@@ -61,6 +61,11 @@
   (:metaclass python-type))
 
 
+(defmethod __repr__ ((x builtin-class))
+  (with-output-to-string (s)
+    (print-unreadable-object (x s :type t :identity t)
+      (format s "~A" (class-name x)))))
+
 ;;;; User-defined
 
 (defclass user-defined-object (python-object) ())
@@ -77,6 +82,11 @@
   ;; this is NOT the _instance_ dict -- UDCs are *instances* of this class
   (:documentation "Represents all Python classes created within Python (at runtime)."))
 
+
+(defmethod __repr__ ((x user-defined-class))
+  (with-output-to-string (s)
+    (print-unreadable-object (x s :type t :identity t)
+      (format s "~A" (class-name x)))))
 
 ;; The reason for having the following class, is that if a UDC Foo
 ;; defined fixed slots for its instances, then the list of fixed slot
