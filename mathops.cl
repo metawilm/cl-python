@@ -31,15 +31,11 @@
 	  
 	  (defmethod ,op :around (x y)
 	    (declare (ignore x y))
-	    (if (next-method-p)
-		(call-next-method)
-	      *NotImplemented*))
+	    (if (next-method-p) (call-next-method) *NotImplemented*))
 	  
 	  (defmethod ,rop :around (x y)
 	    (declare (ignore x y))
-	    (if (next-method-p)
-		(call-next-method)
-	      *NotImplemented*))
+	    (if (next-method-p) (call-next-method) *NotImplemented*))
 	  
 	  ,@(when cl-op
 	      `((defmethod ,fname ((x number) (y number))
@@ -54,7 +50,7 @@
 	      (flet ((try-op ()
 		       (multiple-value-bind (meth found)
 			   (internal-get-attribute x-class ',op)
-			 (if found
+			 (if (and found (not (eq meth *NotImplemented*)))
 			     (py-call meth (list x y))
 			   *NotImplemented*)))
 		     (try-rop ()
@@ -76,7 +72,9 @@
 				      (try-rop)
 				    res)))))
 		  (if (eq result *NotImplemented*)
-		      (py-raise 'TypeError "Operands don't support ~A (got: ~A and ~A)" ',err-py-op x y)
+		      (py-raise 'TypeError
+				"Operands don't support ~A (got: ~A and ~A, resulted in NotImplemented)"
+				',err-py-op x y)
 		    result)))))))
 
 ;; This mapping is used by the internal-get-attribute, in EVAL-BINARY
