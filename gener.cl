@@ -56,7 +56,8 @@
 							 (go ,repeat-tag)
 						       (go ,after-tag))
 						    ,else-tag
-						    (:split ,(when else-suite (walk else-suite stack)))
+						    ,@(when else-suite
+							`((:split ,(walk else-suite stack))))
 						    ,after-tag)
 					   t)))))
 				 
@@ -83,7 +84,8 @@
 				    (values `(:split (cond ,@tests (t (go ,else-tag)))
 						     (:split ,@suites)
 						     ,else-tag
-						     (:split ,(when else-suite (walk else-suite stack)))
+						     ,@(when else-suite
+							 `((:split ,(walk else-suite stack))))
 						     ,after-tag)
 					    t)))))))
 				     
@@ -107,7 +109,8 @@
 						   (setf ,loop-var (funcall ,generator))
 						   (if ,loop-var (go ,repeat-tag) (go ,end-tag))
 						   ,else-tag
-						   ,(when else-suite `(:split ,(walk else-suite stack2)))
+						   ,@(when else-suite
+						       `((:split ,(walk else-suite stack2))))
 						   ,end-tag
 						   (setf ,loop-var nil  ;; enable garbage collection
 							 ,generator nil))
@@ -145,7 +148,7 @@
 					      finally (return nil))
 					  (and else-clause (generator-ast-p else-clause)))
 				      (break "TODO: `yield' inside try/except")
-				    (warn "Harmless `yield' inside try/except")))
+				    (warn "Found handlable try/except in generator (no yield): OK")))
 				(values `(py-eval-1 ',form)
 					t))
 		    

@@ -27,8 +27,9 @@
 
 ;; XXX for now (?) add default equality tester
 (defmethod __eq__ (x y)
-  (break "default equality tester used, indicating something TODO")
-  (eq x y))
+  (declare (ignore x y) (special *False*))
+  #+(or)(warn "default equality tester used, may indicating something TODO: ~A ~A" x y)
+  *False*)
 
 (defgeneric __class__ (x) (:documentation "The class of X"))
 (defmethod __class__ ((x integer))       (find-class 'py-int))
@@ -1476,7 +1477,10 @@
   (make-instance 'python-function-returning-generator
     :name fname
     :call-rewriter (apply #'make-call-rewriter fname params)
-    :generator-creator (eval (create-generator-function ast))))
+    :generator-creator (let ((lambda-lst (create-generator-function ast)))
+			 #+(or)(break "lambda-lst ~A" lambda-lst)
+			 (check-type lambda-lst list)
+			 (compile nil lambda-lst))))
 
 (defmethod __get__ ((x python-function-returning-generator) inst class)
   (declare (special *None*))
@@ -1862,16 +1866,12 @@
 (defmethod __contains__ ((x py-list/tuple) item)
   (if (member item (slot-value x 'vec) :test #'py-==) *True* *False*))
 
-(defmethod __eq__ ((x py-list/tuple) (y py-list/tuple))
-  (if (eq x y)
-      *True*
-    (with-slots ((x-vec vec)) x
-      (with-slots ((y-vec vec)) y
-	(if (= (length x-vec) (length y-vec))
-	    (if (mismatch x-vec y-vec :test (lambda (x y) (or (eq x y) (py-== x y))))
-		*False*
-	      *True*)
-	  *False*)))))
+(defmethod __eq__-vectors ((x vector) (y vector))
+  (if (= (length x) (length y))
+      (if (mismatch x y :test (lambda (a b) (or (eq a b) (py-val->lisp-bool (py-== a b)))))
+	  *False*
+	*True*)
+    *False*))
 
 (defmethod __eq__ ((x py-list/tuple) y)
   (declare (ignore y))
@@ -1926,14 +1926,17 @@
       
       (t (py-raise 'TypeError "list.__getitem__ expected integer or slice (got: ~A)" item)))))
 
-(defmethod __iter__ ((x py-list/tuple))
+(defmethod __iter__-fun ((x py-list/tuple))
   (let ((vec (slot-value x 'vec))
 	(i -1))
-    (make-iterator-from-function
-     (lambda ()
-       (if (<= 0 (incf i) (1- (length vec))) ;; may be modified in between
-	   (aref vec i)
-	 nil)))))
+    (lambda ()
+      (if (<= 0 (incf i) (1- (length vec))) ;; may be modified in between
+	  (values (aref vec i) t)
+	nil))))
+  
+(defmethod __iter__ ((x py-list/tuple))
+  (make-iterator-from-function
+   (__iter__-fun x)))
 
 (defmethod __len__ ((x py-list/tuple))
   (length (slot-value x 'vec)))
@@ -1942,7 +1945,7 @@
   (if (= (length (slot-value x 'vec)) 0) *False* *True*))
 
 (defmethod print-list/tuple ((x py-list/tuple) &key (kind :repr) prefix suffix empty-seq)
-  (assert (member kind :repr :str))
+  (assert (member kind '(:repr :str)))
   (with-slots (vec) x
     (if (= (length vec) 0)
 	empty-seq
@@ -2024,6 +2027,15 @@
 
 ;; CPython tuples: no __radd__
 
+(defmethod __eq__ ((x py-tuple) (y py-tuple))
+  (if (eq x y)
+      *True*
+    (__eq__-vectors (slot-value x 'vec) (slot-value y 'vec))))
+
+(defmethod __eq__ ((x py-tuple) y)
+  (declare (ignore y))
+  *False*)
+
 (defmethod __getitem__ ((x py-tuple) (item py-slice))
   (let ((res (call-next-method))) ;; defined on py-list/tuple; returns a py-list
     (check-type res py-list)
@@ -2032,12 +2044,6 @@
 (defmethod __hash__ ((x py-tuple))
   (sxhash (slot-value x 'vec)))
    
-(defmethod __iter__ ((x py-tuple))
-  (let ((list (slot-value x 'list))) ;; copy-tree ?!
-    (make-iterator-from-function
-     (lambda ()
-       (pop list)))))
-
 (defmethod __mul__ ((x py-tuple) n)
   ;; n <= 0 => empty list
   (setf n (py-int-designator-val n))
@@ -2187,13 +2193,10 @@
 	       do (setf (aref vec i) nil)) ;; enable GC
 	   (decf (fill-pointer vec) length)))))))
 
-;;; default __eq__ is defined for py-list/tuple
-
-(defmethod __eq__ ((x py-list) (y py-tuple))
-  *False*)
-
-(defmethod __eq__ ((x py-tuple) (y py-list))
-  *False*)
+(defmethod __eq__ ((x py-list) (y py-list))
+  (if (eq x y)
+      *True*
+    (__eq__-vectors (slot-value x 'vec) (slot-value y 'vec))))
 
 (defmethod __eq__ ((x py-list) y)
   (declare (ignore y))

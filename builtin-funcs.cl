@@ -130,7 +130,7 @@
 (defmethod pyb:cmp ((x builtin-object) (y builtin-object))
   (if (eq x y)
       0
-    (if (__eq__ x y)
+    (if (py-val->lisp-bool (__eq__ x y))
 	0
       -1))) ;; or +1
 
@@ -156,7 +156,7 @@
   ;; 
   ;; Note: when the objects X,Y are EQ, they may still be not equal in
   ;; the Python sense.
-  
+
   (macrolet ((normalize (x)  ;; object.c - adjust_tp_compare(c)
 	       `(let ((i (py-int-designator-val ,x)))
 		  (cond ((< i 0) -1)
@@ -170,7 +170,7 @@
       
       (when (member (find-class 'python-type) (list x-class y-class))
 	(return-from pyb::cmp-2
-	  (if (eq x-class y-class)
+	  (if (eq x y)
 	      0
 	    -1)))
       
@@ -761,5 +761,5 @@
 	     do (let ((val (funcall iter-func)))
 		  (if val
 		      (setf (aref current-tuple-values iter-i) val)
-		    (return-from pyb:zip (make-py-list-from-vector res)))))
-	 (vector-push-extend (make-tuple-from-vector current-tuple-values) res)))
+		    (return-from pyb:zip (make-py-list res)))))
+	 (vector-push-extend (make-tuple current-tuple-values) res)))

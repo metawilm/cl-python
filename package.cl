@@ -9,8 +9,8 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Features to be included
 ;;  
-;;  Some of them aid during debugging of Lisp or Python code, but slow
-;;  down execution.
+;;  Some of them aid debugging of Lisp or Python code, but slow down
+;;  execution.
 
 #.(progn
     (loop for (feat yes) in

@@ -88,25 +88,14 @@
 
 ;; fun
 
-(defvar *py-tuple-list* nil)
-
-(defun get-py-iterate-fun (object)
+(defmethod get-py-iterate-fun (object)
   "Return a function that when called returns VAL, T, where VAL is the next value ~@
    gotten by iterating over OBJECT. Returns NIL, NIL upon exhaustion."
   
-  ;; can't use load-time-value, because classes load after this file... XXX
-  (unless *py-tuple-list*
-    (setf *py-tuple-list* (list (find-class 'py-tuple) (find-class 'py-list))))
-  
-  (when (member (class-of object) *py-tuple-list* :test 'eq)
+  (when (member (class-name (class-of object)) '(py-tuple py-list))
     (return-from get-py-iterate-fun 
-      (let ((list (slot-value object 'list)))
-	(declare (dynamic-extent list))
-	(lambda ()
-	  (let ((val (pop list)))
-	    (when val
-	      (values val t)))))))
-
+      (__iter__-fun object)))
+  
   ;; Using __iter__ is the prefered way.
   (multiple-value-bind (iter-meth found)
       (getattr-of-class object '__iter__)
@@ -160,13 +149,12 @@
 (defun py-iterate->lisp-list (object)
   "Returns a Lisp list, that may not be modified destructively."
 
-  (when (or (eq (class-of object) (find-class 'py-tuple))
-	    (eq (class-of object) (find-class 'py-list)))
-    (return-from py-iterate->lisp-list (slot-value object 'list)))
+  (when (member (class-name (class-of object)) '(py-tuple py-list))
+    (return-from py-iterate->lisp-list (loop for x across (slot-value object 'vec)
+					   collect x)))
   
   (let ((res ()))
-    (map-over-py-object (lambda (x) (push x res))
-			object)
+    (map-over-py-object (lambda (x) (push x res)) object)
     (nreverse res)))
 
 (defun map-over-py-object (fun object)
@@ -211,7 +199,7 @@
     (number        (values (make-py-number x) t))
     (string        (values (make-py-string x) t))
     (symbol        (values (make-py-string (string x)) t))
-    ((eql (find-class 'python-type)) (values x nil))
+    ((eql (load-time-value (find-class 'python-type))) (values x nil))
     (t (error "Not a recognized Python object: ~A" x))))
 
 

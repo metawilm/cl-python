@@ -205,12 +205,12 @@
   (getattr-of-number x attr))
 
 (defmethod internal-get-attribute ((x string) attr)
-  (let ((cls (find-class 'py-string)))
+  (let ((cls (load-time-value (find-class 'py-string))))
     (multiple-value-bind (res found)
 	(internal-get-attribute cls attr)
       (if found
 	  (progn (when (typep res 'unbound-method)
-		   (setf (slot-value res 'class) (find-class 'string)))
+		   (setf (slot-value res 'class) (load-time-value (find-class 'string))))
 		 (values (maybe-bind res x cls) t))
 	(values nil nil)))))
 
@@ -263,11 +263,11 @@
 	      (values nil nil))))))))
 
 (defmethod getattr-of-number ((x number) attr)
-  (dolist (num-cls (list (find-class 'number) ;; XXX hack
-			 (find-class 'real)
-			 (find-class 'integer)
-			 (find-class 'complex)
-			 (find-class 't)))
+  (dolist (num-cls (load-time-value (list (find-class 'number) ;; XXX hack
+					  (find-class 'real)
+					  (find-class 'integer)
+					  (find-class 'complex)
+					  (find-class 't))))
     (when (typep x num-cls)
       (let ((meth (lookup-bi-class-attr/meth num-cls attr)))
 	(when meth
@@ -389,7 +389,7 @@
 	     (setf cls (pop cpl))))
     
     ;; try built-in class method (like __str__ for user-defined subclass of py-string)
-    (let ((val (lookup-bi-class-attr/meth (find-class 't) attr)))
+    (let ((val (lookup-bi-class-attr/meth (load-time-value (find-class 't)) attr)))
       (when val
 	(return-from getattr-of-instance-rec
 	  (values (maybe-bind val x (class-of x))
@@ -428,7 +428,7 @@
     
     (when __getattr__
       (return-from getattr-of-instance-rec
-	(values (py-call (maybe-bind __getattr__ x (class-of x)) (list attr))
+	(values (py-call (maybe-bind __getattr__ x (class-of x)) (list (symbol-name attr)))
 		t)))
 
     ;; Finally, give up.
@@ -456,7 +456,7 @@
 	(values val #+(or)(maybe-bind val *None* cls)
 		t)))))
 
-(defmethod getattr-of-class-nonrec ((cls (eql (find-class 't))) attr)
+(defmethod getattr-of-class-nonrec ((cls (eql (load-time-value (find-class 't)))) attr)
   (let ((val (lookup-bi-class-attr/meth cls attr)))
     (when val 
       (return-from getattr-of-class-nonrec
@@ -480,13 +480,13 @@
 		       t)))))
   
   ;; fallback: methods specialized on class 'class or class 't
-  (let ((val (getattr-of-class-nonrec (find-class 'class) attr)))
+  (let ((val (getattr-of-class-nonrec (load-time-value (find-class 'class)) attr)))
     (when val
       (return-from getattr-of-class-rec
 	(values (maybe-bind val *None* cls)
 		t))))
 
-  (let ((val (getattr-of-class-nonrec (find-class 't) attr)))
+  (let ((val (getattr-of-class-nonrec (load-time-value (find-class 't)) attr)))
     (when val
       (return-from getattr-of-class-rec
 	(values (maybe-bind val *None* cls)
@@ -518,16 +518,18 @@
 			 t))))
 	   (setf c (pop cpl)))
     
-    (assert (or (member c (list
-			   (find-class 'user-defined-class) ;; <- when it's an instance of
-			   ;; a user-defined metaclass
-			   
-			   (find-class 'python-type) ;; subclass of type, at the moment an instance of the subclass is created
-			   
-			   
-				(find-class 'udc-instance-w/dict)
-				(find-class 'udc-instance-w/slots)
-				(find-class 'udc-instance-w/dict+slots)))
+    (assert (or (member c		
+			(load-time-value
+			 (list (find-class 'user-defined-class)
+			       ;; ^-- when it's an instance of a user-defined metaclass
+			       
+			       (find-class 'python-type)
+			       ;; subclass of type
+			       ;;  at the moment an instance of the subclass is created
+			       
+			       (find-class 'udc-instance-w/dict)
+			       (find-class 'udc-instance-w/slots)
+			       (find-class 'udc-instance-w/dict+slots))))
 		(typep c 'builtin-class)))
     
     (loop while (typep c 'builtin-class)
@@ -540,13 +542,13 @@
 	   (setf c (pop cpl))))
     
   ;; fallback: methods specialized on class 'class and class 't
-  (let ((val (getattr-of-class-nonrec (find-class 'class) attr)))
+  (let ((val (getattr-of-class-nonrec (load-time-value (find-class 'class)) attr)))
     (when val
       (return-from getattr-of-class-rec
 	(values (maybe-bind val *None* cls)
 		t))))
 
-  (let ((val (getattr-of-class-nonrec (find-class 't) attr)))
+  (let ((val (getattr-of-class-nonrec (load-time-value (find-class 't)) attr)))
     (when val
       (return-from getattr-of-class-rec
 	(values (maybe-bind val *None* cls)
@@ -555,7 +557,7 @@
   (values nil nil))
 
 (defmethod getattr-of-class-rec (cls attr)
-  (assert (or (member cls (list (find-class 'python-type)))
+  (assert (or (eq cls (load-time-value (find-class 'python-type)))
 	      (subtypep cls 'Exception)))
   (when (and (subtypep cls 'Exception)
 	     (eq attr '__name__))
@@ -563,7 +565,7 @@
       (values (symbol-name (class-name cls))
 	      t)))
   
-  (let ((val (lookup-bi-class-attr/meth (find-class 't) attr)))
+  (let ((val (lookup-bi-class-attr/meth (load-time-value (find-class 't)) attr)))
     (when val 
       (return-from getattr-of-class-rec
 	(values (maybe-bind val *None* cls)
