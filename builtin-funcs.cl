@@ -762,4 +762,4 @@
 		  (if val
 		      (setf (aref current-tuple-values iter-i) val)
 		    (return-from pyb:zip (make-py-list res)))))
-	 (vector-push-extend (make-tuple current-tuple-values) res)))
+	 (vector-push-extend (make-tuple (copy-seq current-tuple-values)) res)))

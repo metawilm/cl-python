@@ -19,7 +19,7 @@ def check(a, b):
       print "== ok", a, b
 
 def exception(exc, f, *args):
-    print "WWW exception", exc, f, args ## wb
+    #print "WWW exception", exc, f, args ## wb
     try:
         f(*args)
     except exc:
@@ -311,7 +311,7 @@ def check_descriptors(i, j):
         fs = staticmethod(f)
 
         def __repr__(self):
-            zaza
+            return super(C, self).__repr__() ## wb
             s = super(C, self).__repr__()
             s = s.replace("<" + __name__ + ".", "<")
             i = s.index(" at ")

@@ -163,8 +163,10 @@
 	    `(lambda ()  ;; This is the function that returns a generator
 	       (let ((state 0)
 		     ,@(nreverse vars))
+		 
+		 (lambda ()
+		   ;; This is the function that will repeatedly be called to return the values
 		   
-		 (lambda ()  ;; This is the function that will repeatedly be called to return the values
 		   (block inside
 		     (macrolet ((ret (val new-state)
 				  `(progn (setf state ,new-state)

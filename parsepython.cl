@@ -164,9 +164,10 @@
 		    #+(or)(warn "aug: ~S ~S" $1 $2)
 		    (list 'augassign-expr $1 (car $2) (cdr $2)))
 		   (t
+		    (warn "not a real assign expr?!: ~A" $1)
 		    $1))))
 
- (expr-stmt2 (augassign testlist) ((cons $1 $2)))
+ (expr-stmt2 (augassign testlist) ((cons $1 $2))) ;; todo: return empty list, so "foo" = (identifier 'foo), not testlist
  (expr-stmt2 (=--testlist*) ((list '= $1)))
  (:=--testlist*)
  (=--testlist (= testlist) ($2))

@@ -5,18 +5,19 @@
   ;; String formatting; similar to C's sprintf().
   ;; http://docs.python.org/lib/typesseq-strings.html
   
-  ;; If ARG is a tuple, its content are the values to use. If it is
-  ;; not, ARG is the one object to use as argument (either by
-  ;; including a string representation of ARG itself, or using ARG as
-  ;; mapping).
+  ;; If ARG is a tuple, the items it contains are the values to
+  ;; use. If ARG is not a tuple, ARG is the one object to use as
+  ;; argument: either by including a string representation of ARG
+  ;; itself, or using ARG as mapping.
   
   (multiple-value-bind (args mapping-arg)
-      (if (typep arg 'py-tuple) (values (slot-value arg 'list) nil) (values (list arg) arg))
+      (if (typep arg 'py-tuple) (values (slot-value arg 'vec) nil) (values (list arg) arg))
     
     (let* ((res (make-array 20 :element-type 'character :adjustable t :fill-pointer 0))
 	   (next-char-index 0)
 	   (max-index (1- (length x)))
-	   (mapping-arg-used nil))
+	   (mapping-arg-used nil)
+	   (arg-vector-i (if (vectorp args) 0 nil)))
       
       (labels ((next-char-nil () (if (> next-char-index max-index) nil
 				   (prog1 (aref x next-char-index) (incf next-char-index))))
@@ -25,9 +26,15 @@
 	       (next-arg () (if mapping-arg-used
 				(py-raise 'ValueError "In format string, both non-mapping ~@
                                                        and mapping operators found")
-			      (or (pop args)
-				  (py-raise 'TypeError
-					    "Not enough arguments for format string")))))
+			      (typecase args
+				(list (or (pop args)
+					  (py-raise 'TypeError
+						    "Not enough arguments for format string")))
+				(vector (if (<= arg-vector-i (length args))
+					    (prog1 (aref args arg-vector-i)
+					      (incf arg-vector-i))
+					  (py-raise 'TypeError
+						    "Not enough arguments for format string")))))))
 	(let ((c (next-char-nil)))
 	  (tagbody start-parsing
 	    

@@ -61,9 +61,6 @@
 ;;; Classes have a `__mro__' attribute, which is the "Method
 ;;; Reslution Order" or Class Precedence List.
 
-(defgeneric __mro__ (cls)
-  (:documentation "Method resolution order (as tuple, including itself)"))
-
 (defmethod py-class-mro ((x class))
   (loop for cls in (mop:class-precedence-list x)
       if (or (typep cls 'user-defined-class)
@@ -71,12 +68,6 @@
 	     (eq cls (find-class 'python-type)))
       collect cls))
    
-(defmethod __mro__ ((c class))
-  (make-tuple-from-list (py-class-mro c)))
-
-(register-bi-class-attr/meth (find-class 'class) '__mro__
-			     (make-bi-class-attribute #'__mro__))
-
 
 ;;; Classes have a `__bases__' attribute, indicating the direct superclasses
 
@@ -1571,59 +1562,69 @@
 		   (t (setf prev curr
 			    curr (cdr curr))))))))
 
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Namespace
+
 (defstruct (al-namespace #+(or)(:type :vector))
   (enclosing-ns nil)
   (alist        nil)
   (global-ns    nil)
   (builtins     nil))
 	   
+#+(or)
 (defun make-namespace (&key inside name builtins)
   ;;(declare (ignore name))
   ;;(format t "make-namespace ~A  in: ~A  bi: ~A~%" name inside builtins)
   (let ((ns (make-al-namespace :enclosing-ns inside)))
     (when builtins
       (locally (declare (special *__builtin__-module-namespace*))
-	(namespace-bind ns '__builtins__ *__builtin__-module-namespace*)
+	(al-namespace-bind ns '__builtins__ *__builtin__-module-namespace*)
 	(setf (al-namespace-builtins ns) *__builtin__-module-namespace*)))
     ns))
 
-(defun namespace-bind (ns key val)
+(defun al-namespace-bind (ns key val)
   (assert (symbolp key))
   ;;(format t "binding ~A -> ~A~%" key val)
   (let* ((alist (al-namespace-alist ns))
 	 (k (assoc key alist :test 'eq)))
     (if k
 	(if (eq (cdr k) :global)
-	    (namespace-bind (al-namespace-global-ns ns) key val)
-	  (setf (cdr k) val))
-      (setf (al-namespace-alist ns) (cons (cons key val) alist)))))
+	    (al-namespace-bind (al-namespace-global-ns ns) key val)
+	  (progn (setf (cdr k) val)
+		 nil))
+      (progn (setf (al-namespace-alist ns) (cons (cons key val) alist))
+	     nil))))
 
-(defun namespace-lookup (ns key)
+(defun al-namespace-lookup (ns key)
+  (assert (symbolp key))
   ;;(format t "lookup ~A~%" key)
   ;;(break)
   (let ((k (assoc key (al-namespace-alist ns) :test 'eq)))
     (if k
 	(if (eq (cdr k) :global)
-	    (namespace-lookup (al-namespace-global-ns ns) key)
+	    (al-namespace-lookup (al-namespace-global-ns ns) key) ;; XXX possible metaclass weirdness
 	  (values (cdr k) t))
       (when (al-namespace-enclosing-ns ns)
 	;;(format t "trying enclosing for ~A~%" key)
-	(namespace-lookup (al-namespace-enclosing-ns ns) key)))))
+	(al-namespace-lookup (al-namespace-enclosing-ns ns) key)))))
 
-(defun namespace-delete (ns key)
+(defun al-namespace-delete (ns key)
+  ;; Returns if key was found.
   (let ((alist (al-namespace-alist ns)))
     (if (eq (caar alist) key)
-	(setf (al-namespace-alist ns) (cdr alist))
+	(progn (setf (al-namespace-alist ns) (cdr alist))
+	       t)
       (loop with prev = alist
 	  with curr = (cdr alist)
-	  do (cond ((null curr) (return))
+	  do (cond ((null curr) (return-from al-namespace-delete nil))
 		   ((eq (caar curr) key)
 		    (setf (cdr prev) (cdr curr))
-		    (return))
+		    (return-from al-namespace-delete t))
 		   (t (setf prev curr
 			    curr (cdr curr))))))))
 
-(defun namespace-declare-global (ns key)
+(defun al-namespace-declare-global (ns key)
   ;;(format t "ns-decl-global~%")
   ;; Asumes name not already bound or declare global
   (setf (al-namespace-alist ns) 
@@ -1637,13 +1638,90 @@
 	finally (assert curr-ns)
 		(setf (al-namespace-global-ns ns) curr-ns))))
 
-(defun namespace-copy (ns)
+(defun al-namespace-copy (ns)
   (let ((new-ns (make-al-namespace :enclosing-ns (al-namespace-enclosing-ns ns))))
     (let ((bi-ns (al-namespace-builtins ns)))
       (when bi-ns
-	(namespace-bind new-ns '__builtins__ bi-ns)
+	(al-namespace-bind new-ns '__builtins__ bi-ns)
 	(setf (al-namespace-builtins new-ns) bi-ns)))
     new-ns))
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Namespace-proxy
+;; 
+;; Wrapper for namespaces, supplying __getitem__ and __setitem__ methods.
+
+(defclass namespace-proxy (builtin-instance)
+  ((namespace :initarg :namespace))
+  (:metaclass builtin-class))
+
+(mop:finalize-inheritance (find-class 'namespace-proxy))
+
+(defun make-namespace (&key name inside builtins)
+  (declare (ignore name))
+  (let* ((enc-ns (when inside
+		   (if (typep inside 'namespace-proxy)
+		       (slot-value inside 'namespace)
+		     (error "invalid 'inside' namespace: ~A" inside))))
+	 (ans (make-al-namespace :enclosing-ns enc-ns)))
+    (when builtins
+      (locally (declare (special *__builtin__-module-namespace*))
+	(al-namespace-bind ans '__builtins__ *__builtin__-module-namespace*)
+	(setf (al-namespace-builtins ans) *__builtin__-module-namespace*)))
+    (make-instance 'namespace-proxy :namespace ans)))
+
+(defmethod namespace-bind ((x namespace-proxy) (key symbol) val)
+  (with-slots (namespace) x
+    (al-namespace-bind namespace key val)))
+
+(defmethod namespace-lookup ((x namespace-proxy) (key symbol))
+  (with-slots (namespace) x
+    (al-namespace-lookup namespace key)))
+
+(defmethod namespace-delete ((x namespace-proxy) key)
+  ;; returns whether item was found
+  (with-slots (namespace) x
+    (al-namespace-delete namespace key)))
+
+(defmethod namespace-copy ((x namespace-proxy))
+  (with-slots (namespace) x
+    (make-instance 'namespace-proxy :namespace (al-namespace-copy namespace))))
+
+(defmethod namespace-declare-global ((x namespace-proxy) (key symbol))
+  (with-slots (namespace) x
+    (al-namespace-declare-global namespace key)))
+  
+
+;; __{get,set,del}item__ : these raise errors when not found
+
+(defmethod __getitem__ ((x namespace-proxy) (key symbol))
+  (or (namespace-lookup x key)
+      (py-raise 'KeyError "Namespace does not have key: ~A" key)))
+
+(defmethod __getitem__ ((x namespace-proxy) key)
+  (__getitem__ x (intern (py-string-designator-val key) #.*package*)))
+
+(register-bi-class-attr/meth (find-class 'namespace-proxy) '__getitem__ #'__getitem__)
+
+(defmethod __setitem__ ((x namespace-proxy) (key symbol) val)
+  (namespace-bind x key val))
+  
+(defmethod __setitem__ ((x namespace-proxy) key val)
+  (__setitem__ x (intern (py-string-designator-val key) #.*package*) val))
+	
+(register-bi-class-attr/meth (find-class 'namespace-proxy) '__setitem__ #'__setitem__)
+
+(defmethod __delitem__ ((x namespace-proxy) (key symbol))
+  ;; Returns whether item was found.
+  (or (namespace-delete x key)
+      (py-raise 'KeyError "Namespace does not have key: ~A" key)))
+
+(defmethod __delitem__ ((x namespace-proxy) key)
+  (__delitem__ x (intern (py-string-designator-val key) #.*package*)))
+
+(register-bi-class-attr/meth (find-class 'namespace-proxy) '__delitem__ #'__delitem__)
+
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Function
@@ -2190,8 +2268,7 @@
 (defmethod __nonzero__ ((x py-list/tuple))
   (if (= (length (slot-value x 'vec)) 0) *False* *True*))
 
-(defmethod print-list/tuple ((x py-list/tuple) &key (kind :repr) prefix suffix empty-seq)
-  (assert (member kind '(:repr :str)))
+(defmethod print-list/tuple ((x py-list/tuple) &key prefix suffix empty-seq)
   (with-slots (vec) x
     (if (= (length vec) 0)
 	empty-seq
@@ -2199,7 +2276,7 @@
 	     (res (make-array size-est :adjustable t :fill-pointer 0
 			      :element-type 'character)))
 	(vector-push prefix res)
-	(loop with print-func = (if (eq kind :repr) #'py-repr #'py-str)
+	(loop with print-func = #'py-repr ;; otherwise str( ('a',) ) = '(a)', should be "('a',)"
 	    for item across vec
 	    do (loop for ch across (py-string-designator-val (funcall print-func item))
 		   do (vector-push-extend ch res))
@@ -2251,15 +2328,21 @@
   (cond ((null args) *the-empty-tuple*)
 	((cdr args) (py-raise 'TypeError
 			      "tuple.__new__(): takes at most one pos arg (got: ~A)" args))
-	(t (loop with f = (get-py-iterate-fun (car args))
-	       with val = (funcall f)
-	       while val
-	       collect val into vals
-	       count 1 into num-vals
-	       do (setf val (funcall f))
-	       finally (return (if vals
-				   (make-tuple (make-array num-vals :initial-contents vals))
-				 *the-empty-tuple*))))))
+	(t (let ((arg (car args)))
+	     (typecase arg
+	       (py-tuple arg)
+	       (py-list  (let ((vec (slot-value arg 'vec)))
+			   (make-tuple (make-array (length vec) :initial-contents vec))))
+	       (t (loop with f = (get-py-iterate-fun (car args))
+		      with val = (funcall f)
+		      while val
+		      collect val into vals
+		      count 1 into num-vals
+		      do (setf val (funcall f))
+		      finally 
+			(return (if vals
+				    (make-tuple (make-array num-vals :initial-contents vals))
+				  *the-empty-tuple*)))))))))
 
 (register-bi-class-attr/meth (find-class 'py-tuple) '__new__
 			     (make-static-method #'py-tuple-__new__))
@@ -2302,7 +2385,16 @@
 			   finally (return res))))))
   
 (defmethod __repr__ ((x py-tuple))
-  (print-list/tuple x :prefix #\( :suffix #\) :empty-seq "()" :kind :repr))
+  (with-slots (vec) x
+    (if (= (length vec) 1)
+	(let ((res (make-array 4 :adjustable t :fill-pointer 0 :element-type 'character)))
+	  (vector-push #\( res)
+	  (loop for ch across (py-string-designator-val (py-repr (aref vec 0)))
+	      do (vector-push-extend ch res))
+	  (vector-push-extend #\, res)
+	  (vector-push-extend #\) res)
+	  res)
+      (print-list/tuple x :prefix #\( :suffix #\) :empty-seq "()"))))
 
 ;; __reversed__ ?
 
@@ -2312,7 +2404,7 @@
 	    "Cannot set items of tuples"))
 
 (defmethod __str__ ((x py-tuple))
-  (print-list/tuple x :prefix #\( :suffix #\) :empty-seq "()" :kind :str))
+  (print-list/tuple x :prefix #\( :suffix #\) :empty-seq "()"))
 
 
 (loop for name in '(__add__ __cmp__ __contains__ __eq__ __getitem__ __init__
@@ -2468,7 +2560,7 @@
       (make-py-list new-vec))))
 
 (defmethod __repr__ ((x py-list))
-  (print-list/tuple x :prefix #\[ :suffix #\] :empty-seq "[]" :kind :repr))
+  (print-list/tuple x :prefix #\[ :suffix #\] :empty-seq "[]"))
 
 
 (defmethod move-vec-items ((vec vector) (delta integer) &key (start 0) (stop (1- (length vec))) make-nil)
@@ -2594,7 +2686,7 @@
 		    do (setf (aref vec i) (aref source-vec j))))))))))))
 
 (defmethod __str__ ((x py-list))
-  (print-list/tuple x :prefix #\[ :suffix #\] :empty-seq "[]" :kind :str))
+  (print-list/tuple x :prefix #\[ :suffix #\] :empty-seq "[]"))
 
 
 (loop for name in '(__init__ __add__ __cmp__ __contains__ __delitem__ __eq__
@@ -3796,7 +3888,7 @@
 ;; Relevant documentation on how CPython behaves:
 ;;  http://mail.python.org/pipermail/python-dev/2003-May/035791.html
 
-(defclass py-property (builtin-object)
+(defclass py-property (builtin-instance)
   ((get    :initarg :get)
    (set    :initarg :set)
    (delete :initarg :delete)
@@ -3808,6 +3900,7 @@
 (mop:finalize-inheritance (find-class 'py-property))
 
 (defmethod py-property-__new__ (&optional pos-args kwd-args)
+  ;; XX allow subclasses
   (let ((cls (car pos-args)))
     (assert (and cls
 		 (subtypep cls (find-class 'py-property))))
@@ -3816,12 +3909,12 @@
 						   (fdel . nil) (doc . nil))
 					      nil nil))
 	   (args (funcall call-rewriter (cdr pos-args) kwd-args))
-	   (fget (or (assoc 'fget args) *None*))
-	   (fset (or (assoc 'fset args) *None*))
-	   (fdel (or (assoc 'fdel args) *None*))
-	   (doc  (or (assoc 'doc args) *None*))
-	       
+	   (fget (or (cdr (assoc 'fget args)) *None*))
+	   (fset (or (cdr (assoc 'fset args)) *None*))
+	   (fdel (or (cdr (assoc 'fdel args)) *None*))
+	   (doc  (or (cdr (assoc 'doc args)) *None*))
 	   (inst (make-instance cls)))
+      
       (setf (slot-value inst 'get) fget
 	    (slot-value inst 'set) fset
 	    (slot-value inst 'delete) fdel
@@ -3841,10 +3934,31 @@
 (defmethod fdel ((x py-property))
   (slot-value x 'delete))
 
+(defmethod __get__ ((x py-property) inst cls)
+  (with-slots (get) x
+    (if (eq get *None*)
+	(py-raise 'TypeError "Property: attribute __get__ not set")
+      (py-call get (list inst cls)))))
+
+(defmethod __set__ ((x py-property) inst val)
+  (with-slots (set) x
+    (if (eq set *None*)
+	(py-raise 'TypeError "Property: attribute __set__ not set")
+      (py-call set (list inst val)))))
+
+(defmethod __delete__ ((x py-property) inst)
+  (with-slots (delete) x
+    (if (eq delete *None*)
+	(py-raise 'TypeError "Property: attribute __del__ not set")
+      (py-call delete (list inst)))))
+
 (register-bi-class-attr/meth (find-class 'py-property) 'fget (make-bi-class-attribute #'fget))
 (register-bi-class-attr/meth (find-class 'py-property) 'fset (make-bi-class-attribute #'fset))
 (register-bi-class-attr/meth (find-class 'py-property) 'fdel (make-bi-class-attribute #'fdel))
 
+(register-bi-class-attr/meth (find-class 'py-property) '__set__ #'__set__)
+(register-bi-class-attr/meth (find-class 'py-property) '__get__ #'__get__)
+(register-bi-class-attr/meth (find-class 'py-property) '__delete__ #'__delete__)
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Super
@@ -3857,24 +3971,9 @@
 (mop:finalize-inheritance (find-class 'py-super))
 
 ;; super( <B class>, <C instance> ) where C derives from B:
-;;   :instance = <C instance>
+;;   :object = <C instance>
 ;;   :current-class = <B class>
-
-#+(or) ;; old
-(defmethod py-super-__new__ (cls type &optional obj)
-  (break "super.__new__")
-  (assert (subtypep cls (find-class 'py-super)))
-  (if (eq cls (find-class 'py-super))
-      (if obj
-	  (make-bound-super type obj)
-	(make-unbound-super type))
-    (progn (assert (subtypep cls (find-class 'py-super)))
-	   (error "todo: super(...) with cls != py-super"))))
-
-#+(or) ;; old
-(register-bi-class-attr/meth (find-class 'py-super) '__new__
-			     (make-static-method #'py-super-__new__))
-
+;; 
 ;; A typical use for calling a cooperative superclass method is:
 ;; 
 ;;  class C(B):

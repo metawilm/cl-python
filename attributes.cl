@@ -80,37 +80,6 @@
 ;;   Look in all classes in the CPL for an attribute __getattr__; if
 ;;   found: invoke it, using (inst, attrname) as values. If not found,
 ;;   raise AttributeError.
-;;
-;;
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;;
-;; 
-;; Setting
-;; -------
-;; 
-;; If the attribute is set on an instance:
-;;   
-;;   If there is a method `__setattr__' defined in one of the classes
-;;   in the CPL, it intercepts the attribute setting. It is called
-;;   with (instance, attrname, val) as arguments.
-;;   
-;;   Otherwise, the classes in the CPL are searched for the
-;;   attribute. If found:
-;;     
-;;     If the value is a "data descriptor", its __set__ method of the
-;;     is invoked. The arguments to __set__ (besides the implied
-;;     `self') are (inst, val).
-;;     
-;;     Else, if the value is something else: store in instance
-;;     __dict__/slot.
-;;   
-;;
-;; If the lookup is set on a class:
-;;   
-;;   Update the class' __dict__.
-;; 
-;; XXX Deleting...
-
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
@@ -137,47 +106,40 @@
 ;; logic. (Not sure that would buy us much.)
 ;; 
 
+(defvar *try-__getattr__* t)
+(defvar *try-__getattribute__* t)
+(defvar *bind-result* t)
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;;; GET attribute
+;; temporary -- all calls should be changed to call py-get-attribute
+(defun internal-get-attribute (x attr)
+  (let ((res (py-get-attribute x attr)))
+    (values res res)))
 
-(defgeneric internal-get-attribute (x attr)
+
+(defgeneric py-get-attribute (x attr)
   (:documentation
-   "Get attribute ATTR of X; returns VAL, FOUND-P. ~@
-    Does not raise AttributeError itself, but any Python exception could be
-    raised in methods called in the process."))
+   "Get attribute ATTR of X; returns ATTR or NIL. ~@
+    Does not raise exceptions (AttributeError) itself, but any Python ~
+    exception could be raised in methods called during lookup."))
 
 
-(defmethod internal-get-attribute :around (x attr)
-  (assert (symbolp attr))
-  (cond ((eq attr '__class__) (values (py-type x) t))   ;; a bit hackish
-	
-	((and (eq attr '__mro__)
-	      (typep x 'class)) (values (__mro__ x) t))
-	
+(defmethod py-get-attribute :around (x attr)
+  (or (call-next-method)
+      (cond ((and (eq attr '__name__) (eq x #'iterator-next)) ;; XXX hack
+	     "next")
+	    (t
+	     (warn "Catch-all internal-get-attribute: ~S ~S" x attr)
+	     nil))))
+  
+(defmethod py-get-attribute :around ((x class) (attr symbol))
+  (cond ((eq attr '__mro__)
+	 (make-tuple-from-list (py-class-mro x)))
 	((eq attr '__name__)
-	 (typecase x
-	   (class (return-from internal-get-attribute  ;; XXX hack. todo: remove prefix `py-'
-		    (values (symbol-name (class-name x)) t)))
-	   (bound-method
-	    (return-from internal-get-attribute  ;; XXX hack. todo: remove prefix `py-'
-	      (values (internal-get-attribute (slot-value x 'func) '__name__)
-		      t)))
-	   #+allegro
-	   (generic-function (return-from internal-get-attribute
-			       (values (symbol-name (slot-value x 'excl::name)) t)))))
-		 
+	 (symbol-name (class-name x)))
 	(t (call-next-method))))
 
-(defmethod internal-get-attribute (x attr)
-  (cond ((and (eq attr '__name__) (eq x #'iterator-next)) ;; XXX hack
-	 (values 'next' t))
-	(t
-	 (warn "Catch-all internal-get-attribute: ~S ~S" x attr)
-	 (values nil nil))))
 
-
-(defmethod internal-get-attribute ((x py-super) attr)
+(defmethod py-get-attribute ((x py-super) attr)
   (flet ((find-preceding-class-in-mro (mro cls)
 	   (check-type mro list)
 	   (check-type cls class)
@@ -195,72 +157,51 @@
       (let ((klass (find-preceding-class-in-mro
 		    (py-class-mro (if (typep object 'class) object (class-of object)))
 		    current-class)))
-	(multiple-value-bind (val found)
-	    (getattr-of-class-rec klass attr)
-	  (if found
-	      (values (maybe-bind val object klass) t)
-	    (values nil nil)))))))
+	(let ((val (getattr-of-class-rec klass attr)))
+	  (when val (maybe-bind val object klass)))))))
 
-(defmethod internal-get-attribute ((x number) attr)
+
+(defmethod py-get-attribute ((x number) attr)
   (getattr-of-number x attr))
 
-(defmethod internal-get-attribute ((x string) attr)
-  (let ((cls (load-time-value (find-class 'py-string))))
-    (multiple-value-bind (res found)
-	(internal-get-attribute cls attr)
-      (if found
-	  (progn (when (typep res 'unbound-method)
-		   (setf (slot-value res 'class) (load-time-value (find-class 'string))))
-		 (values (maybe-bind res x cls) t))
-	(values nil nil)))))
+(defmethod py-get-attribute ((x string) attr)
+  (let* ((cls (load-time-value (find-class 'py-string)))
+	 (res (py-get-attribute cls attr)))
+    (when res (maybe-bind res x cls))))
 
-(defmethod internal-get-attribute ((x builtin-instance) attr)
+(defmethod py-get-attribute ((x builtin-instance) attr)
   (getattr-of-instance-rec x attr))
 
-(defmethod internal-get-attribute ((x udc-instance) attr)
+(defmethod py-get-attribute ((x udc-instance) attr)
   (getattr-of-instance-rec x attr))
 
-(defmethod internal-get-attribute ((x builtin-class) attr)
+(defmethod py-get-attribute ((x builtin-class) attr)
   (getattr-of-class-rec x attr))
 
-(defmethod internal-get-attribute ((x user-defined-class) attr)
+(defmethod py-get-attribute ((x user-defined-class) attr)
   (getattr-of-class-rec x attr))
 
-(defmethod internal-get-attribute ((x class) attr)
-  ;; XXX 
+(defmethod py-get-attribute ((x class) attr)
+  (warn "i-g-a for x class: ~A ~A" x attr)
   (getattr-of-class-rec x attr))
 
-(defmethod internal-get-attribute ((x py-module) attr)
+(defmethod py-get-attribute ((x py-module) attr)
   (getattr-of-module x attr))
 
-(defmethod internal-get-attribute ((x udc-with-ud-metaclass) attr)
-  #+(or)(break "banaan")
-  ;; situation:
+(defmethod py-get-attribute ((x udc-with-ud-metaclass) attr)
+  ;; Situation:
   ;;   class M(type): pass
   ;;   class C: __metaclass__ = M
-  ;;  Now, C is of type udc-with-ud-metaclass
+  ;; Now, C is of type udc-with-ud-metaclass.
+  ;; 
+  ;; All user-defined classes have a __dict__ attribute of type
+  ;; NAMESPACE-PROXY. This includes user-defined classes with a
+  ;; user-defined metaclass.
   
-  (let ((dict (slot-value x '__dict__)))
-    #+(or)(break "appel")
-    (multiple-value-bind (res found)
-	(py-dict-gethash dict attr)
-      (if found
-	  (progn #+(or)(break "citroen")
-		 #+(or)(break "iga uwu: ~A is ~A before binding; binding needed??" attr res)
-		 (values (maybe-bind res x (class-of x))
-			 t))
-	(progn
-	  #+(or)(break "kers")
-	  (multiple-value-bind (res found)
-	      (getattr-of-class-rec x attr)
-	    (if found
-		(progn (warn "iga uwu 2: ~A -> ~A, no more binding" attr res)
-		       (values res
-			       ;; already bound!
-			       #+(or)(maybe-bind res *None* x)
-			       
-			       t))
-	      (values nil nil))))))))
+  (let ((res (namespace-lookup (slot-value x '__dict__) attr)))
+    (if res 
+	(maybe-bind res x (class-of x))
+      (getattr-of-class-rec x attr))))
 
 (defmethod getattr-of-number ((x number) attr)
   (dolist (num-cls (load-time-value (list (find-class 'number) ;; XXX hack
@@ -271,65 +212,23 @@
     (when (typep x num-cls)
       (let ((meth (lookup-bi-class-attr/meth num-cls attr)))
 	(when meth
-	  (return-from getattr-of-number 
-	    (values (maybe-bind meth x (__class__ x))
-		    t))))))
-  (values nil nil))
+	  (return-from getattr-of-number (maybe-bind meth x (__class__ x))))))))
+
 
 (defmethod getattr-of-module ((x py-module) (attr symbol))
   (namespace-lookup (slot-value x 'namespace) attr))
   
 (defmethod getattr-of-module ((x py-module) attr)
-  (getattr-of-module x (intern (py-string-designator-val attr) #.*package*))) ;;XXX uses internal knowledge of module
+  (getattr-of-module x (intern (py-string-designator-val attr) #.*package*)))
 
-
-;; Remove use of unbound methods... XXX check if this doesn't remove too much...
-      
-(defmethod maybe-bind ((x function) instance class)
-  (if (member instance (load-time-value (list nil *None*) :test 'eq))
-      x
-    (__get__ x instance class)))
-
-(defmethod maybe-bind ((x user-defined-function) instance class)
-  (declare (ignore class))
-  (if (member instance (load-time-value (list nil *None*) :test 'eq))
-      x
-    (call-next-method)))
-
-;; end remove ...
-
-
-(defmethod maybe-bind ((x unbound-method) instance class)
-  (declare (ignore class))
-  (with-slots ((cls class) func) x
-    (if instance
-	(cond ((typep instance cls)
-	       (make-bound-method :func func :object instance))
-	      ((eq instance *None*)
-	       x)
-	      (t
-	       (py-raise 'TypeError "Unbound method ~A bound to instance ~A of wrong type"
-			 x instance)))
-      x)))
-
-(defmethod maybe-bind (object instance class)
-  #+(or)(break "maybe-bind ~A ~A ~A" object instance class)
-  (multiple-value-bind (bound-val get-found)
-      (call-attribute-via-class object '__get__ (list instance class))
-    (if get-found
-	bound-val
-      object)))
 
 (defmethod getattr-of-instance-rec ((x builtin-instance) attr)
   (loop for cls in (mop:class-precedence-list (class-of x))
       while (typep cls 'builtin-class)
       do (let ((meth (lookup-bi-class-attr/meth cls attr)))
 	   (when meth
-	       (return-from getattr-of-instance-rec
-		 (values (maybe-bind meth x (class-of x))
-			 t)))))
-  (values nil nil))
-
+	     (return-from getattr-of-instance-rec
+	       (maybe-bind meth x (class-of x)))))))
 
 (defmethod getattr-of-instance-rec ((x udc-instance) attr)
   (declare (optimize (debug 3)))
@@ -354,24 +253,19 @@
 	       ;; To avoid infinite recursion caused by the default
 	       ;; (built-in) __getattribute__ calling a user-defined
 	       ;; __getattribute__, set a flag stating this. XXX hackish
-	do (multiple-value-bind (val found)
-	       (getattr-of-class-nonrec cls '__getattribute__)
-	     (when found
-	       #+(or)(break "__getattribute__ found: ~A ~A ~A ~A" x cls val found)
+	do (let ((val (getattr-of-class-nonrec cls '__getattribute__)))
+	     (when val
 	       (return-from getattr-of-instance-rec
-		 (values (py-call (maybe-bind val x (class-of x)) (list (string attr)))
-			 t))))
+		 (py-call (maybe-bind val x (class-of x)) (list (string attr))))))
 	   
 	when (not attr-val)
-	do (multiple-value-bind (val found)
-	       (getattr-of-class-nonrec cls attr)
-	     (when found 
+	do (let ((val (getattr-of-class-nonrec cls attr)))
+	     (when val 
 	       (setf attr-val val)))
 
 	when (and (not attr-val) (not __getattr__))
-	do (multiple-value-bind (val found)
-	       (getattr-of-class-nonrec cls '__getattr__)
-	     (when found (setf __getattr__ val)))
+	do (let ((val (getattr-of-class-nonrec cls '__getattr__)))
+	     (when val (setf __getattr__ val)))
 	   
 	do (setf cls (pop cpl)))
     
@@ -386,16 +280,14 @@
 	  do (let ((val (lookup-bi-class-attr/meth cls attr)))
 	       (when val
 		 (return-from getattr-of-instance-rec
-		   (values (maybe-bind val x (class-of x))
-			   t))))
+		   (maybe-bind val x (class-of x)))))
 	     (setf cls (pop cpl))))
     
     ;; try built-in class method (like __str__ for user-defined subclass of py-string)
     (let ((val (lookup-bi-class-attr/meth (load-time-value (find-class 't)) attr)))
       (when val
 	(return-from getattr-of-instance-rec
-	  (values (maybe-bind val x (class-of x))
-		  t))))
+	  (maybe-bind val x (class-of x)))))
     
     ;; Arriving here means: no regular attribute value, no
     ;; __getattribute__, but perhaps __getattr__ or attr-val.
@@ -404,124 +296,81 @@
     ;; (i.e. has a `__set__' attribute), it takes precedence over the
     ;; attributes set on the instance.
     
+    ;; Try __get__-able data descriptor
     (when (and attr-val (data-descriptor-p attr-val))
-
-      ;; Try __get__-able data descriptor
       (return-from getattr-of-instance-rec
-	(values (maybe-bind attr-val x (class-of x))
-		t)))
+	(maybe-bind attr-val x (class-of x))))
     
     ;; Look in instance dict and slots. These are returned unbound.
-    
-    (multiple-value-bind (val found)
-	(getattr-of-ud-instance-nonrec x attr)
-      (when found (return-from getattr-of-instance-rec
-		    (values val
-			    t))))
+    (let ((val (getattr-of-ud-instance-nonrec x attr)))
+      (when val (return-from getattr-of-instance-rec val)))
     
     ;; Fall back to a class attribute that is not a `data descriptor'.
-
     (when attr-val
       (return-from getattr-of-instance-rec
-	(values (maybe-bind attr-val x (class-of x))
-		t)))
+	(maybe-bind attr-val x (class-of x))))
     
     ;; Fall back to the __getattr__ hook.
-    
     (when __getattr__
       (return-from getattr-of-instance-rec
-	(values (py-call (maybe-bind __getattr__ x (class-of x)) (list (symbol-name attr)))
-		t)))
+	(py-call (maybe-bind __getattr__ x (class-of x)) (list (symbol-name attr)))))
 
     ;; Finally, give up.
-
-    (values nil nil)
-    
-    #+(or) ;; never raise in the internal-{get,set,del}-attribute functions!
-    (py-raise 'AttributeError
-	      "Object ~A has no attribute ~A" x attr)))
+    ))
 
 
 (defmethod getattr-of-class-nonrec ((cls class) attr) ;; was: builtin-class
-  (let ((val (lookup-bi-class-attr/meth cls attr)))
-    (when val 
-      (return-from getattr-of-class-nonrec
-	(values val #+(or)(maybe-bind val *None* cls)
-		t)))))
+  (lookup-bi-class-attr/meth cls attr))
 
 (defmethod getattr-of-class-nonrec ((cls user-defined-class) attr)
-  ;; (break "g-a of class nonrec: ~A, ~A" cls attr)
-  (multiple-value-bind (val found)
-      ;;(py-dict-gethash (slot-value cls '__dict__) attr) ;; XXX
-      (namespace-lookup (slot-value cls '__dict__) attr)
-    (when found
-      (return-from getattr-of-class-nonrec
-	(values val #+(or)(maybe-bind val *None* cls)
-		t)))))
-
-(defmethod getattr-of-class-nonrec ((cls (eql (load-time-value (find-class 't)))) attr)
-  (let ((val (lookup-bi-class-attr/meth cls attr)))
-    (when val 
-      (return-from getattr-of-class-nonrec
-	(values val #+(or)(maybe-bind val *None* cls)
-		t)))))
-
-
-
-#+(or)
-(defmethod getattr-of-class-rec :around ((cls class) attr)
-  (declare (ignore attr))
-  (call-next-method))
+  (namespace-lookup (slot-value cls '__dict__) attr))
   
+(defmethod getattr-of-class-nonrec ((cls (eql (load-time-value (find-class 't)))) attr)
+  (lookup-bi-class-attr/meth cls attr))
+
 (defmethod getattr-of-class-rec ((cls builtin-class) attr)
   (loop for c in (mop:class-precedence-list cls)
       while (typep c 'builtin-class)
       do (let ((val (getattr-of-class-nonrec c attr)))
 	   (when val
 	     (return-from getattr-of-class-rec
-	       (values (maybe-bind val *None* cls)
-		       t)))))
+	       (maybe-bind val *None* cls)))))
   
   ;; fallback: methods specialized on class 'class or class 't
   (let ((val (getattr-of-class-nonrec (load-time-value (find-class 'class)) attr)))
     (when val
       (return-from getattr-of-class-rec
-	(values (maybe-bind val *None* cls)
-		t))))
+	(maybe-bind val *None* cls))))
 
   (let ((val (getattr-of-class-nonrec (load-time-value (find-class 't)) attr)))
     (when val
       (return-from getattr-of-class-rec
-	(values (maybe-bind val *None* cls)
-		t))))
+	(maybe-bind val *None* cls))))
  
-  (values nil nil))
+  nil)
 
 
 (defmethod getattr-of-class-rec :around ((cls user-defined-class) attr)
-  (if (member attr '(__dict__ __name__))
-      (values (slot-value cls attr)
-	      t)
+  (if (member attr '(__dict__ __name__)) ;; make dict proxy?
+      (slot-value cls attr)
     (call-next-method)))
 
 (defmethod getattr-of-class-rec ((cls user-defined-class) attr)
   ;; All udc's have a <py-dict> instance in slot named
   ;; __dict__; that dict contains class attribs and
   ;; methods are stored. TODO: metaclasses
-  ;;(break)
+
   (let* ((cpl (mop:class-precedence-list cls))
 	 (c (pop cpl)))
-    #+(or)(warn "cpl of ~A: ~A" (class-name cls) cpl)
+    
     (loop while (typep c 'user-defined-class)
-	do (multiple-value-bind (val found)
-	       (getattr-of-class-nonrec c attr)
-	     (when found
+	do (let ((val (getattr-of-class-nonrec c attr)))
+	     (when val
 	       (return-from getattr-of-class-rec
-		 (values (maybe-bind val *None* cls)
-			 t))))
+		 (maybe-bind val *None* cls))))
 	   (setf c (pop cpl)))
     
-    (assert (or (member c		
+    (assert (or (member c
 			(load-time-value
 			 (list (find-class 'user-defined-class)
 			       ;; ^-- when it's an instance of a user-defined metaclass
@@ -536,44 +385,36 @@
 		(typep c 'builtin-class)))
     
     (loop while (typep c 'builtin-class)
-	do (multiple-value-bind (val found)
-	       (getattr-of-class-nonrec c attr)
-	     (when found
+	do (let ((val (getattr-of-class-nonrec c attr)))
+	     (when val
 	       (return-from getattr-of-class-rec
-		 (values (maybe-bind val *None* cls)
-			 t))))
+		 (maybe-bind val *None* cls))))
 	   (setf c (pop cpl))))
     
   ;; fallback: methods specialized on class 'class and class 't
   (let ((val (getattr-of-class-nonrec (load-time-value (find-class 'class)) attr)))
     (when val
       (return-from getattr-of-class-rec
-	(values (maybe-bind val *None* cls)
-		t))))
+	(maybe-bind val *None* cls))))
 
   (let ((val (getattr-of-class-nonrec (load-time-value (find-class 't)) attr)))
     (when val
       (return-from getattr-of-class-rec
-	(values (maybe-bind val *None* cls)
-		t))))
-
-  (values nil nil))
+	(maybe-bind val *None* cls)))))
 
 (defmethod getattr-of-class-rec (cls attr)
+  ;;(break "though to be unused") 
   (assert (or (eq cls (load-time-value (find-class 'python-type)))
 	      (subtypep cls 'Exception)))
   (when (and (subtypep cls 'Exception)
 	     (eq attr '__name__))
     (return-from getattr-of-class-rec
-      (values (symbol-name (class-name cls))
-	      t)))
+      (symbol-name (class-name cls))))
   
   (let ((val (lookup-bi-class-attr/meth (load-time-value (find-class 't)) attr)))
     (when val 
       (return-from getattr-of-class-rec
-	(values (maybe-bind val *None* cls)
-		t)))))
-
+	(maybe-bind val *None* cls)))))
 
 
 (defmethod getattr-of-ud-instance-nonrec ((x udc-instance-w/dict+slots) attr)
@@ -581,37 +422,28 @@
 	   (slot-boundp x attr))  ;; also if attr is `__dict__' or `__slots__'
       (progn
 	(let ((val (slot-value x attr)))
-	  (when (or (eq attr '__dict__)
-		    (typep val 'namespace))
-	    (warn "accessing namespace as dict: partly TODO"))
-	  (values val t)))
-    
+	  (when (eq attr '__dict__)
+	    (assert (typep val 'namespace-proxy)))
+	  val))
+	  
     (namespace-lookup (slot-value x '__dict__) attr)))
 
-;;    #+(or)(__getitem__ (slot-value x '__dict__) attr)))
 
 (defmethod getattr-of-ud-instance-nonrec ((x udc-instance-w/slots) attr)
   (cond ((eq attr '__slots__)
-	 (values (slot-value (class-of x) '__slots__) t))
+	 (slot-value (class-of x) '__slots__))
 	
 	((and (slot-exists-p x attr) (slot-boundp x attr))
-	 (values (slot-value x attr) t))
-	
-	(t (values nil nil))))
+	 (slot-value x attr))))
 
 (defmethod getattr-of-ud-instance-nonrec ((x udc-instance-w/dict) attr)
-  (if (eq attr '__dict__)
-      
-      (progn (warn "Accessing namespace: partly TODO")
-	     (values (slot-value x '__dict__) t))
+  (let ((dict (slot-value x '__dict__)))
+    (assert (typep dict 'namespace-proxy))
+	     
+    (if (eq attr '__dict__)
+	dict
+      (namespace-lookup dict attr))))
     
-    (namespace-lookup (slot-value x '__dict__) attr)))
-    
-#+(or)(handler-case
-	  (__getitem__ (slot-value x '__dict__) attr)
-	(KeyError ()   ;; __getitem__ on py-dict can throw it
-	  (values nil nil)))
-
 
 ;; Shortcuts
 
@@ -633,17 +465,106 @@
    __str__ attribute of the instance."
   
   (let ((klass (__class__ x)))
-    (multiple-value-bind (val found)
-	(getattr-of-class-rec klass attr)
-      (cond ((not found)          (values nil nil))
+    (let ((val (getattr-of-class-rec klass attr)))
+      (cond ((not val)            nil)
 	    ((eq val #'__get__)   (values (apply val x pos-args) t)) ;; XXX hack?
 	    (t  (let* ((bound-val (maybe-bind val nil klass)) ;; nil was *None*
 		       (res (py-call bound-val (cons x pos-args) key-args)))
-		  (values res
-			  (not (eq res *NotImplemented*)))))))))
+		  (if (eq res *NotImplemented*)
+		      nil
+		    (values res t))))))))
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Maybe-bind : bind result to instance or class
+
+;; Remove use of unbound methods... XXX check if this doesn't remove too much...
+
+(defmethod maybe-bind :around (x instance class)
+  (declare (ignore instance class))
+  (if *bind-result*
+      (call-next-method)
+    x))
+
+
+(defmethod maybe-bind ((x function) instance class)
+  (if (member instance (load-time-value (list nil *None*) :test 'eq))
+      x ;; no unbound method anymore
+    (__get__ x instance class)))
+
+;; TODO: class-method ...
+
+(defmethod maybe-bind ((x user-defined-function) instance class)
+  (declare (ignore class))
+  (if (member instance (load-time-value (list nil *None*) :test 'eq))
+      x
+    (call-next-method)))
+
+#+(or) ;; there are no unbound methods anymore
+(defmethod maybe-bind ((x unbound-method) instance class)
+  (declare (ignore class))
+  (with-slots ((cls class) func) x
+    (if instance
+	(cond ((typep instance cls)
+	       (make-bound-method :func func :object instance))
+	      ((eq instance *None*)
+	       x)
+	      (t
+	       (py-raise 'TypeError "Unbound method ~A bound to instance ~A of wrong type"
+			 x instance)))
+      x)))
+
+(defmethod maybe-bind (object instance class)
+  (multiple-value-bind (bound-val get-found)
+      (call-attribute-via-class object '__get__ (list instance class))
+    (if get-found
+	bound-val
+      object)))
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;; Memoization for attribute lookups:
+
+#+(or) ;; for later use
+(define-compiler-macro py-get-attribute (x attr)
+  (let ((cache (cons nil nil)))
+    `(py-get-attribute-cached ,x ,attr ,cache)))
+
+#+(or) ;; for later use
+(defmethod py-get-attribute-cached ((x builtin-instance) (attr symbol) (cache cons))
+  (let ((klass (class-of x)))
+    (if (eq klass (car cons))
+	(cdr cons)
+      (let ((res (py-get-attribute x attr)))
+	(when res (setf (car cache) klass
+			(cdr cache) res))
+	res))))
+
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; SET attribute
+;; 
+;; If the attribute is set on an instance:
+;;   
+;;   If there is a method `__setattr__' defined in one of the classes
+;;   in the CPL, it intercepts the attribute setting. It is called
+;;   with (instance, attrname, val) as arguments.
+;;   
+;;   Otherwise, the classes in the CPL are searched for the
+;;   attribute. If found:
+;;     
+;;     If the value is a "data descriptor", its __set__ method of the
+;;     is invoked. The arguments to __set__ (besides the implied
+;;     `self') are (inst, val).
+;;     
+;;     Else, if the value is something else: store in instance
+;;     __dict__/slot.
+;;   
+;;
+;; If the lookup is set on a class:
+;;   
+;;   Update the class' __dict__.
+
 
 (defgeneric internal-set-attribute (x attr val)
   (:documentation
@@ -662,6 +583,7 @@
   ;; attribute __dict__ which is a mapping that supports __setitem__
   
   (cond ((eq attr '__dict__)
+	 (break "internal-set-attribute of __dict__: may be buggy")
 	 (setf (slot-value x '__dict__) val))
 	
 	((eq attr '__name__)
@@ -671,9 +593,13 @@
 	 ;; change the direct-superclasses
 	 (error "todo: change __bases__"))
 	
-	(t 
-	 (call-attribute-via-class (slot-value x '__dict__) '__setitem__
-				   (list attr val)))))
+	(t (let ((dict (slot-value x '__dict__)))
+	     (unless (typep dict 'namespace-proxy)
+	       (break "internal-set-attribute of udc: __dict__ not nsproxy"))
+	     (namespace-bind dict attr val)))
+	
+	#+(or)(call-attribute-via-class (slot-value x '__dict__) '__setitem__
+					(list attr val))))
 
 
 (defmethod internal-set-attribute ((x udc-instance) attr val)
@@ -713,10 +639,10 @@
       
     (when attr-val
       (multiple-value-bind (res set-found)
-	  (call-attribute-via-class attr-val '__set__ (list val))
+	  (call-attribute-via-class attr-val '__set__ (list x val))
 	(if set-found
 	    (return-from internal-set-attribute res))))
-	  
+    
     ;; Set attribute in the instance __dict__/slot
     (setattr-udi x attr val)))
 
@@ -724,8 +650,11 @@
 
 (defmethod setattr-udi ((x udc-instance-w/dict) attr val)
   (if (eq attr '__dict__)
-      (setf (slot-value x '__dict__) val)
-    (namespace-bind (slot-value x '__dict__) attr val))) ;; was: __setitem__
+      (progn (break "setattr-udi __dict__: buggy")
+	     (setf (slot-value x '__dict__) val))
+    (let ((dict (slot-value x '__dict__)))
+      (assert (typep dict 'namespace-proxy))
+      (namespace-bind dict attr val)))) ;; was: __setitem__
 
 ;;    #+(or)(call-attribute-via-class (slot-value x '__dict__) '__setitem__
 ;;			      (list attr val))))
@@ -743,8 +672,11 @@
       (setf (slot-value x attr) val)
     
     ;; inline?
-    (call-attribute-via-class (slot-value x '__dict__) '__setitem__
-			      (list attr val))))
+    (let ((dict (slot-value x '__dict__)))
+      (assert (typep dict 'namespace-proxy))
+      (namespace-bind dict attr val)))
+  #+(or)(call-attribute-via-class (slot-value x '__dict__) '__setitem__
+				  (list attr val)))
 
 
 (defmethod verify-settable-attribute (x attr)
@@ -804,29 +736,55 @@
 
 
 (defmethod internal-del-attribute ((x user-defined-class) attr)
+  (when (eq attr '__dict__)
+    (break "TODO: i-del-attr udc __dict__"))
   (let ((dict (slot-value x '__dict__)))
-    (handler-case (__delitem__ dict attr)
-      (Exception () (raise-delattr-error-no-such-att x attr)))))
-
+    (typecase dict
+      (namespace-proxy (or (namespace-delete dict attr)
+			   (raise-delattr-error-no-such-att x attr)))
+	  
+      (t (warn "deleting by __delitme__")
+	 (handler-case 
+	     (__delitem__ dict attr)
+	   (Exception () (raise-delattr-error-no-such-att x attr)))))))
 
 (defmethod internal-del-attribute ((x udc-instance-w/dict+slots) attr)
   (if (slot-exists-p x attr)
       
       (if (slot-boundp x attr)
-	  (slot-makunbound x attr)
+	  (slot-makunbound x attr) ;; todo: call __delete__ on val
 	(raise-delattr-error-unbound x attr))
     
-    (let ((dict (slot-value x '__dict__)))
-      (handler-case (__delitem__ dict attr)
-	(Exception () (raise-delattr-error-no-such-att x attr))))))
+    (let* ((*bind-result* nil)
+	   (curr-val (internal-get-attribute x attr))
+	   (curr-val-delete (and curr-val (getattr-of-class curr-val '__delete__))))
+      (if curr-val-delete
+	  (progn (warn "calling delte method")
+		 (py-call curr-val-delete (list curr-val x)))
+	
+	(let ((dict (slot-value x '__dict__)))
+	  (typecase dict
+	    (namespace-proxy (or (namespace-delete dict attr)
+				 (raise-delattr-error-no-such-att x attr)))
+	    (t (handler-case (__delitem__ dict attr)
+		 (Exception () (raise-delattr-error-no-such-att x attr))))))))))
 
 
 (defmethod internal-del-attribute ((x udc-instance-w/dict) attr)
-  (let ((dict (slot-value x '__dict__)))
-    (handler-case (__delitem__ dict attr)
-      (Exception () (raise-delattr-error-no-such-att x attr)))))
-
-
+  (let* ((*bind-result* nil)
+	 (curr-val (internal-get-attribute x attr))
+	 (curr-val-delete (and curr-val (getattr-of-class curr-val '__delete__))))
+    (if curr-val-delete
+	(progn (warn "calling delte method")
+	       (py-call curr-val-delete (list curr-val x)))
+      
+      (let ((dict (slot-value x '__dict__)))
+	(typecase dict
+	  (namespace-proxy (or (namespace-delete dict attr)
+			       (raise-delattr-error-no-such-att x attr)))
+	  (t (handler-case (__delitem__ dict attr)
+	       (Exception () (raise-delattr-error-no-such-att x attr)))))))))
+  
 (defmethod internal-del-attribute ((x udc-instance-w/slots) attr)
   (if (slot-exists-p x attr)
       (if (slot-boundp x attr)
@@ -834,7 +792,6 @@
 	(raise-delattr-error-unbound x attr))
     (raise-delattr-error-no-such-att x attr)))
 
-    
 (defun raise-delattr-error-no-such-att (x attr)
   (py-raise 'AttributeError
 	    "Object ~A has no attribute ~A" x attr))

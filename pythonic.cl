@@ -88,6 +88,44 @@
 
 ;; fun
 
+(defgeneric py-iterate-n-values (object n &key error)
+  (:documentation 
+   "Return N values from iterable Python object in the form of a Lisp vector.
+   If ERROR, than when there are more values in the object, an error of type
+   TypeError is raised; if not ERROR, NIL is returned in that situation."))
+  
+(defmethod py-iterate-n-values ((x py-list/tuple) (n fixnum) &key (error t))
+  (assert (> n 0))
+  (with-slots (vec) x
+    (if (= (length vec) n)
+	vec
+      (when error
+	(py-raise 'TypeError "Wanted ~A values from iterable ~A, but got ~A"
+		  n x (length vec))))))
+
+(defmethod py-iterate-n-values (x (n fixnum) &key (error t))
+  (assert (> n 0))
+  (let* ((f (get-py-iterate-fun x))
+	 (vec (make-array n)))
+    (declare (dynamic-extent vec))
+    (loop with val = (funcall f)
+	for i from 0 below n
+	do (if val
+	       (setf (aref vec i) val
+		     val (funcall f))
+	     (if error
+		 (py-raise 'TypeError
+			   "Wanted ~A values from iterable, but got less: ~A"
+			   n i)
+	       (return-from py-iterate-n-values nil)))
+	finally
+	  (let ((v (funcall f)))
+	    (when v
+	      (py-raise 'TypeError
+			"Wanted ~A values from iterable ~A, but got 1 more already: ~A"
+			n x v)))
+	  (return vec))))
+
 (defmethod get-py-iterate-fun (object)
   "Return a function that when called returns VAL, T, where VAL is the next value ~@
    gotten by iterating over OBJECT. Returns NIL, NIL upon exhaustion."

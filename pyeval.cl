@@ -94,7 +94,8 @@
   (funcall x (cdr ast)))
 
 (defmethod py-eval-1 ((ast list)) ;; uses FUNCALL for all!
-  (declare (dynamic-extent ast))
+  (declare (dynamic-extent ast)
+	   (optimize (speed 3) (safety 0) (debug 0)))
   
   (case (car ast)
     
@@ -159,7 +160,7 @@
     (t (error "uncatched in py-eval: ~S~%" ast))))
 
 
-#+(or)  
+#+(or) ;; old
 (defun py-eval-1 (ast)
   "Evaluate AST. Assumes *scope* and error handlers are set."
   (typecase ast
@@ -621,6 +622,43 @@
   "Assign EVALUE to TARGETS.
    Assumes EVALUE already evaluated."
   
+  
+  ;;(warn "eval-real-assign-expr: ~A ~A" targets evalue)
+  
+  ;; Special-case common uses:
+  
+  ;; a = ..
+  ;; b,a = ..
+  ;; ...
+  ;; but not:  a.b = ..
+  ;;           a[b] = ..
+  
+  (block special-cases ;; XXX compiler macro, later on 
+    (locally (declare (optimize (speed 3) (safety 0) (debug 0)))
+      (when (and (member (first targets) '(exprlist testlist))
+		 (null (third targets))
+		 (eq (caaadr targets) 'identifier))
+	
+	(if (null (cdadr targets))
+	    
+	    (return-from eval-real-assign-expr
+	      (namespace-bind *scope* (second (caadr targets)) evalue))
+    
+	  (let ((i 0))
+	    (dolist (tg (cadr targets))
+	      (unless (eq (car tg) 'identifier)
+		(return-from special-cases nil))
+	      (incf i))
+	    (let ((vals-vec (py-iterate-n-values evalue i)))
+	      (declare (dynamic-extent vals-vec))
+	      (loop for tg in (cadr targets)
+		  for val across vals-vec
+		  do (namespace-bind *scope* (second tg) val))
+	      (return-from eval-real-assign-expr nil)))))))
+  
+  ;; a,b = 3,4:  (testlist ((identifier d) (identifier d1)) nil)  #<py-tuple>
+  ;;(when (and (eq (first targets) 'testlist)
+    
   (assert (member (car targets) '(testlist exprlist) :test 'eq))
   (let* ((etargets (eval-assignment-targets (second targets)))
 	 (num-targets (length etargets))
@@ -820,40 +858,50 @@
   ;; Note that the Exception class that an 'except' clause catches, is
   ;; evaluated after an exception is thrown, not earlier; so long as
   ;; there is no exception thrown, it is not evaluated.
+  ;; 
+  ;; That is also the reason why we can't use handler-case: we don't
+  ;; want to unwind for exceptions that are not catched by an
+  ;; `except:' clause. Instead, we want to get into the debugger to
+  ;; analyze and perhaps resume executions.
+  
   (destructuring-bind (suite except-clauses else-clause) suite--except-clauses--else-clause
     (let ((handler-scope *scope*))
     
       (handler-bind 
-	  ;; Not handler-case: we don't want to unwind for uncatched exceptions
+	
 	  ((Exception (lambda (exc)
 			(loop for ((cls/tuple parameter) handler-form) in except-clauses
-			    do (cond ((and cls/tuple  ;; `except Something:'  where Something a class or tuple
-					   (let ((ecls/tuple (py-eval-1 cls/tuple)))
-					     (typecase ecls/tuple
-					       (class    (typep exc ecls/tuple))
-					       (py-tuple (loop for cls in (tuple->lisp-list ecls/tuple)
-							     when (typep exc cls)
-							     do (return t)
-							     finally (return nil)))
-					       (t (warn "Non-class as `except' specializer: ~S"
-							ecls/tuple)
-						  nil))))
-				  
-				      (let ((*scope* handler-scope))
-					(when parameter
-					  (assert (eq (first parameter) 'identifier))
-					  (namespace-bind handler-scope #+(or)*scope*
-							  (second parameter) exc)) ;; right scope??
-					(py-eval-1 handler-form))
-				      (return-from eval-try-except nil))
+			    do (cond 
+				
+				;; `except Something:'  where Something a class or tuple
+				((and cls/tuple  
+				      (let ((ecls/tuple (let ((*scope* handler-scope))
+							  (py-eval-1 cls/tuple))))
+					(typecase ecls/tuple
+					  (class    (typep exc ecls/tuple))
+					  (py-tuple (loop for cls in (tuple->lisp-list ecls/tuple)
+							when (typep exc cls)
+							do (return t)
+							finally (return nil)))
+					  (t (warn "Non-class as `except' specializer (ignored): ~S"
+						   ecls/tuple)
+					     nil))))
 				 
-				     ((null cls/tuple) ;; a bare `except:' matches all exceptions
-				      (let ((*scope* handler-scope))
-					(py-eval-1 handler-form))
-				      (return-from eval-try-except nil))
-				 
-				     (t (error "assumed unreachable")))))))
-    
+				 (let ((*scope* handler-scope))
+				   (when parameter
+				     (assert (eq (first parameter) 'identifier))
+				     (namespace-bind handler-scope #+(or)*scope*
+						     (second parameter) exc)) ;; right scope??
+				   (py-eval-1 handler-form))
+				 (return-from eval-try-except nil))
+				
+				((null cls/tuple) ;; a bare `except:' matches all exceptions
+				 (let ((*scope* handler-scope))
+				   (py-eval-1 handler-form))
+				 (return-from eval-try-except nil))
+				
+				(t (error "assumed unreachable")))))))
+	
 	;; The `py-error-handlers' we re already set in py-eval. Need to
 	;; set them here again, because when one of the py-eval
 	;; handler-bind handlers takes control, the handler above for
@@ -877,6 +925,7 @@
 		      (with-py-error-handlers
 			  (py-eval-1 suite)))))
 		  
+      (assert (eq *scope* handler-scope))
       (when else-clause
 	(py-eval-1 else-clause)))))
 
@@ -940,18 +989,17 @@
                       be None or not supplied (got: ~A)" second))))))
 
 (defun eval-identifier (name)
-  (setf name (car name))
   "Look up the identifier in the active namespaces, and fall back to
    looking in the (module) object named '__builtins__."
+  (let ((name (car name)))
 
-  (or (namespace-lookup *scope* name) ;; traverses all enclosing scopes too
+    (or (namespace-lookup *scope* name) ;; traverses all enclosing scopes too
       
-      (let ((bi (namespace-lookup *scope* '__builtins__)))
-	(when bi
-	  (namespace-lookup bi name)))
+	(let ((bi (namespace-lookup *scope* '__builtins__)))
+	  (when bi
+	    (namespace-lookup bi name)))
       
-      (py-raise 'NameError
-		"Name ~A is not defined" name)))
+	(py-raise 'NameError "Name ~A is not defined" name))))
 
 (defun eval-list (data)
   (setf data (car data))
@@ -969,16 +1017,49 @@
 
     (make-py-list-from-list (mapcar #'py-eval-1 data))))
 
-
-
-
-
-
-
-
-
+(defvar *eval-listcompr-nesting* 0)
 
 (defun eval-listcompr (expr list-for-ifs)
+  (declare (optimize (speed 3) (safety 0) (debug 0)))
+  ;;
+  (let* ((acc (if (= *eval-listcompr-nesting* 0)
+		  (let ((vec (load-time-value (make-array 0 :adjustable t :fill-pointer 0))))
+		    (setf (fill-pointer vec) 0)
+		    vec)
+		(make-array 0 :adjustable t :fill-pointer 0)))
+	 (*eval-listcompr-nesting* (1+ *eval-listcompr-nesting*)))
+    
+    (labels ((process-for/ifs (for-ifs)
+	       (let ((clause (car for-ifs)))
+		 (cond ((null for-ifs)                 (collect-expr))
+		       ((eq (car clause) 'list-for-in) (process-for for-ifs))
+		       ((eq (car clause) 'list-if)     (process-if for-ifs)))))
+	     
+	     (collect-expr () (vector-push-extend (py-eval-1 expr) acc))
+	     
+	     (process-for (for-ifs)
+	       (destructuring-bind ((list-for-in? exprlist source) &rest rest)
+		   for-ifs
+		 (assert (eq list-for-in? 'list-for-in))
+		 (map-over-py-object (lambda (x)
+				       (eval-real-assign-expr exprlist x)	 
+				       (process-for/ifs rest))
+				     (py-eval-1 source))))
+	     
+	     (process-if (for-ifs)
+	       (destructuring-bind ((_list-if condition) &rest rest)
+		   for-ifs
+		 (declare (ignore _list-if))
+		 (when (py-val->lisp-bool (py-eval-1 condition))
+		   (process-for/ifs rest)))))
+      
+      (process-for/ifs list-for-ifs)
+      (make-py-list (make-array (length acc) :adjustable t :fill-pointer (length acc)
+				:initial-contents acc)))))
+
+#+(or)
+(defun eval-listcompr (expr list-for-ifs)
+  (declare (optimize (speed 3) (safety 0) (debug 0)))
   (let ((acc ()))
     (labels ((process-for/ifs (for-ifs)
 	       (let ((clause (car for-ifs)))

@@ -22,7 +22,7 @@
 (defun data-descriptor-p (x)
   "Returns DES-P, __SET__"
   (multiple-value-bind (val found)
-      (internal-get-attribute x '__set__)
-    (if found
+      (getattr-of-class x '__set__)
+    (if (and found (not (eq val *None*)))
 	(values t val)
       nil)))
