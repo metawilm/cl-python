@@ -495,119 +495,179 @@
   (or (read-char-nil)
       (error "Unexpected end of file")))
 
-(defun read-string (first-char)
+
+(defun read-string (first-char &key unicode raw)
   "Returns string as a string"
+  ;; Rules: <http://meta.kabel.utwente.nl/specs/Python-Docs-2.3.3/ref/strings.html>
+  
   (assert (member first-char '(#\' #\") :test 'eql))
+  
+  (when raw
+    ;; Include escapes literally in the resulting string.
+    
+    (loop with ch = (read-char-error)
+	with res = (make-array 10 :element-type 'character
+			       :adjustable t :fill-pointer 0)
+	with num-bs = 0
+	do (case ch
+	     (#\\  (progn (vector-push-extend ch res)
+			  (incf num-bs)))
+	     
+	     (#\u  (if (and unicode
+			    (oddp num-bs))
+		       
+		       (loop for i below 4
+			   with code = 0
+			   with ch = (read-char-error)
+			   do (setf code (+ (* code 16)
+					    (or (digit-char-p ch 16)
+						(py-raise 'SyntaxError
+							  "Non-hex digit in \"\u...\": ~S" ch)))
+				    ch (read-char-error))
+			   finally (vector-push-extend (code-char code) res))
+		     
+		     (vector-push-extend #\u res))
+		   (setf num-bs 0))
+	     
+	     ((#\' #\") (cond ((and (char= ch first-char)
+				    (> num-bs 0))         (progn (vector-push-extend ch res)
+								 (setf num-bs 0)))
+			      ((char= ch first-char)      (return-from read-string res))
+			      (t                          (vector-push-extend ch res)
+							  (setf num-bs 0))))
+	     
+	     (t (vector-push-extend ch res)
+		(setf num-bs 0)))
+	   
+	   (setf ch (read-char-error))))
+  
+  (assert (not raw))
   
   (let ((second (read-char-error))
 	(third (read-char-nil)))
 
     (cond 
-       
-     ;; "" ('') but not """ (''') --> empty string
-     ((and (char= first-char second)
-	   (or (null third)
-	       (char/= first-char third)))
+      
+     ((char= first-char second third)      ;; """ or ''': a probably long multi-line string
+	
+      (loop
+	  with res = (make-array 50 :element-type 'character :adjustable t :fill-pointer 0)
+	  with x = (read-char-error) and y = (read-char-error) and z = (read-char-error)
+	  until (char= first-char z y x)
+	  do (vector-push-extend (shiftf x y z (read-char-error)) res)
+	  finally (return-from read-string res)))
+
+     
+     ((char= first-char second)  ;; ""/'' but not """/''' --> empty string
 	
       (when third
 	(unread-char third))
       (return-from read-string ""))
-       
-       
-     ;; """ or ''': a long? multi-line? string
-     ((char= first-char second third)
-	
-      (let* ((res (make-array 50
-			      :element-type 'character
-			      :adjustable t
-			      :fill-pointer 0))
-	     (x (read-char-error))
-	     (y (read-char-error))
-	     (z (read-char-error)))
-	  
-	(loop until (char= first-char x y z)
-	    do (vector-push-extend
-		(shiftf x y z (read-char-error))
-		res))
-	(return-from read-string res)))
-      
+     
 
-     ;; non-empty string with one starting quote
-     ;; Quotes can be escaped with a backslash.
-     (t 
-	
+     (t ;; Non-empty string with one starting quote, possibly containing escapes
       (unless third
 	(py-raise 'SyntaxError "Quoted string not finished"))
+      
+      (let ((res (make-array 30 :element-type 'character :adjustable t :fill-pointer 0))
+	    (c third)
+	    (prev-backslash (char= second #\\)))
 	
-      (let ((res (make-array 30
-			     :element-type 'character
-			     :adjustable t
-			     :fill-pointer 0)))
-	  
 	(unless (char= second #\\)
 	  (vector-push-extend second res))
-	  
-	(let ((c third)
-	      (prev-backslash (char= second #\\)))
-	    
-	  (loop 
-	    (cond
-	     ;; Rules: <http://meta.kabel.utwente.nl/specs/Python-Docs-2.3.3/ref/strings.html>
-	    
-	     (prev-backslash
-	      (case c
-		(#\Newline) ;; ignore: quoted string continues on next line
-		(#\\ (vector-push-extend #\\ res))        (#\' (vector-push-extend #\' res))
-		(#\" (vector-push-extend #\" res))        (#\a (vector-push-extend #\Bell res))
-		(#\b (vector-push-extend #\Backspace res))(#\f (vector-push-extend #\Page res))
-		(#\n (vector-push-extend #\Newline res))
-		((#\N #\u #\U) (error "TODO: unicode support in strings"))
-		(#\r (vector-push-extend #\Return res)) (#\t (vector-push-extend #\Tab res))
-		(#\u (error "TODO: unicode support"))   (#\v (vector-push-extend #\VT  res))
-		  
-		((#\0 #\1 #\2 #\3 #\4 #\5 #\6 #\7) ;; char code: up to three octal digits
-		 (let ((char-code
-			(loop with res = (digit-char-p c 8)
-			    with x = c
-			    for num from 1
-			    while (and (<= num 2) (digit-char-p x 8))
-			    do (setf res (+ (* res 8) (digit-char-p x 8))
-				     x (read-char-error))
-			    finally (unread-char x)
-				    (return res))))
-		   (vector-push-extend (code-char char-code) res)))
-		  
-		(#\x (let* ((a (read-char-error)) ;; char code: up to two hex digits
-			    (b (read-char-error)))
-		       (unless (digit-char-p a 16)
-			 (py-raise 'SyntaxError
-				   "Invalid hex in string literal:  \ x ~A" a))
-		       (vector-push-extend
-			(code-char (if (digit-char-p b 16)
-				       (+ (* 16 (digit-char-p a 16))
-					  (digit-char-p b 16))
-				     (progn (unread-char b)
-					    (digit-char-p a 16)))) res)))
-		  
-		(t 
-		 ;; Backslash is not used for escaping: collect both
-		 ;; the backslash itself and the character just
-		 ;; read.
-		 (vector-push-extend #\\ res)
-		 (vector-push-extend c res)))
+	
+	(loop 
+	  (cond
+	   (prev-backslash
+	    (case c 
+	      (#\\ (vector-push-extend #\\ res))
+	      (#\' (vector-push-extend #\' res))
+	      (#\" (vector-push-extend #\" res))
+	      (#\a (vector-push-extend #\Bell res))
+	      (#\b (vector-push-extend #\Backspace res))
+	      (#\f (vector-push-extend #\Page res))
+	      (#\n (vector-push-extend #\Newline res))
+	      (#\Newline)  ;; ignore this newline; quoted string continues on next line
+	      (#\r (vector-push-extend #\Return res))
+	      (#\t (vector-push-extend #\Tab res))
+	      (#\v (vector-push-extend #\VT  res))
 		
-	      (setf prev-backslash nil))
-	       
-	     ((char= c #\\)
-	      (setf prev-backslash t))
-	       
-	     ((char= c first-char) ;; end quote of literal string
-	      (return-from read-string res))
-	       
-	     (t 
-	      (vector-push-extend c res)))
+	      ((#\N)
+	       (if unicode  ;; unicode char by name: u"\N{latin capital letter l with stroke}"
+		   
+		   (let ((ch2 (read-char-error))) 
+		     (unless (char= ch2 #\{)
+		       (py-raise 'SyntaxError
+				 "In Unicode string: \N{...} expected, but got ~S after \N" ch2))
+		     (loop with ch = (read-char-error)
+			 with vec = (make-array 10 :element-type 'character :adjustable t :fill-pointer 0)
+			 while (char/= ch #\}) do
+			   (vector-push-extend (if (char= ch #\space) #\_ ch) vec)
+			   (setf ch (read-char-error))
+			 finally
+			   (break "Charname: ~S" vec)
+			   (vector-push-extend (name-char vec) res)))
+			 
+		 (progn (warn "Unicode escape  \\N{..}  found in non-unicode string")
+			(vector-push-extend #\\ res)
+			(vector-push-extend #\N res))))
+		
+	      ((#\u #\U) (if unicode
+			     
+			     (loop for i below (if (char= c #\u) 4 8) ;; \uf7d6 \U12345678
+				 with code = 0
+				 with ch = (read-char-error)
+				 do (setf code
+				      (+ (* 16 code) 
+					 (or (digit-char-p ch 16)
+					     (py-raise 'SyntaxError "Non-hex digit in \"\~A...\": ~S" c ch)))
+				      ch (read-char-error))
+				 finally (vector-push-extend (code-char code) res))
+			   
+			   (progn (warn "Unicode escape \~A... found in non-unicode string" c)
+				  (vector-push-extend #\\ res)
+				  (vector-push-extend #\N res))))
+	        
+	      ((#\0 #\1 #\2 #\3 #\4 #\5 #\6 #\7)  ;; char code: up to three octal digits
+	       (loop with code = (digit-char-p c 8)
+		   with x = c
+		   for num from 1
+		   while (and (<= num 2) (digit-char-p x 8))
+		   do (setf code (+ (* code 8) (digit-char-p x 8))
+			    x (read-char-error))
+		   finally (unread-char x)
+			   (vector-push-extend (code-char code) res)))
 	      
-	    (setf c (read-char-error)))))))))
+	      
+	      (#\x (let* ((a (read-char-error)) ;; char code: up to two hex digits
+			  (b (read-char-error)))
+		     
+		     (cond ((not (digit-char-p a 16)) (py-raise 'SyntaxError
+								"Non-hex digit found in \x..: ~S" a))
+			   ((digit-char-p b 16) (vector-push-extend (code-char (+ (* 16 (digit-char-p a 16))
+										  (digit-char-p b 16)))
+								    res))
+			   (t (vector-push-extend (digit-char-p a 16) res)
+			      (unread-char b)))))
+	        
+	      (t 
+	       ;; Backslash is not used for escaping: collect both the backslash
+	       ;; itself and the character just read.
+	       (vector-push-extend #\\ res)
+	       (vector-push-extend c res)))
+		
+	    (setf prev-backslash nil))
+	       
+	   ((char= c #\\)
+	    (setf prev-backslash t))
+	   
+	   ((char= c first-char) ;; end quote of literal string
+	    (return-from read-string res))
+	       
+	   (t 
+	    (vector-push-extend c res)))
+	      
+	  (setf c (read-char-error))))))))
 
 
 ;; integers:     input  -> base-10 val  system used
@@ -733,12 +793,12 @@
 			(got-num nil))
 		  
 		    (cond
-		      ((char= ch2 #\+))
-		      ((char= ch2 #\-)       (setf minus t))
-		      ((digit-char-p ch2 10) (setf exp (digit-char-p ch2 10)
-						   got-num t))
-		      (t (py-raise 'SyntaxError
-				   "Exponent for literal number invalid: ~A ~A" ch ch2)))
+		     ((char= ch2 #\+))
+		     ((char= ch2 #\-)       (setf minus t))
+		     ((digit-char-p ch2 10) (setf exp (digit-char-p ch2 10)
+						  got-num t))
+		     (t (py-raise 'SyntaxError
+				  "Exponent for literal number invalid: ~A ~A" ch ch2)))
 		  
 		    (unless got-num
 		      (let ((ch3 (read-char-error)))
@@ -760,22 +820,26 @@
 		    (setf res (* res (expt 10 exp)))))
 	      
 	      (when ch
-		(unread-char ch))))
-
-	  ;; suffix `L' for `long integer'
-	  (unless (or has-frac has-exp)
-	    (let ((ch (read-char-nil)))
-	      (if (and (not (member ch '(#\l #\L)))
-		       ch)
-		  (unread-char ch))))
-		
-	  ;; suffix `j' means imaginary
+		(unread-char ch)))))
+	
+	;; CPython allows `j', decimal, not for hex (SyntaxError) or octal (becomes decimal!!?)
+	;; and allows 'L' for decimal, hex, octal
+	
+	
+	;; suffix `L' for `long integer'
+	(unless (or has-frac has-exp)
 	  (let ((ch (read-char-nil)))
-	    (if (member ch '(#\j #\J))
-		(setf res (complex 0 res))
-	      (when ch (unread-char ch)))))
+	    (if (and (not (member ch '(#\l #\L)))
+		     ch)
+		(unread-char ch))))
 		
-	res))))
+	;; suffix `j' means imaginary
+	(let ((ch (read-char-nil)))
+	  (if (member ch '(#\j #\J))
+	      (setf res (complex 0 res))
+	    (when ch (unread-char ch)))))
+		
+      res)))
 		
 		
 		
@@ -1019,6 +1083,7 @@
 (defparameter *lex-debug* nil)
 
 ;; XXX take a function that gives characters
+
 (defun make-py-lexer (&optional (*standard-input* *standard-input*))
   (let ((tokens-todo (list))
 	(indentation-stack (list 0))
@@ -1088,6 +1153,24 @@
 			     (return-from lexer (values (tcode-1 (find-class 'python-grammar) 'clpy)
 							lisp-form))))
 			  
+			  ((member token '(u U  r R  ur uR Ur UR))
+			   ;; u"abc"    : `u' stands for `Unicode string'
+			   ;; u + b     : `u' is an identifier
+			   ;; r"s/f\af" : `r' stands for `raw string'
+			   ;; r + b     : `r' is an identifier
+			   ;; ur"asdf"  : `ur' stands for `raw unicode string'
+			   ;; ur + a    : `ur' is identifier
+			   ;; `u' must appear before 'r' if both are present
+			   
+			   (let ((is-unicode (member token '(u U ur uR Ur UR)))
+				 (is-raw     (member token '(r R ur uR Ur UR)))
+				 (ch (read-char-nil)))
+			     (if (and ch (member ch '(#\' #\")))
+				 (lex-return string (read-string ch :unicode is-unicode :raw is-raw))
+			       (progn
+				 (unread-char ch)
+				 (lex-return identifier token)))))
+				  
 			  ((member token *reserved-words* :test #'eq)
 			   (when *lex-debug*
 			     (format t "lexer returning reserved word: ~s~%" token))

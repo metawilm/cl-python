@@ -7,6 +7,7 @@
 
 ;; XXX todo:  eval-for-in calls __iter__
 ;;  from __future__ import division
+;;  unicode strings don't print properly (question marks)
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; The `magic methods' shared by all objects.
@@ -878,7 +879,7 @@
   (remhash key (slot-value d 'hash-table)))
     
 		 
-;;; willem __add__ etc(?)
+;; dicts have no __add__
 
 (defmethod __repr__ ((d py-dict))
   (with-output-to-string (s)
@@ -897,9 +898,7 @@
   (lisp-val->py-bool (/= 0 (hash-table-count (slot-value d 'hash-table)))))
 
 (loop for name in '(__init__ __cmp__ __contains__ __eq__ __getitem__ __setitem__
-		    __delitem__ __iter__
-		    ;; __add__ etc...
-		    __len__ __nonzero__)
+		    __delitem__ __iter__ __len__ __nonzero__)
     do (register-bi-class-attr/meth (find-class 'py-dict) name (symbol-function name)))
 
 
@@ -1094,7 +1093,9 @@
     ns))
 
 
-;; For now, a bit paranoid regarding the rule that all keys are symbols...
+;; For now, a bit paranoid regarding the rule that all keys are
+;; symbols. This becomes important when the __dict__ objects is read
+;; directly, or assigned to directly (like "x.__dict__ = ...").
 
 (defmethod check-only-symbol-keys ((x namespace))
   (maphash (lambda (k v)
@@ -1422,7 +1423,8 @@
   (make-py-list-from-list
    (append (slot-value x 'list) (slot-value y 'list))))
 
-;; CPython lists: no __radd__
+;; CPython lists: no __radd__ but do have __iadd__ - functionally,
+;; that's not needed, but it is a tiny bit more efficient to have it. Don't for now...
 
 (defmethod __cmp__ ((x py-list) (y py-list))
   (__cmp-list__ (slot-value x 'list) (slot-value y 'list)))
