@@ -40,11 +40,15 @@
 
 ;; Some definitions:
 ;; 
-;; `builtin-object' : instance of a built-in class: (make-instance 'py-dict)
-;; `builtin-class' : built-in class: (find-class 'py-dict)
+;;  All CLOS objects in the Python world are either an instance of
+;;  BUILTIN-OBJECT or USER-DEFINED-OBJECT.
 ;; 
-;; `user-defined-object' : ...
-;; `user-defined-classes' : class defined within Python: (make-python-class 'Foo ..)
+;;  Every BUILTIN-OBJECT instance is either a BUILTIN-CLASS instance or
+;;  a BUILTIN-INSTANCE instance.
+;; 
+;;  Every USER-DEFINED-OBJECT instance is either a USER-DEFINED-CLASS
+;;  or a UDC-INSTANE instance.
+
 
 ;;;; Built-in
 
