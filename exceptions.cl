@@ -73,16 +73,3 @@
 	       (def-python-exceptions (car sub) (cdr sub)))))))
 
 (def-python-exceptions 'Exception *exceptions-tree*)
-
-
-
-;; These objects are used internally to signal the absence of an
-;; implementation of a magic method (like `__len__', `__call__') for
-;; an object.
-
-(defclass %magic-method-missing% (condition) ()
-	  (:documentation "The class does not support the magic method"))
-
-(defclass %not-implemented-result% (condition) ()
-	  (:documentation "The (ud/bi) class method returned NotImplemented"))
-

@@ -52,10 +52,6 @@
 				  ,result)))))
 
 
-;; (__call__ <<some-builtin-object>> args)
-;; creates an instance of X based on (optional) args
-;; for example, create a DICT whose initial content is ARGS)
-
 (defmacro create-methods-all-classes (data)
   `(defvar *methods-of-all-classes*
        (let ((h (make-hash-table :test 'eq)))
@@ -1422,7 +1418,7 @@
   "Stable sort, in-place"
   (let ((lt-pred (if (eq cmpfunc *None*)
 		     #'py-<
-		   (lambda (x y) (< (__call__ cmpfunc x y) 0)))))
+		   (lambda (x y) (< (py-call cmpfunc (list x y)) 0)))))
     (setf (slot-value x 'list)
       (stable-sort (slot-value x 'list) lt-pred)))
   x)
@@ -2538,6 +2534,7 @@
 ;; The Python type from which all other types (classes) are derived.
 ;; It is defined in classes.cl.
 
+#+(or)
 (defmethod __call__ ((x (eql (find-class 'python-type))) &optional pos key)
   (declare (ignorable pos key))
   (break "__call__ on `type'"))

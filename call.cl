@@ -2,24 +2,24 @@
 
 ;;; Calling objects
 
-(defgeneric __call__ (x &optional pos-args kwds-args)
+(defgeneric py-call (x &optional pos-args kwds-args)
   (:documentation "Call X with given arguments. Call arg rewriting must take ~@
-                   place _before_ calling __call__ (or in __CALL__ :AROUND ?)"))
+                   place _before_ calling PY-CALL")) ;; or in py-call :AROUND ?
 
 
 ;; None of the built-in functions take keyword argument, so give an
 ;; error in case kw args are given.
 
-(defmethod __call__ ((x generic-function) &optional pos-args kwd-args)
+(defmethod py-call ((x generic-function) &optional pos-args kwd-args)
   (when kwd-args
     (warn "supplying keyword args to generic function ~A (kw: ~S)" x kwd-args))
   #+(or)(py-raise 'ValueError "built-in function ~S does not take keyword arguments (got: ~A)"
 		  x kwd-args)
   (apply x pos-args))
 
-(defmethod __call__ ((x function) &optional pos-args kwd-args)
+(defmethod py-call ((x function) &optional pos-args kwd-args)
   (when kwd-args
-    (warn "__call__ on regular Lisp Function ~A got keyword args?! ~@
+    (warn "py-call on regular Lisp Function ~A got keyword args?! ~@
            (pos-args: ~A; kwd-args: ~A - ignored)"
 	  x pos-args kwd-args))
   (apply x pos-args))
@@ -27,7 +27,7 @@
 
 ;;; user-defined functions/methods:   
 
-(defmethod __call__ :around ((x user-defined-function) &optional pos-args key-args)
+(defmethod py-call :around ((x user-defined-function) &optional pos-args key-args)
   "Evaluate function body in function definition namespace."
   (declare (ignore pos-args key-args))
   
@@ -41,7 +41,7 @@
     *None*))
 
 
-(defmethod __call__ ((x python-function) &optional pos-args key-args)
+(defmethod py-call ((x python-function) &optional pos-args key-args)
   ;; used in user-defined functions
   (with-slots (call-rewriter namespace ast) x
     (let ((actual-args (funcall call-rewriter pos-args key-args)))
@@ -57,7 +57,7 @@
 	(py-eval ast)))))
 
 
-(defmethod __call__ ((x python-function-returning-generator) &optional pos-args key-args)
+(defmethod py-call ((x python-function-returning-generator) &optional pos-args key-args)
   (with-slots (call-rewriter generator-creator) x
     (declare (special *scope*))
     (let ((ns (make-namespace :name "generator namespace"
@@ -73,17 +73,17 @@
 				       (funcall value-producing-f)))))))
 		
 
-(defmethod __call__ ((x py-bound-method) &optional pos-args kwd-args)
+(defmethod py-call ((x py-bound-method) &optional pos-args kwd-args)
   "The instance enclosed in the bound method is prefixed to pos-args"
   (unless (listp pos-args)
     (error "pos-args should be list (got: ~A)" pos-args))
-  (__call__ (slot-value x 'func)
-	    (cons (slot-value x 'self)
-		  pos-args)
-	    kwd-args))
+  (py-call (slot-value x 'func)
+	   (cons (slot-value x 'self)
+		 pos-args)
+	   kwd-args))
 
 
-(defmethod __call__ ((x py-unbound-method) &optional pos-args kwd-args)
+(defmethod py-call ((x py-unbound-method) &optional pos-args kwd-args)
   "X must be of right class, then call class method with given args."
   (unless pos-args
     (py-raise 'TypeError "Unbound method~% ~X~% must be called with instance as ~
@@ -102,20 +102,12 @@
                    class ~%~A ~%as first argument (got as first arg: ~S)"
 		  x um-class inst))
     
-      (__call__ um-func pos-args kwd-args))))
-
+      (py-call um-func pos-args kwd-args))))
 
 
 ;;;; Calling a class creates an instance
 
-#+(or)
-(defmethod __call__ :around ((x builtin-class) &optional pos-args kwd-args)
-  (when kwd-args
-    (py-raise 'ValueError "Built-in classes do not take keyword arguments (XXX ?!) (got: ~S)" kwd-args))
-  ;; XXX or allow?
-  (call-next-method))
-
-(defmethod __call__ ((cls python-type) &optional pos-args kwd-args)
+(defmethod py-call ((cls python-type) &optional pos-args kwd-args)
   ;; <cls>.__new__(<cls>, ..) creates and returns a new instance
   ;; <cls>.__init__(<cls instance>, ..) initializes it but doesn't return anything useful
   
@@ -123,7 +115,7 @@
       (internal-get-attribute cls '__new__)
     (if found
 	
-	(let ((inst (__call__ meth (cons cls pos-args) kwd-args))) ;; call with class as first arg
+	(let ((inst (py-call meth (cons cls pos-args) kwd-args))) ;; call with class as first arg
 	  (multiple-value-bind (res found)
 	      (call-attribute-via-class inst '__init__ pos-args kwd-args)
 	    (declare (ignore res))
@@ -132,15 +124,6 @@
 	  inst)
       
       (error "Class ~S has no method __new__" cls))))
-
-
-#+(or)
-(defmethod __call__ ((cls user-defined-class) &optional pos-args kwd-args)
-  ;;; Create an instance of CLS, by calling the __new__ and __init__
-  ;;; methods of CLS; both are called with ARGS.
-  ;;; XXX todo: rename make-instance to __new__ everywhere
-  (declare (ignore pos-args kwd-args))
-  (make-instance cls))
 
 
 

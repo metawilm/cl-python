@@ -53,7 +53,7 @@
 	     
     (if found
 	
-	(let ((iterator (__call__ iter-meth (list object))))
+	(let ((iterator (py-call iter-meth (list object))))
 	  (labels ((get-next-val-fun ()
 		     (handler-case (next iterator)
 		       (StopIteration () (values nil nil))
@@ -74,7 +74,7 @@
 
 	    (let ((index 0))
 	      (labels ((get-next-val-fun ()
-			 (handler-case (__call__ getitem-meth (list object index))
+			 (handler-case (py-call getitem-meth (list object index))
 			   (IndexError () (values nil nil))  ;; even ok if index = 0 (empty sequence)
 			   (:no-error (val)
 			     (incf index)
@@ -139,7 +139,7 @@
 
 (defmacro def-pyfun (name (&rest args) &body body)
   "Define a Lisp function that is callable from within Python. ~@
-   It basically defines (defun NAME ...) and (defmethod __call__ #'NAME ...)."
+   It basically defines (defun NAME ...) and (defmethod py-call ((eql #'NAME) ...)."
   (multiple-value-bind (pos-args key-args key-vals)
       (lispargs->pyargs args)
     ;; For example args:
@@ -157,7 +157,7 @@
 				    (list ,@(mapcar (lambda (kv) `(cons ',(car kv) ,(cdr kv)))
 						key-vals))
 				    nil nil)))
-	   (defmethod __call__ ((f (eql #',name)) &optional pos-args key-args)
+	   (defmethod py-call ((f (eql #',name)) &optional pos-args key-args)
 	     (let* ((,res (funcall call-rewriter pos-args key-args))
 		    ,@(mapcar (lambda (posarg)
 				`(,posarg (cdr (assoc ',posarg ,res))))
@@ -207,5 +207,5 @@
 (progn (def-pyfun foo (a b &key (key1 *None*) (key2 *None*))
 	 (format t "FOO got:  a: ~S  b: ~S  key1: ~S  key2: ~S~%" a b key1 key2))
        (foo 1 2 :key2 3)
-       (__call__ #'foo '(1 2) '((key2 . 3))))
+       (py-call #'foo '(1 2) '((key2 . 3))))
 

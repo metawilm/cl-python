@@ -55,13 +55,13 @@
 		       (multiple-value-bind (meth found)
 			   (internal-get-attribute x-class ',op)
 			 (if found
-			     (__call__ meth (list x y))
+			     (py-call meth (list x y))
 			   *NotImplemented*)))
 		     (try-rop ()
 		       (multiple-value-bind (meth found)
 			   (internal-get-attribute y-class ',rop)
 			 (if (and found (not (eq meth *NotImplemented*)))
-			     (__call__ meth (list y x))
+			     (py-call meth (list y x))
 			   *NotImplemented*))))
       
 		(let ((result (if y-sub-of-x
@@ -129,7 +129,7 @@
   (multiple-value-bind (meth found)
       (internal-get-attribute (__class__ x) '__pow__)
     (let ((result (if found
-		      (__call__ meth (list x y z))
+		      (py-call meth (list x y z))
 		    *NotImplemented*)))
       (if (eq result *NotImplemented*)
 	  (py-raise 'TypeError "Unsupported operands for ** (got: ~A, ~A, ~A)" x y z)
@@ -194,7 +194,7 @@
 	      (multiple-value-bind (meth found)
 		  (internal-get-attribute class ',op)
 		(let ((result (if found
-				  (__call__ meth (list x))
+				  (py-call meth (list x))
 				*NotImplemented*)))
 		  (if (eq result *NotImplemented*)
 		      (py-raise 'TypeError "Unsupported operand for ~A (got: ~A)"

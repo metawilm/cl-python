@@ -62,9 +62,10 @@
 	       (call-next-method)))))
 
 (defmethod pyb::callable-1 ((x builtin-instance))
+  (break "actually used? (pyb::callable-1 builtin-instance)")
   (assert (not (some (lambda (meth) 
 		       (typep x (car (mop:method-specializers meth))))
-		     (mop:generic-function-methods #'__call__)))
+		     (mop:generic-function-methods #'py-call)))
       () "PYB::CALLABLE-1 should specialize on ~A, defining it as callable!" x)
   nil)
 
@@ -269,7 +270,7 @@
   (when (eq func *None*)
     (setf func #'identity))
   (make-py-list-from-list (loop for x in list
-			   when (py-val->lisp-bool (__call__ func x))
+			   when (py-val->lisp-bool (py-call func x))
 			   collect x)))
 
 (defun pyb:getattr (x attr &optional (default nil default-p))
@@ -375,7 +376,7 @@
 	  iterator))
     
     (if (eq (pyb:callable x) *True*)
-	(make-iterator-from-function (lambda () (__call__ x))
+	(make-iterator-from-function (lambda () (py-call x))
 				     y)
       #1#)))
 	    
@@ -459,14 +460,14 @@
 	(progn
 	  (setf res initial)
 	  (py-iterate (x seq)
-		      (setf res (__call__ func res x)))
+		      (setf res (py-call func res x)))
 	  res)
       (let ((first t))
 	(py-iterate (x seq)
 		    (if first
 			(setf res x
 			      first nil)
-		      (setf res (__call__ func res x))))))))
+		      (setf res (py-call func res x))))))))
 
 (defun pyb:reload (module)
   (declare (ignore module))

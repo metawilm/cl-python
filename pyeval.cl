@@ -191,12 +191,12 @@
 	 ;; to the constructor. The instance so created by calling the
 	 ;; constructor is used as the exception value."
 	 
-	 ;; XXX  make-instance or __call__?
+	 ;; XXX  make-instance or py-call?
 	 
 	 (cond ((typep value exctype) (error exctype :args value))
 	       
 	       ((typep value 'py-tuple)  
-		(error exctype (__call__ exctype (tuple->lisp-list value))))
+		(error exctype (py-call exctype (tuple->lisp-list value))))
 	       
 	       ((or (null value)
 		    (eq value *None*)) (error (make-instance exctype)))
@@ -347,11 +347,11 @@
 			 (> (length item-list) 1))
 		     (make-tuple-from-list (mapcar #'py-eval item-list-2))
 		   (car item-list-2))))
-      
+      ;; XXX call via class
       (multiple-value-bind (getitem found)
 	  (internal-get-attribute eprim '__getitem__)
 	(if found
-	    (__call__ getitem (list item))
+	    (py-call getitem (list item))
 	  (py-raise 'TypeError
 		    "No __getitem__ found (~A)" eprim)))
       #+(or)(__getitem__ eprim item))))
@@ -372,7 +372,7 @@
     ;; (1 2 (= b 3) (= c 4) (* (testlist ...)) (** (dict ...)))
     
     (when (null args)
-      (return-from eval-call (__call__ eprim)))
+      (return-from eval-call (py-call eprim)))
     
     (let* ((x (pop args))
 	   
@@ -417,7 +417,7 @@
 	       
 	    do (push (cons key-symbol val) kw-args)))
       
-      (__call__ eprim pos-args kw-args))))
+      (py-call eprim pos-args kw-args))))
 
 
 (defun eval-for-in (targets sources suite else-suite)
@@ -529,7 +529,7 @@
 	   (multiple-value-bind (setitem found)
 	       (internal-get-attribute primary '__setitem__)
 	     (if found
-		 (__call__ setitem (list subs val))
+		 (py-call setitem (list subs val))
 	       (py-raise 'TypeError "No __setitem__ found (~A)" primary)))
 	   
 	   #+(or) ;; not correct for UDC with method __setitem__
