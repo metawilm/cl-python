@@ -70,12 +70,12 @@
     
     (case (car ast)
       (inline-lisp (eval-inline-lisp (second ast)))
-      (file-input (eval-file-input (cdr ast)))
+      (file-input (apply #'eval-file-input (cdr ast)))
       (testlist (apply #'eval-testlist (cdr ast)))
     
       ;; special hook for inserting Lisp code directly in AST
       ;; (implicit PROGN)
-      (lisp (eval `(progn ,@(cdr ast))))
+      #+(or)(lisp (eval `(progn ,@(cdr ast))))
 	   
       ;; these bind names and create new scope:
       (module (apply #'eval-module "mod_name_here" (cdr ast)))
@@ -595,6 +595,7 @@
     (loop for tg in targets
 	collect (do-eval tg)))) ;; local function: can't do direct mapcar
 
+#+(or) ;; unused
 (defun find-in-lists (item list)
   "Find ITEM in LISTS. LISTS consists of lists and atoms"
   (if (atom list)
@@ -898,6 +899,7 @@
   (declare (ignore obj start end step))
   'todo)
 
+#+(or) ;; unused
 (defun get-item (obj item)
   ;;declare (ignore obj item))
   (__getitem__ obj item))
