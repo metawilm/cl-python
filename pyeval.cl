@@ -132,13 +132,6 @@
       (t (error "uncatched in py-eval: ~S~%" ast))
       )))
 
-
-#+never
-(eval-try-except-m (suite ((testlist ((identifier foo)) nil)))
-		   ((except ((identifier Exc) (identifier e))
-			    (suite ((testlist ((identifier bar)) nil)))))
-		   nil)
-
 (defun eval-try-except (suite except-clauses else-clause)
   (handler-bind
       ((Exception (lambda (c)
@@ -150,40 +143,6 @@
     (py-eval suite))
   (py-eval else-clause))
 
-#+nomore
-(defun eval-try-except (suite except-clauses else-clause)
-  (let ((ev `(eval-try-except-m ,suite ,except-clauses ,else-clause)))
-    (eval ev)))
-
-#+nomore
-(defmacro eval-try-except-m (suite except-clauses else-clause)
-  `(handler-case (py-eval ',suite)
-     ,@(loop for ex-cl in except-clauses
-	   collect (destructuring-bind (except (exc-name exc-param) suite)
-		       ex-cl
-		     (declare (ignore except))
-		     (if exc-name
-			 (progn (unless (eq (first exc-name) 'identifier)
-				  (py-raise 'TypeError
-					    "try/except: the token after 'except' ~
-                                             must be a variable name (got: ~A)"
-					    exc-name))
-				`(,(second exc-name)
-				  ,(if exc-param
-				       (progn
-					 (assert (and (consp exc-param)
-						      (eq (car exc-param) 'identifier))
-					     () "Invalid 'except' parameters")
-					 `($cond$))
-				     nil)
-				  (namespace-bind *scope* ',(second exc-param) $cond$)
-				  (py-eval ',suite)))
-		       (progn (assert (not exc-param) () "should be enforced by syntax")
-			      `(Exception () (py-eval ',suite))))))
-     ,@(when else-clause
-	 `(:no-error (&rest $args$)
-		     (declare (ignore $args$))
-		     (py-eval ',else-clause)))))
 		    
 (defun eval-assert (test expr)
   "Test whether assertion holds. Is only executed when __debug__ is true"
@@ -825,7 +784,7 @@
 
 (defun eval-tuple (&rest content)
   (let ((c (mapcar #'py-eval content)))
-    (apply #'make-tuple-from-list c)))
+    (make-tuple-from-list c)))
 
 (defun get-slice (obj start end &optional (step nil))
   (declare (ignore obj start end step))
@@ -863,30 +822,6 @@
     (terpri)))
 
 
-;;; Given:  def foo(a, b, c=3, d=4, *args, **kws)
-;;;  -> func-args = ((a b) ((c . 3) (d . 4)) args kws)
-;;;
-;;; foo(9,8,7,6,5,4, foo=17, bar=12)
-;;;  -> a,b,c,d=9,8,7,6 args=(5,4) kws={'foo':17, 'bar':12}
-;;; foo(1,2) -> a,b,c,d = (1,2,3,4) args=() kws={}
-;;; foo(1,2, zut=12, c=9) -> a,b,c,d = 1,2,9,4 args=() kws={'zut':12}
-;;;
-;;; x = (1,2,3)
-;;; d = {'sd': 12}
-;;; funcarg.foo(1,2, zut=12, q=9, *x, **d)
-;;;  -> a,b,c,d = 1,2,11,12 args=(13,) kws={'q':9, 'zut': 12, 'sd': 12}
-
-
-#+(or) ;; probably not needed, because it's enforced by the parser already
-(defun is-ok-arg-list (args)
-  "Keyword arguments should be after positional arguments"
-  (let ((last-pos (position-if #'atom args :from-end t))
-	(first-kw (position-if #'consp args)))
-    (if (and last-pos first-kw)
-	(< last-pos first-kw)
-      t)))
-
-
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Utils
 
@@ -907,31 +842,3 @@
       do (setf tree (subst-treelist old new tree))
       finally (return tree)))
 
-
-#+(or)
-(py-eval '(list ((identifier x)
-		 ((list-for-in (exprlist ((identifier x)) nil) (list (1 2 3)))
-		  (list-for-in (exprlist ((identifier y)) nil)
-		   (identifier foo))
-		  (list-if (comparison > (identifier x) (identifier y)))
-		  (list-if (comparison == (identifier y) 3))))))
-
-
-#+(or)
-(eval-listcompr-m (testlist (identifier x))
-		  ((list-for-in (exprlist ((identifier x)) nil) (list (1 2 3)))
-		   (list-for-in (exprlist ((identifier y)) nil) (list (4 5 6)))
-		   (list-if (comparison > (identifier x) (identifier y)))))
-
-
-#+(or)(progn not working yet
-	     ("a" in "asdf"))
-
-#+(or)(working
-       list-comprehensions 
-       arith
-       string-methods
-       "for x,y in [(1,2)]: print x+y"
-       "if then else"
-       "class def"
-       )
