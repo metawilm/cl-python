@@ -526,10 +526,27 @@
      (__long__    (make-int (truncate x))) ;; CPython: returns long int
      (__float__   (make-float x))
      
-     (__repr__    (let ((x (if (floatp x) ;; for floats like `3.1d0' don't print `d', etc
-			       (coerce x 'long-float)
-			     x)))
-		    (format nil "~A" x)))
+     (__repr__    (let* ((v (make-array 4 :adjustable t
+					:fill-pointer 0 :element-type 'character)))
+		    
+		    ;; Show number simply with a few decimals if
+		    ;; feasible, otherwise use exp notation
+		    
+		    (format v "~,,2,,,,vG" #\E x)
+		    (decf (fill-pointer v) (loop for i downfrom (1- (length v))
+					       while (char= (aref v i) #\Space)
+					       count 1))
+		    (when (or (position #\E v :test #'char=)
+			      (> (length v) 8))
+		      (setf (fill-pointer v) 0)
+		      (format v "~11,,,,,,ve" #\E x))
+		    
+		    (let ((len (length v)))  ;; remove final "E+0"
+		      (when (and (> len 3)
+				 (char= (aref v (- len 1)) #\0)
+				 (char= (aref v (- len 2)) #\+))
+			(decf (fill-pointer v) 3)))
+		    v))
      ))
 
 (loop for name in `(__int__ __long__ __float__)
@@ -983,7 +1000,9 @@
 		(not pos-arg)) 
 	   (loop with ht = (slot-value x 'hash-table)
 	       for (k . v) in key-arg
-	       do (setf (gethash (symbol-name k) ht) v))))
+	       do (setf (gethash (symbol-name k) ht) v)))
+	  
+	  (t (error "unhandled case in dict.__init__")))
     *None*))
 
 (register-bi-class-attr/meth (find-class 'py-dict) '__init__
@@ -1984,7 +2003,7 @@
 
 (mop:finalize-inheritance (find-class 'py-tuple))
 
-(defmethod make-tuple (&optional vec)
+(defmethod make-tuple (&optional (vec (make-array 0)))
   (make-instance 'py-tuple :vec vec))
 
 ;; As tupls are immutable, popular ones can be cached.
@@ -2056,7 +2075,7 @@
 			   finally (return res))))))
   
 (defmethod __repr__ ((x py-tuple))
-  (print-list/tuple x :prefix #\( :suffix #\) :empty-seq "()" :type :repr))
+  (print-list/tuple x :prefix #\( :suffix #\) :empty-seq "()" :kind :repr))
 
 ;; __reversed__ ?
 
@@ -2066,7 +2085,7 @@
 	    "Cannot set items of tuples"))
 
 (defmethod __str__ ((x py-tuple))
-  (print-list/tuple x :prefix #\( :suffix #\) :empty-seq "()" :type :str))
+  (print-list/tuple x :prefix #\( :suffix #\) :empty-seq "()" :kind :str))
 
 
 (loop for name in '(__add__ __cmp__ __contains__ __eq__ __getitem__ __init__
@@ -2086,7 +2105,9 @@
 (mop:finalize-inheritance (find-class 'py-list))
 
 (defmethod make-py-list ((vec vector))
-  (make-instance 'py-list :vec vec))
+  (let ((i (make-instance 'py-list :vec vec)))
+    (assert (slot-value i 'vec))
+    i))
 
 (defmethod make-py-list-from-list ((lst list))
   (make-instance 'py-list :vec (make-array (length lst) :initial-contents lst
@@ -2100,22 +2121,22 @@
 
 (defmethod py-list-__new__ ((cls class) &rest args)
   (assert (subtypep cls 'py-list))
-  (make-instance cls))
+  (make-instance cls :vec (make-array 0 :adjustable t :fill-pointer 0)))
 
 (register-bi-class-attr/meth (find-class 'py-list) '__new__ 
 			     (make-static-method #'py-list-__new__))
 
 (defmethod __init__ ((x py-list) &rest args)
-  (let ((new-vec (make-array 5 :adjustable t :fill-pointer 0)))
-    (cond ((null args) (make-py-list new-vec))
+  (with-slots (vec) x
+    (cond ((null args) )
 	  ((cdr args) (py-raise 'TypeError
 				"list.__init__(): takes at most one pos arg (got: ~A)" args))
 	  (t (loop with f = (get-py-iterate-fun (car args))
 		 with val = (funcall f)
-		 while val do (vector-push-extend new-vec val)
-			      (setf val (funcall f))
-		 finally (return (make-py-list new-vec)))))))
-
+		 while val do (vector-push-extend val vec)
+			      (setf val (funcall f))))))
+  x)
+    
 ;; regular magic methods
 
 (defmethod __add__ ((x py-list) (y py-list))

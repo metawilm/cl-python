@@ -19,8 +19,7 @@ def check(a, b):
       print "== ok", a, b
 
 def exception(exc, f, *args):
-    print "WWW exception", exc, f, args
-    zud
+    print "WWW exception", exc, f, args ## wb
     try:
         f(*args)
     except exc:
@@ -159,8 +158,8 @@ def check_functions(i=0, j=0):
 
     check(repr(42), "42")
     ## check(repr(42L), "42L") # WB int/long unification
-    ## check(repr(3.5), "3.5") # 3.5d0
-    ## check(repr(4.5j), "4.5j") # 4.5d0j
+    check(repr(3.5), "3.5") # 3.5d0
+    check(repr(4.5j), "4.5j") # 4.5d0j
     check(repr(4j+3), "(3+4j)")
     check(repr(4j-3), "(-3+4j)")
     check(repr(-4j), "-4j")
@@ -176,8 +175,8 @@ def check_functions(i=0, j=0):
 
     check(repr({1: 42}), "{1: 42}")
 
-    ## for x in 42, 42L, 3.5, 4.5j, 4j+3, "abc", range(3), (1, 2, 'c'), {}:
-    ##    check(repr(x), `x`) # 3.5d0
+    for x in 42, 42L, 3.5, 4.5j, 4j+3, "abc", range(3), (1, 2, 'c'), {}:
+        check(repr(x), `x`) # 3.5d0
 
     check(round(3.14), 3.0)
     check(round(3.14, 1), 3.1)
@@ -388,12 +387,12 @@ def main():
     global show
     show = True
     for i in range(500):
-        ## check_functions(j=long(i*1000000), i=i*1000000) # WB
+        check_functions(j=long(i*1000000), i=i*1000000) # WB
         check_descriptors(j=long(i*1000000), i=i*1000000)
         show = False
     print "OK."
 
-main() # WB
+#main() # WB
 
 if __name__ == '__main__':
     main()
