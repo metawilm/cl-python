@@ -2,6 +2,8 @@
 
 (in-package :python)
 
+(declaim (optimize (debug 3)))
+
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (require :yacc)
   (use-package :yacc))
@@ -486,117 +488,123 @@
 
 ;;; STRINGS
 
+(defun read-char-error ()
+  (or (read-char-nil)
+      (error "Unexpected end of file")))
+
 (defun read-string (first-char)
   "Returns string as a string"
   (assert (member first-char '(#\' #\") :test 'eql))
-  (macrolet ((read-char-error () `(or (read-char-nil)
-				      (error "Unexpected end of file"))))
-    (let ((second (read-char-error))
-	  (third (read-char-nil)))
+  
+  (let ((second (read-char-error))
+	(third (read-char-nil)))
 
-      (cond 
+    (cond 
        
-       ;; "" ('') but not """ (''') --> empty string
-       ((and (char= first-char second)
-	     (or (null third)
-		 (char/= first-char third)))
+     ;; "" ('') but not """ (''') --> empty string
+     ((and (char= first-char second)
+	   (or (null third)
+	       (char/= first-char third)))
 	
-	(when third
-	  (unread-char third))
-	(return-from read-string ""))
+      (when third
+	(unread-char third))
+      (return-from read-string ""))
        
        
-       ;; """ or ''': a long? multi-line? string
-       ((char= first-char second third)
+     ;; """ or ''': a long? multi-line? string
+     ((char= first-char second third)
 	
-	(let* ((res (make-array 50
-				:element-type 'character
-				:adjustable t
-				:fill-pointer 0))
-	       (x (read-char-error))
-	       (y (read-char-error))
-	       (z (read-char-error)))
+      (let* ((res (make-array 50
+			      :element-type 'character
+			      :adjustable t
+			      :fill-pointer 0))
+	     (x (read-char-error))
+	     (y (read-char-error))
+	     (z (read-char-error)))
 	  
-	  (loop until (char= first-char x y z)
-	      do (vector-push-extend
-		  (shiftf x y z (read-char-error))
-		  res))
-	  (return-from read-string res)))
+	(loop until (char= first-char x y z)
+	    do (vector-push-extend
+		(shiftf x y z (read-char-error))
+		res))
+	(return-from read-string res)))
       
 
-       ;; non-empty string with one starting quote
-       ;; Quotes can be escaped with a backslash.
-       (t 
+     ;; non-empty string with one starting quote
+     ;; Quotes can be escaped with a backslash.
+     (t 
 	
-	(unless third
-	  (py-raise 'SyntaxError "Quoted string not finished"))
+      (unless third
+	(py-raise 'SyntaxError "Quoted string not finished"))
 	
-	(let ((res (make-array 30
-			       :element-type 'character
-			       :adjustable t
-			       :fill-pointer 0)))
+      (let ((res (make-array 30
+			     :element-type 'character
+			     :adjustable t
+			     :fill-pointer 0)))
 	  
-	  (unless (char= second #\\)
-	    (vector-push-extend second res))
+	(unless (char= second #\\)
+	  (vector-push-extend second res))
 	  
-	  (let ((c third)
-		(prev-backslash (char= second #\\)))
+	(let ((c third)
+	      (prev-backslash (char= second #\\)))
 	    
-	    (loop 
-	      (cond
-	       ;; Rules: <http://meta.kabel.utwente.nl/specs/Python-Docs-2.3.3/ref/strings.html>
+	  (loop 
+	    (cond
+	     ;; Rules: <http://meta.kabel.utwente.nl/specs/Python-Docs-2.3.3/ref/strings.html>
 	    
-	       (prev-backslash
-		(case c
-		  (#\Newline) ;; ignore: quoted string continues on next line
-		  (#\\ (vector-push-extend #\\ res))        (#\' (vector-push-extend #\' res))
-		  (#\" (vector-push-extend #\" res))        (#\a (vector-push-extend #\Bell res))
-		  (#\b (vector-push-extend #\Backspace res))(#\f (vector-push-extend #\Page res))
-		  (#\n (vector-push-extend #\Newline res))
-		  ((#\N #\u #\U) (error "TODO: unicode support in strings"))
-		  (#\r (vector-push-extend #\Return res)) (#\t (vector-push-extend #\Tab res))
-		  (#\u (error "TODO: unicode support"))   (#\v (vector-push-extend #\VT  res))
+	     (prev-backslash
+	      (case c
+		(#\Newline) ;; ignore: quoted string continues on next line
+		(#\\ (vector-push-extend #\\ res))        (#\' (vector-push-extend #\' res))
+		(#\" (vector-push-extend #\" res))        (#\a (vector-push-extend #\Bell res))
+		(#\b (vector-push-extend #\Backspace res))(#\f (vector-push-extend #\Page res))
+		(#\n (vector-push-extend #\Newline res))
+		((#\N #\u #\U) (error "TODO: unicode support in strings"))
+		(#\r (vector-push-extend #\Return res)) (#\t (vector-push-extend #\Tab res))
+		(#\u (error "TODO: unicode support"))   (#\v (vector-push-extend #\VT  res))
 		  
-		  ((#\0 #\1 #\2 #\3 #\4 #\5 #\6 #\7) ;; char code: up to three octal digits
-		   (let ((char-code
-			  (loop with res = (digit-char-p c 8)
-			      with x = c
-			      for num from 1
-			      while (and (<= num 2) (digit-char-p x 8))
-			      do (setf res (+ (* res 8) (digit-char-p x 8))
-				       x (read-char-error))
-			      finally (unread-char x)
-				      (return res))))
-		     (vector-push-extend (code-char char-code) res)))
+		((#\0 #\1 #\2 #\3 #\4 #\5 #\6 #\7) ;; char code: up to three octal digits
+		 (let ((char-code
+			(loop with res = (digit-char-p c 8)
+			    with x = c
+			    for num from 1
+			    while (and (<= num 2) (digit-char-p x 8))
+			    do (setf res (+ (* res 8) (digit-char-p x 8))
+				     x (read-char-error))
+			    finally (unread-char x)
+				    (return res))))
+		   (vector-push-extend (code-char char-code) res)))
 		  
-		  (#\x (let* ((a (read-char-error)) ;; char code: up to two hex digits
-			      (b (read-char-error)))
-			 (unless (digit-char-p a 16)
-			   (py-raise 'SyntaxError
-				     "Invalid hex in string literal:  \ x ~A" a))
-			 (vector-push-extend
-			  (code-char (if (digit-char-p b 16)
-					 (+ (* 16 (digit-char-p a 16))
-					    (digit-char-p b 16))
-				       (progn (unread-char b)
-					      (digit-char-p a 16)))) res)))
+		(#\x (let* ((a (read-char-error)) ;; char code: up to two hex digits
+			    (b (read-char-error)))
+		       (unless (digit-char-p a 16)
+			 (py-raise 'SyntaxError
+				   "Invalid hex in string literal:  \ x ~A" a))
+		       (vector-push-extend
+			(code-char (if (digit-char-p b 16)
+				       (+ (* 16 (digit-char-p a 16))
+					  (digit-char-p b 16))
+				     (progn (unread-char b)
+					    (digit-char-p a 16)))) res)))
 		  
-		  (t 
-		   ;; Backslash is not used for escaping: collect both
-		   ;; the backslash itself and the character just
-		   ;; read.
-		   (vector-push-extend #\\ res)
-		   (vector-push-extend c res)))
+		(t 
+		 ;; Backslash is not used for escaping: collect both
+		 ;; the backslash itself and the character just
+		 ;; read.
+		 (vector-push-extend #\\ res)
+		 (vector-push-extend c res)))
 		
-		(setf prev-backslash nil))
+	      (setf prev-backslash nil))
 	       
-	       ((char= c #\\)
-		(setf prev-backslash t))
+	     ((char= c #\\)
+	      (setf prev-backslash t))
 	       
-	       ((char= c first-char) ;; end quote of literal string
-		(return-from read-string res)))
+	     ((char= c first-char) ;; end quote of literal string
+	      (return-from read-string res))
+	       
+	     (t 
+	      (vector-push-extend c res)))
 	      
-	      (setf c (read-char-error))))))))))
+	    (setf c (read-char-error)))))))))
 
 #+(or)
 (defun read-number (first-char)
@@ -652,6 +660,82 @@
   ;;  if there's a dot -> ...
   )
 
+(defun read-number (&optional (first-char (read-char-error)))
+  (assert (digit-char-p first-char 10))
+  (let ((base 10)
+	(res 0))
+	
+    (flet ((read-int (&optional (res 0))
+	     (loop with ch = (read-char-nil)
+		 while (and ch (digit-char-p ch base))
+		 do (setf res (+ (* res base) (digit-char-p ch base))
+			  ch (read-char-nil))
+		 finally (when ch 
+			   (unread-char ch))
+			 (return res))))
+	  
+      (if (char= first-char #\0)
+
+	  (let ((second (read-char-nil)))
+	    (setf res (cond ((null second) 0) ;; eof
+			     
+			    ((member second '(#\x #\X)) (setf base 16)
+							(read-int))
+			    ((digit-char-p second 8) (setf base 8)
+						     (read-int))
+			    ((char= second #\.) (unread-char second)
+						0)
+			    ((digit-char-p second 10) (read-int))
+			    ((member second '(#\j #\J)) #(0 0))
+			    ((member second '(#\l #\L)) 0)
+			    (t (unread-char second)
+			       0)))) ;; non-number, like `]' in `x[0]'
+	
+	(setf res (read-int (digit-char-p first-char 10))))
+      
+      (let ((has-frac nil))
+	(when (= base 10)
+	  (let ((dot? (read-char-nil)))
+	    (if (eql dot? #\.)
+		
+		(progn
+		  (setf has-frac t)
+		  (incf res
+			(loop
+			    with ch = (read-char-nil)
+			    with lst = ()
+			    while (and ch (digit-char-p ch 10))
+			    do (push ch lst)
+			       (setf ch (read-char-nil))
+			       
+			    finally (setf lst (nreverse lst))
+				    (push #\. lst)
+				    (push #\0 lst)
+				    (unread-char ch)
+				    (return (read-from-string
+					     (make-array (length lst)
+							 :initial-contents lst
+							 :element-type 'character))))))
+		      
+	      (unread-char dot?))))
+		
+	;; discard optional `L' (for `long') suffix for integers
+	(when (not has-frac)
+	  (let ((ch (read-char-nil)))
+	    (unless (member ch '(#\l #\L))
+	      (unread-char ch))))
+		
+	;; suffix `j' means imaginary
+	(let ((ch (read-char-nil)))
+	  (if (member ch '(#\j #\J))
+	      (setf res (complex 0 res))
+	    (unread-char ch)))
+		
+	res))))
+		
+		
+		
+#+(or)
 (defun read-number (first-char)
   (assert (digit-char-p first-char 10))
   (let* ((res (digit-char-p first-char 10))
@@ -673,11 +757,14 @@
 	 ((char= second #\.) ;; <digit>.<something> like 1.2 or 1.23 or 1.234 etc
 	  (unread-char second)) ;; and continue
 
+	 ((member second '(#\j #\J))
+	  (return-from read-number #C(0 0)))
+	 
+	 ((member second '(#\L #\l)) ;; it's a "long" integer -- suffix ignored here
+	  (return-from read-number 0))
+	 
 	 ((alphanumericp second)
 	  (error "Invalid number (got: '0~A'" second))
-
-	 ((member second '(#\L #\l)) ;; it's a "long" integer -- ignored
-	  (return-from read-number 0))
 	 
 	 (t ;; non-number stuff after a zero, like `]' in `x[0]'
 	  (unread-char second)
@@ -715,9 +802,9 @@
 		(unread-char c))))
 
 	(when c
-	  (unless (member c '(#\L #\l))
-	    (unread-char c)))))
-
+	  (cond ((member c '(#\L #\l)) )       ;; Suffix for `long' integers: ignored
+		((member c '(#\C #\c)) (setf res (complex 0 res))) ;; imaginary number -- XXX check next char
+		(t (unread-char c))))))
     res))
 
 
