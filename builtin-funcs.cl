@@ -10,32 +10,35 @@
 
 (in-package :python)
 
-
 (defun pyb:__import__ (name &optional globals locals fromlist)
   "This function is invoked by the import statement."
   (declare (ignore name globals locals fromlist))
-  (error "py-import: todo"))
+  (error "__import__: todo (import functionality hardcoded in py-eval for now)"))
 
 (defun pyb:abs (x)
   "Return the absolute value of object X. ~@
    Raises AttributeError when there is no `__abs__' method."
-  (multiple-value-bind (meth found)
-      (internal-get-attribute x '__abs__)
-    (if found
-	(progn
-	  (unless (typep meth 'py-bound-method)
-	    (warn "x.__abs__ for x = ~A did not return a bound method (got: ~A)"
-		  x meth))
-	  (__call__ meth)) ;; no args: should be bound method
-      (py-raise 'TypeError "Bad operand type for abs(): ~A" x))))
+  (multiple-value-bind (val meth-found)
+      (call-attribute-via-class x '__abs__)
+    (if meth-found
+	val
+      (py-raise 'TypeError "Bad operand type for abs(): ~S" x))))
 
-(defun pyb:apply (function args &optional keywords)
+(defun pyb:apply (function &optional pos-args kw-dict)
+  "Apply FUNCTION (a callable object) to given args. ~@
+   POS-ARGS is any iterable object; KW-DICT must be of type PY-DICT." 
   (warn "Function 'apply' is deprecated; use extended call ~@
-         syntax instead:  function( *args, **kwargs )")
-  (let ((kw (when keywords
-	      (check-type keywords py-dict)
-	      (dict->alist keywords))))
-    (__call__ function args kw)))
+         syntax instead:  f(*args, **kwargs)")
+  (let ((pos (when pos-args (py-iterate->lisp-list pos-args)))
+	(kw (when kw-dict
+	      (check-type kw-dict py-dict)
+	      (loop for (key . val) in (dict->alist kw-dict)
+		  with key-py-obj
+		  do (setf key-py-obj (convert-to-py-object key))
+		     (unless (typep key-py-obj 'py-string)
+		       (py-raise 'TypeError "APPLY keyword dictionary keys must be strings (got: ~S)" key-py-obj))
+		  collect (cons (py-string->symbol key-py-obj) val)))))
+    (__call__ function pos kw)))
 
 
 (defun pyb:callable (x)
@@ -59,10 +62,10 @@
 
 (defmethod pyb::callable-1 ((x udc-instance))
   (or (internal-get-attribute x '__call__)
-      
-      ;; might inherit from callable built-in class
-      (when (next-method-p)
-	(call-next-method))))
+      ;; might inherit from callable built-in class XXX ?!
+      (progn (break "call next method? pyb::callable-1" x)
+	     (when (next-method-p)
+	       (call-next-method)))))
 
 (defmethod pyb::callable-1 ((x builtin-instance))
   (assert (not (some (lambda (meth) 
@@ -79,7 +82,7 @@
 
 (defun pyb:chr (i)
   "Return a string of one character whose ASCII code is the integer i. ~@
-   This is the inverse of :ord."
+   This is the inverse of pyb:ord."
   (multiple-value-bind (int-des-p lisp-int)
       (py-int-designator-p i)
     (if (and int-des-p

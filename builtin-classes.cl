@@ -1594,7 +1594,8 @@
 				      (character (string s))
 				      (symbol (symbol-name s)))))
 
-
+(defmethod py-string->symbol ((x py-string))
+  (intern (slot-value x 'string)))
 
 (defmethod print-object ((x py-string) stream)
   (print-unreadable-object (x stream :type t)
