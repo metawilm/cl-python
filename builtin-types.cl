@@ -13,13 +13,13 @@
 (defconstant pyt:str     (find-class 'py-string))
 (defconstant pyt:tuple   (find-class 'py-tuple))
 (defconstant pyt:xrange  (find-class 'py-xrange))
+(defconstant pyt:object  (find-class 'python-object))
 
 #+(or) ;; todo
 (progn 
   (defconstant pyt:classmethod  (find-class 'py-classmethod))
   (defconstant pyt:staticmethod (find-class 'py-staticmethod))
   (defconstant pyt:property     (find-class 'py-property))
-  (defconstant pyt:object  (find-class 'py-object)) ;; or `user-defined-class'
   (defconstant pyt:type    (find-class 'py-type))
   (defconstant pyy:unicode (find-class ???)))
 
