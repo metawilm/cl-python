@@ -107,9 +107,10 @@
 		    (let* ((total (apply #'concatenate 'string (reverse acc)))
 			   (ast (ignore-errors (parse-python-string total))))
 		      (when ast
+			(format t "got ast: ~A~%" ast)
 			(assert (eq (first ast) 'file-input))
 			(when (and (= (length ast) 2)
-				   (member (car (second ast)) '(testlist assign-expr) :test 'eq))
+				   (member (caar (second ast)) '(testlist assign-expr) :test 'eq))
 			  (show-ast ast)
 			  (eval-print-ast ast)
 			  (setf acc nil)))))))))))))))
