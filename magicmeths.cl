@@ -1,6 +1,8 @@
 ;; (in-package :bimeth)
 (in-package :python)
 
+(defvar *check-attr-exists* t)
+
 ;; Python's `magic' methods
 ;; 
 ;; Those that start and end with two underscores, like `__len__',
@@ -24,20 +26,25 @@
 			    ',methname args ',methname))
 		
 		,@(let ((real-params (remove '&optional params)))
+		    (declare (ignorable real-params))
 		    `(
 		      ;; In case of instances of user-defined classes,
 		      ;; check if the built-in method is overruled in
 		      ;; the class.
+		      #+(or)
 		      (defmethod ,methname :around ((,(car params) udc-instance) ,@(cdr params))
-			(multiple-value-bind (meth found)
-			    ;; or use __class__ instead of class-of?
-			    (internal-get-attribute (class-of ,(car params)) ',methname)
-			  (if found
-			      (__call__ meth (list ,@real-params))
-			    (py-raise 'TypeError
-				      "No method ~A defined for user-defined class instance ~A"
-				      ',methname ,(car params)))))
+			(when *check-attr-exists*
+			  (multiple-value-bind (meth found)
+			      (internal-get-attribute (class-of ,(car params)) ',methname)  ;; or use __class__ instead of class-of?
+			    (when found
+				(let ((*check-attr-exists* t))
+				  (__call__ meth (list ,@real-params))))))
+			
+			(py-raise 'TypeError
+				  "No method ~A defined for user-defined class instance ~A"
+				  ',methname ,(car params)))
 		      
+		      #+(or)
 		      (defmethod ,methname :around ((,(car params) t) ,@(cdr params))
 			(declare (ignore ,@(cdr params)))
 			(if (next-method-p)
@@ -46,6 +53,7 @@
 				    "No method ~A defined for arg ~S [XXX]"
 				    ',methname ,(car params))))
 		      
+		      #+(or)
 		      (defmethod ,methname ((,(car params) udc-instance) ,@(cdr params))
 			;; When this method is called, it means the
 			;; corresponding method is not just looked up
