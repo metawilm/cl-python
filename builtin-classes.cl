@@ -100,6 +100,35 @@
   (:documentation "Create a new instance of class CLS"))
 
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Type
+;; 
+;; The Python type from which all other types (classes) are derived.
+;; It is defined in classes.cl.
+
+(defmethod python-type-__call__ ((x python-type) &optional clsname bases dict)
+
+  ;; X is an instance of PYTHON-TYPE, i.e. a class.
+  ;; type(x) -> <type-of-x> is filtered out in call.cl
+  
+  (unless (typep x 'class)
+    (error "type.__call__ excepted class as first arg, got: ~A"))
+  
+  (let ((inst (py-call (or (internal-get-attribute x '__new__)
+			   (py-raise 'TypeError "Can't create ~A instance: no __new__ method" x))
+		       (list clsname bases dict))))
+    ;; CPython doesn't initialize INST if it not an instance of PYTHON-TYPE ?!
+    (let ((init (internal-get-attribute x '__init__)))
+      (when init
+	(py-call init (list clsname bases dict))))
+      
+    inst))
+	
+(register-bi-class-attr/meth (find-class 'python-type) '__call__ #'python-type-__call__) ;; check which one
+(register-bi-class-attr/meth (find-class 't) '__call__ #'python-type-__call__)
+(register-bi-class-attr/meth (find-class 'class) '__call__ #'python-type-__call__)
+
+
 
 (defmethod python-type-__new__ (metaclass &optional name bases dict)
   
@@ -109,41 +138,38 @@
   (unless (and name dict)
     (error "type.__new__ got not 1 or 4 args: ~A ~A ~A ~A" metaclass name bases dict))
   
-  (if (subtypep metaclass 'python-type)
+  (assert (subtypep metaclass 'python-type))
       
-      ;; Create a class with this as metaclass
-      (progn (unless (symbolp name)
-	       (ensure-py-type name string "class name must be string (got: ~A)")
-	       (setf name (intern name #.*package*)))
-	     
-	     (multiple-value-bind (slots has-slots)
-		 (values nil nil) ;; for now
+  ;; Create a class with this as metaclass
+  (unless (symbolp name)
+    (ensure-py-type name string "class name must be string (got: ~A)")
+    (setf name (intern name #.*package*)))
+  
+  (multiple-value-bind (slots has-slots)
+      (values nil nil) ;; for now
 	       
-	       #+(or)(let ((s (namespace-lookup dict '__slots__)))
-		       (if s 
-			   (values (py-iterate->lisp-list s) t)
-			 (values nil nil)))
+    #+(or)(let ((s (namespace-lookup dict '__slots__)))
+	    (if s 
+		(values (py-iterate->lisp-list s) t)
+	      (values nil nil)))
 	       
-	       (return-from python-type-__new__
-		 (make-python-class :name name
-				    :supers (cond ((null bases) ())
-						  ((consp bases) bases)
-						  (t (py-iterate->lisp-list bases)))
-				    :slots slots
-				    :has-slots has-slots
-				    :namespace dict
-				    :metaclass metaclass))))
-    (progn #+(or)(when (or name bases dict)
-		   (warn "type.__new__ ignoring arguments" name bases dict))
-	   (break "type.__new__ with unexpected args")
-	   (return-from python-type-__new__
-	     (make-instance metaclass)))))
-    
+    (return-from python-type-__new__
+      (make-python-class :name name
+			 :supers (cond ((null bases) ())
+				       ((consp bases) bases)
+				       (t (py-iterate->lisp-list bases)))
+			 :slots slots
+			 :has-slots has-slots
+			 :namespace dict
+			 :metaclass metaclass))))
 
-(register-bi-class-attr/meth (find-class 't) '__new__
+(register-bi-class-attr/meth (find-class 't) '__new__   ;; check which one
 			     (make-static-method #'python-type-__new__))
 (register-bi-class-attr/meth (find-class 'class) '__new__
 			     (make-static-method #'python-type-__new__))
+(register-bi-class-attr/meth (find-class 'python-type) '__new-_
+			     (make-static-method #'python-type-__new__))
+
 
 (defgeneric __init__ (x &rest args)
   (:documentation "Object initialization"))
@@ -2167,6 +2193,10 @@
   ((vec :type vector :initarg :vec))
   (:metaclass builtin-class))
 
+(defmethod py-iterate->lisp-list ((x py-list/tuple))
+  (loop for x across (slot-value x 'vec)
+      collect x))
+
 (defmethod __cmp__ ((x py-list/tuple) (y py-list/tuple))
   (__cmp__-vectors (slot-value x 'vec) (slot-value y 'vec)))
 
@@ -4010,47 +4040,6 @@
 
 (register-bi-class-attr/meth (find-class 'py-super) '__new__ 
 			     (make-static-method #'py-super-__new__))
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Type
-;; 
-;; The Python type from which all other types (classes) are derived.
-;; It is defined in classes.cl.
-
-;; #+(or)
-(defmethod __call__ ((x python-type) &optional pos key)
-  (declare (ignorable pos key))
-  (warn "__call__ on TYPE: ~A   ~A  ~A" x pos key)
-  
-  (let ((make-instance (or (typep x 'udc-with-ud-metaclass)
-			   (typep x 'user-defined-class)))
-	(make-class (and (= (length pos) 4)
-			 ((not make-instance)))))
-
-    (warn "A call on ~A:  results in ~A" x (if make-instance "instance" "class"))
-    
-    (if make-instance
-	
-	(let ((inst (py-call (or (internal-get-attribute x '__new__)
-				 (error "type.__call__: allocating instance failed, ~
-                                   as there is no __new__ method defined on ~A"
-					x))
-			     pos key)))
-	  ;; Initialization, return value is ignored
-	  (py-call (or (internal-get-attribute x '__init__)
-		       (error "type.__call__: allocated ~A (inst = ~A), but no __init__ on ~A defined"
-			      x inst x))
-		   (cons inst pos) key)
-	  inst)
-      
-      (break "TODO: make class"))))
-	
-;; #+(or)
-(register-bi-class-attr/meth (find-class 'python-type) '__call__
-			     #'__call__)
-
-(register-bi-class-attr/meth (find-class 't) '__call__
-			     #'__call__)
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;

@@ -184,19 +184,12 @@
 	  (py-raise 'TypeError
 		    "Iteration over non-sequence (got: ~A)" object))))))
 
-(eval-when (:execute) ;; py-tuple/list
-  (defun py-iterate->lisp-list (object)
-    "Returns a Lisp list, that may not be modified destructively."
-    
-    (when (member (class-of object)
-		  (list (load-time-value (find-class 'py-tuple)) (load-time-value (find-class 'py-list))
-			:test 'eq))
-      (return-from py-iterate->lisp-list (loop for x across (slot-value object 'vec)
-					     collect x)))
-  
-    (let ((res ()))
-      (map-over-py-object (lambda (x) (push x res)) object)
-      (nreverse res))))
+
+(defmethod py-iterate->lisp-list (object)
+  "Returns a Lisp list, that may not be modified destructively."
+  (let ((res ()))
+    (map-over-py-object (lambda (x) (push x res)) object)
+    (nreverse res)))
 
 (defmethod map-over-py-object (fun object)
   "Iterate over OBJECT, calling Lisp function FUN on each value. Returns nothing."

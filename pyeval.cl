@@ -298,17 +298,19 @@
 	(let* ((doc (or (namespace-lookup ns '__doc__) *None*))
 	       (metaclass (or (namespace-lookup ns '__metaclass__)
 			      (load-time-value (find-class 'python-type))))
-	       (c (call-attribute-via-class metaclass '__new__ (list cname supers ns)))
+	       (c (call-attribute-via-class metaclass '__new__ (list cname supers ns))))
 	  
-	       #+(or)(c (make-python-class :name cname :module "ModuleName" :supers supers
-					   :slots slots :has-slots has-slots :namespace ns
-					   :metaclass metaclass :documentation doc)))
+	  (call-attribute-via-class c '__init__ (list cname supers ns)) ;; ignore result
+	  
+	  #+(or)(c (make-python-class :name cname :module "ModuleName" :supers supers
+				      :slots slots :has-slots has-slots :namespace ns
+				      :metaclass metaclass :documentation doc))
 	  
 	  ;; In the current namespace, the name of the class that is defined
 	  ;; now becomes bound to the class object that results from
 	  ;; evaluating the classdef.
 	  (namespace-bind *scope* cname c)
-    
+	  
 	  ;; Finally, return the class (purely for debuggin: classdef has no
 	  ;; return value, as it is a stmt, not an expr.
 	  c)))))
