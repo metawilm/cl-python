@@ -219,3 +219,45 @@
     (funcall generator))
 
 	     
+
+#|
+TODO: rewriting `yield' when it occurs in `try', `except', `finally' or `else'.
+
+try:
+  -a-
+  yield x
+  -b-
+except E:
+  -c-
+else:
+  -d-
+
+ ==>
+
+$yield-val$ = nil
+$do-yield$ = nil
+$continue-try$ = t
+$do-else$ = t
+
+try:
+  -a-
+  $yield-val$ = x
+  $do-yield$ = t
+except E:
+  $continue-try$ = nil
+  $do-else$ = nil
+  -c-
+
+if $do-yield$:
+  yield $yield-val$
+
+if $continue-try$:
+  try:
+    -b-
+  except E:
+    $do-else$ = nil
+    -c-
+
+if $do-else$:
+  -d-
+|#

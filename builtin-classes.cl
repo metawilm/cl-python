@@ -6,6 +6,7 @@
 
 
 ;; XXX todo:  eval-for-in calls __iter__
+;;            __new__ must accept subclasses
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; The `magic methods' shared by all objects.
@@ -35,7 +36,7 @@
 (defmethod __class__ ((x string))        (find-class 'py-string))
 (defmethod __class__ ((x user-defined-class))   (find-class 'python-type)) ;; TODO metaclass
 (defmethod __class__ ((x builtin-class)) (find-class 'python-type))
-(defmethod __class__ ((x function))      (find-class 'python-type)) ;; XXX doesn't show function name
+(defmethod __class__ ((x function))      (find-class 'python-type)) ;; XXX show function name
 (defmethod __class__ ((x python-object)) (class-of x)) ;; XXX check
 (defmethod __class__ ((x symbol))        (find-class 'py-string))
 
@@ -86,22 +87,22 @@
 ;;; 
 ;;; Both are called with any parameters supplied:  x = ClassName(1,2, key=42) 
 
-(defgeneric __new__ (cls &optional pos-arg key-arg)
+(defgeneric __new__ (cls &rest args)
   (:documentation "Create a new instance of class CLS"))
 
-(defmethod __new__ ((cls class) &optional pos-arg key-arg)
-    (when (or pos-arg key-arg)
-      (warn (format nil "Default __new__ ignoring args: ~A ~A" pos-arg key-arg)))
+(defmethod __new__ ((cls class) &rest args)
+  (when args
+    (warn (format nil "Default __new__ ignoring args: ~A" args)))
   (make-instance cls))
 
 (register-bi-class-attr/meth (find-class 'class) '__new__ (make-static-method #'__new__))
 
 
-(defgeneric __init__ (x &optional pos-arg key-arg)
+(defgeneric __init__ (x &rest args)
   (:documentation "Object initialization"))
 
-(defmethod __init__ (x &optional pos-arg key-arg)
-  (declare (ignore x pos-arg key-arg)
+(defmethod __init__ (x &rest args)
+  (declare (ignore x args)
 	   (special *None*))
   *None*)
 
@@ -236,26 +237,28 @@
      ,@(loop for (class-name class-doc object object-doc object-repr object-hash) in data
 	   collect 
 	     (progn (assert (typep object-hash 'fixnum))
-		    `(progn (defclass ,class-name (builtin-object) ()
-				      (:documentation ,class-doc)
-				      (:metaclass builtin-class))
-			    (mop:finalize-inheritance (find-class ',class-name))
+		    (let ((__new__-name (intern (concatenate 'string (string class-name)
+							     "-__new__")
+						#.*package*)))
+		      `(progn (defclass ,class-name (builtin-object) ()
+					(:documentation ,class-doc)
+					(:metaclass builtin-class))
+			      (mop:finalize-inheritance (find-class ',class-name))
+			      
+			      (defvar ,object (make-instance ',class-name) ,object-doc)
+			      
+			      ;; CPython disallows creating instances of these.
+			      
+			      (defmethod ,__new__-name ((x class) &rest args)
+				(declare (ignore args))
+				(py-raise 'TypeError
+					  "Cannot create '~A' instances" ',class-name))
 			    
-			    (defvar ,object (make-instance ',class-name) ,object-doc)
-			    
-			    ;; CPython disallows creating instances of these.
-			    
-			    (defmethod __new__ ((x (eql (find-class ',class-name))) 
-						&optional pos-arg kwd-arg)
-			      (declare (ignore pos-arg kwd-arg))
-			      (py-raise 'TypeError
-					"Cannot create '~A' instances" ',class-name))
-			    
-			    (defmethod __repr__ ((c ,class-name))
-			      ,object-repr)
-			    
-			    (defmethod __hash__ ((c ,class-name))
-			      ,object-hash))))))
+			      (defmethod __repr__ ((c ,class-name))
+				,object-repr)
+			      
+			      (defmethod __hash__ ((c ,class-name))
+				,object-hash)))))))
 
 (def-static-singleton-classes
     ;; They don't have any special methods, other than those of all objects
@@ -289,10 +292,27 @@
   (print-unreadable-object (x stream :identity t :type t)
     (format stream ":val ~A" (slot-value x 'val))))
 
-(defmethod __new__ ((x (eql (find-class 'py-number))) &optional pos-arg key-arg)
-  (when (or key-arg (cdr pos-arg))
-    (py-raise 'ValueError "__new__ for py-number takes max 1 pos arg (got: ~A ~A) pos-arg key-arg"))
-  (or (car pos-arg) 0))
+
+
+
+(defmethod number-__new__ ((cls class) &rest args)
+  (break "number-__new__ accessible, apparently?!") ;; I think not accessible by user code
+  (assert (subtypep cls 'py-number))
+  (when (cdr args)
+    (py-raise 'ValueError "__new__ for py-number takes max 1 pos arg (got: ~A)" args))
+  (let ((inst (make-instance cls)))
+    (setf (slot-value inst 'val) (if args
+				     (convert-to-number (car args) 'number)
+				   0))
+    inst))
+
+(register-bi-class-attr/meth (find-class 'py-number) '__new__ 
+			     (make-static-method #'number-__new__))
+
+#+(or) ;; needed?
+(register-bi-class-attr/meth (find-class 'number) '__new__ 
+			     (make-static-method #'number-__new__))
+
 
 (deftype py-number-designator ()
   `(or number py-number))
@@ -477,6 +497,18 @@
 
 (mop:finalize-inheritance (find-class 'py-complex))
 
+(defmethod py-complex-__new__((cls class) &rest args)
+  (assert (subtypep cls (find-class 'py-complex)))
+  (cond ((null args)       (make-complex 0))
+	((null (cdr args)) (make-complex (convert-to-number (car args) 'complex)))
+	((null (cddr args)) (make-complex  ;; both args can be complex
+			     (+ (convert-to-number (first args) 'complex)
+				(* #C(0 1) (convert-to-number (second args) 'complex)))))
+	(t (py-raise 'ValueError "Too many args for complex.__new__ (got: ~A)" args))))
+
+(register-bi-class-attr/meth (find-class 'py-complex) '__new__ 
+			     (make-static-method #'py-complex-__new__))
+
 (defun make-complex (&optional (val #C(0 0)))
   (make-instance 'py-complex :val (coerce val 'complex)))
 
@@ -493,14 +525,10 @@
      (complex-imag (imagpart x))
      (complex-conjugate (conjugate x))))
 
-(register-bi-class-attr/meth (find-class 'complex) 'real (make-bi-class-attribute #'complex-real))
-(register-bi-class-attr/meth (find-class 'py-complex) 'real (make-bi-class-attribute #'complex-real))
-
-(register-bi-class-attr/meth (find-class 'complex) 'imag (make-bi-class-attribute #'complex-imag))
-(register-bi-class-attr/meth (find-class 'py-complex) 'imag (make-bi-class-attribute #'complex-imag))
-
-(register-bi-class-attr/meth (find-class 'complex) 'conjugate (make-bi-class-attribute #'complex-conjugate))
-(register-bi-class-attr/meth (find-class 'py-complex) 'conjugate (make-bi-class-attribute #'complex-conjugate))
+(loop for (meth . func) in `((real . ,(make-bi-class-attribute #'complex-real))
+			     (imag . ,(make-bi-class-attribute #'complex-imag))
+			     (conjugate . ,(make-bi-class-attribute #'complex-conjugate)))
+    do (register-bi-class-attr/meth (find-class 'complex) meth func))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -511,6 +539,15 @@
   (:metaclass builtin-class))
 
 (mop:finalize-inheritance (find-class 'py-float))
+
+(defmethod py-float-__new__ ((cls class) &rest args)
+  (assert (subtypep cls 'py-float))
+  (cond ((null args)       (make-float 0))
+	((null (cdr args)) (make-float (convert-to-number (first args) 'real)))
+	(t (py-raise 'ValueError "Too many args for float.__new__ (got: ~A)" args))))
+
+(register-bi-class-attr/meth (find-class 'py-float) '__new__ 
+			     (make-static-method #'py-float-__new__))
 
 (defun make-float (&optional (val 0d0))
   (make-instance 'py-float :val val))
@@ -537,6 +574,24 @@
   (:metaclass builtin-class))
 
 (mop:finalize-inheritance (find-class 'py-int))
+
+
+(defmethod py-int-__new__ ((cls class) &rest args)
+  (assert (subtypep cls (find-class 'py-int)))
+  (when (cdr args)
+    (py-raise 'ValueError "int.__new__ max arg (got: ~A)" args))
+  (let ((inst (make-instance cls)))
+    (setf (slot-value inst 'val)
+      (if args
+	  (truncate (convert-to-number (car args) 'real)) ;; CPython truncates
+	0))
+    inst))
+
+(register-bi-class-attr/meth (find-class 'py-int) '__new__
+			     (make-static-method #'py-int-__new__))
+
+;; noop __init__
+
 
 (defun make-int (&optional (val 0))
   (make-instance 'py-int :val val))
@@ -632,6 +687,21 @@
 (defvar *True* (make-instance 'py-bool :val 1))
 (defvar *False* (make-instance 'py-bool :val 0))
 
+(defmethod py-bool-__new__ ((cls class) &rest args)
+  ;; Contrary to int.__new__, bool.__new__ accepts any arg and will
+  ;; check its truth value.
+  (assert (subtypep cls 'py-bool))
+  (let ((inst (make-instance cls)))
+    (setf (slot-value inst 'val) 
+      (if (car args)
+	  (if (py-val->lisp-bool (car args)) 1 0)
+	0))
+    inst))
+
+(register-bi-class-attr/meth (find-class 'py-bool) '__new__
+			     (make-static-method #'py-bool-__new__))
+
+
 (defmethod make-instance ((c py-bool) &rest initargs &key val)
   (if val *True* *False*))
 
@@ -709,6 +779,24 @@
   (:metaclass builtin-class))
 
 (mop:finalize-inheritance (find-class 'py-dict))
+
+
+(defmethod py-dict-__new__ ((cls class) &rest args)
+  (assert (subtypep cls 'py-dict))
+  (make-instance cls)) ;; :initform creates empty hashtable
+
+(register-bi-class-attr/meth (find-class 'py-dict) '__new__
+			     (make-static-method #'py-dict-__new__))
+
+;; XXX dict() takes keyword args... TODO
+(defmethod __init__ ((x py-dict) &rest args)
+  (cond ((null args))
+	((null (cdr args)) (if (typep (car args) 'py-dict)
+			       (progn (dict-clear x)
+				      (loop for (k . v) in (dict->alist (car args))
+					  do (__setitem__ (car args) k v)))
+			     (error "dict.__init__() with a ~A as arg: TODO" (car args))))
+	(t (error "dict.__init__ with multiple args: TODO"))))
 
 
 (defun make-dict (&optional data)
@@ -800,7 +888,8 @@
 (defmethod __nonzero__ ((d py-dict))
   (lisp-val->py-bool (/= 0 (hash-table-count (slot-value d 'hash-table)))))
 
-(loop for name in '(__cmp__ __contains__ __eq__ __getitem__ __setitem__ __delitem__ __iter__
+(loop for name in '(__init__ __cmp__ __contains__ __eq__ __getitem__ __setitem__
+		    __delitem__ __iter__
 		    ;; __add__ etc...
 		    __len__ __nonzero__)
     do (register-bi-class-attr/meth (find-class 'py-dict) name (symbol-function name)))
@@ -1095,8 +1184,8 @@
       (format s "~A" (mop:generic-function-name x)))))
 
 
-
 (register-bi-class-attr/meth (find-class 'function) '__get__ #'__get__)
+
 
 (defclass python-function (builtin-instance)
   ((ast             :initarg :ast   
@@ -1114,6 +1203,8 @@
 
 (mop:finalize-inheritance (find-class 'python-function))
 
+;; TODO: __new__, __init__
+
 (defmethod __get__ ((x python-function) inst class)
   (if (eq inst *None*) ;; Hmm what if class of None were subclassable?!
       (make-unbound-method :func x :class class) ;; <Class>.meth
@@ -1128,6 +1219,8 @@
   (:metaclass builtin-class))
 
 (mop:finalize-inheritance (find-class 'py-lambda-function))
+
+;; TODO: __new__, __init__
 
 (defun make-lambda-function (&rest options)
   (apply #'make-instance 'py-lambda-function options))
@@ -1248,7 +1341,7 @@
 ;; adjustable vector is more efficient.
 
 (defclass py-list (builtin-instance)
-  ((list :type list :initarg :list))
+  ((list :type list :initarg :list :initform ()))
   (:documentation "The List type")
   (:metaclass builtin-class))
 
@@ -1269,6 +1362,23 @@
   (make-instance 'py-list :list lst))
   
 
+(defmethod py-list-__new__ ((cls class) &rest args)
+  (assert (subtypep cls 'py-list))
+  (when args
+    (warn "list.__new__ ignoring args: ~A" args))
+  (make-instance cls))
+
+(register-bi-class-attr/meth (find-class 'py-list) '__new__ (make-static-method #'py-list-__new__))
+
+		    
+(defmethod __init__ ((x py-list) &rest args)
+  (cond ((cdr args) (py-raise 'TypeError "list.__init__ takes at most 1 pos arg (got: ~A)" args))
+	((car args) (setf (slot-value x 'list) ;; override, not extend
+		      (py-iterate->lisp-list (car args))))
+	(t          (setf (slot-value x 'list) nil))))
+
+
+  
 ;;;; magic methods
 
 (defmethod __add__ ((x py-list) (y py-list))
@@ -1463,7 +1573,8 @@
   (format nil "[~:_~{~A~^, ~:_~}]"
 	  (mapcar #'__str__ (slot-value x 'list))))
 
-(loop for name in '(__add__ __cmp__ __contains__ __delitem__ __getitem__ __hash__ __iter__ __len__ __mul__
+(loop for name in '(__init__
+		    __add__ __cmp__ __contains__ __delitem__ __getitem__ __hash__ __iter__ __len__ __mul__
 		    __rmul__ __nonzero__ __reversed__ __setitem__)
     do (register-bi-class-attr/meth (find-class 'py-list) name (symbol-function name)))
 
@@ -1638,7 +1749,7 @@
 ;; Tuple
 
 (defclass py-tuple (builtin-instance)
-  ((list :initarg :list :type list)
+  ((list :initarg :list :type list :initform ())
    #+(or)(length :initarg :length :type integer))
   (:documentation "The Tuple type")
   (:metaclass builtin-class))
@@ -1660,12 +1771,21 @@
 
 ;;;; magic methods
 
-(defmethod __new__ ((cls (eql (find-class 'py-tuple))) &optional pos-arg key-arg)
-  (cond (key-arg       (py-raise 'TypeError "tuple.__new__ takes no key args"))
-	((cdr pos-arg) (py-raise 'TypeError "tuple.__new__ takes at most 1 pos arg"))
-	((car pos-arg) (make-tuple-from-list (py-iterate->lisp-list (car pos-arg))))
-	(t             (make-tuple-from-list nil))))
+(defmethod py-tuple-__new__ ((cls class) &rest args)
+  (assert (subtypep cls 'py-tuple))
+  (when (cdr args)
+    (py-raise 'TypeError "tuple.__new__ takes at most 1 pos arg (got: ~A)" args))
+  (let* ((inst (make-instance cls))
+	 (vals (if (car args) 
+		   (py-iterate->lisp-list (car args))
+		 nil)))
+    (setf (slot-value inst 'list) vals)
+    inst))
 
+(register-bi-class-attr/meth (find-class 'py-tuple) '__new__
+			     (make-static-method #'py-tuple-__new__))
+
+;; default noop __init__
 
 ;;; XXX Many methods are similar as for py-list. Maybe move some to a
 ;;; shared superclass py-sequence. However, the implementation of
@@ -1735,7 +1855,7 @@
 	  (dolist (item (slot-value x 'list))
 	    (format s "~A, " (call-attribute-via-class item '__repr__)))
 	  (format s ")"))
-      "(,)")))
+      "()")))
 
 ;; __reversed__ ?
 
@@ -1745,7 +1865,7 @@
 	    "Cannot set items of tuples"))
 
 ;;; there are no tuple-specific methods
-(loop for name in '(__add__ __cmp__ __contains__ __getitem__ __iter__ __len__
+(loop for name in '(__add__ __cmp__ __contains__ __getitem__ __init__ __iter__ __len__
 		    __mul__ __rmul__ __setitem__)
     do (register-bi-class-attr/meth (find-class 'py-tuple) name (symbol-function name)))
 
@@ -1783,11 +1903,20 @@
   (print-unreadable-object (x stream :type t)
     (format stream "~S" (slot-value x 'string))))
 
-(defmethod __new__ ((x (eql (find-class 'py-string))) &optional pos-arg key-arg)
-  (cond (key-arg       (py-raise 'TypeError "string.__new__ takes no key arg"))
-	((cdr pos-arg) (py-raise 'TypeError "string.__new__ takes at most 1 key arg"))
-	((car pos-arg) (make-py-string (call-attribute-via-class (car pos-arg) '__str__)))
-	(t             "")))
+(defmethod py-string-__new__ ((cls (eql (find-class 'py-string))) &rest args)
+  (let ((str (if args
+		 (call-attribute-via-class (car args) '__str__)
+	       "")))
+    (cond ((typep str 'string)    str)
+	  ((typep str 'py-string) str)
+	  (t (error "__str__ returned non-string ~A" str)))))
+   
+(defmethod py-string-__new__ ((cls class) &rest args)
+  (assert (subtypep cls 'py-string))
+  (error "todo: string.__new__ nonsimple"))
+
+(register-bi-class-attr/meth (find-class 'string) '__new__ (make-static-method #'py-string-__new__))
+(register-bi-class-attr/meth (find-class 'py-string) '__new__ (make-static-method #'py-string-__new__))
 
 
 (defmethod __mul-1__ ((x string) n)
@@ -2385,12 +2514,10 @@
 	  (y (xrange-2 x y 1))
 	  (t (xrange-2 0 x 1)))))
 
-(defmethod __new__ ((x (eql (find-class 'py-xrange))) &optional pos-args key-args)
-  (when key-args
-    (py-raise 'ValueError "xrange(): takes no key args (got: ~A)" key-args))
-  (unless pos-args
-    (py-raise 'ValueError "xrange(): at least 1 pos-arg required"))
-  (apply #'make-xrange pos-args)) 
+(defmethod __new__ ((x (eql (find-class 'py-xrange))) &rest args)
+  (unless args
+    (py-raise 'ValueError "xrange(): at least 1 pos-arg required (got none)"))
+  (apply #'make-xrange args)) 
 
 (register-bi-class-attr/meth (find-class 'py-xrange) '__new__ (make-static-method #'__new__))
 
@@ -2644,6 +2771,42 @@
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; General Python object stuff
+
+
+;; Convert a number or string to a number (in numeric types constructors)
+
+(defmethod convert-to-number :around (x cls)
+  (declare (ignore x))
+  (let ((res (call-next-method)))
+    (unless (typep res cls)
+      (py-raise 'TypeError "Expected a ~A, got (perhaps after conversion) ~A" cls res))
+    res))
+     
+(defmethod convert-to-number ((x string) cls)
+  ;; Check that string is harmless; then call READ on it.
+  (declare (ignore cls))
+  (loop for c across x
+      unless (or (digit-char-p c 16)
+		 (member c '(#\x #\. #\- #\j)))
+      do (py-raise 'ValueError "Can't convert string to number: ~W" x))
+  (parse-python-string x))
+
+(defmethod convert-to-number ((x number) cls)
+  (declare (ignore cls))
+  x)
+
+(defmethod convert-to-number ((x py-number) cls)
+  (declare (ignore cls))
+  (slot-value x 'val))
+
+(defmethod convert-to-number ((x py-string) cls)
+  (declare (ignore cls))
+  (slot-value x 'string))
+
+(defmethod convert-to-number (x cls)
+  (declare (ignore cls))
+  (py-raise 'TypeError "Can't convert to number: ~A" x))
+
 
 
 (deftype attribute-name-designator ()

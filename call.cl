@@ -109,11 +109,10 @@
   
   (multiple-value-bind (meth found)
       (internal-get-attribute cls '__new__)
-    
     (if found
 		
 	(progn #+(or)(warn "__new__ method found for class ~A: ~A" cls meth)
-	       (let ((inst (py-call meth (list cls pos-args) kwd-args))) ;; call with class as first arg
+	       (let ((inst (py-call meth (cons cls pos-args) kwd-args))) ;; call with class as first arg
 		 #+(or)(warn "result of calling __new__: ~A" inst)
 		 (multiple-value-bind (res found)
 		     (call-attribute-via-class inst '__init__ pos-args kwd-args)
