@@ -453,11 +453,11 @@
   (internal-get-attribute (__class__ x) attr))
 
 (defun call-attribute-via-class (x attr &optional pos-args key-args)
-  "Lookup ATTR of the class of X, and call it for instance X.
-   Returns RES, FOUND-P where RES is the result of calling ATTR and FOUND-P
-   is T or NIL.
-   Example use: `print' calls the class' __str__ method, not the __str__
-   attribute of the instance (assuming it exists)"
+  "Lookup ATTR of the class of X, and call it for instance X. ~@
+   Returns RES, FOUND-P: RES is the result of calling ATTR; ~@
+   FOUND-P is T or NIL. ~
+   Example use: `print' calls the class' __str__ method, not the ~@
+   __str__ attribute of the instance."
 
   (multiple-value-bind (val found)
       (getattr-of-class x attr)
