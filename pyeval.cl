@@ -9,6 +9,7 @@
 (defparameter *scope* nil)
 (defparameter *py-eval-warn* nil)
 
+#+(or)
 (defun make-builtins-namespace ()
   ;; Fill a new namespace with all built-in names. Because there are
   ;; no name conflicts, the order of filling with functions and types
@@ -29,8 +30,33 @@
 	do (namespace-bind ns name exc))
     ns))
 
+(defun make-builtins-module ()
+  
+  ;; Fill a new namespace with all built-in names, and create a module
+  ;; for it. Because there are no name conflicts, the order of filling
+  ;; with functions and types doesn't matter.
+  
+  (let ((ns (make-namespace :name "builtins-namespace")))
+    (do-external-symbols (s 'python-builtin-functions)
+      (namespace-bind ns (symbol-name s) (symbol-function s)))
+    (do-external-symbols (s 'python-builtin-types)
+      (if (boundp s) ;; check needed, as some symbols are TODO
+	  (namespace-bind ns (symbol-name s) (symbol-value s))))
+    (loop for (key . val) in `((None . ,*None*)
+			       (Ellipsis . ,*Ellipsis*)
+			       (NotImpemented . ,*NotImplemented*)
+			       (True . ,*True*)
+			       (False . ,*False*))
+	do (namespace-bind ns key val))
+    (loop for (name . exc) in *python-exceptions*
+	do (namespace-bind ns name exc))
+    (make-module :name "__builtin__"
+		 :namespace ns)))
+
+#+(or)
 (defparameter *builtins* (make-builtins-namespace))
 
+(defparameter *builtins* (make-builtins-module))
 
 ;;; evaluation
 
@@ -60,7 +86,11 @@
 	(not (eql nil)))
        (return-from py-eval ast)) ;; string designator
       ((eql nil) (error "PY-EVAL of NIL")))
-  
+    
+    (when (eql ast (find-class 'python-type))
+      (return-from py-eval ast))
+	
+    
     (case (car ast)
       (file-input (eval-file-input (cdr ast)))
       (testlist (apply #'eval-testlist (cdr ast)))
@@ -222,11 +252,11 @@
   (mapc #'py-eval stmts))
 
 (defun eval-identifier (name)
-  (or (namespace-lookup *scope* name) ;; traversel all enclosing scopes
+  "Look up the identifier in the active namespaces, and fall back to
+   looking in the (module) object named '__builtins__."
+
+  (or (namespace-lookup *scope* name) ;; traverses all enclosing scopes too
       
-      ;; XXX figure out whether making __builtins__ the enclosing ns
-      ;; of the outermost scope in module would work -- that would
-      ;; avoid this special-casing.
       (let ((bi (namespace-lookup *scope* '__builtins__)))
 	(when bi
 	  (namespace-lookup bi name)))
@@ -687,15 +717,15 @@
 
 (defun read-file (filename)
   (with-open-file (stream filename :direction :input)
-    (let ((res (make-array 10000
+    (let ((res (make-array (or (file-length stream)
+			       10000)
 			   :element-type 'character
 			   :fill-pointer 0
 			   :adjustable t)))
-      (loop
-	(let ((c (read-char stream nil nil)))
-	  (if c
+      (let ((c (read-char stream nil nil)))
+	(loop while c do
 	      (vector-push-extend c res)
-	    (return))))
+	      (setf c (read-char stream nil nil))))
       res)))
 
 (defun eval-import (data nl)
@@ -704,9 +734,7 @@
       data
     (assert (eq normal 'normal))
     (assert (eq nil nl2))
-    (let* ((file-name (concatenate 'string 
-		      #+(or)"c:/willem/python/"
-		      (string modname) ".py"))
+    (let* ((file-name (concatenate 'string (string modname) ".py"))
 	   (file-contents (read-file file-name)))
       
       ;; In CPython, when the toplevel of modules is executed, the
@@ -806,7 +834,7 @@
   
   (dolist (x objs)
     (let* ((ex (py-eval x))
-	   (str (__str__ ex)))
+	   (str (call-attribute-via-class ex '__str__)))
       (format stream "~A " str)))
   
   (unless comma?
