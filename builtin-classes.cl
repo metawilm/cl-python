@@ -52,14 +52,28 @@
   ))
        
 
-(defmethod __str__ ((x python-object))
-  "__str__ falls back to __repr__"
+;; Regarding string representation of Python objects:
+;;    __str__       is a representation targeted to humans
+;;    __repr__      if possible,  eval(__repr__(x)) should be equal to x
+;; 
+;; To reduce duplication:
+;;    print-object  falls back to writing __str__
+;;    __str__       falls back to returning __repr__
+;;    __repr__      returns by default the print-unreadable-object representation
+
+(defmethod print-object ((x python-object) stream)
+  (write-string (__str__ x) stream))
+
+(defmethod __str__ (x)
+  ;; This method is not only for X of type python-object, but also for
+  ;; regular numbers, for example.
   (__repr__ x))
 
-(defmethod __repr__ ((x python-object))
+(defmethod __repr__ (x)
+  ;; Also for all X, not just Python objects.
   (with-output-to-string (s)
-    (print-unreadable-object (x s :identity t :type t)
-      (format s "instance"))))
+    (print-unreadable-object (x s :identity t :type t))))
+
 
 (defgeneric __class__ (x)
   (:documentation "The class of X. X must be a python-object designator."))
@@ -71,11 +85,6 @@
 (defmethod __class__ ((x string))        (find-class 'py-string))
 (defmethod __class__ ((x python-object)) (class-of x))
  
-
-(defmethod print-object ((x python-object) stream)
-  (print-unreadable-object (x stream :type t :identity t)
-    ;; not all object have __str__ defined yet
-    (ignore-errors (format stream "~S" (__str__ x)))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Some special singleton classes: None, Ellipsis, NotImplemented
@@ -119,14 +128,17 @@
 		  *Ellipsis* "Represent `...' in things like `x[1,...,1]'"
 		  "Ellipsis" 177117)
 
-     (py-notimplemented "To signal unsupported arg for binary operation"
+     (py-notimplemented "To signal unsupported arguments for binary operation"
 			*NotImplemented* "An operation is not implemented"
 			"NotImplemented" -99221188)))
 
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Number (this type doesn't exist in Python)
+;; Number
+;; 
+;; The Python number classes are subtypes of this class. CPython has
+;; no corresponding class.
 
 (defclass py-number (builtin-instance)
   ((val :type number :initarg :val :initform 0))
@@ -145,15 +157,6 @@
     (py-number (values t (slot-value x 'val)))
     (t nil)))
 
-(defgeneric py-num-to-lisp-num (x)
-  (:documentation "The numeric value of X (a PY-NUMBER or Lisp number)"))
-
-(defmethod py-num-to-lisp-num ((x number))
-  x)
-
-(defmethod py-num-to-lisp-num ((x py-number))
-  (slot-value x 'val))
-
 
 (defmethod make-py-number ((val number))
   "Make a PY-NUMBER instance for Lisp number VAL"
@@ -162,15 +165,7 @@
     (real (make-float (coerce val 'double-float)))
     (complex (make-complex val))))
 
-(defmethod print-object ((x py-number) stream)
-  (print-unreadable-object (x stream :type t)
-    (format stream "~A" (slot-value x 'val))))
-
-
   
-;; ACL hashtable require fixnum hash values, therefore override SXHASH
-;; when appropriate.
-
 (defmethod __hash__ ((x py-number))
   (__hash__ (slot-value x 'val)))
 
@@ -179,60 +174,75 @@
     (
      ;; CPython prints *sys-neg-maxint* <= x <= *sys-pos-maxint* as X,
      ;; outside that range as XL:  3 vs 3L. Let's not bother.
-     (__str__  (format nil "~A" x))
-     
      (__repr__     (format nil "~A" x))
-     (__nonzero__  (make-bool (/= x 0)))
      
-     (__neg__     (- x))
-     (__pos__     x)
-     (__abs__     (abs x))
-			  
-     (__complex__ (make-complex (coerce x 'complex)))))
+     (__nonzero__  (make-bool (/= x 0)))
+     (__neg__      (- x))
+     (__pos__      x)
+     (__abs__      (abs x))
+     (__complex__  (make-complex x))))
 
 (def-binary-meths py-number number (slot-value x 'val) (slot-value y 'val)
+
 		  ;; comparison -> t/nil	
 		  ((__eq__  (= x y))
 		   (__ne__  (/= x y))
+		   
 		   ;; arithmethic -> lisp number
-		   (__add__ (+ x y))
-		   (__radd__ (+ x y))
-		   (__sub__ (- x y))
-		   (__mul__ (* x y))
-		   (__rmul__ (* x y))
-		   (__truediv__ (/ x y))
-		   (__rtruediv__  (/ y x))
-		   (__rsub__      (- y x))
-		   ))
+		   (__add__      (+ x y))
+		   (__radd__     (+ x y))
+		   (__sub__      (- x y))
+		   (__mul__      (* x y))
+		   (__rmul__     (* x y))
+		   (__truediv__  (/ x y))
+		   (__rtruediv__ (/ y x))
+		   (__rsub__     (- y x))))
 
+;; Power
+;; 
+;; pow(a,b)   <=> a**b
+;; pow(a,b,c) <=> (a**b) % c
+;; 
+;; As CPython has deprecated the use of modulo and division on complex
+;; numbers and Lisp doesn't support it, it's not supported here
+;; either.
+;; 
+;; However, pow(x,y) with x,y complex numbers is no problem.
 
-;;; pow(a,b) = a**b
-;;; pow(a,b,c) = (a**b) % c
-
-(defmethod __pow__ ((x py-number) (y py-number) &optional m)
-  (__pow-2__ x y m))
-
-(defmethod __pow__ ((x py-number) (y number) &optional m)
-  (__pow-2__ x y m))
-
-(defmethod __pow__ ((x number) (y py-number) &optional m)
-  (__pow-2__ x y m))
-
-(defmethod __pow__ ((x number) (y number) &optional m)
-  (__pow-2__ x y m))
+(defmethod __pow__ (x y &optional m)
+  (macrolet ((check-real (var)
+	       `(typecase ,var
+		  (real)
+		  (py-real (setf ,var (slot-value ,var 'val)))
+		  (t (py-raise 'TypeError "Unsupported operands for power (got: ~A ~A ~A)"
+			       x y m))))
+	     (check-number (var)
+	       `(typecase ,var
+		  (number)
+		  (py-number (setf ,var (slot-value ,var 'val)))
+		  (t (py-raise 'TypeError "Unsupported operands for power (got: ~A ~A ~A)"
+			       x y m)))))
+    (if m
+	(progn (check-real x)
+	       (check-real y)
+	       (check-real m)
+	       (mod (expt x y) m))
+      (progn (check-number x)
+	     (check-number y)
+	     (expt x y)))))
 
 
 ;; Built-in function pow() will not call __rpow__ with 3 arguments,
 ;; but user code might.
 
-(defmethod __rpow__ ((x number)    (y number)    &optional m) (__pow__ y x m))
-(defmethod __rpow__ ((x number)    (y py-number) &optional m) (__pow__ y x m))
-(defmethod __rpow__ ((x py-number) (y number)    &optional m) (__pow__ y x m))
-(defmethod __rpow__ ((x py-number) (y py-number) &optional m) (__pow__ y x m))
+(defmethod __rpow__ (x y &optional m)
+  (__pow__ y x m))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Real (corresponds to Lisp type `real')
+;; Real
+;; 
+;; Corresponds to Lisp type `real'. CPython has no corresponding class.
 
 (defclass py-real (py-number)
   ((val :type real :initform 0))
@@ -251,15 +261,15 @@
 
 (def-unary-meths
     py-real real (slot-value x 'val)
-    ((__int__     (make-int (truncate x))) ;; in CPython, returns a long int for X large enough
-     (__long__    (make-int (truncate x)))
+    ((__int__     (make-int (truncate x))) ;; CPython: returns a long int for X large enough
+     (__long__    (make-int (truncate x))) ;; CPython: returns long int
      (__float__   (make-float x))))
 
 (def-binary-meths
     py-real real (slot-value x 'val) (slot-value y 'val)
     
     ;; comparison -> t/nil	
-    ;; these are not defined on complexes, that's why they are here.
+    ;; These are not defined on complexes, only on reals.
     ((__lt__  (< x y))
      (__gt__  (> x y))
      (__le__  (<= x y))
@@ -268,17 +278,17 @@
      (__rmod__ (mod y x))
      
      ;; As FLOOR takes REAL arguments, not COMPLEX, some operations
-     ;; that Python (deprecatedly) allows on complexes are not allowed
-     ;; here.
+     ;; that Python allows (although they are deprecated) on complexes
+     ;; are not allowed here.
     
      (__cmp__ (cond ((< x y) -1)
-		    ((> x y) 1)
-		    ((= x y) 0)))
+		    ((> x y)  1)
+		    ((= x y)  0)))
      (__div__       (floor x y))
      (__rdiv__      (__div__ y x))
      (__floordiv__  (floor x y))
      (__rfloordiv__ (__floordiv__ y x))
-     (__divmod__    (apply #'make-tuple (multiple-value-list (floor x y))))
+     (__divmod__    (make-tuple-from-list (multiple-value-list (floor x y))))
      (__rdivmod__   (__divmod__ y x))))
 
 
@@ -292,24 +302,7 @@
 (mop:finalize-inheritance (find-class 'py-complex))
 
 (defun make-complex (&optional (val #C(0 0)))
-  (make-instance 'py-complex :val val)) ;; coerce needed?
-
-
-;; Left-over from number.__pow__ -- only now is class 'py-complex defined.
-
-(defmethod __pow-2__ (x y &optional modulo)
-  (when (and modulo
-	     (or (typep x '(or complex py-complex))
-		 (typep y '(or complex py-complex))))
-    (py-raise 'ValueError "complex modulo"))
-  
-  (ensure-py-type (x y) real
-		  "Shouldn't come in __pow-2__ if one not number: ~A ~A")
-  (if modulo
-      (progn (ensure-py-type modulo real
-			     "Invalid modulo arg (complex or not number at all): ~A")
-	     (mod (expt x y) modulo))
-    (expt x y)))
+  (make-instance 'py-complex :val (coerce val 'complex)))
 
 
 (def-unary-meths
@@ -317,16 +310,13 @@
     ((__hash__ (if (= (imagpart x) 0)
 		   (__hash__ (realpart x))
 		 (sxhash x)))
+     (__repr__ (if (= (complex-imag x) 0)
+		   (__repr__ (complex-real x))
+		 (format nil "~(A + ~Aj)" (realpart x) (imagpart x))))
      (complex-real (realpart x))
      (complex-imag (imagpart x))
      (complex-conjugate (conjugate x))))
 
-;; XXX this is not quite correct, as in CPython:
-;; 
-;; a = 1+ 3j; a.real -> 1 (real is an attribute, not a method)
-;; 
-;; we need support for `descriptors' before we can do the same.
-;; ignore difference for now.
 
 (defmacro def-class-specific-methods (class data)
   `(progn ,@(loop for (attname (kind . val)) in data
@@ -483,6 +473,13 @@
 (defmethod print-object ((x py-bool) stream)
   (format stream 
 	  (if (eq x *True*) "True" "False")))
+
+(defmethod __str__ ((x py-bool))
+  (__repr__ x))
+
+(defmethod __repr__ ((x py-bool))
+  (with-output-to-string (s)
+    (print-object x s)))
 
 ;;; Conversions to a Python boolean
 
@@ -872,6 +869,9 @@
 
 (mop:finalize-inheritance (find-class 'python-function))
 
+  
+      
+
 #+(or) ;; unused -- built-in functions are directly called (after argument massaging)
 (progn (defclass builtin-function (python-function)
 	 ((name :initarg :name)
@@ -919,6 +919,11 @@
   (:metaclass builtin-class))
 
 (mop:finalize-inheritance (find-class 'user-defined-function))
+
+(defmethod __repr__ ((x user-defined-function))
+  (with-output-to-string (s)
+    (print-unreadable-object (x s :type t :identity t)
+      (format s "~A" (slot-value x 'name)))))
 
 (defun make-user-defined-function (&rest options &key namespace &allow-other-keys)
   "Make a python function"
