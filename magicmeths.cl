@@ -1,257 +1,188 @@
-;; (in-package :bimeth)
 (in-package :python)
 
-(defvar *check-attr-exists* t)
+;;; Python's `magic' methods: those starting and ending with two
+;;; underscores, like `__len__', `__add__'.
+;;; 
+;;; They are part of "protocols". For example, "a + b" roughly
+;;; translates into a.__add__(b) (but it's a bit more complex than
+;;; that).
 
-;; Python's `magic' methods
+
+;;; Methods every object has:
+
+(defgeneric __class__ (x)
+  (:documentation "The class of X"))
+
+(defgeneric __delattr__ (x attr)
+  (:documentation "Delete attribute named ATTR of X")
+  (:method (x attr) (internal-del-attribute x attr)))
+
+(defgeneric __doc__ (x)
+  (:documentation "Documentation for X")
+  (:method (x) (locally (declare (ignore x)
+				 (special *None*))
+		 *None*))) ;; defaults to None
+
+(defgeneric __getattribute__ (x attr)
+  (:documentation "Intercepts all attribute lookups")
+  (:method (x attr) (or (internal-get-attribute x attr)
+			(py-raise 'AttributeError "~A ~A" x attr))))
+
+(defgeneric __hash__ (x)
+  (:documentation "Hash value (integer)")
+  (:method (x) (pyb:id x))) ;; hash defaults to id, the pointer value
+
+(defgeneric __init__ (x &optional pos-arg key-arg)
+  (:documentation "Object initialization")
+  (:method (x &optional pos-arg key-arg) (locally (declare (ignore x pos-arg key-arg)
+							   (special *None*))
+					   *None*)))
+
+(defgeneric __new__ (cls &optional pos-arg key-arg)
+  (:documentation "Create a new instance of class CLS")
+  (:method ((cls class) &optional pos-arg key-arg) (progn (when (or pos-arg key-arg)
+							    (warn "__new__ ignoring args: ~A ~A" pos-arg key-arg))
+							  (make-instance cls))))
+
+;; (defgeneric __reduce__ ...)
+;; (defgeneric __reduce_ex__ ...)
+
+(defgeneric __repr__ (x)
+  (:documentation "String representation of X, preferably eval-able")
+  (:method (x)
+	   (with-output-to-string (s)
+	     (print-unreadable-object (x s :identity t :type t)))))
+
+(defgeneric __setattr__ (x attr val)
+  (:documentation "Set attribute ATTR of X to VAL")
+  (:method (x attr val) (internal-set-attribute x attr val)))
+
+(defgeneric __str__ (x)
+  (:documentation "String representation of X, intended for humans")
+  (:method (x) (call-attribute-via-class x '__repr__)))
+
+
+
+;;; Methods not present for all objects
+
+;; Not all CPython objects have the following methods, so only define
+;; the generic function here, not a method specialized on types T.
+
+(defgeneric __eq__ (x y) (:documentation "x == y"))
+(defgeneric __ne__ (x y) (:documentation "x != y"))
+(defgeneric __lt__ (x y) (:documentation "x < y"))
+(defgeneric __gt__ (x y) (:documentation "x > y"))
+(defgeneric __le__ (x y) (:documentation "x <= y"))
+(defgeneric __ge__ (x y) (:documentation "x >= y"))
+
+(defgeneric __cmp__ (x y) (:documentation "cmp(x,y) -- rich comparison"))
+(defgeneric __nonzero__ (x) (:documentation "truth value testing"))
+ 
+#+(or) ;; TODO
+(__unicode__ (x) "unicode")
+ 
+;;; Descriptor methods
+(defgeneric __get__ (self instance owner-class) (:documentation "Get property attribute value of INSTANCE of OWNER-CLASS"))
+(defgeneric __set__ (self instance value) (:documentation "Set property attribute to VALUE on INSTANCE"))
+(defgeneric __del__ (self instance) (:documentation "Delete property attribute of INSTANCE"))
+
+(defgeneric __len__ (x) (:documentation "len(x) -> integer >= 0"))
+(defgeneric __getitem__ (x key) (:documentation "x[key]"))
+(defgeneric __setitem__ (x key val) (:documentation "x[key] = val"))
+(defgeneric __delitem__ (x key) (:documentation "del x[key]"))
+(defgeneric __iter__ (x) (:documentation "iter(x) -> iterator object"))
+(defgeneric __contains__ (x item) (:documentation "if item in x: ..."))
+
+
+;; __getslice__, __setslice__, __delslice__ are deprecated, and not implemented here
+
+;;; 3.3.7 Emulating numberic types
+
+(defgeneric __add__ (x y) (:documentation "x + y"))
+(defgeneric __sub__ (x y) (:documentation "x - y"))
+(defgeneric __mul__ (x y) (:documentation "x * y"))
+(defgeneric __div__ (x y) (:documentation "x / y"))
+(defgeneric __floordiv__ (x y) (:documentation "x // y"))
+(defgeneric __mod__ (x y) (:documentation "x % y"))
+(defgeneric __divmod__ (x y) (:documentation "divmod(x,y)"))  ;; should be ( _floordiv_(), _mod_() )
+  #+(or)(__pow__ (x y &optional z) "pow(x,y[,z])")
+(defgeneric __lshift__ (x y) (:documentation "x << y"))
+(defgeneric __rshift__ (x y) (:documentation "x >> y"))
+(defgeneric __and__ (x y) (:documentation "x & y"))
+(defgeneric __xor__ (x y) (:documentation "x ^ y"))
+(defgeneric __or__ (x y) (:documentation "x | y"))
+ 
+(defgeneric __truediv__ (x y) (:documentation "x / y  when __future__.division in effect"))
+;; has priority over __div__ iif __future__.division in effect
 ;; 
-;; Those that start and end with two underscores, like `__len__',
-;; `__add__'. They are part of a "protocol": "a + b" => a.__add__(b),
-;; "len(x)" => x.__len__().
+;; For division operators, from PEP 238:
+;;  http://www.python.org/peps/pep-0238.html
+;; 
+;; When both arguments to div are ints, implementes FLOOR division:
+;;   1/3 = 0
+;;   1 // 3 = 0  (// means `floor division')
+;; when at least one argument is float, implements TRUE division:
+;;   1.0/3 = 1.0/3.0 = 0.333
+;; 
+;; After `from __future__ import division':
+;;   1/3 = 0.333
+;;   1//3 = 0
 
-;;; XXX __reduce__
+;; reversed ops
+;;  e.g. for  a ** b
+;;       try  pow(a,b)
+;;  then try  rpow(b,a)
+(defgeneric __radd__ (x y) (:documentation "reversed x + y"))
+(defgeneric __rsub__ (x y) (:documentation "reversed x - y"))
+(defgeneric __rmul__ (x y) (:documentation "reversed x * y"))
+(defgeneric __rdiv__ (x y) (:documentation "reversed x / y"))
+(defgeneric __rfloordiv__ (x y) (:documentation "reversed x // y"))
+;; XXX __rtruediv__
+(defgeneric __rmod__ (x y) (:documentation "reversed x % y"))
+(defgeneric __rdivmod__ (x y) (:documentation "reversed divmod(x,y)"))
+#+(or)(__rpow__ (x y &optional z) "reversed x ** y")
+(defgeneric __rlshift__ (x y) (:documentation "reversed x << y"))
+(defgeneric __rrshift__ (x y) (:documentation "reversed x >> y"))
 
-(defmacro make-py-methods (&rest meths)
-  `(progn
-     ,@(loop for (methname params doc) in meths collect
-	     `(progn
-		(defgeneric ,methname ,params
-			    (:documentation ,doc))
+(defgeneric __rand__ (x y) (:documentation "reversed x & y"))
+(defgeneric __rxor__ (x y) (:documentation "reversed x ^ y"))
+(defgeneric __ror__ (x y) (:documentation "reversed x | y"))
 
-		#+(or) ;; can't discriminate like this
-		(defmethod no-applicable-method ((f (eql #',methname)) &rest args)
-		  (signal '%magic-method-missing%)
-		  (py-raise 'TypeError
-			    "No method ~A defined for args ~S [no-app-meth ~A]"
-			    ',methname args ',methname))
-		
-		,@(let ((real-params (remove '&optional params)))
-		    (declare (ignorable real-params))
-		    `(
-		      ;; In case of instances of user-defined classes,
-		      ;; check if the built-in method is overruled in
-		      ;; the class.
-		      #+(or)
-		      (defmethod ,methname :around ((,(car params) udc-instance) ,@(cdr params))
-			(when *check-attr-exists*
-			  (multiple-value-bind (meth found)
-			      (internal-get-attribute (class-of ,(car params)) ',methname)  ;; or use __class__ instead of class-of?
-			    (when found
-				(let ((*check-attr-exists* t))
-				  (__call__ meth (list ,@real-params))))))
-			
-			(py-raise 'TypeError
-				  "No method ~A defined for user-defined class instance ~A"
-				  ',methname ,(car params)))
-		      
-		      #+(or)
-		      (defmethod ,methname :around ((,(car params) t) ,@(cdr params))
-			(declare (ignore ,@(cdr params)))
-			(if (next-method-p)
-			    (call-next-method)
-			  (py-raise 'TypeError
-				    "No method ~A defined for arg ~S [XXX]"
-				    ',methname ,(car params))))
-		      
-		      #+(or)
-		      (defmethod ,methname ((,(car params) udc-instance) ,@(cdr params))
-			;; When this method is called, it means the
-			;; corresponding method is not just looked up
-			;; but really that it is being called:
-			;; `instance.methname(params..)'.
+;; in-place ops
+(defgeneric __iadd__ (x y) (:documentation "x += y"))
+(defgeneric __isub__ (x y) (:documentation "x -= y"))
+(defgeneric __imul__ (x y) (:documentation "x *= y"))
+(defgeneric __idiv__ (x y) (:documentation "x /= y"))
+(defgeneric __ifloordiv__ (x y) (:documentation "x //= y"))
+;; __itruediv__ XXX
+(defgeneric __imod__ (x y) (:documentation "x %= y"))
+;; there's no __idivmod__ (x y)
+(defgeneric __ipow__ (x y &optional z) (:documentation "x **= y  or  x.__ipow__(y,z)"))  ;; x **= y -- no way to specify z?
+(defgeneric __ilshift__ (x y) (:documentation "x <<= y"))
+(defgeneric __irshift__ (x y) (:documentation "x >>= y"))
+(defgeneric __iand__ (x y) (:documentation "x &= y"))
+(defgeneric __ixor__ (x y) (:documentation "x ^= y"))
+(defgeneric __ior__ (x y) (:documentation "x |= y"))
 
-			(multiple-value-bind (meth found)
-			    (internal-get-attribute ,(car params) ',methname)
-			  
-			  ;; Internal-get-attribute look at base classes too, also
-			  ;; when a base class is a built-in classes.
-			  ;; 
-			  ;; This might return a bound method. We can
-			  ;; avoid this binding by inlining the
-			  ;; attribute lookup and calling, in a new
-			  ;; method `internal-get-attribute-call',
-			  ;; say.
-			  
-			  (cond
-			   
-			   ((and found (pyb:callable meth))
-			    ;; XXX need to match keyword arguments here
-			    ;; (like, accept `other' keyword in: def __lt__(self, other): ..
-			    (let ((res (__call__ meth (list ,@(cdr real-params)))))
-			      (declare (special *NotImplemented*))
-			      (when (eq res *NotImplemented*)
-				(signal '%not-implemented-result%)) ;; why?
-			      res))
-			   
-			   (found
-			    (py-raise 'TypeError "~A instance is not callable"
-				      (class-of ,(car params))))
-			   
-			   ((not found)
-			    ;; Maybe there is default behaviour defined on
-			    ;; PYTHON-OBJECT (this is the case for `__repr__'
-			    ;; for example (but not for `__eq__').  If not,
-			    ;; call-next-method will give an AttributeError.
-			    (if (next-method-p)
-				(call-next-method)
-			      (progn
-				(signal '%magic-method-missing%)
-				(py-raise 'AttributeError "~A instance has no attribute ~A"
-					  ,(car params) ',methname)))))))))))))
-		      
+(defgeneric __neg__(x) (:documentation "-x"))
+(defgeneric __pos__(x) (:documentation "+x"))
+(defgeneric __abs__(x) (:documentation "abs(x)"))
+(defgeneric __invert__(x) (:documentation "~x"))
+ 
+(defgeneric __complex__(x) (:documentation "complex(x)"))
+(defgeneric __int__ (x) (:documentation "int(x)"))
+(defgeneric __long__ (x) (:documentation "long(x)"))
+(defgeneric __float__ (x) (:documentation "float(x)"))
+ 
+(defgeneric __oct__ (x) (:documentation "oct(x)"))
+(defgeneric __hex__ (x) (:documentation "hex(x)"))
+ 
+(defgeneric __coerce__ (x y) (:documentation "coercion"))
+;; should return (x', y') where x', y' are standard numbers
+;; or None or NotImplemented, indicating coercion failure
 
 
-(make-py-methods
- (__doc__ (x) "documentation for X")
-
- ;;; Order as in the Python Reference Manual
- ;;; 3.3.1: Basic Customization
- 
- ;; string representation
- ;; XXX these are handled in builtin-classes.cl
- (__repr__ (x) "repr(x) -> readable string representation of x") ;; both must return string
- (__str__  (x) "str(x) -> string representation of x") ;; fallback: __repr__
-
- ;; Comparison
- (__eq__ (x y) "x == y") ;; these can return any value, but bool (True/False) is common
- (__ne__ (x y) "x != y")
- (__lt__ (x y) "x < y")
- (__gt__ (x y) "x > y")
- (__le__ (x y) "x <= y")
- (__ge__ (x y) "x >= y")
- 
- (__cmp__ (x y) "cmp(x,y) -- rich comparison") ;; int: - => x<y; + => x>y; 0 => x=y
- (__nonzero__ (x) "truth value testing") ;; True/False, or 1/0
- 
- (__hash__ (x) "hash(x) -> int") ;; must be integer (XXX sxhash -> fixnum)
- (__unicode__ (x) "unicode") ;; XXX not implemented yet
- 
- ;;; 3.3.2: Customizing attribute access
- (__getattr__ (x name) "when attribute lookup failed")
- (__setattr__ (x name value) "all attribute assignments")
- (__delattr__ (x name) "attribute deletion")
- 
- ;;; 3.3.2.1: More attribute access for new-style classes
- (__getattribute__ (x name) "all attribute lookups")
- 
- ;;; 3.3.2.2 Implementing Descriptors
- (__get__ (self instance owner-class) "Get property attribute value of INSTANCE of OWNER-CLASS")
- (__set__ (self instance value) "Set property attribute to VALUE on INSTANCE")
- (__del__ (self instance) "Delete property attribute of INSTANCE")
-
- ;;; 3.3.2.4 __slots__
- ;; __slots__ is represented by a CLOS slot
- 
- ;;; 3.3.3 Customizing class creation
- ;; __metaclass__ is not supperted yet
- 
- ;;; 3.3.4 Emulating callable objects
- ;; __call__ is done below, because it's special.
- 
- ;;; 3.3.5 Emulating container types
- (__len__ (x) "len(x) -> integer >= 0")
- 
- (__getitem__ (x key) "x[key]")
- (__setitem__ (x key val) "x[key] = val")
- (__delitem__(x key) "del x[key]")
- 
- (__iter__ (x) "iter(x) -> iterator object")
- (__contains__ (x item) "if item in x: ...")
- 
- ;;; 3.3.6 Additional methods for emulation of sequence types
- ;; __getslice__, __setslice__, __delslice__ are deprecated so not supported
- 
- ;;; 3.3.7 Emulating numberic types
-
- ;; regular ops
- (__add__ (x y) "x + y")
- (__sub__ (x y) "x - y")
- (__mul__ (x y) "x * y")
- (__div__ (x y) "x / y")
- (__floordiv__ (x y) "x // y")
- (__mod__ (x y) "x % y")
- (__divmod__ (x y) "divmod(x,y)") ;; should be ( _floordiv_(), _mod_() )
- #+(or)(__pow__ (x y &optional z) "pow(x,y[,z])")
- (__lshift__ (x y) "x << y")
- (__rshift__ (x y) "x >> y")
- (__and__ (x y) "x & y")
- (__xor__ (x y) "x ^ y")
- (__or__ (x y) "x | y")
- 
- (__truediv__ (x y) "x / y  when __future__.division in effect")
- ;; has priority over __div__ iif __future__.division in effect
-
- ;; For division operators, from PEP 238:
- ;;  http://www.python.org/peps/pep-0238.html
- ;;
- ;; When both arguments to div are ints, implementes FLOOR division:
- ;;   1/3 = 0
- ;;   1 // 3 = 0  (// means `floor division')
- ;; when at least one argument is float, implements TRUE division:
- ;;   1.0/3 = 1.0/3.0 = 0.333
- ;;
- ;; After `from __future__ import division':
- ;;   1/3 = 0.333
- ;;   1//3 = 0
- 
- 
- ;; reversed ops
- ;;  e.g. for  a ** b
- ;;       try  pow(a,b)
- ;;  then try  rpow(b,a)
- (__radd__ (x y) "reversed x + y")
- (__rsub__ (x y) "reversed x - y")
- (__rmul__ (x y) "reversed x * y")
- (__rdiv__ (x y) "reversed x / y")
- (__rfloordiv__ (x y) "reversed x // y")
- ;; __rtruediv__ is not supported either
- (__rmod__ (x y) "reversed x % y")
- (__rdivmod__ (x y) "reversed divmod(x,y)")
- #+(or)(__rpow__ (x y &optional z) "reversed x ** y")
- (__rlshift__ (x y) "reversed x << y")
- (__rrshift__ (x y) "reversed x >> y")
- (__rand__ (x y) "reversed x & y")
- (__rxor__ (x y) "reversed x ^ y")
- (__ror__ (x y) "reversed x | y")
-
- ;; in-place ops
- (__iadd__ (x y) "x += y")
- (__isub__ (x y) "x -= y")
- (__imul__ (x y) "x *= y")
- (__idiv__ (x y) "x /= y")
- (__ifloordiv__ (x y) "x //= y")
- ;; __itruediv__ is not supported either
- (__imod__ (x y) "x %= y")
- ;; there's no __idivmod__ (x y)
- (__ipow__ (x y &optional z) "x **= y  or  x.__ipow__(y,z)") ;; x **= y -- no way to specify z?
- (__ilshift__ (x y) "x <<= y")
- (__irshift__ (x y) "x >>= y")
- (__iand__ (x y) "x &= y")
- (__ixor__ (x y) "x ^= y")
- (__ior__ (x y) "x |= y")
-
- (__neg__(x) "-x")
- (__pos__(x) "+x")
- (__abs__(x) "abs(x)")
- (__invert__(x) "~x")
- 
- (__complex__(x) "complex(x)")
- (__int__ (x) "int(x)")
- (__long__ (x) "long(x)")
- (__float__ (x) "float(x)")
- 
- (__oct__ (x) "oct(x)")
- (__hex__ (x) "hex(x)")
- 
- (__coerce__ (x y) "coercion")
- ;; should return (x', y') where x', y' are standard numbers
- ;; or None or NotImplemented, indicating coercion failure
- )
-
-
-;;; These mappings are used for automatically generating the
-;;; appropriate methods for builtin-int etc, in builtin-classes.cl
-
+#+(or)
 (defvar *reverse-method-mapping*
     '((__radd__      . __add__)
       (__rsub__      . __sub__)
@@ -268,6 +199,7 @@
       (__rxor__      . __xor__)
       (__ror__       . __or__)))
 
+#+(or)
 (defvar *inplace-method-mapping*
     '((__iadd__      . __add__)
       (__isub__      . __sub__)
@@ -283,62 +215,3 @@
       (__iand__      . __and__)
       (__ixor__      . __xor__)
       (__ior__       . __or__)))
-
-
-
-;; these are special
-
-(defgeneric __new__ (class &rest args)
-  (:documentation "Allocate new instance of CLASS"))
-
-#+(or) ;; don't for now
-(defgeneric __init__ (x &rest args)
-  (:documentation "Initialize class instance X"))
-
-
-;;; Some of these methods have default behaviour.
-
-;;(defmethod __cmp__ (x y)
-;;  (if (eq x y)
-
-#+(or)
-(defmacro python:def-default-behaviours (clauses)
-  `(progn ,@(loop for (meth params behaviour) in clauses
-		collect (let ((real-params (remove '&optional params)))
-			  `(defmethod ,meth ((,(car params) python-object) ,@(cdr params))
-			     (declare (ignorable ,@real-params))
-			     ,behaviour)))))
-
-#+(or)
-(python:def-default-behaviours
-    ((__doc__ (x) *None*)
-
-     (__repr__ (x) (with-output-to-string (s)
-		     (print-unreadable-object (x s) :identity t :type t)))
-     ;; str(x) defaults to repr(x), but method __str__ doesn't.
-     
-     ;; Comparison of objects is always possible. The fall-back is pointer comparison.
-     (__eq__ (x y) (eq x y)) ;; __eq__ and __ne__ default to comparing pointers
-     (__ne__ (x y) (not (eq x y)))
-     
-     (__lt__ (x y) (t))
-     (__gt__ (x y) t)
-     (__le__ (x y) t)
-     (__ge__ (x y) t)
-
-     (__hash__ (x) 123) ;; XXX pointer value
-     ))     
-
-;; some default behaviours
-(defmethod __eq__ (x y)
-  (declare (special *True* *False*))
-  (if (eq x y) *True* *False*))
-
-(defmethod __cmp__ (x y)
-  (if (eq x y)
-      0
-    -1)) ;; or +1
-
-;; there is some bug 
-;;(defmethod __lt__ (x y)
-;;  -1)

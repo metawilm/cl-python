@@ -67,12 +67,6 @@
 (defmethod fdel ((x py-property))
   (slot-value x 'delete))
 
-(def-class-specific-methods
-    py-property
-    ((fget (att . fget))
-     (fset (att . fset))
-     (fdel (att . fdel))))
-
-#+(or) ;; test
-(let ((p (make-property :fget "fget")))
-  (internal-get-attribute p 'fget)) ;; 'fget))
+(register-bi-class-attr/meth (find-class 'py-property) 'fget #'fget :attr)
+(register-bi-class-attr/meth (find-class 'py-property) 'fset #'fset :attr)
+(register-bi-class-attr/meth (find-class 'py-property) 'fdel #'fdel :attr)

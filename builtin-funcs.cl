@@ -74,57 +74,72 @@
   nil)
 
 
-
-(defun pyb:chr (i)
+(defun pyb:chr (x)
   "Return a string of one character whose ASCII code is the integer i. ~@
    This is the inverse of pyb:ord."
-  (multiple-value-bind (int-des-p lisp-int)
-      (py-int-designator-p i)
-    (if (and int-des-p
-	     (<= 0 lisp-int 255))
-	(make-py-string (code-char lisp-int))
-      (py-raise 'TypeError
-		 "Function chr() should be given an integer in range 0..255 ~
-                 (got: ~A)" lisp-int))))
+  (let ((i (py-int-designator-val x)))
+    (if (<= 0 i 255)
+	(make-py-string (code-char i))
+      (py-raise 'TypeError "Function chr() should be given an integer in range 0..255 (got: ~A)" i))))
 
-(defun pyb:cmp (x y)
-  "Compare two objects. ~@
+
+(defmethod pyb:cmp ((x number) (y number))
+  ;; This special case is not needed, because this case is already
+  ;; handled before this function is called.
+  (cond ((< x y) -1)
+	((> x y)  1)
+	(t        0)))
+
+(defmethod pyb:cmp ((x user-defined-object) y)
+  (pyb::cmp-2 (py-object-designator-val x) (py-object-designator-val y)))
+
+(defmethod pyb:cmp (x (y user-defined-object))
+  (pyb::cmp-2 (py-object-designator-val x) (py-object-designator-val y)))
+
+(defmethod pyb:cmp ((x builtin-object) (y builtin-object))
+  (if (eq x y) 0 (__eq__ x y)))
+
+(defmethod pyb::cmp-2 (x y)
+  "Compare two objects, of which at least one is a user-defined-object. ~@
    Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y"
   
   ;; This function is used in comparisons like <, <=, == (see
   ;; *math-cmp-mapping* in mathops.cl)
-   
+  ;; 
   ;; The CPython logic is a bit complicated; hopefully the following
   ;; is a correct translation.
+  ;; 
+  ;; Note: when the objects X,Y are EQ, they may still be not equal in
+  ;; the Python sense.
   
-  #+(or)(when (eq x y)
-	  (return-from pyb:cmp 0))
-  
-  (macrolet ((normalize (x)
-	       `(cond ((< ,x 0) -1) ;; object.c - adjust_tp_compare(c)
-		      ((= ,x 0) 0)
-		      ((> ,x 0) 1)
-		      (t (py-raise 'TypeError
-				   "Result of comparison should be int (got: ~A)"
-				   ,x)))))
+  (macrolet ((normalize (x)  ;; object.c - adjust_tp_compare(c)
+	       `(let ((i (py-int-designator-val ,x)))
+		  (cond ((< i 0) -1)
+			((= i 0) 0)
+			((> i 0) 1)))))
 
     ;; CPython: object.c - do_cmp(v,w)
 
     (let ((x-class (__class__ x))
-	  (y-class (__class__ y))) ;; XXX or just class-of ?
+	  (y-class (__class__ y)))
       
-
-      ;; If X, Y are instances of the same class, and that class defines
-      ;; __cmp__, use that.
+      ;; If X, Y are instances of the same class, it must be a
+      ;; user-defined class, otherwise we wouldn't be in this
+      ;; method.
       
       (when (eq x-class y-class)
-
-	(handler-case (__cmp__ x y)
-	  ((or %magic-method-missing% %not-implemented-result%) ()) ;; continue
-	  (:no-error (res) (return-from pyb:cmp (normalize res)))))
-
+	(assert (typep x-class 'user-defined-class)))
+      
+      ;; If the class is equal and it defines __cmp__, use that.
+      
+      (when (eq x-class y-class)
+	(multiple-value-bind (meth found)
+	    (internal-get-attribute x-class '__cmp__)
+	  (if found
+	      (return-from pyb::cmp-2 (normalize (py-call meth x y))))))
+      
       ;; The "rich comparison" operations __lt__, __eq__, __gt__ are
-      ;; called before __cmp__ is called.
+      ;; now called before __cmp__ is called.
       ;; 
       ;; Normally, we take these methods of X.  However, if class(Y)
       ;; is a subclass of class(X), the first look at Y's magic
@@ -133,25 +148,27 @@
       ;; 
       ;; It is assumed that the subclass overrides all of
       ;; __{eq,lt,gt}__. For example, if sub.__eq__ is not defined,
-      ;; first super.__eq__ is called, and after that __sub__.lt (or
-      ;; super.__lt__)
+      ;; first super.__eq__ is called, and after that __sub__.__lt__
+      ;; (or super.__lt__).
       ;; 
       ;; object.c - try_rich_compare_bool(v,w,op) / try_rich_compare(v,w,op)
-      (let ((y-sub-of-x (and (not (eq (__class__ x) (__class__ y)))
-			     (subtypep (__class__ y) (__class__ x)))))
+      
+      (let ((y-sub-of-x (and (not (eq x-class y-class))
+			     (subtypep y-class x-class))))
 	
 	;; Try each `meth'; if the outcome it True, return `res-value'.
-	(loop for (meth . res-value) in `((,#'__eq__ .  0)
-					  (,#'__lt__ . -1)
-					  (,#'__gt__ .  1))
-	    do (handler-case (if y-sub-of-x
-				 (funcall meth y x)
-			       (funcall meth x y))
-		 ((or %magic-method-missing% %not-implemented-result%) ()) ;; cont.
-		 (:no-error (meth-result)
-		   (when (py-val->lisp-bool meth-result)
-		     (return-from pyb:cmp
-		       (if y-sub-of-x (- res-value) res-value)))))))
+	(loop for (meth-name . res-value) in `((__eq__ .  0)
+					       (__lt__ . -1)
+					       (__gt__ .  1))
+	    do (multiple-value-bind (res found)
+		   (call-attribute-via-class (if y-sub-of-x y x) meth-name (list (if y-sub-of-x x y)))
+		 (if (and found
+			  (not (eq res *NotImplemented*))
+			  (py-val->lisp-bool res))
+		     
+		     (return-from pyb::cmp-2 
+		       (normalize (if y-sub-of-x (- res-value) res-value)))))))
+      
       
       ;; So the rich comparison operations didn't lead to a result.
       ;; 
@@ -160,32 +177,42 @@
       ;; Now, first try X.__cmp__ (even it y-class is a subclass of
       ;; x-class) and Y.__cmp__ after that.
       
-      (handler-case (__cmp__ x y)
-	((or %magic-method-missing% %not-implemented-result%) ()) ;; cont.
-	(:no-error (res)
-	  (return-from pyb:cmp (normalize res))))
+      (multiple-value-bind (res found)
+	  (call-attribute-via-class x '__cmp__ (list y))
+	(when (and found
+		   (not (eq res *NotImplemented*)))
+	  (return-from pyb::cmp-2 (normalize res))))
       
-      (handler-case (__cmp__ y x)
-	((or %magic-method-missing% %not-implemented-result%) ()) ;; cont.
-	(:no-error (res)
-	  (return-from pyb:cmp (normalize res))))
+      (multiple-value-bind (res found)
+	  (call-attribute-via-class y '__cmp__ (list x))
+	(when (and found
+		   (not (eq res *NotImplemented*)))
+	  (return-from pyb::cmp-2 (- (normalize res)))))
+      
       
       ;; CPython now does some number coercion attempts that we don't
-      ;; have to do, I suppose. (Numbers are instances in this
-      ;; implementation, while they are not in CPython (?)).
+      ;; have to do, I suppose.
+      
+      (if (and (typep x 'py-number)
+	       (typep y 'py-number))
+	  (return-from pyb::cmp-2 (pyb:cmp (slot-value x 'val)
+					   (slot-value y 'val))))
       
       ;; object.c - default_3way_compare(v,w)
       ;; 
       ;; Two instances of same class without any comparison operator,
-      ;; are compared by pointer value.
+      ;; are compared by pointer value. Our function `pyb:id' fakes
+      ;; that.
       
-      ;; XXX (pointer< x y)
+      (when (eq x-class y-class)
+	(return-from pyb::cmp-2 (pyb:cmp (pyb:id x) (pyb:id y))))
       
       ;; None is smaller than everything (excluding itself, but that
-      ;; is catched above already, when testing for same class).
+      ;; is catched above already, when testing for same class;
+      ;; NoneType is not subclassable).
       
-      (cond ((eq x *None*) (return-from pyb:cmp -1))
-	    ((eq y *None*) (return-from pyb:cmp 1)))
+      (cond ((eq x *None*) (return-from pyb::cmp-2 -1))
+	    ((eq y *None*) (return-from pyb::cmp-2  1)))
       
       ;; Instances of different class are compared by class name, but
       ;; numbers are always smaller.
@@ -193,33 +220,26 @@
       ;; XXX In Python, there can be two different classes with the
       ;; same name, while in CL there can't. See comment in
       ;; MAKE-PYTHON-CLASS in classes.cl.
-
+      
       (warn "CMP can't find any proper comparison function and has to compare ~
              class names now (CMP ~A ~A)" x y)
       
-      (when (eq x-class y-class)
-	(return-from pyb:cmp -1)) ;; XXX or 1, or pointer comparison, whatever
-      
-      (let ((x-class-name (if (typep x 'py-number-designator) "" (class-name x-class)))
-	    (y-class-name (if (typep y 'py-number-designator) "" (class-name y-class))))
-
-	(when (and (string= x-class-name y-class-name)
-		   (not (string= x-class-name "")))
-	  (error "There are multiple classes with name ~S: ~
-                  sorry, no support for that yet (PY-CMP)"
-		 x-class-name))
-	
-	;;(warn "x-class-name: ~S, y-class-name: ~S~%" x-class-name y-class-name)
-      	(return-from pyb:cmp 
-	  (if (string< x-class-name y-class-name) -1 1)))
+      (let ((x-class-name (class-name x-class))
+	    (y-class-name (class-name y-class)))
+      	(return-from pyb::cmp-2 (if (string< x-class-name y-class-name) -1 1)))
       
       ;; Finally, we have either two instances of different non-number
       ;; classes, or two instances that are of incomparable numeric
-      ;; types. Last decision criterium is based on the pointer values.
+      ;; types. Last decision criterium is based on fake pointer
+      ;; values as given by `id'.
       
-      ;; XXX  (if (< (pointer-value X) (pointer-value Y)) -1 1)
-      (warn "hard case for cmp() - would be resolved by pointer values in CPython")
-      -1)))
+      (return-from pyb::cmp-2
+	(if (eq x y)
+	    0
+	  (let ((x-id (pyb:id x))
+		(y-id (pyb:id y)))
+	    (if (< x-id y-id) -1 1)))))))
+
 
 (defun pyb:coerce (x y)
   (declare (ignore x y))

@@ -44,7 +44,7 @@
 
 (defmacro def-class-specific-methods (class data)
   `(progn ,@(loop for (attname func kind) in data
-		collect `(register-bi-class-method (find-class ',class) ',attname ,func ,kind))))
+		collect `(register-bi-class-attr/meth (find-class ',class) ',attname ,func ,kind))))
 
 
 
@@ -90,9 +90,6 @@
 ;;; Using metaclasses, classes can be created that might not have
 ;;; these methods.
 
-(defgeneric __class__ (x)
-  (:documentation "The class of X. X must be a python-object designator."))
-
 (defmethod __class__ ((x integer))       (find-class 'py-int))
 (defmethod __class__ ((x real))          (find-class 'py-float))
 (defmethod __class__ ((x complex))       (find-class 'py-complex))
@@ -108,36 +105,36 @@
 (defmethod __class__ ((x (eql (find-class 'python-type)))) x)
 
 
-(defgeneric __delattr__ (x attr) (:documentation "Delete attribute named ATTR of X"))
-(defmethod  __delattr__ (x attr)  (internal-del-attribute x attr))
-(register-bi-class-attr/meth (find-class 'python-object) '__delattr__ #'__delattr__ :meth)
+#+(or)(progn (defgeneric __delattr__ (x attr) (:documentation "Delete attribute named ATTR of X"))
+	     (defmethod  __delattr__ (x attr)  (internal-del-attribute x attr))
+	     (register-bi-class-attr/meth (find-class 'python-object) '__delattr__ #'__delattr__ :meth))
 
-(defgeneric __doc__ (x) (:documentation "documentation"))
-(defmethod  __doc__ (x) (multiple-value-bind (val found)
-			    (internal-get-attribute x '__doc__)
-			  (if found
-			      val
-			    *None*)))
-(register-bi-class-attr/meth (find-class 'python-object) '__doc__ #'__doc__ :attr)
+#+(or)(progn (defgeneric __doc__ (x) (:documentation "documentation"))
+	     (defmethod  __doc__ (x) (multiple-value-bind (val found)
+					 (internal-get-attribute x '__doc__)
+				       (if found
+					   val
+					 *None*)))
+	     (register-bi-class-attr/meth (find-class 'python-object) '__doc__ #'__doc__ :attr))
 
-(defgeneric __getattribute__ (x attr))
-(defmethod  __getattribute__ (x attr)
-  (or (internal-get-attribute x attr)
-      (py-raise 'AttributeError "object ~A no attribute ~A" x attr)))
-(register-bi-class-attr/meth (find-class 'python-object) '__getattribute__ #'__getattribute__ :meth)
+#+(or)(progn (defgeneric __getattribute__ (x attr))
+	     (defmethod  __getattribute__ (x attr)
+	       (or (internal-get-attribute x attr)
+		   (py-raise 'AttributeError "object ~A no attribute ~A" x attr)))
+	     (register-bi-class-attr/meth (find-class 'python-object) '__getattribute__ #'__getattribute__ :meth))
 
-(defgeneric __hash__ (x))
-(defmethod  __hash__ (x) (pyb:id x)) ;; hash defaults to id
+#+(or)(progn (defgeneric __hash__ (x))
+	     (defmethod  __hash__ (x) (pyb:id x))) ;; hash defaults to id
 
-(defgeneric __init__ (x &rest arguments))
-(defmethod  __init__ (x &rest arguments)
-  (declare (ignore arguments))
-  *None*)
+#+(or)((defgeneric __init__ (x &rest arguments))
+       (defmethod  __init__ (x &rest arguments)
+	 (declare (ignore arguments))
+	 *None*))
 
-(defgeneric __new__ (cls &rest arguments))
-(defmethod __new__ (cls &rest arguments)
-  (declare (ignore arguments))
-  (make-instance cls))
+#+(or)((defgeneric __new__ (cls &rest arguments))
+       (defmethod __new__ (cls &rest arguments)
+	 (declare (ignore arguments))
+	 (make-instance cls)))
 
 #+(or) ;; don't for now...
 (progn (defgeneric __reduce__ ---)"; "helper for pickle"
@@ -162,19 +159,19 @@
   ;; infinite loops when debugging __str__ methods, for example.
   (print-unreadable-object (x stream :identity t :type t)))
 
-(defmethod __str__ (x) 
-  ;; This method is not only for X of type python-object, but also for
-  ;; regular numbers, for example.
-  (__repr__ x))
+#+(or)(defmethod __str__ (x) 
+	;; This method is not only for X of type python-object, but also for
+	;; regular numbers, for example.
+	(__repr__ x))
 
-(defmethod __repr__ (x)
-  ;; Also for all X, not just Python objects.
-  (with-output-to-string (s)
-    (print-unreadable-object (x s :identity t :type t))))
+#+(or)(defmethod __repr__ (x)
+	;; Also for all X, not just Python objects.
+	(with-output-to-string (s)
+	  (print-unreadable-object (x s :identity t :type t))))
 
-(defgeneric __setattr__ (x attr val))
-(defmethod  __setattr__ (x attr val)
-  (internal-set-attribute x attr val))
+#+(or)((defgeneric __setattr__ (x attr val))
+       (defmethod  __setattr__ (x attr val)
+	 (internal-set-attribute x attr val)))
 
 #+(or) ;; XXX
 (def-class-specific-methods
@@ -189,19 +186,19 @@
 
 ;; XXX todo...
 
-(defun py-type-__new__ (cls &rest options)
-  (declare (ignore options))
-  (make-instance cls))
+#+(or)((defun py-type-__new__ (cls &rest options)
+	 (declare (ignore options))
+	 (make-instance cls))
+       
+       (defmethod py-type-__init__((x python-object) &optional pos-args kw-args)
+	 (declare (ignore pos-args kw-args)))
+       
+       (def-class-specific-methods
+	   python-type
+	   ((__new__  #'py-type-__new__  :meth)
+	    (__init__ #'py-type-__init__ :meth)))
 
-(defmethod __init__((x python-object) &optional pos-args kw-args)
-  (declare (ignore pos-args kw-args)))
-			    
-(def-class-specific-methods
-    python-type
-    ((__new__  #'py-type-__new__  :meth)
-     (__init__ #'py-type-__init__ :meth)))
-
-(register-as-__new__method #'py-type-__new__)
+       (register-as-__new__method #'py-type-__new__))
  
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -288,6 +285,7 @@
   
 (defmethod __hash__ ((x py-number))
   (__hash__ (slot-value x 'val)))
+
 
 (def-unary-meths 
     py-number number (slot-value x 'val)
@@ -494,12 +492,12 @@
 	((typep x 'py-int) (values t (slot-value x 'val)))
 	(t nil)))
 
-(defun py-int-designator-val (x)
-  "Return the Lisp int value of a Python integer designator."
-  (typecase x
-    (integer x)
-    (py-int  (slot-value x 'val))
-    (t       (py-raise "Integer expected (got: ~S)" x))))
+
+(defgeneric py-int-designator-val (x)
+  (:documentation "Return the Lisp int value of a Python integer designator.")
+  (:method ((x integer)) x)
+  (:method ((x py-int)) (slot-value x 'val))
+  (:method (x) (py-raise "Integer expected (got: ~S)" x)))
 
 (def-binary-meths
     py-int integer (slot-value x 'val) (slot-value y 'val)
@@ -2555,7 +2553,7 @@
   "Return ATT-DES-P, SYMBOL"
   (typecase x
     (symbol (values t x))
-    (string (values t (make-interned-string x)))
+    (string (values t (intern x #.*package*)))
     (t      nil)))
 
 
@@ -2577,6 +2575,13 @@
 (defmethod python-object-designator-p ((x string)) (values t (make-py-string x)))
 (defmethod python-object-designator-p (x) (declare (ignore x)) nil)
 
+
+(defgeneric py-object-designator-val (x)
+  (:method ((x python-object))                   x)
+  (:method ((x (eql (find-class 'python-type)))) x) ;; needed?
+  (:method ((x number))                        (make-py-number x))
+  (:method ((x string))                        (make-py-string x))
+  (:method (x) (error "Uncatched in PY-OBJECT-DESIGNATOR-VAL: ~S" x)))
 
 
 ;;;; builtin object?
