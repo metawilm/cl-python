@@ -1108,10 +1108,8 @@
   (check-only-symbol-keys x)
   (setf (gethash var (slot-value x 'hash-table)) val))
 
-(defmethod namespace-lookup ((x namespace) var)
+(defmethod namespace-lookup ((x namespace) (var symbol))
   "Recursive lookup. Returns two values:  VAL, FOUND-P"
-  (ensure-py-type var attribute-name "Invalid attribute name: ~A")
-  (check-type var symbol)
   (check-only-symbol-keys x)
   (multiple-value-bind (val found) ;; m-v-b, as NIL is valid VAR
       (gethash var (slot-value x 'hash-table))
@@ -1120,10 +1118,9 @@
 					 (slot-value x 'enclosing-ns) var))
 	  (t                            nil))))
 
-(defmethod namespace-delete ((x namespace) var)
+(defmethod namespace-delete ((x namespace) (var symbol))
   "Delete the attribute."
   ;; todo: when in an enclosing namespace
-  (ensure-py-type var attribute-name "Invalid attribute name: ~A")
   (check-type var symbol)
   (check-only-symbol-keys x)
   (let ((res (remhash var (slot-value x 'hash-table))))
@@ -1131,6 +1128,37 @@
       (py-raise 'NameError
 		"No variable with name ~A" var))))
 
+(defmethod namespace-declare-global ((x namespace) (var-name symbol))
+  (let* ((module-namespace (loop with namespace = x
+			       with encl-ns = (slot-value namespace 'enclosing-ns)
+			       while encl-ns do
+				 (setf namespace encl-ns
+				       encl-ns (slot-value namespace 'enclosing-ns))
+			       finally (return namespace))))
+    
+    (if (eq module-namespace x)
+	(warn "Bogus top-level 'global' declaration for variable ~A" var-name))
+    
+    (let ((lookup-meth (make-instance 'standard-method
+			 :specializers (list (mop:intern-eql-specializer x)
+					     (mop:intern-eql-specializer var-name))
+			 :lambda-list '(x var)
+			 :function (lambda (x var)
+				     (declare (ignore var x))
+				     (namespace-lookup module-namespace var-name))))
+	 
+	  (bind-meth (make-instance 'standard-method
+		       :specializers (list (mop:intern-eql-specializer x)
+					   (mop:intern-eql-specializer var-name)
+					   (find-class 't))
+		       :lambda-list '(x var val)
+		       :function (lambda (x var val)
+				   (declare (ignore x var))
+				   (namespace-bind module-namespace var-name val)))))
+			 
+      (add-method (ensure-generic-function 'namespace-lookup) lookup-meth)
+      (add-method (ensure-generic-function 'namespace-bind)   bind-meth))))
+  
 (defmethod namespace-copy ((x namespace))
   (check-only-symbol-keys x)
   (with-slots (name enclosing-ns hash-table) x

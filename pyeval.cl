@@ -84,6 +84,7 @@
 		   
 	     (assign-expr (apply #'eval-assign-expr (cdr ast)))
 	     (del (eval-del (second ast)))
+	     (global (eval-global (second ast)))
 
 	     (try-except (apply #'eval-try-except (cdr ast)))
 	     (raise (apply #'eval-raise (cdr ast)))
@@ -249,7 +250,12 @@
 		     "RAISE: when first arg is instance, second argument must be None or not supplied (got: ~A)"
 		     value)))))
 
-		
+
+(defun eval-global (varlist)
+  (let ((ns *scope*))
+    (dolist (varname varlist)
+      (namespace-declare-global ns varname))))
+
 		    
 (defun eval-assert (test expr)
   "Test whether assertion holds. Is only executed when __debug__ is true"

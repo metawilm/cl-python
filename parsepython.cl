@@ -215,7 +215,8 @@
  (:dot--name*)
  (dot--name (|.| identifier) ($2))
 
- (global-stmt (global identifier comma--identifier*) ((list $1 $2 $3)))
+ (global-stmt (global identifier comma--identifier*)
+	      (`(global ,(if $3 (cons $2 $3) (list $2)))))
  (:comma--identifier*)
  (comma--identifier (|,| identifier) ($2))
  (exec-stmt (exec expr) ((list $1 $2)))
