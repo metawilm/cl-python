@@ -87,7 +87,7 @@
 (defmethod __class__ ((x symbol))        (find-class 'py-string))
 (defmethod __class__ ((x string))        (find-class 'py-string))
 (defmethod __class__ ((x user-defined-class)) (find-class 'python-type)) ;; TODO metaclass
-
+(defmethod __class__ ((x function))      (find-class 'python-type)) ;; XXX doesn't show function name
 (defmethod __class__ ((x python-object)) (class-of x)) ;; XXX check
 
 
