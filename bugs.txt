@@ -12,3 +12,11 @@
 
 - support non-modules in modules registry sys.modules
 http://groups.google.com/groups?hl=en&lr=&c2coff=1&threadm=mailman.981282736.25263.python-list%40python.org&rnum=3&prev=/groups%3Fas_q%3Dauthor:peters%2520sys%2520modules%26safe%3Dimages%26ie%3DUTF-8%26oe%3DUTF-8%26lr%3D%26num%3D100%26hl%3Den
+
+- break only allowed lexically inside for/while
+>>> def f():
+...   break
+...
+#<user-defined-function f @ #x71d9ad1a>
+>>> for i in range(3):
+...   f()
