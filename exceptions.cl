@@ -21,32 +21,32 @@
 
 (defvar *exceptions-tree* ;; XXX CPython has explanation string for every exception
     (quote
-     (SystemExit 
+     (SystemExit
       StopIteration
       (StandardError KeyboardInterrupt 
 		     ImportError
-		     (EnvironmentError (IOError 
-					(OSError (WindowsError 
-						  VMSError))))
+		     (EnvironmentError IOError 
+				       (OSError WindowsError 
+						VMSError))
 		     EOFError
-		     (RuntimeError (NotImplementedError))
-		     (NameError    (UnboundLocalError))
+		     (RuntimeError NotImplementedError)
+		     (NameError    UnboundLocalError)
 		     AttributeError
 		     (SyntaxError (IndentationError (TabError)))
 		     TypeError
 		     AssertionError
-		     (LookupError (IndexError
-				   KeyError))
-		     (ArithmeticError (OverflowError 
-				       ZeroDivisionError
-				       FloatingPointError))
-		     (ValueError (UnicodeError (UnicodeEncodeError
-						UnicodeDecodeError 
-						UnicodeTranslateError)))
+		     (LookupError IndexError
+				  KeyError)
+		     (ArithmeticError OverflowError 
+				      ZeroDivisionError
+				      FloatingPointError)
+		     (ValueError (UnicodeError UnicodeEncodeError
+					       UnicodeDecodeError 
+					       UnicodeTranslateError))
 		     ReferenceError
 		     SystemError 
 		     MemoryError)
-      (Warning UserWarning 
+      (Warning UserWarning
 	       DeprecationWarning 
 	       PendingDeprecationWarning 
 	       SyntaxWarning 
@@ -59,17 +59,24 @@
 (push (cons 'Exception (find-class 'Exception)) *python-exceptions*)
 
 (defun def-python-exceptions (root tree)
+  (declare (optimize (debug 3))
+	   (notinline def-python-exceptions))
   (flet ((def-sub-exc (exc-name super)
-	     ;; (format t "defining exception   ~A  (~A)~%" exc-name super)
-	     (let ((c (mop:ensure-class exc-name
-					:direct-superclasses (list super)
-					:metaclass 'python-type)))
-	       (push (cons exc-name c) *python-exceptions*))))
-    (loop for sub in tree
-	do (if (symbolp sub)
-	       (def-sub-exc sub root)
-	     (progn
-	       (def-sub-exc (car sub) root)
-	       (def-python-exceptions (car sub) (cdr sub)))))))
+	     (format t "defining exception   ~A  (~A)~%" exc-name super)
+	   (let ((c (mop:ensure-class exc-name
+				      :direct-superclasses (list super)
+				      :metaclass 'python-type)))
+	     (push (cons exc-name c) *python-exceptions*))))
+    
+    (if (symbolp tree)
+	
+	(def-sub-exc tree root)
+      
+      (progn
+	(def-sub-exc (car tree) root)
+	(loop for sub in (cdr tree)
+	    do (def-python-exceptions (car tree) sub))))))
 
-(def-python-exceptions 'Exception *exceptions-tree*)
+(mapcar (lambda (x)
+	  (def-python-exceptions 'Exception x))
+	*exceptions-tree*)
