@@ -2,6 +2,7 @@
 
 ;;; Built-in classes and their methods
 
+
 ;; There is a special method __new__ that accepts as first argument
 ;; classes instead of instances. Need to special-case them in
 ;; __call__, therefore keep track of them in a hash-table.
@@ -15,10 +16,37 @@
   (gethash f *__new__-methods*))
 
 
+;; Class-specific non-magic methods, like the `clear' methods of
+;; dicts, and the `append' method of lists, are stored in a hashtable,
+;; where the key is the method name as a symbol, and the value is an
+;; alist where the class is the key, and the method for that class and
+;; its type are in the cons that is the value.
+
+(defparameter *builtin-class-attr/meths* (make-hash-table :test #'eq))
+
+(defmethod register-bi-class-attr/meth ((class class) (meth-name symbol) (func function) (type symbol))
+  "Puts the method in the hash table. TYPE is either :ATTR or :METH."
+  (let* ((alist (gethash meth-name *builtin-class-attr/meths*))
+	 (kons  (cons class (cons func type)))
+	 (assval (assoc class alist)))
+    (when assval
+      (warn "builtin-class-methods already had a func for method ~A of class ~A"
+	    meth-name class))
+    (if alist
+	(push kons alist)
+      (setf (gethash meth-name *builtin-class-attr/meths*) (list kons)))))
+
+(defmethod lookup-bi-class-attr/meth ((class class) (meth-name symbol))
+  "Returns METHOD, TYPE. Both are NIL if not found."
+  (let ((val (cdr (assoc class (gethash meth-name *builtin-class-attr/meths*)))))
+    (values (car val) (cdr val))))
+
+
+
 (defmacro def-class-specific-methods (class data)
-  `(progn ,@(loop for (attname (kind . val)) in data
-		collect `(setf (get ',attname (find-class ',class))
-			   (cons ',kind #',val)))))
+  `(progn ,@(loop for (attname func kind) in data
+		collect `(register-bi-class-method (find-class ',class) ',attname ,func ,kind))))
+
 
 
 ;; TODO:
@@ -52,21 +80,6 @@
 				  ,result)))))
 
 
-(defmacro create-methods-all-classes (data)
-  `(defvar *methods-of-all-classes*
-       (let ((h (make-hash-table :test 'eq)))
-	 ,@(loop for (name val) in data
-	       collect `(setf (gethash ',name h) #',val))
-	 h)))
-
-(create-methods-all-classes
- ((__repr__   __repr__)
-  (__eq__     __eq__)
-  (__ne__     __ne__)
-  ;; XXX __reduce__ (is a bit like `make-load-form')...
-  ))
-       
-
 ;; Regarding string representation of Python objects:
 ;;    __str__       is a representation targeted to humans
 ;;    __repr__      if possible,  eval(__repr__(x)) should be equal to x
@@ -99,7 +112,6 @@
 (defmethod __class__ ((x integer))       (find-class 'py-int))
 (defmethod __class__ ((x real))          (find-class 'py-float))
 (defmethod __class__ ((x complex))       (find-class 'py-complex))
-(defmethod __class__ ((x symbol))        (find-class 'py-string))
 (defmethod __class__ ((x string))        (find-class 'py-string))
 (defmethod __class__ ((x user-defined-class)) (find-class 'python-type)) ;; TODO metaclass
 (defmethod __class__ ((x function))      (find-class 'python-type)) ;; XXX doesn't show function name
@@ -121,14 +133,12 @@
   (make-instance cls))
 
 (defmethod __init__((x python-object) &optional pos-args kw-args)
-  (declare (ignore pos-args kw-args))
-  ;; nothing
-  )
+  (declare (ignore pos-args kw-args)))
 			    
 (def-class-specific-methods
     python-type
-    ((__new__ (meth . py-type-__new__))
-     #+(or)(__init__ (meth . py-type-__init__))))
+    ((__new__  #'py-type-__new__  :meth)
+     (__init__ #'py-type-__init__ :meth)))
 
 (register-as-__new__method #'py-type-__new__)
  
@@ -148,12 +158,14 @@
 			    
 			    (defvar ,object (make-instance ',class-name) ,object-doc)
 			    
-			    ;; CPython disallows creating instances of these
+			    ;; CPython disallows creating instances of these.
+			    
 			    (defmethod make-instance
 				((c (eql (find-class ',class-name))) &rest initargs)
 			      (declare (ignore initargs))
 			      #1=(py-raise 'TypeError
 					   "Cannot create '~A' instances" ',class-name))
+			    
 			    (defmethod make-instance
 				((c (eql ',class-name)) &rest initargs)
 			      (declare (ignore initargs))
@@ -368,9 +380,9 @@
 
 (def-class-specific-methods
     py-complex
-    ((real (att . complex-real))
-     (imag (att . complex-imag))
-     (conjugate (meth . complex-conjugate))))
+    ((real      #'complex-real      :attr)
+     (imag      #'complex-imag      :attr)
+     (conjugate #'complex-conjugate :attr)))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -417,15 +429,16 @@
 (defun py-int-designator-p (x)
   "Return DESIGNATOR-P, LISP-VAL where LISP-VAL only makes sense if it's ~
    indeed a designator"
-  (cond ((integerp x) (values t x))
+  (cond ((integerp x)      (values t x))
 	((typep x 'py-int) (values t (slot-value x 'val)))
 	(t nil)))
 
-(defun py-int-designator-p-2 (x)
-  "Return one value: the int value"
-  (cond ((integerp x) x)
-	((typep x 'py-int) (slot-value x 'val))
-	(t nil)))
+(defun py-int-designator-val (x)
+  "Return the Lisp int value of a Python integer designator."
+  (typecase x
+    (integer x)
+    (py-int  (slot-value x 'val))
+    (t       (py-raise "Integer expected (got: ~S)" x))))
 
 (def-binary-meths
     py-int integer (slot-value x 'val) (slot-value y 'val)
@@ -516,48 +529,37 @@
 (defmethod __repr__ ((x py-bool))
   (if (eq x *True*) "True" "False"))
 
-;;; Conversions to a Python boolean
 
 (defun py-val->lisp-bool (x)
-  "Somewhat contrary to its name, VAL is either a Lisp or Python value. ~@
+  "VAL is either a Python value or one of the Lisp values T, NIL. ~@
    Returns a generalized Lisp boolean."
-  (declare (special *interned-empty-string*))
   (cond
-   ;; Lisp: t/nil,  Python: True/False/None
-   ((member x (load-time-value (list 't *True*)) :test 'eq) t)
+   ;; T/NIL, True/False/None
+   ((member x (load-time-value (list t *True*)) :test 'eq) t)
    ((member x (load-time-value (list nil *False* *None*)) :test 'eq) nil)
-       
-   ((numberp x) (/= x 0))    ;; py-number designators
-   ((symbolp x) (not (eq x *interned-empty-string*))) ;; py-string designator
    
-   ;; class instance: check __nonzero__, __len__ methods
+   ((numberp x) (/= x 0))
+   ((stringp x) (not (string= x "")))
+
    (t (py-lisp-bool-1 x))))
 
 (defun py-lisp-bool-1 (x)
-  ;; Determine truth value of X. Returns a Lisp bool.
-  (handler-case (let ((res (__nonzero__ x)))
-		  (multiple-value-bind (bool-p lisp-bool)
-		      (py-bool-designator-p res)
-		    (unless bool-p
-		      (py-raise 'TypeError
-				"__nonzero__ should return a bool (got: ~A)" res))
-		    (return-from py-lisp-bool-1 (not (__eq__ lisp-bool 0)))))
-    (%magic-method-missing% ()
-      (handler-case (let ((res (__len__ x)))
-		      (multiple-value-bind (int-p int-len)
-			  (py-int-designator-p res)
-			(unless (and int-p (<= 0 int-len))
-			  (py-raise 'TypeError
-				    "__len__ should return a non-negative int (got: ~A)"
-				    res))
-			(return-from py-lisp-bool-1 (not (= int-len 0)))))
-	(%magic-method-missing% ()
-	  ;; If a class defined neither __nonzero__ nor
-	  ;; __len__, all instances are considered `True'.
+  "Determine truth value of X, by trying the __nonzero__ and __len__ methods. ~@
+   Returns a generalized Lisp boolean."
+  
+  (multiple-value-bind (val found)
+      (call-attribute-via-class x '__nonzero__)
+    
+    (if found 
+	(py-val->lisp-bool val)
+  
+      (multiple-value-bind (val found)
+	  (call-attribute-via-class x '__len__)
+	(if found 
+	    (/= 0 (py-int-designator-val val))
+	  ;; If a class defined neither __nonzero__ nor __len__, all
+	  ;; instances are considered `True'.
 	  t)))))
-
-
-
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -796,20 +798,20 @@
 
 (def-class-specific-methods
     py-dict
-    ((clear (meth . dict-clear))
-     (copy  (meth . dict-copy))
-     (fromkeys (meth . dict-fromkeys))
-     (get (meth . dict-get))
-     (has_key (meth . dict-has-key))
-     (items (meth . dict-items))
-     (iteritems (meth . dict-iter-items))
-     (iterkeys  (meth . dict-iter-keys))
-     (itervalues (meth . dict-iter-values))
-     (keys (meth . dict-keys))
-     (pop  (meth . dict-pop))
-     (popitem (meth . dict-popitem))
-     (setdefault (meth . dict-setdefault))
-     (values (meth . dict-values))))
+    ((clear      #'dict-clear       :meth)
+     (copy       #'dict-copy        :meth)
+     (fromkeys   #'dict-fromkeys    :meth)
+     (get        #'dict-get         :meth)
+     (has_key    #'dict-has-key     :meth)
+     (items      #'dict-items       :meth)
+     (iteritems  #'dict-iter-items  :meth)
+     (iterkeys   #'dict-iter-keys   :meth)
+     (itervalues #'dict-iter-values :meth)
+     (keys       #'dict-keys        :meth)
+     (pop        #'dict-pop         :meth)
+     (popitem    #'dict-popitem     :meth)
+     (setdefault #'dict-setdefault  :meth)
+     (values     #'dict-values      :meth)))
      
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -1013,7 +1015,7 @@
 
 (def-class-specific-methods
     py-module
-    ((__dict__ (att . module-dict))))
+    ((__dict__ #'module-dict :attr)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Methods: they come in `bound' and `unbound' flavors
@@ -1430,15 +1432,15 @@
 
 (def-class-specific-methods
     py-list
-    ((append (meth . list-append))
-     (count  (meth . list-count))
-     (extend (meth . list-extend))
-     (index (meth . list-index))
-     (insert (meth . list-insert))
-     (pop    (meth . list-pop))
-     (remove (meth . list-remove))
-     (reverse (meth . list-reverse))
-     (sort (meth . list-sort))))
+    ((append  #'list-append  :meth)
+     (count   #'list-count   :meth)
+     (extend  #'list-extend  :meth)
+     (index   #'list-index   :meth)
+     (insert  #'list-insert  :meth)
+     (pop     #'list-pop     :meth)
+     (remove  #'list-remove  :meth)
+     (reverse #'list-reverse :meth)
+     (sort    #'list-sort    :meth)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Iterator
@@ -1611,13 +1613,13 @@
 ;;; there are no tuple-specific methods
 (def-class-specific-methods
     py-tuple
-    ((__new__ (meth . tuple-__new__))))
+    ((__new__ #'tuple-__new__ :meth)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; String
 ;; 
-;; Symbols act as designators for Python strings. They are interned in
-;; the :python package, so they can be compared using EQ.
+;; Lisp strings are designators for Python string objects, but Lisp
+;; characters are not.
 
 (defclass py-string (builtin-instance)
   ((string :type string :initarg :string))
@@ -1627,21 +1629,17 @@
 (mop:finalize-inheritance (find-class 'py-string))
 
 (deftype py-string-designator ()
-  `(or py-string symbol))
+  `(or py-string string))
 
 (defun py-string-designator-p (s)
   "Return STRING-DESIGNATOR-P, LISP-STRING"
   (cond ((typep s 'string) (values t s))
 	((typep s 'py-string) (values t (slot-value s 'string)))
-	((symbolp s) (values t (symbol-name s)))
 	(t nil)))
   
 (defun make-py-string (&optional (s ""))
-  (check-type s (or symbol string character) "A Lisp symbol, string or character")
-  (make-instance 'py-string :string (typecase s
-				      (string s)
-				      (character (string s))
-				      (symbol (symbol-name s)))))
+  (check-type s string "A Lisp string")
+  (make-instance 'py-string :string s))
 
 (defmethod py-string->symbol ((x py-string))
   (intern (slot-value x 'string)))
@@ -1649,101 +1647,6 @@
 (defmethod print-object ((x py-string) stream)
   (print-unreadable-object (x stream :type t)
     (format stream "~S" (slot-value x 'string))))
-
-
-;;; Strings have 3 internal representations: symbol, string, py-string.
-
-(defmacro def-unary-string-meths (data)
-  `(progn ,@(loop for (name args body) in data
-		do (assert (eq (car args) 'x))
-		collect (let ((rest (cdr args)))
-			  `(progn (defmethod ,name ((x py-string) ,@rest)
-				    (let ((x (slot-value x 'string)))
-				      ,body))
-				  (defmethod ,name ((x symbol) ,@rest)
-				    (let ((x (symbol-name x)))
-				      ,body))
-				  (defmethod ,name ((x string) ,@rest)
-				    ,body))))))
-
-(defmacro def-binary-string-meths (names)
-  `(progn ,@(loop for (name args body) in names
-		do (assert (and (eq (first args) 'x)
-				(eq (second args) 'y)))
-		collect (let* ((rest (cddr args))
-			       (rest2 (remove '&optional rest)))
-			  `(progn (defmethod ,name ((x py-string) y ,@rest)
-				    (let ((x (slot-value x 'string)))
-				      (,name x y ,@rest2)))
-				  (defmethod ,name ((x symbol) y ,@rest)
-				    (let ((x (symbol-name x)))
-				      (,name x y ,@rest2)))
-				  (defmethod ,name (x (y py-string) ,@rest)
-				    (let ((y (slot-value y 'string)))
-				      (,name x y ,@rest2)))
-				  (defmethod ,name (x (y symbol) ,@rest)
-				    (let ((y (symbol-name y)))
-				      (,name x y ,@rest2)))
-				  (defmethod ,name ((x string) (y string) ,@rest)
-				    ,body))))))
-
-(def-unary-string-meths 
-    ((__getitem__ (x index) (progn (ensure-py-type index integer
-						   "String indices must be integer (slices: todo)")
-				   (when (< index 0)
-				     (incf index (length x)))
-				   (string (char x index))))
-     (__hash__ (x) (sxhash x))
-     
-     (__iter__  (x) (let ((i 0))
-		      (make-iterator-from-function
-		       (lambda ()
-			 (when (< i (length x))
-			   (prog1 (string (aref x i))
-			     (incf i)))))))
-     
-     (__len__  (x) (length x))
-     (__mod__  (x args) (locally (declare (ignore x args))
-			  (error "todo: string mod")))
-     ;; rmod, rmul
-     (__mul__  (x n) (__mul-1__ x n))
-     
-     ;; __reduce__ : todo
-     
-     ;; __repr__ : with quotes (todo: if string contains ', use " as quote etc)
-     ;; __str__  : without surrounding quotes
-     (__repr__ (x) (format nil "~S" x))
-     (__str__  (x) (format nil "~A" x))
-     
-     (py-string-capitalize (x) (string-capitalize x)) ;; lisp function
-     (string-center (x width) (string-center-1 x width))
-     (string-decode (x &optional encoding errors) (string-decode-1 x encoding errors))
-     (string-encode (x &optional encoding errors) (string-encode-1 x encoding errors))
-     (string-expandtabs (x &optional tabsize) (string-expandtabs-1 x tabsize))
-     (string-isalnum (x) (string-isalnum-1 x))
-     (string-isalpha (x) (string-isalpha-1 x))
-     (string-isdigit (x) (string-isdigit-1 x))
-     (string-islower (x) (string-islower-1 x))
-     (string-istitle (x) (string-istitle-1 x))
-     (string-isupper (x) (string-isupper-1 x))
-     (string-join    (x seq) (string-join-1 x seq))
-     ))
-
-
-(def-binary-string-meths
-    ((__add__      (x y) (concatenate 'string x y))
-     (__radd__     (x y) (__add__ y x))
-     (__contains__ (x y) (lisp-val->py-bool (search y x)))
-     (__cmp__ (x y)      (cond ((string< x y) -1)
-			       ((string= x y) 0)
-			       (t 1)))
-     (__eq__ (x y)       (string= x y))
-     
-     (string-count (x y) (string-count-1 x y))
-     (string-endswith (x y &optional start end) (lisp-val->py-bool (string-endswith-1 x y start end)))
-     (string-find (x y &optional start end) (string-find-1 x y start end))
-     (string-index (x y &optional start end) (string-index-1 x y (or start 0) (or end 0)))
-    ))
 
 
 (defmethod __mul-1__ ((x string) n)
@@ -1756,16 +1659,6 @@
     (loop for i from 1 to n
 	do (setf s (concatenate 'string s x))
 	finally (return s))))
-
-
-;; When both strings are symbols, direct equality tests are very efficient
-(defmethod __cmp__ ((x symbol) (y symbol))
-  (if (eq x y) 
-      0
-    (__cmp__ (symbol-name x) (symbol-name y))))
-
-(defmethod __eq__ ((x symbol) (y symbol))
-  (eq x y))
 
 
 ;;; string-specific methods
@@ -1863,7 +1756,7 @@
 	(py-raise 'ValueError "Substring not found")
       res)))
 
-;; predicates
+;; Predicates
 
 (defmethod string-isalnum-1 ((x string))
   (lisp-val->py-bool (every #'alphanumericp x)))
@@ -1890,18 +1783,15 @@
   (let ((got-cased nil)
 	(previous-is-cased nil))
     (loop for c across x
-	do (cond ((upper-case-p c)
-		  (when previous-is-cased
-		    (return-from string-istitle-1 *False*))
-		  (setf previous-is-cased t)
-		  (setf got-cased t))
-		     
-		 ((lower-case-p c)
-		  (unless previous-is-cased
-		    (return-from string-istitle-1 *False*)))
-		     
-		 (t
-		  (setf previous-is-cased nil))))
+	do (cond ((upper-case-p c) (when previous-is-cased
+				     (return-from string-istitle-1 *False*))
+				   (setf previous-is-cased t)
+				   (setf got-cased t))
+		 
+		 ((lower-case-p c) (unless previous-is-cased
+				     (return-from string-istitle-1 *False*)))
+		 
+		 (t 		   (setf previous-is-cased nil))))
     (lisp-val->py-bool got-cased)))
 
   
@@ -1918,60 +1808,98 @@
 		(push str acc))
     (apply #'concatenate 'string x (nreverse acc))))
 
+
+(defmacro def-unary-string-meths (data)
+  `(progn ,@(loop for (name args body) in data
+		do (assert (eq (car args) 'x))
+		collect (let ((rest (cdr args)))
+			  `(progn (defmethod ,name ((x py-string) ,@rest)
+				    (let ((x (slot-value x 'string)))
+				      ,body))
+				  (defmethod ,name ((x string) ,@rest)
+				    ,body))))))
+
+(defmacro def-binary-string-meths (names)
+  `(progn ,@(loop for (name args body) in names
+		do (assert (and (eq (first args) 'x)
+				(eq (second args) 'y)))
+		collect (let* ((rest (cddr args))
+			       (rest2 (remove '&optional rest)))
+			  `(progn (defmethod ,name ((x py-string) y ,@rest)
+				    (let ((x (slot-value x 'string)))
+				      (,name x y ,@rest2)))
+				  (defmethod ,name (x (y py-string) ,@rest)
+				    (let ((y (slot-value y 'string)))
+				      (,name x y ,@rest2)))
+				  (defmethod ,name ((x string) (y string) ,@rest)
+				    ,body))))))
+
+(def-unary-string-meths 
+    ((__getitem__ (x index) (progn (ensure-py-type index integer "String indices must be integer (slices: todo)")
+				   (when (< index 0) ;; XXX slice support
+				     (incf index (length x)))
+				   (string (char x index))))
+     (__hash__  (x) (sxhash x))
+     (__iter__  (x) (let ((i 0))
+		      (make-iterator-from-function
+		       (lambda () (when (< i (length x))
+				    (prog1 (string (aref x i))
+				      (incf i)))))))
+     (__len__  (x) (length x))
+     (__mod__  (x args) (locally (declare (ignore x args))
+			  (error "todo: string mod")))
+     ;; rmod, rmul
+     (__mul__  (x n) (__mul-1__ x n))
+     
+     ;; __reduce__ : todo
+     
+     ;; __repr__ : with quotes (todo: if string contains ', use " as quote etc)
+     ;; __str__  : without surrounding quotes
+     (__repr__ (x) (format nil "~S" x))
+     (__str__  (x) (format nil "~A" x))
+     
+     (py-string-capitalize (x) (string-capitalize x)) ;; Lisp function
+     (string-center (x width)                     (string-center-1 x width))
+     (string-decode (x &optional encoding errors) (string-decode-1 x encoding errors))
+     (string-encode (x &optional encoding errors) (string-encode-1 x encoding errors))
+     (string-expandtabs (x &optional tabsize)     (string-expandtabs-1 x tabsize))
+     (string-isalnum (x)  (string-isalnum-1 x))
+     (string-isalpha (x)  (string-isalpha-1 x))
+     (string-isdigit (x)  (string-isdigit-1 x))
+     (string-islower (x)  (string-islower-1 x))
+     (string-istitle (x)  (string-istitle-1 x))
+     (string-isupper (x)  (string-isupper-1 x))
+     (string-join    (x seq) (string-join-1 x seq))))
+
+(def-binary-string-meths
+    ((__add__      (x y)  (concatenate 'string x y))
+     (__radd__     (x y)  (__add__ y x))
+     (__contains__ (x y)  (lisp-val->py-bool (search y x)))
+     (__cmp__ (x y)       (cond ((string< x y) -1)
+			        ((string= x y) 0)
+			        (t 1)))
+     (__eq__ (x y)        (string= x y))
+     
+     (string-count    (x y) (string-count-1 x y))
+     (string-endswith (x y &optional start end)  (lisp-val->py-bool (string-endswith-1 x y start end)))
+     (string-find     (x y &optional start end)  (string-find-1 x y start end))
+     (string-index    (x y &optional start end)  (string-index-1 x y (or start 0) (or end 0)))))
+
+
 (def-class-specific-methods
     py-string
-    ((capitalize (meth . string-capitalize)) ;; lisp function
-     (center (meth . string-center-1))
-     (decode (meth . string-decode-1))
-     (encode (meth . string-encode-1))
-     (expandtabs  (meth . string-expandtabs-1))
-     (isalnum  (meth . string-isalnum-1))
-     (isalpha  (meth . string-isalpha-1))
-     (isdigit  (meth . string-isdigit-1))
-     (islower  (meth . string-islower-1))
-     (istitle  (meth . string-istitle-1))
-     (isupper  (meth . string-isupper-1))
-     (join     (meth . string-join-1))))
-
-
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-;;; Interned strings: the string is represented by an interned symbol,
-;;; enabling quick EQ comparison.
-
-(defclass py-interned-string (py-string)
-  ((interned-string :type symbol :initarg :interned-string))
-  (:metaclass builtin-class))
-
-(mop:finalize-inheritance (find-class 'py-interned-string))
-
-(defmethod unintern-string ((s symbol))
-  ;; used in mathops.cl for when method of user-defined-object may be called.
-  ;; XXX check if still used
-  (symbol-name s))
-
-(defvar *interned-strings* 
-    (make-hash-table :test 'eq))
-
-(defun make-interned-string (&optional (string ""))
-  "Intern STRING, return corresponding SYMBOL."
-  (multiple-value-bind (symbol status)
-      (intern string #.*package*) ;; package arg needed?
-    (if (eq status nil)
-	(let ((hash (sxhash string)))
-	  ;; XXX verify SXHASH appropriate (eg, need equality of unicode and regular strings)
-	  (setf (gethash symbol *interned-strings*) (cons string hash)))) ;; CONS?!
-    symbol))
-
-(defvar *interned-empty-string*
-    (make-interned-string ""))
-
-(defun show-interned-strings ()
-  (maphash (lambda (k v)
-	     (declare (ignore k))
-	     (format t "~S (~S)~%" (car v) (cdr v)))
-	   *interned-strings*))
+    ((capitalize #'string-capitalize :meth) ;; lisp function
+     (center   #'string-center-1   :meth)
+     (decode   #'string-decode-1   :meth)
+     (encode   #'string-encode-1   :meth)
+     (expandtabs  #'string-expandtabs-1  :meth)
+     (isalnum  #'string-isalnum-1  :meth)
+     (isalpha  #'string-isalpha-1  :meth)
+     (isdigit  #'string-isdigit-1  :meth)
+     (islower  #'string-islower-1  :meth)
+     (istitle  #'string-istitle-1  :meth)
+     (isupper  #'string-isupper-1  :meth)
+     (join     #'string-join-1     :meth)))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -2239,6 +2167,16 @@
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Enumerate
+;; 
+;; Generator to iterate over an object, also yielding the index of the yielded item:
+;; 
+;; >>> x = enumerate("asdf")
+;; >>> x
+;; <enumerate object at 0x4021b6ac>
+;; >>> x.next()
+;; (0, 'a')
+;; >>> x.next()
+;; (1, 's')
 
 (defclass py-enumerate (builtin-instance)
   ((generator :initarg :generator)
@@ -2265,6 +2203,8 @@
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; XRange object
+;; 
+;; Like built-in function `range', but lazy. It's a type of its own.
 
 (defclass py-xrange (builtin-instance)
   ((start :type integer :initarg :start)
@@ -2349,6 +2289,8 @@
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Slice object
+;; 
+;; Denotes sub-items of a sequence-like object.
 ;; 
 ;; slice( [start,] stop [, step )
 ;;
@@ -2553,13 +2495,13 @@
   (typecase x
     (symbol (values t x))
     (string (values t (make-interned-string x)))
-    (t nil)))
+    (t      nil)))
 
 
 ;;;; python object?
 
 (deftype python-object-designator ()
-  `(or python-object number symbol))
+  `(or python-object number))
 
 (defgeneric python-object-designator-p (x)
   (:documentation "Returns DESIGNATOR-P, PYVAL where PYVAL is a ~
@@ -2571,7 +2513,6 @@
 (defmethod python-object-designator-p ((x python-object)) (values t x))
 (defmethod python-object-designator-p ((x (eql (find-class 'python-type)))) (values t x))
 (defmethod python-object-designator-p ((x number)) (values t (make-py-number x)))
-(defmethod python-object-designator-p ((x symbol)) (values t (make-py-string x)))
 (defmethod python-object-designator-p ((x string)) (values t (make-py-string x)))
 (defmethod python-object-designator-p (x) (declare (ignore x)) nil)
 
