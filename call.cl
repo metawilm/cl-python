@@ -292,7 +292,8 @@
 	      (push (cons f* (make-tuple-from-list pos-arg-2)) result)
 	    (if pos-arg-2
 		(py-raise 'TypeError
-			  "~A: Too many positional args supplied" fname))))
+			  "~A: Too many positional args supplied (pos-args: ~A; declared: ~A)"
+			  fname pos-args fpos))))
 	 
 	;; Assign kw args
 	(let ((for-f** ()))

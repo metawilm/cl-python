@@ -729,6 +729,7 @@
 		   type object-or-type))
 	
 	((null object-or-type)
+	 (break "super to unbound method: maybe wrong")
 	 (make-unbound-method :func (lambda (x) (pyb:super type x))
 			      :class type))        ;; XXX Right?
 	

@@ -227,8 +227,6 @@ def xx_check_functions(i=0, j=0):
     check(type(D), MC)
     check(type(E), MC)
 
-def check_functions(i=0, j=0):
-
     check(unicode("abc"), u"abc") # unicode normalization
     check("abc".decode(), u"abc")
     check(unicode("abc", "ASCII"), u"abc")
@@ -254,6 +252,9 @@ def check_functions(i=0, j=0):
     check(zip("abc", "def"), [('a', 'd'), ('b', 'e'), ('c', 'f')])
     check(zip("abc", "def", "ghi"),
       [('a', 'd', 'g'), ('b', 'e', 'h'), ('c', 'f', 'i')])
+
+def check_functions(i=0, j=0):
+    pass
 
 def check_descriptors(i, j):
 

@@ -13,6 +13,7 @@
 (defconstant pyt:property (find-class 'py-property))
 (defconstant pyt:slice   (find-class 'py-slice))
 (defconstant pyt:str     (find-class 'py-string))
+(defconstant pyt:super   (find-class 'py-super))
 (defconstant pyt:tuple   (find-class 'py-tuple))
 (defconstant pyt:type    (find-class 'python-type))
 (defconstant pyt:unicode (find-class 'py-string))

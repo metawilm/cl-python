@@ -38,21 +38,20 @@
   (:nicknames :pyb)
   (:use )
   (:export 
-   :__import__ :abs :apply :callable :chr :cmp :coerce
-   :compile :delattr :dir :divmod :eval :execfile :filter
-   :getattr :globals :hasattr :hash :hex :id :input :intern :isinstance
-   :issubclass :iter :len :locals :map :max :min :oct :ord :pow :range
-   :raw_input :reduce :reload :repr :round :setattr :sorted
-   :sum :super :type :unichr :vars :zip))
+   :__import__ :abs :apply :callable :chr :cmp :coerce :compile
+   :delattr :dir :divmod :eval :execfile :filter :getattr :globals
+   :hasattr :hash :hex :id :input :intern :isinstance :issubclass
+   :iter :len :locals :map :max :min :oct :ord :pow :range :raw_input
+   :reduce :reload :repr :round :setattr :sorted :sum :super :type
+   :unichr :vars :zip))
 
 (defpackage :python-builtin-types
   (:nicknames :pyt)
   (:use )
   (:export
-   :bool :complex :dict :enumerate :float :int :list :long
-   :slice :str :tuple :xrange
-   ;;; todo:
-   :classmethod :staticmethod :property :object :type :unicode))
+   :bool :complex :dict :enumerate :float :int :list :long :slice :str
+   :super :tuple :xrange :classmethod :staticmethod :property :object
+   :type :unicode))
 
 (defpackage :python-module-sys
   (:use)

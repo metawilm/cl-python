@@ -176,6 +176,16 @@
 	 (warn "Catch-all internal-get-attribute: ~S ~S" x attr)
 	 (values nil nil))))
 
+
+(defmethod internal-get-attribute ((x py-bound-super) attr)
+  (with-slots (class inst) x
+    (multiple-value-bind (val found)
+	(getattr-of-class-rec class attr)
+      (if found
+	  (values (maybe-bind val inst (class-of inst)) t)
+	(values nil nil)))))
+  
+
 (defmethod internal-get-attribute ((x number) attr)
   (getattr-of-number x attr))
 
@@ -258,6 +268,19 @@
 (defmethod maybe-bind ((x function) instance class)
   (__get__ x instance class))
 
+(defmethod maybe-bind ((x unbound-method) instance class)
+  (declare (ignore class))
+  (with-slots ((cls class) func) x
+    (if instance
+	(cond ((typep instance cls)
+	       (make-bound-method :func func :object instance))
+	      ((eq instance *None*)
+	       x)
+	      (t
+	       (py-raise 'TypeError "Unbound method ~A bound to instance ~A of wrong type"
+			 x instance)))
+      x)))
+
 (defmethod maybe-bind (object instance class)
   #+(or)(break "maybe-bind ~A ~A ~A" object instance class)
   (multiple-value-bind (bound-val get-found)
@@ -265,7 +288,6 @@
     (if get-found
 	bound-val
       object)))
-
 
 (defmethod getattr-of-instance-rec ((x builtin-instance) attr)
   (loop for cls in (mop:class-precedence-list (class-of x))
@@ -279,7 +301,7 @@
 
 
 (defmethod getattr-of-instance-rec ((x udc-instance) attr)
-
+  (declare (optimize (debug 3)))
   ;; Check user-defined classes for __getattribute__, including X
   ;; itself. While we're doing that, keep an eye on the value of
   ;; `__getattr__' and the value of the attribute itself if we come
@@ -297,6 +319,7 @@
 	do (multiple-value-bind (val found)
 	       (getattr-of-class-nonrec cls '__getattribute__)
 	     (when found
+	       (break "__getattribute__ found: ~A ~A ~A ~A" x cls val found)
 	       (return-from getattr-of-instance-rec
 		 (values (py-call (maybe-bind val x (class-of x)) (list (string attr)))
 			 t))))

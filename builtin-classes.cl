@@ -1403,6 +1403,10 @@
 
 (mop:finalize-inheritance (find-class 'python-function))
 
+(defmethod print-object ((x python-function) stream)
+  (print-unreadable-object (x stream :identity t :type t)
+    (format stream "~A" (slot-value x 'name))))
+
 (defmethod __class__ ((x python-function)) (find-class 'python-function))
 
 (defmethod py-function-name ((x python-function))
@@ -3412,6 +3416,50 @@
 (register-bi-class-attr/meth (find-class 'py-property) 'fget (make-bi-class-attribute #'fget))
 (register-bi-class-attr/meth (find-class 'py-property) 'fset (make-bi-class-attribute #'fset))
 (register-bi-class-attr/meth (find-class 'py-property) 'fdel (make-bi-class-attribute #'fdel))
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Super
+
+(defclass py-super (builtin-object)
+  ()
+  (:metaclass builtin-class))
+
+(mop:finalize-inheritance (find-class 'py-super))
+
+(defmethod py-super-__new__ (cls type &optional obj)
+  (if (eq cls (find-class 'py-super))
+      (if obj
+	  (make-bound-super type obj)
+	(make-unbound-super type))
+    (progn (assert (subtypep cls (find-class 'py-super)))
+	   (error "todo: super(...) with cls != py-super"))))
+
+(register-bi-class-attr/meth (find-class 'py-super) '__new__
+			     (make-static-method #'py-super-__new__))
+
+(defclass py-unbound-super (py-super)
+  ((class :initarg :class))
+  (:metaclass builtin-class))
+
+(mop:finalize-inheritance (find-class 'py-unbound-super))
+
+(defmethod make-unbound-super ((cls class))
+  (make-instance 'py-unbound-super :class cls))
+
+
+(defclass py-bound-super (py-super)
+  ((class :initarg :class) ;; from which class to get the attribute
+   (inst  :initarg :inst))
+  (:metaclass builtin-class))
+
+(mop:finalize-inheritance (find-class 'py-bound-super))
+
+(defmethod make-bound-super ((cls class) obj)
+  (if (typep obj 'class)
+      (error "todo: super(...  , <type>)") ;; unbound super?  whatever that means...
+    (progn (assert (typep obj cls))
+	   (make-instance 'py-bound-super :class cls :inst obj))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Type
