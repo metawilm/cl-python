@@ -8,44 +8,6 @@
   (:documentation "Call X with given arguments. Call arg rewriting must take ~@
                    place _before_ calling PY-CALL")) ;; or in py-call :AROUND ?
 
-#+(or) ;; replace by fwrapping trace functionality
-(defmethod py-call :around (x &optional pos-args kwd-args)
-  (if (gethash x *traced-objects*)
-      (progn
-	(dotimes (i *trace-print-level*)
-	  (format t "  "))
-	(format t "[~A]  ~A ~A ~{~A~}~%" 
-		*trace-print-level*
-		(py-str x)
-		(mapcar #'py-str pos-args)
-		(loop for (k . v) in kwd-args 
-		    collect `(,k = ,(py-str v))))
-	(let ((unwinded t))
-	  (unwind-protect
-	      (let* ((res (catch 'function-block
-			    (let ((*trace-print-level* (+ 1 *trace-print-level*)))
-			      (call-next-method)))))
-		(setf unwinded nil)
-		(dotimes (i *trace-print-level*)
-		  (format t "  "))
-		(format t "[~A]  returned ~A~%" *trace-print-level* (py-str res))
-		(return-from py-call res))
-	    (when unwinded
-	      (format t "TR: ... unwound (perhaps caused by exception)~%")))))
-    (call-next-method)))
-
-#+(or) ;; old
-(defmethod py-trace (x)
-  (setf (gethash x *traced-objects*) t))
-
-#+(or) ;; old
-(defmethod py-untrace (x)
-  (remhash x *traced-objects*))
-
-;; None of the built-in functions take keyword argument, so give an
-;; error in case kw args are supplied.
-;; 
-;; XXX but default __init__ accepts yet ignores them...
 
 (defmethod py-call ((x function) &optional pos-args kwd-args)
   (when kwd-args
@@ -63,8 +25,6 @@
 
 (defmethod py-call ((x user-defined-function) &optional pos-args key-args)
   "Evaluate function body in function definition namespace."
-  
-  #+(or)(declare (ignore pos-args key-args))
   
   ;; If the AST contains `return', it exists from this FUNCTION-BLOCK
   ;; (or a FB inside this one). `return' can only occur inside a
@@ -91,11 +51,6 @@
 	(declare (special *scope*))
 	(catch 'function-block
 	  (py-eval-1 ast))))))
-
-    
-    #+(or)(call-next-method)
-    #+(or)*None* ;; `add-return-None-to-suite' in pyeval.cl makes this obsolete
-     
 
 
 (defmethod py-call ((x python-function) &optional pos-args key-args)
@@ -130,14 +85,12 @@
 				       (declare (special *scope*))
 				       (funcall value-producing-f)))))))
 
-
 (defmethod py-call ((x bound-method) &optional pos-args kwd-args)
   "The instance enclosed in the bound method is prefixed to pos-args"
   (py-call (slot-value x 'func)
 	   (cons (slot-value x 'object)
 		 pos-args)
 	   kwd-args))
-
 
 
 (defmethod py-call ((x unbound-method) &optional pos-args kwd-args)
@@ -174,7 +127,7 @@
   ;; type(x) is a function returning type of x
   (when (and (eq cls (find-class 'python-type))
 	     (= (length pos-args) 1))
-    (return-from py-call (pyb:type (car pos-args))))
+    (return-from py-call (py-type (car pos-args))))
 
   ;; <type>(..args..) creates an instance
   (let ((cls-name (class-name cls)))
@@ -190,6 +143,17 @@
 	  (unless found
 	    (warn "Class ~S has no __init__ method" cls-name)))
 	(return-from py-call inst)))))
+
+
+(defmethod py-call ((x user-defined-object) &optional pos-args kwd-args)
+  (if (typep x 'class)
+      (call-next-method) ;; regard as class
+    (py-call (getattr-of-class x '__call__) 
+	     (let ((args (cons x pos-args))) 
+	       (declare (dynamic-extent args))
+	       args)
+	     kwd-args)))
+
 
 (defmethod py-call-exception ((cls class) &optional pos-args kwd-args)
   (assert (subtypep cls 'Exception))

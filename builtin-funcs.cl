@@ -713,47 +713,14 @@
      seq)
     res))
 
-(defmethod pyb:super (type &optional object-or-type)
+#+(or) ;; use type instead
+(defmethod pyb:super (type-arg &optional object-or-type-arg)
   "Returns the first class in the MRO of the second arg after (the type of) ~@
    OBJECT-OR-TYPE. A cooperative version of call-next-method."
-  
-  ;; A typical use for calling a cooperative superclass method is:
-  ;; 
-  ;;  class C(B):
-  ;;    def meth(self, arg):
-  ;;      super(C, self).meth(arg)
-  
-  (cond ((not (typep type 'class))
-	 (py-raise 'TypeError
-		   "First arg to `super' must be class (got: ~A, ~A)"
-		   type object-or-type))
-	
-	((null object-or-type)
-	 (break "super to unbound method: maybe wrong")
-	 (make-unbound-method :func (lambda (x) (pyb:super type x))
-			      :class type))        ;; XXX Right?
-	
-	(t (let ((obj-type (if (typep object-or-type 'class)
-			       object-or-type
-			     (class-of object-or-type))))
-	     (unless (subtypep obj-type type)
-	       (py-raise 'TypeError "Calling `super' with two types: second must ~@
-                                     be strict subclass of first (got: ~A, ~A)"
-			 type obj-type))
-	     (assert (and (typep type 'class)
-			  (typep obj-type 'class)))
-	     (let ((mro (py-class-mro obj-type)))
-	       (loop for sublist on mro 
-		   when (eq (car sublist) type)
-		   do (if (cdr sublist)
-			  (return-from pyb:super (second sublist))
-			(py-raise 'TypeError "In mro of class ~A, there is no ~@
-                                              class before ~A" obj-type type))
-		   finally
-		     (error "pyb:super strangeness")))))))
-
+  )
 
 ;; `type' is also the name of the builtin class `python-type'
+#+(or) ;; overruled by class
 (defmethod pyb:type (x &optional bases dict)
   (if (or bases dict)
       (error "type(...) to create a new type: not implemented yet (got: ~A ~A ~A)" x bases dict)

@@ -1,4 +1,5 @@
 def check(a, b):
+    print "checking %s" % a
     if not a == b:
         #clpy (break "assertionerror ~%~A ~%---~%~A"
         #       (namespace-lookup *scope* 'a) (namespace-lookup *scope* 'b)) # WB
@@ -161,7 +162,7 @@ class Clone(object):
 
 def getcFromString(s):
     for c in s:
-        print "getcFromString returning: ", c
+        # print "getcFromString returning: ", c # WB
         yield c
     while True:
         yield ''
@@ -317,6 +318,7 @@ class Node(object):
         self.eval(globals, locals)
         if False:
             yield None
+
 class Define(Node):
     def __init__(self, name, args, body):
         self.name = name
@@ -331,6 +333,7 @@ class Define(Node):
         else:
             obj = Function(self.name, self.args, self.body, globals)
         globals[self.name] = obj
+
 class For(Node):
     def __init__(self, var, seq, body):
         self.var = var
@@ -909,7 +912,9 @@ def main():
     for pair in it:
         L.append(pair)
     L2 = list(it2)
+    print "checking L, L2" # WB
     check(L, L2)
+    print "checked L, L2" # WB
 
     scanner = Scanner(getcFromString(sample).next).tokenize()
     parser = Parser(scanner)

@@ -139,10 +139,10 @@
 
 (defun make-clpy-module ()
   (make-std-module clpy
-		   ((brk  (lambda () (break))) ;; `break' is a reserved word
-		    (trace #'clpy.trace)
+		   ((brk  (lambda () (break))) ;; `break' is a reserved word, can't be name
+		    (trace #'clpy.trace) ;; tracing
 		    (untrace #'clpy.untrace)
-		    (time #'py-time)
+		    (time #'py-time)  ;; profiling
 		    (timeit #'clpy.timeit)
 		    (prof_c #'py-profile-count)
 		    (prof_t #'py-profile-time)
@@ -150,7 +150,35 @@
 		    (prof_sc #'py-profile-space-count)
 		    (prof_tc #'py-profile-time-count)
 		    (prof_sg #'py-profile-space-graph)
-		    (prof_tg #'py-profile-time-graph))))
+		    (prof_tg #'py-profile-time-graph)
+		    
+		    (craise (lambda (exc)  ;; `continuable raise'
+			      (with-simple-restart (continue "Resume execution")
+				(error (if (typep exc 'class) (make-instance exc) exc)))))
+		    
+		    #+py-exception-stack
+		    (active_excepts (lambda ()
+				      (make-py-list-from-list
+				       (mapcar #'make-tuple-from-list *active-excepts*))))
+		    
+		    #+py-exception-stack
+		    (catched (lambda (exc)
+			       (block catched
+				 (dolist (x *active-excepts*)
+				   (dolist (e x)
+				     (when (subtypep exc e) 
+				       (return-from catched *True*))))
+				 *False*)))
+		    
+		    #+py-exception-stack
+		    (exp_catched (lambda (exc)
+				   (block catched
+				     (dolist (x *active-excepts*)
+				       (dolist (e x)
+					 (when (eq exc e) 
+					   (return-from catched *True*))))
+				     *False*)))
+		    )))
 
 (make-clpy-module)
 

@@ -150,7 +150,7 @@
 
 (defmethod internal-get-attribute :around (x attr)
   (assert (symbolp attr))
-  (cond ((eq attr '__class__) (values (pyb:type x) t))   ;; a bit hackish
+  (cond ((eq attr '__class__) (values (py-type x) t))   ;; a bit hackish
 	
 	((and (eq attr '__mro__)
 	      (typep x 'class)) (values (__mro__ x) t))
@@ -177,14 +177,29 @@
 	 (values nil nil))))
 
 
-(defmethod internal-get-attribute ((x py-bound-super) attr)
-  (with-slots (class inst) x
-    (multiple-value-bind (val found)
-	(getattr-of-class-rec class attr)
-      (if found
-	  (values (maybe-bind val inst (class-of inst)) t)
-	(values nil nil)))))
-  
+(defmethod internal-get-attribute ((x py-super) attr)
+  (flet ((find-preceding-class-in-mro (mro cls)
+	   (check-type mro list)
+	   (check-type cls class)
+	   (loop for sublist on mro 
+	       when (eq (car sublist) cls)
+	       do (if (cdr sublist)
+		      (return-from find-preceding-class-in-mro (second sublist))
+		    (py-raise 'TypeError "In mro ~A, there is no class before ~A"
+			      mro cls))
+	       finally
+		 (error "find-preceding-class-in-mro strangeness"))))
+    
+    ;; XXX check when attribute is static method and super is bound to class
+    (with-slots (object current-class) x
+      (let ((klass (find-preceding-class-in-mro
+		    (py-class-mro (if (typep object 'class) object (class-of object)))
+		    current-class)))
+	(multiple-value-bind (val found)
+	    (getattr-of-class-rec klass attr)
+	  (if found
+	      (values (maybe-bind val object klass) t)
+	    (values nil nil)))))))
 
 (defmethod internal-get-attribute ((x number) attr)
   (getattr-of-number x attr))
@@ -333,7 +348,7 @@
 	do (multiple-value-bind (val found)
 	       (getattr-of-class-nonrec cls '__getattribute__)
 	     (when found
-	       (break "__getattribute__ found: ~A ~A ~A ~A" x cls val found)
+	       #+(or)(break "__getattribute__ found: ~A ~A ~A ~A" x cls val found)
 	       (return-from getattr-of-instance-rec
 		 (values (py-call (maybe-bind val x (class-of x)) (list (string attr)))
 			 t))))

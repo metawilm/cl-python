@@ -15,8 +15,9 @@
     '(def class return yield lambda
       and or not for in is
       print import from as assert break continue global del exec pass
-      try except finally raise
-      if elif else while #+(or)clpy))
+      try except finally raise 
+      if elif else while
+      ))
 
 (defgrammar python-grammar (grammar)
   ()
@@ -48,7 +49,7 @@
 	    and or not for in is
 	    print import from as assert break continue global del exec pass
 	    try except finally raise
-	    if elif else while #+(or)clpy)
+	    if elif else while)
   )
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
@@ -193,7 +194,7 @@
  (raise-stmt (raise test) ((list $1 $2 nil nil)))
  (raise-stmt (raise test |,| test) ((list $1 $2 $4 nil)))
  (raise-stmt (raise test |,| test |,| test) ((list $1 $2 $4 $6)))
-
+ 
  ;; "import" module ["as" name] ( "," module ["as" name] )*
  (import-stmt :or import-normal import-from)
  (import-normal (import dotted-as-name comma--dotted-as-name*) (`(import (,$2 ,@$3))))
@@ -316,11 +317,8 @@
        ((|`| testlist1 |`|) . ((list 'backticks $2)))
        ((identifier) . ((list 'identifier $1)))
        ((number) . ($1))
-       ((string+) . ($1))
-       #+(or)((clpy-expr) . ($1)))
+       ((string+) . ($1)))
 
- #+(or)(clpy-expr (clpy) (`(inline-lisp ,$1)))
-   
  (string+ (string) ($1))
  (string+ (string+ string) ((concatenate 'string $1 $2)))
 
@@ -1161,15 +1159,7 @@
 		  (let* ((read-id (read-identifier c))
 			 (token (intern read-id)))
 		    		    
-		    (cond #+(or)
-			  ((eq token 'clpy) ;; allows mixing Lisp code in Python files clpy(3) -> 3
-			   (let ((lisp-form (read)))
-			     (when *lex-debug*
-			       (format t "lexer returning Lisp form: ~s~%" lisp-form))
-			     (return-from lexer (values (tcode-1 (find-class 'python-grammar) 'clpy)
-							lisp-form))))
-			  
-			  ((member token '(u U  r R  ur uR Ur UR))
+		    (cond ((member token '(u U  r R  ur uR Ur UR))
 			   ;; u"abc"    : `u' stands for `Unicode string'
 			   ;; u + b     : `u' is an identifier
 			   ;; r"s/f\af" : `r' stands for `raw string'
@@ -1184,7 +1174,7 @@
 			     (if (and ch (member ch '(#\' #\")))
 				 (lex-return string (read-string ch :unicode is-unicode :raw is-raw))
 			       (progn
-				 (unread-char ch)
+				 (when ch (unread-char ch))
 				 (lex-return identifier token)))))
 				  
 			  ((member token *reserved-words* :test #'eq)

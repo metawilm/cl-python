@@ -131,7 +131,8 @@
 		      (when ast
 			(assert (eq (first ast) 'file-input))
 			(when (and (= (length ast) 2)
-				   (member (caar (second ast)) '(testlist assign-expr) :test 'eq))
+				   (member (caar (second ast))
+					   '(testlist assign-expr import) :test 'eq))
 			  (show-ast ast)
 			  (eval-print-ast ast)
 			  (setf acc nil)))))))))))))))

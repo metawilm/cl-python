@@ -118,7 +118,15 @@
 			     (make-static-method #'__new__))
 
 
+(defmethod py-type (x)
+  (__class__ x))
+
+
 (defmethod python-type-__new__ (metaclass &optional name bases dict)
+  
+  (when (not (or name bases dict)) ;; "type(x) -> <type-of-x>"
+    (return-from python-type-__new__ (py-type metaclass)))
+    
   (if (subtypep metaclass 'python-type)
       
       ;; Create a class with this as metaclass
@@ -180,6 +188,10 @@
 
 
 (defgeneric __getattribute__ (x attr) (:documentation "Intercepts all attribute lookups"))
+
+(defmethod __getattribute__ :around (x (attr string))
+  (__getattribute__ x (intern attr #.*package*)))
+
 (defmethod __getattribute__ (x attr)
   (or (internal-get-attribute x attr)
       (py-raise 'AttributeError "~A ~A" x attr)))
@@ -392,8 +404,7 @@
     (
      ;; CPython prints *sys-neg-maxint* <= x <= *sys-pos-maxint* as X,
      ;; outside that range as XL:  3 vs 3L. Let's not bother.
-     (__repr__     (format nil "~A" (coerce x 'long-float)))
-			    ;; do floats like `3.1d0' don't print `d', etc
+     (__repr__     (format nil "~A" x))
      
      (__nonzero__  (lisp-val->py-bool (/= x 0)))
      (__neg__      (- x))
@@ -503,7 +514,13 @@
     py-real real (slot-value x 'val)
     ((__int__     (make-int (truncate x))) ;; CPython: returns a long int for X large enough
      (__long__    (make-int (truncate x))) ;; CPython: returns long int
-     (__float__   (make-float x))))
+     (__float__   (make-float x))
+     
+     (__repr__    (let ((x (if (floatp x) ;; for floats like `3.1d0' don't print `d', etc
+			       (coerce x 'long-float)
+			     x)))
+		    (format nil "~A" x)))
+     ))
 
 (loop for name in `(__int__ __long__ __float__)
     do (loop for cls in `(,(find-class 'real) ,(find-class 'py-real))
@@ -521,7 +538,7 @@
      (__ge__  (>= x y))
      (__mod__ (mod x y))
      (__rmod__ (mod y x))
-     
+ 
      ;; As FLOOR takes REAL arguments, not COMPLEX, some operations
      ;; that Python allows (although they are deprecated) on complexes
      ;; are not allowed here.
@@ -772,7 +789,8 @@
      
      ;; string representations
      (__oct__  (format nil "0~O" x))
-     (__hex__  (format nil "0x~X" x))))
+     (__hex__  (format nil "0x~X" x))     
+     ))
 
 (loop for name in `(__invert__ __hash__ __complex__ __int__ __long__ __float__ __oct__ __hex__)
     do (loop for cls in `(,(find-class 'integer) ,(find-class 'py-int))
@@ -3390,12 +3408,20 @@
 ;; Super
 
 (defclass py-super (builtin-object)
-  ()
+  ((object :initarg :object)
+   (current-class :initarg :current-class))
   (:metaclass builtin-class))
 
 (mop:finalize-inheritance (find-class 'py-super))
 
+;; super( <B class>, <C instance> ) where C derives from B:
+;;   :instance = <C instance>
+;;   :current-class = <B class>
+
+#+(or) ;; old
 (defmethod py-super-__new__ (cls type &optional obj)
+  (break "super.__new__")
+  (assert (subtypep cls (find-class 'py-super)))
   (if (eq cls (find-class 'py-super))
       (if obj
 	  (make-bound-super type obj)
@@ -3403,31 +3429,49 @@
     (progn (assert (subtypep cls (find-class 'py-super)))
 	   (error "todo: super(...) with cls != py-super"))))
 
+#+(or) ;; old
 (register-bi-class-attr/meth (find-class 'py-super) '__new__
 			     (make-static-method #'py-super-__new__))
 
-(defclass py-unbound-super (py-super)
-  ((class :initarg :class))
-  (:metaclass builtin-class))
+;; A typical use for calling a cooperative superclass method is:
+;; 
+;;  class C(B):
+;;    def meth(self, arg):
+;;      super(C, self).meth(arg)
 
-(mop:finalize-inheritance (find-class 'py-unbound-super))
+(defmethod py-super-__new__ (cls class-arg &optional second-arg)
+  (assert (subtypep cls (find-class 'py-super)))
+  
+  (cond ((not (typep class-arg 'class))
+	 (py-raise 'TypeError
+		   "First arg to super.__new__() must be class (got: ~A)" class-arg))
+	 
+	((null second-arg)
+	 (warn "super() with one arg is TODO, but faking anyway")
+	 (lambda (sec-arg) (py-super-__new__ cls class-arg sec-arg)))
+	  
+	((typep second-arg class-arg)
 
-(defmethod make-unbound-super ((cls class))
-  (make-instance 'py-unbound-super :class cls))
+	 ;; like:  super( <B class>, <C instance> )
+	 ;; in the CPL of class C, find the class preceding class B
+	 ;; 
+	 ;; CPython returns a `super' instance and not directly the
+	 ;; class to allow subclassing class `super' and overriding
+	 ;; the __getattribute__ method.
+	 
+	 (make-instance cls :object second-arg :current-class class-arg))
+	 
+	((typep second-arg 'class)
+	 (unless (subtypep second-arg class-arg)
+	   (py-raise 'TypeError "Calling `super' with two classes: second must ~@
+                                  be subclass of first (got: ~A, ~A)"
+		     class-arg second-arg))
+	 (make-instance cls :object second-arg :current-class class-arg))
+	
+	(t (error "TODO super clause"))))
 
-
-(defclass py-bound-super (py-super)
-  ((class :initarg :class) ;; from which class to get the attribute
-   (inst  :initarg :inst))
-  (:metaclass builtin-class))
-
-(mop:finalize-inheritance (find-class 'py-bound-super))
-
-(defmethod make-bound-super ((cls class) obj)
-  (if (typep obj 'class)
-      (error "todo: super(...  , <type>)") ;; unbound super?  whatever that means...
-    (progn (assert (typep obj cls))
-	   (make-instance 'py-bound-super :class cls :inst obj))))
+(register-bi-class-attr/meth (find-class 'py-super) '__new__ 
+			     (make-static-method #'py-super-__new__))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Type

@@ -1,7 +1,27 @@
-(in-package :user)
+(when (eq *package* (find-package :python))
+  (error "load package.cl when you're in another *package* than :python!"))
 
-(if (find-package :python)
-    (delete-package :python))
+(in-package :user) ;; needed?
+
+(when (find-package :python)
+  (delete-package :python))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Features to be included
+;;  
+;;  Some of them aid during debugging of Lisp or Python code, but slow
+;;  down execution.
+
+#.(progn
+    (loop for (feat yes) in
+	  '((:py-exception-stack t) ;; enables assertions about outstanding exception handlers
+	    ;; ...more?
+	    )
+	when yes do (pushnew feat *features*))
+    nil)
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Package definitions
 
 (defpackage :python
   (:documentation "An implementation of the Python programming language.")
@@ -42,7 +62,7 @@
    :delattr :dir :divmod :eval :execfile :filter :getattr :globals
    :hasattr :hash :hex :id :input :intern :isinstance :issubclass
    :iter :len :locals :map :max :min :oct :ord :pow :range :raw_input
-   :reduce :reload :repr :round :setattr :sorted :sum :super :type
+   :reduce :reload :repr :round :setattr :sorted :sum #+(or):type
    :unichr :vars :zip))
 
 (defpackage :python-builtin-types

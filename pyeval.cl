@@ -4,10 +4,12 @@
 (defparameter *__debug__* 1) ;; CPython readonly variable `__debug__' (see EVAL-ASSERT)
 (defparameter *__future__.division* nil)
 
-
-#+(or) ;; namespace re-use optimization
+#+(or) ;; namespace re-use optimization: not worth it?
 (defparameter *namespace-cache* (make-array 100 :fill-pointer 0 :adjustable nil))
-    
+
+#+py-exception-stack
+(defparameter *active-excepts* nil)
+
 ;;; Evaluation
 
 (defun user-py-eval (ast &optional namespace)
@@ -167,8 +169,6 @@
   ;; evaluated after an exception is thrown, not earlier; so long as
   ;; there is no exception thrown, it is not evaluated.
 
-  ;; XXX todo: `class' may be a tuple, catching all exceptions in the tuple.
-  
   (handler-bind 
       ;; Not handler-case: we don't want to unwind for uncatched exceptions
       ((Exception (lambda (exc)
@@ -201,9 +201,24 @@
     ;; handler-bind handlers takes control, the handler above for
     ;; Exception is not active anymore.
     
+    #-py-exception-stack
     (with-py-error-handlers
-	(py-eval-1 suite)))
+	(py-eval-1 suite))
 
+    #+py-exception-stack
+    (loop with excepts = ()
+	for ((cls/tuple nil) nil) in except-clauses
+	do (if (null cls/tuple)
+	       (push (find-class 'Exception) excepts) ;; bare `except: ...'
+	     (let ((ecls/tuple (py-eval-1 cls/tuple)))
+	       (etypecase ecls/tuple
+		 (class (push ecls/tuple excepts))
+		 (py-tuple (dolist (cls (tuple->lisp-list ecls/tuple))
+			     (push cls excepts))))))
+	finally (let ((*active-excepts* (cons (nreverse excepts) *active-excepts*)))
+		  (with-py-error-handlers
+		      (py-eval-1 suite)))))
+		  
   (when else-clause
     (py-eval-1 else-clause)))
 
