@@ -382,55 +382,60 @@
 		(if step (py-eval step) *None*))))
 
 
-
-
 (defun eval-call (primary args)
-  (let ((eprim (py-eval primary))) ;; XX check order of this eval
-    (if (null args)
-	
-	(__call__ eprim () ())
+  (let ((eprim (py-eval primary)))
+    
+    ;; f(1, 2, b=3, c=4, *(1,2), **{'q':6})
+    ;; corresponds with ARGS:
+    ;; (1 2 (= b 3) (= c 4) (* (testlist ...)) (** (dict ...)))
+    
+    (when (null args)
+      (return-from eval-call (__call__ eprim)))
+    
+    (let* ((x (pop args))
+	   
+	   (pos-args  (loop while (eq (car x) 'pos)
+			  collect (py-eval (second x))
+			  do (setf x (pop args))))
+	   
+	   (kw-args   (loop while (eq (car x) 'key)
+			  collect (cons (second x) (py-eval (third x)))
+			  do (setf x (pop args))))
       
-      (let* ((*-arg (find '* args :key (lambda (x) (when (consp x)
-						     (car x)))))
-	     (**-arg (find '** args :key (lambda (x) (when (consp x)
-						       (car x)))))
-	     (temp-key-args (loop for a in args
-				when (and (consp a)
-					  (eq (car a) '=))
-				collect a))
-	     
-	     (key-args (mapcar (lambda (a)
-				 (destructuring-bind (= key val)
-				     a
-				   (declare (ignore =))
-				   (assert (eq (car key) 'identifier) ()
-				     "for key=val arg, supply simple varname as ~
-                                      key (got: ~A)" a)
-				   (cons (second key) val)))
-			       temp-key-args))
-	     
-	     (pos-args (remove *-arg (remove **-arg
-					     (let ((x args))
-					       (dolist (a temp-key-args)
-						 (setf x (delete a x)))
-					       x)))))
-	     
-	(setf *-arg (second *-arg)  ;; remove leading stars in list
-	      **-arg (second **-arg))
-	
-	#+(or)(format t "EVAL-CALL: pos: ~A  key: ~A  *: ~A  **: ~A~%" 
-		      pos-args key-args *-arg **-arg)
+	   (*-arg     (when (eq (car x) '*)
+			(prog1 (py-eval (second x))
+			  (setf x (pop args)))))
+	      
+	   (**-arg    (when (eq (car x) '**)
+			(py-eval (second x)))))
+      
+      (assert (null args))
+      
+      #+(or)(break "between: pos=~A, kw=~A, *=~A, **-~A" pos-args kw-args *-arg **-arg)
 	  
-	(setf pos-args (mapcar #'py-eval pos-args)
-	      pos-args (append pos-args (when *-arg
-					  (slot-value (py-eval *-arg) 'list)))
-	      key-args (loop for (k . v) in key-args
-			   collect `(,k . ,(py-eval v)))
-	      key-args (append key-args (when **-arg
-					  (dict->alist (py-eval **-arg)))))
-	;; **-arg can only contain already evaluated stuff, is the assumption
-	#+(or)(format t "call: ~A~%" `(__call__ ,eprim ,pos-args ,key-args))
-	(__call__ eprim pos-args key-args)))))
+      (when *-arg
+	(setf pos-args (nconc pos-args (py-iterate->lisp-list *-arg))))
+      
+      (when **-arg
+	(check-type **-arg py-dict "a dictionary (subclass) instance")
+	(loop for (key . val) in (dict->alist **-arg)
+	    with key-py-obj
+	    with key-symbol
+	    
+	    do (setf key-py-obj (convert-to-py-object key))
+	       
+	       (if (typep key-py-obj 'py-string)
+		   (setf key-symbol (py-string->symbol key-py-obj))
+		 (py-raise 'TypeError "**-argument in function call must be a dictionary with strings as keys ~@
+                                       (got as key: ~S)" key-py-obj))
+	       ;; XXX improve this conversion stuff if it's inefficient
+	       
+	    when (assoc key-symbol kw-args)
+	    do (py-raise 'ValueError "Keyword ~S appeared more than once in call" key-py-obj)
+	       
+	    do (push (cons key-symbol val) kw-args)))
+      
+      (__call__ eprim pos-args kw-args))))
 
 
 (defun eval-for-in (targets sources suite else-suite)

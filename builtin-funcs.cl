@@ -27,18 +27,12 @@
 (defun pyb:apply (function &optional pos-args kw-dict)
   "Apply FUNCTION (a callable object) to given args. ~@
    POS-ARGS is any iterable object; KW-DICT must be of type PY-DICT." 
+  
   (warn "Function 'apply' is deprecated; use extended call ~@
          syntax instead:  f(*args, **kwargs)")
-  (let ((pos (when pos-args (py-iterate->lisp-list pos-args)))
-	(kw (when kw-dict
-	      (check-type kw-dict py-dict)
-	      (loop for (key . val) in (dict->alist kw-dict)
-		  with key-py-obj
-		  do (setf key-py-obj (convert-to-py-object key))
-		     (unless (typep key-py-obj 'py-string)
-		       (py-raise 'TypeError "APPLY keyword dictionary keys must be strings (got: ~S)" key-py-obj))
-		  collect (cons (py-string->symbol key-py-obj) val)))))
-    (__call__ function pos kw)))
+  
+  (eval-call function `( ,@(when pos-args `((* ,pos-args)))
+			   ,@(when kw-dict) `((** ,kw-dict)))))
 
 
 (defun pyb:callable (x)
