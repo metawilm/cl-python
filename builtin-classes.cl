@@ -92,11 +92,19 @@
   (:documentation "Create a new instance of class CLS"))
 
 (defmethod __new__ ((cls class) &rest args)
+  (break "__new__ class: correct?")
   (when args
     (warn (format nil "Default __new__ ignoring args: ~A" args)))
   (make-instance cls))
 
 (register-bi-class-attr/meth (find-class 'class) '__new__ (make-static-method #'__new__))
+
+#+(or)
+(defmethod python-type-__new__ (metaclass name bases dict)
+  (assert (subtypep metaclass 'python-type))
+  TODO)
+  
+
 
 
 (defgeneric __init__ (x &rest args)

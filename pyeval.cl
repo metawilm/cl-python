@@ -806,6 +806,7 @@
   ;; called.
   
   (assert (eq (car inheritance) 'testlist))
+  
   (let* ((ns (make-namespace :name (format nil "<ns for class ~A>" cname)
 			     :inside *scope*))
 	 
@@ -816,28 +817,43 @@
 			       (py-raise 'TypeError
 					 "Cannot have non-classes in ~
                                           superclass list (got: ~A)" c))))
-			 (second inheritance)))
-				       
-	 (c (make-python-class :name cname
-			       :module "ModuleName"
-			       :supers supers
-			       :namespace ns)))
-    
-    ;; In the current namespace, the name of the class that is defined
-    ;; now becomes bound to the class object that results from
-    ;; evaluating the classdef.
-    (namespace-bind *scope* cname c)
+			 (second inheritance))))
     
     ;; Evaluate SUITE now, in the new namespace inside the class:
     ;; methods and class attributes are defined in it, plus there may
     ;; be other side effects.
+    ;; 
+    ;; Need to do this now, in order for __slots__ to possible be
+    ;; bound, usedin the next step. (XXX Check order ok)
+    
     (when suite
       (let ((*scope* ns))
 	(py-eval suite)))
     
-    ;; Finally, return the class (purely for debuggin: classdef has no
-    ;; return value, as it is a stmt, not an expr.
-    c))
+    (multiple-value-bind (slots has-slots)
+	(multiple-value-bind (val found)
+	    (namespace-lookup ns '__slots__)
+	  (if found
+	      (values (mapcar (lambda (name) (intern (typecase name
+						       (string name)
+						       (py-string (slot-value name 'string)))
+						     #.*package*))
+			      (py-iterate->lisp-list val))
+		      t)
+	    (values nil nil)))
+    
+      (let* ((doc (or (namespace-lookup ns '__doc__) *None*))
+	     (c (make-python-class :name cname :module "ModuleName" :supers supers
+				  :slots slots :has-slots has-slots :namespace ns :documentation doc)))
+      
+	;; In the current namespace, the name of the class that is defined
+	;; now becomes bound to the class object that results from
+	;; evaluating the classdef.
+	(namespace-bind *scope* cname c)
+    
+	;; Finally, return the class (purely for debuggin: classdef has no
+	;; return value, as it is a stmt, not an expr.
+	c))))
 
 
 (defun read-file (filename)

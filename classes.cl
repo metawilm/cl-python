@@ -179,7 +179,7 @@
 ;; classes, and the value of __slots__.
 
 (defun make-python-class (&key name (module "ModuleName")
-			       (supers nil) (slots nil slots-p)
+			       (supers nil) (slots nil) (has-slots nil)
 			       (documentation nil) (namespace nil))
 
   ;; All classes that are accessible from within Python
@@ -207,9 +207,9 @@
   ;;  ('a')              ->   slots=['a']   (no dict) -- only allow `a', which has its own slot
   ;;  <absent>           ->   slots=['__dict__']      -- everything in dict
 
-  (let* ((inst-have-dict (or (not slots-p)
-			     (and slots-p (member '__dict__ slots))))
-	 (the-other-slots (loop 
+  (let* ((inst-have-dict (or (not has-slots)
+			     (and has-slots (member '__dict__ slots))))
+	 (the-other-slots (loop
 			      with lst = slots
 			      for s in '(__dict__ __slots__ __name__)
 			      do (setf lst (remove s lst :test 'eq))
