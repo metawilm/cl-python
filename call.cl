@@ -4,10 +4,44 @@
 
 ;;; Calling objects
 
-(defgeneric py-call (x &optional pos-args kwds-args)
+(defgeneric py-call (x &optional pos-args kwd-args)
   (:documentation "Call X with given arguments. Call arg rewriting must take ~@
                    place _before_ calling PY-CALL")) ;; or in py-call :AROUND ?
 
+
+(defvar *traced-objects* (make-hash-table :test 'eq))
+(defvar *trace-print-level* 0)
+
+(defmethod py-call :around (x &optional pos-args kwd-args)
+  (if (gethash x *traced-objects*)
+      (progn
+	(dotimes (i *trace-print-level*)
+	  (format t "  "))
+	(format t "[~A]  ~A ~A ~{~A~}~%" 
+		*trace-print-level*
+		(py-str x)
+		(mapcar #'py-str pos-args)
+		(loop for (k . v) in kwd-args 
+		    collect `(,k = ,(py-str v))))
+	(let ((unwinded t))
+	  (unwind-protect
+	      (let* ((res (catch 'function-block
+			    (let ((*trace-print-level* (+ 1 *trace-print-level*)))
+			      (call-next-method)))))
+		(setf unwinded nil)
+		(dotimes (i *trace-print-level*)
+		  (format t "  "))
+		(format t "[~A]  returned ~A~%" *trace-print-level* (py-str res))
+		(return-from py-call res))
+	    (when unwinded
+	      (format t "TR: ... unwound (perhaps caused by exception)~%")))))
+    (call-next-method)))
+
+(defmethod py-trace (x)
+  (setf (gethash x *traced-objects*) t))
+
+(defmethod py-untrace (x)
+  (remhash x *traced-objects*))
 
 ;; None of the built-in functions take keyword argument, so give an
 ;; error in case kw args are supplied.
@@ -28,9 +62,10 @@
 
 ;;; user-defined functions/methods:   
 
-(defmethod py-call :around ((x user-defined-function) &optional pos-args key-args)
+(defmethod py-call ((x user-defined-function) &optional pos-args key-args)
   "Evaluate function body in function definition namespace."
-  (declare (ignore pos-args key-args))
+  
+  #+(or)(declare (ignore pos-args key-args))
   
   ;; If the AST contains `return', it exists from this FUNCTION-BLOCK
   ;; (or a FB inside this one). `return' can only occur inside a
@@ -39,12 +74,33 @@
   ;; 
   ;; TODO: rewrite function body to contain block as `return' target
 
-  (catch 'function-block
-    (call-next-method)
-    *None*))
+  (with-slots (call-rewriter namespace ast) x
+    (let ((actual-args (funcall call-rewriter pos-args key-args))
+	  (namespace-copy (namespace-copy namespace)))
+      
+      ;; Copying the function namespace for every call is expensive,
+      ;; but otherwise recursive programs don't work right as
+      ;; different calls mess with each others local variables.
+      
+      ;; Evaluate function AST in the function definition namespace
+      ;; extended with the current argument values.
+      
+      (loop for (arg . val) in actual-args
+	  do (namespace-bind namespace-copy arg val))
+      
+      (let ((*scope* namespace-copy))
+	(declare (special *scope*))
+	(catch 'function-block
+	  (py-eval ast))))))
+
+    
+    #+(or)(call-next-method)
+    #+(or)*None* ;; `add-return-None-to-suite' in pyeval.cl makes this obsolete
+     
 
 
 (defmethod py-call ((x python-function) &optional pos-args key-args)
+
   ;; used in user-defined functions
   (with-slots (call-rewriter namespace ast) x
     (let ((actual-args (funcall call-rewriter pos-args key-args)))

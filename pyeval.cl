@@ -159,7 +159,7 @@
       ;; Not handler-case: we don't want to unwind for uncatched exceptions
       ((Exception (lambda (exc)
 		    (loop for ((cls/tuple parameter) handler-form) in except-clauses
-			do (when (and cls/tuple  ;; not a bare `except:'
+			do (cond ((and cls/tuple  ;; `except Something:'  where Something a class or tuple
 				      (let ((ecls/tuple (py-eval cls/tuple)))
 					(typecase ecls/tuple
 					  (class    (typep exc ecls/tuple))
@@ -170,11 +170,17 @@
 					  (t (warn "Non-class as `except' specializer: ~S"
 						   ecls/tuple)
 					     nil))))
-			     (when parameter
-			       (assert (eq (first parameter) 'identifier))
-			       (namespace-bind *scope* (second parameter) exc)) ;; right scope??
-			     (py-eval handler-form)
-			     (return-from eval-try-except nil))))))
+				  (when parameter
+				    (assert (eq (first parameter) 'identifier))
+				    (namespace-bind *scope* (second parameter) exc)) ;; right scope??
+				  (py-eval handler-form)
+				  (return-from eval-try-except nil))
+				 
+				 ((null cls/tuple) ;; a bare `except:' matches all exceptions
+				  (py-eval handler-form)
+				  (return-from eval-try-except nil))
+				 
+				 (t (error "assumed unreachable")))))))
     
     ;; The `py-error-handlers' were already set in py-eval. Need to
     ;; set them here again, because when one of the py-eval
@@ -211,7 +217,7 @@
 	 (error "TODO: reraise previous exception"))
 
 	((typep first 'class)
-	 (warn "raise c")
+	 #+(or)(warn "raise c")
 	 ;; "If the first object is a class, it becomes the type of
 	 ;; the exception.
 	 ;; 
@@ -754,7 +760,7 @@
     (let* ((params (multiple-value-list (parse-function-parameter-list params)))
 	   (f (make-user-defined-function 
 	       :name (symbol-name fname)
-	       :ast suite
+	       :ast (add-return-None-to-suite suite)
 	       :namespace (make-namespace
 			   :name (format nil "ns for function ~A" fname)
 			   :inside *scope*)
@@ -766,6 +772,13 @@
       (namespace-bind *scope* fname f)))
   *None*)
 
+(defun add-return-None-to-suite (suite)
+  (assert (eq (car suite) 'suite))
+  (destructuring-bind
+      (dummy (&rest suites)) suite
+    (declare (ignore dummy))
+    `(suite (,@suites (return (testlist ((identifier None)) nil))))))
+  
 (defun eval-lambda (params expr)
   (let ((parsed-params (multiple-value-list (parse-function-parameter-list params))))
     #+(or)(break "lambda")

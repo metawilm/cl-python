@@ -53,7 +53,7 @@
 (defun get-py-iterate-fun (object)
   "Return a function that when called returns VAL, T, where VAL is the next value ~@
    gotten by iterating over OBJECT. Returns NIL, NIL upon exhaustion."
-
+  
   ;; Using __iter__ is the prefered way.
   (multiple-value-bind (iter-meth found)
       (getattr-of-class object '__iter__)
@@ -69,12 +69,11 @@
 	  
 	  (unless next-meth
 	    (py-raise 'TypeError "Got invalid iterator (no `next' method): ~A" iterator))
-	  
 	  (labels ((get-next-val-fun ()
-		     (handler-case (values (py-call next-meth (list iterator)))
-		       (StopIteration () (values nil nil))
-		       (:no-error (val)  (values val t)))))
-	    (lambda () (get-next-val-fun))))
+		       (handler-case (values (py-call next-meth (list iterator)))
+			 (StopIteration () (values nil nil))
+			 (:no-error (val)  (values val t)))))
+	      (lambda () (get-next-val-fun))))
       
       ;; Fall-back: __getitem__ with successive integers, starting from 0.
       ;; 

@@ -93,11 +93,65 @@
     (add-method (ensure-generic-function 'py-call) meth)
     (format t ";; ~A is now traced~%" (py-str f))))
 
+(defmethod py-time (x)
+  (time (py-call x))
+  (terpri))
+
+(defmethod py-profile-count (x)
+  (prof:with-profiling (:count t)
+    (py-call x))
+  (terpri)
+  (prof:show-call-counts))
+
+(defmethod py-profile-space-graph (x)
+  (prof:with-profiling (:type :space)
+    (py-call x))
+  (terpri)
+  (prof:show-call-graph))
+  
+(defmethod py-profile-time (x)
+  (prof:with-profiling (:type :time)
+    (py-call x))
+  (terpri)
+  (prof:show-flat-profile))
+
+(defmethod py-profile-time-graph (x)
+  (prof:with-profiling (:type :time)
+    (py-call x))
+  (terpri)
+  (prof:show-call-graph))
+
+(defmethod py-profile-space (x)
+  (prof:with-profiling (:type :space)
+    (py-call x))
+  (terpri)
+  (prof:show-flat-profile))
+
+(defmethod py-profile-space-count (x)
+  (prof:with-profiling (:type :space :count t)
+    (py-call x))
+  (terpri)
+  (prof:show-flat-profile))
+
+(defmethod py-profile-time-count (x)
+  (prof:with-profiling (:type :time :count t)
+    (py-call x))
+  (terpri)
+  (prof:show-flat-profile))
 
 (defun make-clpy-module ()
   (make-std-module clpy
-		   ((brk  (lambda () (break)))
-		    #+(or)(trace #'clpy.trace))))
+		   ((brk  (lambda () (break))) ;; `break' is a reserved word
+		    (trace #'py-trace)
+		    (untrace #'py-untrace)
+		    (time #'py-time)
+		    (prof_c #'py-profile-count)
+		    (prof_t #'py-profile-time)
+		    (prof_s #'py-profile-space)
+		    (prof_sc #'py-profile-space-count)
+		    (prof_tc #'py-profile-space-count)
+		    (prof_sg #'py-profile-space-graph)
+		    (prof_tg #'py-profile-time-graph))))
 
 (make-clpy-module)
 
