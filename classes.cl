@@ -26,6 +26,8 @@
  'python-type
  :direct-superclasses (mapcar #'find-class '(python-object standard-class)))
 
+;; TODO: PYTHON-TYPE is a both a subclass and an instance of PYTHON-OBJECT.
+
 (mop:finalize-inheritance (find-class 'python-type))
 (mop:finalize-inheritance (find-class 'python-object))
 
@@ -57,8 +59,9 @@
   (:documentation "A potentially heavily optimized Python class"))
 
 
-;; Class PYTHON-OBJECT is itself a builtin-object.
-;; This seems to work right...
+;; Class PYTHON-OBJECT is an instance of BUILTIN-CLASS (which is a subclass of PYTHON-TYPE),
+;; but PYTHON-OBJECT is not a subclass of PYTHON-TYPE.
+
 (mop:ensure-class-using-class 
  (find-class 'python-object)
  'python-object
