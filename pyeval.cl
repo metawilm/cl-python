@@ -44,99 +44,108 @@
     (py-eval ast)))
 
 
+(defvar *py-eval-handler-set* nil)
+
 (defun py-eval (ast)
   "Evaluate AST. Assumes *scope* is set appropriately."
 
-  ;; During evaluation, Lisp errors may be signaled. They are
-  ;; converted to the corresponding Python exception, where
-  ;; appripriate.
-  ;; TODO: move this to the places where it can actually occur...
-  (handler-bind 
-      ((division-by-zero (lambda (c) (declare (ignore c))
-				 (py-raise 'ZeroDivisionError
-					   "Division or modulo by zero"))))
-    (typecase ast
-      (python-object (return-from py-eval ast)) ;; already evaluated
-      (python-type (return-from py-eval ast))
-      (number (return-from py-eval ast)) ;; Lisp objects (for efficiency)
-      (string (return-from py-eval ast))
-      ((and symbol
-	(not (eql nil)))
-       (return-from py-eval ast)) ;; string designator
-      ((eql nil) (error "PY-EVAL of NIL")))
+  ;; During evaluation of Python code, a some Lisp errors may
+  ;; occur. Some of them are catched and converted to the
+  ;; corresponding Python exception.
+  (flet ((do-py-eval (ast)
+	   (typecase ast
+	     (python-object (return-from py-eval ast)) ;; already evaluated
+	     (python-type (return-from py-eval ast))
+	     (number (return-from py-eval ast)) ;; Lisp objects (for efficiency)
+	     (string (return-from py-eval ast))
+	     ((and symbol
+	       (not (eql nil)))
+	      (return-from py-eval ast)) ;; string designator
+	     ((eql nil) (error "PY-EVAL of NIL")))
     
-    (when (eql ast (find-class 'python-type))
-      (return-from py-eval ast))
+	   (when (eql ast (find-class 'python-type))
+	     (return-from py-eval ast))
     
-    (case (car ast)
-      (inline-lisp (eval-inline-lisp (second ast)))
-      (file-input (apply #'eval-file-input (cdr ast)))
-      (testlist (apply #'eval-testlist (cdr ast)))
+	   (case (car ast)
+	     (inline-lisp (eval-inline-lisp (second ast)))
+	     (file-input (apply #'eval-file-input (cdr ast)))
+	     (testlist (apply #'eval-testlist (cdr ast)))
     
-      ;; special hook for inserting Lisp code directly in AST
-      ;; (implicit PROGN)
-      #+(or)(lisp (eval `(progn ,@(cdr ast))))
+	     ;; special hook for inserting Lisp code directly in AST
+	     ;; (implicit PROGN)
+	     #+(or)(lisp (eval `(progn ,@(cdr ast))))
 	   
-      ;; these bind names and create new scope:
-      (module (apply #'eval-module "mod_name_here" (cdr ast)))
-      (funcdef (apply #'eval-funcdef (cdr ast)))
-      (class (apply #'eval-classdef (cdr ast)))
+	     ;; these bind names and create new scope:
+	     (module (apply #'eval-module "mod_name_here" (cdr ast)))
+	     (funcdef (apply #'eval-funcdef (cdr ast)))
+	     (class (apply #'eval-classdef (cdr ast)))
       
-      (import (apply #'eval-import (cdr ast)))
-      (import-from (apply #'eval-import-from (cdr ast)))
+	     (import (apply #'eval-import (cdr ast)))
+	     (import-from (apply #'eval-import-from (cdr ast)))
 		   
-      (assign-expr (apply #'eval-assign-expr (cdr ast)))
-      (del (eval-del (second ast)))
+	     (assign-expr (apply #'eval-assign-expr (cdr ast)))
+	     (del (eval-del (second ast)))
 
-      (try-except (apply #'eval-try-except (cdr ast)))
-      (raise (apply #'eval-raise (cdr ast)))
+	     (try-except (apply #'eval-try-except (cdr ast)))
+	     (raise (apply #'eval-raise (cdr ast)))
     
-      ;; expressions:
-      (identifier (eval-identifier (second ast)))
-      (string (make-py-string (cdr ast)))
-      (number (check-type (cdr ast) number)
-	      (make-py-number (cdr ast)))
+	     ;; expressions:
+	     (identifier (eval-identifier (second ast)))
+	     (string (make-py-string (cdr ast)))
+	     (number (check-type (cdr ast) number)
+		     (make-py-number (cdr ast)))
     
-      (list (apply #'eval-list (cdr ast)))
-      (tuple (make-tuple-from-list (mapcar #'py-eval (cdr ast))))
-      (dict (eval-dict (second ast)))
-      (string-conversion (apply #'eval-string-conv (cdr ast)))
+	     (list (apply #'eval-list (cdr ast)))
+	     (tuple (make-tuple-from-list (mapcar #'py-eval (cdr ast))))
+	     (dict (eval-dict (second ast)))
+	     (string-conversion (apply #'eval-string-conv (cdr ast)))
     
-      (call (apply #'eval-call (cdr ast)))
+	     (call (apply #'eval-call (cdr ast)))
     
-      (comparison (apply #'eval-comparison (cdr ast)))
-      (unary (apply #'eval-unary (cdr ast)))
-      (binary (apply #'eval-binary (cdr ast)))
+	     (comparison (apply #'eval-comparison (cdr ast)))
+	     (unary (apply #'eval-unary (cdr ast)))
+	     (binary (apply #'eval-binary (cdr ast)))
     
-      (attributeref (apply #'eval-attributeref (cdr ast)))
-      (subscription (apply #'eval-subscription (cdr ast)))
+	     (attributeref (apply #'eval-attributeref (cdr ast)))
+	     (subscription (apply #'eval-subscription (cdr ast)))
     
-      ;;(simple-slice (apply #'eval-simple-slice (cdr ast)))
-      ;;(extended-slice (apply #'eval-extended-slice (cdr ast)))
-      (slice (eval-slice (cdr ast)))
+	     ;;(simple-slice (apply #'eval-simple-slice (cdr ast)))
+	     ;;(extended-slice (apply #'eval-extended-slice (cdr ast)))
+	     (slice (eval-slice (cdr ast)))
     
-      (lambda (apply #'eval-lambda (cdr ast)))
+	     (lambda (apply #'eval-lambda (cdr ast)))
     
-      (print (apply #'eval-print (cdr ast)))
-      (print>> (apply #'eval-print>> (cdr ast)))
+	     (print (apply #'eval-print (cdr ast)))
+	     (print>> (apply #'eval-print>> (cdr ast)))
     
-      (ellipsis *Ellipsis*)
+	     (ellipsis *Ellipsis*)
 
-      ;; statements
-      (pass) ;; nothing
-      (suite (eval-suite (second ast)))
+	     ;; statements
+	     (pass) ;; nothing
+	     (suite (eval-suite (second ast)))
       
-      (for-in (apply #'eval-for-in (cdr ast)))
-      (while (apply #'eval-while (cdr ast)))
-      (break (eval-break))
-      (continue (eval-continue))
-      (if (apply #'eval-if (cdr ast)))
+	     (for-in (apply #'eval-for-in (cdr ast)))
+	     (while (apply #'eval-while (cdr ast)))
+	     (break (eval-break))
+	     (continue (eval-continue))
+	     (if (apply #'eval-if (cdr ast)))
             
-      (return (eval-return (cadr ast)))
-      (assert (apply #'eval-assert (cdr ast)))
+	     (return (eval-return (cadr ast)))
+	     (assert (apply #'eval-assert (cdr ast)))
     
-      (t (error "uncatched in py-eval: ~S~%" ast))
-      )))
+	     (t (error "uncatched in py-eval: ~S~%" ast)))))
+
+    (if *py-eval-handler-set*
+	
+	(do-py-eval ast)
+
+      (handler-bind 
+	  ((division-by-zero (lambda (c) (declare (ignore c))
+				     (py-raise 'ZeroDivisionError
+					       "Division or modulo by zero"))))
+	(let ((*py-eval-handler-set* t))
+	  (do-py-eval ast))))))
+
 
 (defun eval-inline-lisp (form)
   (eval form))
