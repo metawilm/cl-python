@@ -20,13 +20,33 @@
 
 (defvar *py-eval-handler-set* nil)
 
+;; XXX todo: `global'
+
+(defmacro with-py-error-handlers (&body body)
+  `(handler-bind
+       ((division-by-zero
+	 (lambda (c)
+	   (declare (ignore c))
+	   (py-raise 'ZeroDivisionError "Division or modulo by zero")))
+	
+	#+allegro
+	(excl:synchronous-operating-system-signal
+	 (lambda (c)
+	   (if (string= (slot-value c 'excl::format-control)
+			"~1@<Stack overflow (signal 1000)~:@>")
+	       (py-raise 'RuntimeError "Stack overflow"))))
+	;; XXX more?
+	)
+     ,@body))
+     
+
 (defun py-eval (ast)
   "Evaluate AST. Assumes *scope* is set appropriately."
 
   ;; During evaluation of Python code, a some Lisp errors may
   ;; occur. Some of them are catched and converted to the
   ;; corresponding Python exception.
-  (flet ((do-py-eval (ast)
+  (flet ((do-py-eval ()
 	   (typecase ast
 	     (python-object (return-from py-eval ast)) ;; already evaluated
 	     (python-type (return-from py-eval ast))
@@ -115,21 +135,16 @@
 	     (t (error "uncatched in py-eval: ~S~%" ast)))))
 
     (if *py-eval-handler-set*
-	
-	(do-py-eval ast)
-
-      (handler-bind 
-	  ((division-by-zero (lambda (c) (declare (ignore c))
-				     (py-raise 'ZeroDivisionError
-					       "Division or modulo by zero"))))
-	(let ((*py-eval-handler-set* t))
-	  (do-py-eval ast))))))
-
+	(do-py-eval)
+      (with-py-error-handlers
+       (let ((*py-eval-handler-set* t))
+	 (do-py-eval))))))
 
 (defun eval-inline-lisp (form)
   (eval form))
 
 (defun eval-try-except (suite except-clauses else-clause)
+  (declare (optimize (debug 3)))
   
   ;; Note that the Exception class that an 'except' clause catches, is
   ;; evaluated after an exception is thrown, not earlier; so long as
@@ -137,18 +152,37 @@
 
   ;; XXX todo: `class' may be a tuple, catching all exceptions in the tuple.
   
-  (handler-bind
-      ((Exception (lambda (e)
-		    (loop for ((class parameter) handler-form) in except-clauses
-			do (when (or (null class)
-				     (typep e (py-eval class)))
+  (handler-bind 
+      ;; Not handler-case: we don't want to unwind for uncatched exceptions
+      ((Exception (lambda (exc)
+		    (loop for ((cls/tuple parameter) handler-form) in except-clauses
+			do (when (and cls/tuple  ;; not a bare `except:'
+				      (let ((ecls/tuple (py-eval cls/tuple)))
+					(typecase ecls/tuple
+					  (class    (typep exc ecls/tuple))
+					  (py-tuple (loop for cls in (tuple->lisp-list ecls/tuple)
+							when (typep exc cls)
+							do (return t)
+							finally (return nil)))
+					  (t (warn "Non-class as `except' specializer: ~S"
+						   ecls/tuple)
+					     nil))))
 			     (when parameter
 			       (assert (eq (first parameter) 'identifier))
-			       (namespace-bind *scope* (second parameter) e))
+			       (namespace-bind *scope* (second parameter) exc)) ;; right scope??
 			     (py-eval handler-form)
 			     (return-from eval-try-except nil))))))
-    (py-eval suite))
-  (py-eval else-clause))
+    
+    ;; The `py-error-handlers' were already set in py-eval. Need to
+    ;; set them here again, because when one of the py-eval
+    ;; handler-bind handlers takes control, the handler above for
+    ;; Exception is not active anymore.
+    
+    (with-py-error-handlers
+	(py-eval suite)))
+
+  (when else-clause
+    (py-eval else-clause)))
 
 
 (defun eval-raise (exctype value traceback)
@@ -436,7 +470,8 @@
 		  (eval-assign-expr-1 targets $dummy$)
 		  (catch 'continue
 		    (py-eval suite))))
-    (when take-else
+    (when (and take-else
+	       else-suite)
       (py-eval else-suite))))
 
 (defun eval-continue ()
@@ -927,13 +962,3 @@
   
   (unless comma?
     (terpri)))
-
-
-
-
-
-
-
-
-
-
