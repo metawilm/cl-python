@@ -77,6 +77,7 @@
 	  ((inline-lisp raise assert del list testlist identifier return yield dict
 	    attributeref subscription slice call assign-expr import import-from
 	    comparison unary binary tuple slice print print->> lambda
-	    continue break pass augassign-expr global try-finally class) 
+	    continue break pass augassign-expr global try-finally class
+	    binary-lazy ) 
 	   
 	   form))))))

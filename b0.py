@@ -1,19 +1,15 @@
 def check(a, b):
     if not a == b:
+        #clpy (break "assertionerror ~%~A ~%---~%~A"
+        #       (namespace-lookup *scope* 'a) (namespace-lookup *scope* 'b)) # WB
         raise AssertionError("%.30r != %.30r" % (a, b))
 
 def proto___new__(cls, name):
-    print "proto__new__ start"
     if name in cls.name2num:
-        print "aap"
         return cls.name2num[name]
-    print "noot"
     cls.name2num[name] = obj = int.__new__(cls, cls.next)
-    print "mies"
     cls.num2name[obj] = name
-    print "wim"
     cls.next += 1
-    print "proto__new__ end"
     return obj
 
 def proto___repr__(self):
@@ -137,13 +133,13 @@ class Scanner(object):
         yield EOF, ''
 
 class Link(object):
-    __slots__ = ['value', 'next']
+    ## __slots__ = ['value', 'next'] # WB
     def __init__(self):
         self.value = None
         self.next = None
 
 class Clone(object):
-    __slots__ = ['link', 'itnext']
+    ## __slots__ = ['link', 'itnext'] # WB
     def __init__(self, it, link=None):
         if isinstance(it, Clone):
             self.itnext = it.itnext
@@ -165,6 +161,7 @@ class Clone(object):
 
 def getcFromString(s):
     for c in s:
+        print "getcFromString returning: ", c
         yield c
     while True:
         yield ''
@@ -288,13 +285,30 @@ class Generator(Function):
     def __call__(self, *args):
         check(len(args), len(self.args))
         locals = self.makeLocals(zip(self.args, args))
+        # try:
+        #    for value in geneval(self.body, self.globals, locals):
+        #        yield value
+        # except DoReturn, exc:
+        #    if exc.value is not None:
+        #        raise RuntimeError("'return' with argument in generator")
+        #    return
+        ## rewritten as CLPython can't handle `yield' inside `try/except' and `try/finally' yet -WB
         try:
-            for value in geneval(self.body, self.globals, locals):
-                yield value
+          i = iter( geneval(self.body, self.globals, locals) )
         except DoReturn, exc:
-            if exc.value is not None:
-                raise RuntimeError("'return' with argument in generator")
+          if exc.value is not None:
+             raise RuntimeError("'return' with argument in generator")
+          return
+        while 1:
+          try:
+            value = i.next()
+          except StopIteration:
             return
+          except DoReturn, exc:
+            if exc.value is not None:
+               raise RuntimeError("'return' with argument in generator")
+            return
+          yield value
 
 class Node(object):
     def isgenerator(self):
@@ -335,11 +349,25 @@ class For(Node):
     def geneval(self, globals, locals):
         for value in self.seq.eval(globals, locals):
             self.var.assign(value, globals, locals)
+            #try:
+            #    for v in geneval(self.body, globals, locals):
+            #        yield v
+            #except DoBreak:
+            #    break
+            ## rewritten -WB
             try:
-                for v in geneval(self.body, globals, locals):
-                    yield v
+              i = iter( geneval(self.body, globals, locals) )
             except DoBreak:
-                break
+              break
+            while 1:
+              try:
+                 v = i.next()
+              except StopIteration:
+                 break
+              except DoBreak:
+                 return
+              yield v     
+
 class While(Node):
     def __init__(self, test, body):
         self.test = test
@@ -356,11 +384,25 @@ class While(Node):
                 break
     def geneval(self, globals, locals):
         while self.test.eval(globals, locals):
-            try:
-                for value in geneval(self.body, globals, locals):
-                    yield value
-            except DoBreak:
-                break
+           # try:
+           #     for value in geneval(self.body, globals, locals):
+           #         yield value
+           # except DoBreak:
+           #     break
+           ## rewritten - WB
+           try:
+             i = iter( geneval(self.body, globals, locals) )
+           except DoBreak:
+             break
+           while 1:
+             try:
+               value = i.next()
+             except StopIteration:
+               break
+             except DoBreak:
+               return
+             yield value
+
 class If(Node):
     def __init__(self, test, body, elsebody=None):
         self.test = test
@@ -562,10 +604,11 @@ class Parser(object):
         self.nexttoken()
     def nexttoken(self):
         self.token, self.value = rv = self.scanner.next()
-        ##print rv
+        print rv ## WB
         return rv
     def expect(self, token, value=None):
         if self.token != token:
+            print "Parser.expect wrong: ", self.token, token
             raise SyntaxError
         if value is not None and self.value != value:
             raise SyntaxError
@@ -765,6 +808,7 @@ def cleanup(s):
     return s
 
 def write(s):
+    raise Wilem ## WB
     s = cleanup(s)
     if __debug__:
         print s,
@@ -819,6 +863,7 @@ class instrumentCall(object):
         self.name = name
         self.obj = obj
     def __call__(self, *args):
+        raise Appel ## WB
         global indent
         oldindent = indent
         try:

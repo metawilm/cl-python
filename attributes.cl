@@ -156,11 +156,21 @@
 	(t (call-next-method))))
 
 (defmethod internal-get-attribute (x attr)
-  (warn "Catch-all internal-get-attribute: ~A ~A" x attr)
+  (warn "Catch-all internal-get-attribute: ~S ~S" x attr)
   (values nil nil))
 
 (defmethod internal-get-attribute ((x number) attr)
   (getattr-of-number x attr))
+
+(defmethod internal-get-attribute ((x string) attr)
+  (multiple-value-bind (res found)
+      (internal-get-attribute (load-time-value (make-py-string "iga-dummy-string"))
+			      attr)   ;; XXX hack...
+    (if found
+	(typecase res
+	  (bound-method  (setf (slot-value res 'object) x)
+			 (values res t))
+	  (t (values res t))))))
 
 (defmethod internal-get-attribute ((x builtin-instance) attr)
   (getattr-of-instance-rec x attr))
@@ -340,6 +350,9 @@
 
     ;; Finally, give up.
 
+    (values nil nil)
+    
+    #+(or) ;; never raise in the internal-{get,set,del}-attribute functions!
     (py-raise 'AttributeError
 	      "Object ~A has no attribute ~A" x attr)))
 
@@ -465,7 +478,10 @@
   (values nil nil))
 
 (defmethod getattr-of-class-rec (cls attr)
-  (assert (member cls (list (find-class 'python-type))))
+  (assert (or (member cls (list (find-class 'python-type)))
+	      (subtypep cls 'Exception)))
+  #+(or)(when (subtypep cls 'Exception)
+	  (break "exception attribute lookup ~A ~A" cls attr))
   (let ((val (lookup-bi-class-attr/meth (find-class 't) attr)))
     (when val 
       (return-from getattr-of-class-rec

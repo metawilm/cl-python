@@ -12,6 +12,7 @@
 ;; XXX All uses of PY-ITERATE should be changed to use GET-PY-ITERATE-FUN instead.
 ;; There's no need for this macro, and this macro is even incorrect in that it calls __iter__.
 
+#+(or)
 (defmacro py-iterate ((val object) &body body)
   "Iterate over OBJECT, successively binding VAL to the new value
    and executing BODY.

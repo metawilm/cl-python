@@ -6,7 +6,7 @@ def depth0(n):
     return n
 
 def depth1(n, pea):
-    print n
+    ## print n - WB
     p = (pea, pea)
     for i in xrange(n):
         p = (p, pea)

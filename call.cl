@@ -199,7 +199,7 @@
       )
   (funcall cr posargs kwargs))
 
-(defun make-call-rewriter (fpos fkey f* f**)
+(defun make-call-rewriter (fname fpos fkey f* f**)
   "For a given function with formal arguments FPOS, FKEY, F*, F**
    where FPOS list of atoms, FKEY list of (atom . value), F* atom or nil,
    F** atom or nil,  return a function that parses the arguments to it
@@ -283,7 +283,7 @@
 	      (push (cons f* (make-tuple-from-list pos-arg-2)) result)
 	    (if pos-arg-2
 		(py-raise 'TypeError
-			  "Too many positional args supplied"))))
+			  "~A: Too many positional args supplied" fname))))
 	 
 	;; Assign kw args
 	(let ((for-f** ()))
@@ -297,8 +297,8 @@
 				       (or (eq oldval pos-arg-marker)
 					   (and (consp oldval)
 						(eq (car oldval) opt-arg-marker)))
-				     (error "Got multiple values for parameter ~A (~A, ~A)"
-					    key oldval val)))
+				     (error "~A: Got multiple values for parameter ~A (~A, ~A)"
+					    fname key oldval val)))
 				 (setf (aref argvalues-v k) val)
 				 (return t)
 			      finally (return nil))))
@@ -306,7 +306,7 @@
 	      (unless found
 		(if f**
 		    (push kw for-f**)
-		  (error "Got unexpected keyword argument: ~A" key)))))
+		  (error "~A: Got unexpected keyword argument: ~A" fname key)))))
 	 
 	  (when f**
 	    (push (cons f** (make-dict for-f**)) result)))
@@ -316,7 +316,7 @@
 	    do (let ((val (aref argvalues-v i)))
 		 (cond
 		  ((eq val pos-arg-marker)
-		   (error "Got no value for argument: ~A" (aref argnames-v i)))
+		   (error "~A: Got no value for argument: ~A" fname (aref argnames-v i)))
 		  ((and (consp val) (eq (car val) opt-arg-marker))
 		   (setf val (cdr val))))
 		 (push (cons (aref argnames-v i) val) result)))

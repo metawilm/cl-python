@@ -266,8 +266,8 @@
        binop-expr)
 
  (binop-expr :or
-	     ((binop-expr and binop-expr) . ((list 'binary $2 $1 $3)))
-	     ((binop-expr or  binop-expr) . ((list 'binary $2 $1 $3)))
+	     ((binop-expr and binop-expr) . ((list 'binary-lazy $2 $1 $3)))
+	     ((binop-expr or  binop-expr) . ((list 'binary-lazy $2 $1 $3)))
 	     ((not binop-expr)            . ((list 'unary $1 $2)))
 	     ((binop-expr <  binop-expr)  .  ((list 'comparison $2 $1 $3)))
 	     ((binop-expr <= binop-expr)  . ((list 'comparison $2 $1 $3)))

@@ -56,6 +56,11 @@
 (defun make-bound-method (&key func object)
   (make-instance 'bound-method :func func :object object))
 
+(defmethod print-object ((x bound-method) stream)
+  (print-unreadable-object (x stream :type t :identity t)
+    (with-slots (func object) x
+      (format stream ":func ~A ~_:object ~A" func object))))
+
 (defmethod __repr__ ((x bound-method))
   (with-output-to-string (s)
     (print-unreadable-object (x s :identity t :type t)

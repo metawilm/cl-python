@@ -10,12 +10,12 @@
 
 (in-package :python)
 
-(defun pyb:__import__ (name &optional globals locals fromlist)
+(defmethod pyb:__import__ (name &optional globals locals fromlist)
   "This function is invoked by the import statement."
   (declare (ignore name globals locals fromlist))
   (error "__import__: todo (import functionality hardcoded in py-eval for now)"))
 
-(defun pyb:abs (x)
+(defmethod pyb:abs (x)
   "Return the absolute value of object X. ~@
    Raises AttributeError when there is no `__abs__' method."
   (multiple-value-bind (val meth-found)
@@ -24,7 +24,7 @@
 	val
       (py-raise 'TypeError "Bad operand type for abs(): ~S" x))))
 
-(defun pyb:apply (function &optional pos-args kw-dict)
+(defmethod pyb:apply (function &optional pos-args kw-dict)
   "Apply FUNCTION (a callable object) to given args. ~@
    POS-ARGS is any iterable object; KW-DICT must be of type PY-DICT." 
   
@@ -35,7 +35,7 @@
 			   ,@(when kw-dict) `((** ,kw-dict)))))
 
 
-(defun pyb:callable (x)
+(defmethod pyb:callable (x)
   "Returns whether x can be called (function, class, or callable class instance)
    as True or False."
   (if (pyb::callable-1 x) *True* *False*))
@@ -76,7 +76,7 @@
   nil)
 
 
-(defun pyb:chr (x)
+(defmethod pyb:chr (x)
   "Return a string of one character whose ASCII code is the integer i. ~@
    This is the inverse of pyb:ord."
   (let ((i (py-int-designator-val x)))
@@ -276,47 +276,47 @@
 	    (if (< x-id y-id) -1 1)))))))
 
 
-(defun pyb:coerce (x y)
+(defmethod pyb:coerce (x y)
   (declare (ignore x y))
   (error "Function 'coerce' is deprecated, and not implemented"))
 
 ;; XXX todo: compile functions! :-)
-(defun pyb:compile (string filename kind &optional flags dont-inherit)
+(defmethod pyb:compile (string filename kind &optional flags dont-inherit)
   "Compile string into code object."
   (declare (ignore string filename kind flags dont-inherit))
   (error "todo: py-compile"))
 
-(defun pyb:delattr (x name)
+(defmethod pyb:delattr (x name)
   (check-type x python-object)
   (check-type name attribute-name-designator)
   (error "todo: delattr"))
 
-(defun pyb:dir (&optional x)
+(defmethod pyb:dir (&optional x)
   "Without args, returns names in current scope. ~@
    With arg X, return list of valid attributes of X. ~@
    Result is sorted alphabetically, and may be incomplete."
   (declare (ignore x))
   (error "todo: dir"))
 
-(defun pyb:divmod (x y)
+(defmethod pyb:divmod (x y)
   "Return (x/y, x%y) as tuple"
   ;; CPython doesn't try `__div__' and `__mod__' as fallback, so
   ;; neither do we.
   (__divmod__ x y))
 
-(defun pyb:eval (s &optional globals locals)
+(defmethod pyb:eval (s &optional globals locals)
   (declare (ignore s globals locals))
   ;; ( [user-]py-eval ...)
   (error "todo: eval-string"))
 
-(defun pyb:execfile (filename &optional globals locals)
+(defmethod pyb:execfile (filename &optional globals locals)
   "Executes Python file FILENAME in a scope with LOCALS (defaulting ~@
    to GLOBALS) and GLOBALS (defaulting to scope in which `execfile' ~@
    is called) as local and global variables. Returns None."
   (declare (ignore filename globals locals))
   (error "todo: execfile"))
 
-(defun pyb:filter (func list)
+(defmethod pyb:filter (func list)
   "Construct a list from those elements of LIST for which FUNC is true.
    LIST: a sequence, iterable object, iterator
          If list is a string or a tuple, the result also has that type,
@@ -328,7 +328,7 @@
 			   when (py-val->lisp-bool (py-call func x))
 			   collect x)))
 
-(defun pyb:getattr (x attr &optional (default nil default-p))
+(defmethod pyb:getattr (x attr &optional (default nil default-p))
   "Return the value of attribute NAME of X. ~@
    If attribute doesn't exist, returns supplied DEFAULT or raises AttributeError."
   (check-type x python-object-designator)
@@ -339,18 +339,20 @@
   ;; Lookup attribute, or raise AttributeError (other exceptions
   ;; raised while looking up are not catched)
   (multiple-value-bind (val found)
-      (internal-get-attribute x attr)
+      (internal-get-attribute x (typecase attr
+				  (string (intern attr #.*package*))
+				  (symbol attr)))
     (cond (found val)
 	  (default-p default)
 	  (t (py-raise 'AttributeError
 		       "Object ~A has no attribute ~A" x attr)))))
 
-(defun pyb:globals ()
+(defmethod pyb:globals ()
   "Return a dictionary (namespace) representing the current global symbol table. ~@
    This is the namespace of the current module."
   (error "todo: globals"))
 
-(defun pyb:hasattr (x name)
+(defmethod pyb:hasattr (x name)
   "Returns True is X has attribute NAME, False if not. ~@
    (Uses `getattr'; catches _all_ exceptions.)"
   (check-type x python-object-designator)
@@ -360,18 +362,17 @@
       (progn (pyb:getattr x name)
 	     *True*)
     
-    ;; XXX maybe need to catch more than Exception here (like
-    ;; %magic-method-missing%) ?
+    ;; XXX maybe need to catch more than Exception here
     (Exception () *False*)
     (condition (c)
       (warn "pyb:hasattr catched condition ~A, not sure it should catch it?" c)
       *False*)))
 
-(defun pyb:hash (x)
+(defmethod pyb:hash (x)
   ;; XX todo: once calculated, store hash in object
   (__hash__ x))
 
-(defun pyb:hex (x)
+(defmethod pyb:hex (x)
   (__hex__ x))
 
 
@@ -381,55 +382,53 @@
 ;; non-portable.
 
 #+allegro 
-(let ((ht (make-hash-table :test #'eq :weak-keys t))
-      (counter 0))
-  (defun pyb:id (x)
+(defmethod pyb:id (x)
+  (let ((ht (load-time-value (make-hash-table :test 'eq :weak-keys t)))
+	(counter 0))
     (or (gethash x ht)
 	(setf (gethash x ht) (incf counter)))))
 
 #-allegro
-(defun pyb:id (x)
-  (error "ID not implemented"))
+(defmethod pyb:id (x)
+  (error "TODO: id() not implemented for this Lisp implementation"))
 
 
-(defun pyb:input (&rest args)
+(defmethod pyb:input (&rest args)
   (declare (ignore args))
   (error "todo: py-input"))
 
-(defun pyb:intern (x)
+(defmethod pyb:intern (x)
   (declare (ignore x))
   (error "Function 'intern' is deprecated, and not implemented"))
 
 
-(defun pyb::isinstance-1 (x cls)
+(defmethod pyb::isinstance-1 (x cls)
   ;; CLS is either a class or a _tuple_ of classes (only tuple is
   ;; allowed, not other iterables).
   (if (typep cls 'py-tuple)
-      (py-iterate (c cls)
-		  (when (typep x c)
-		    (return-from pyb::isinstance-1 t)))
+      (dolist (c (py-iterate->lisp-list cls)
+		(when (typep x c)
+		  (return-from pyb::isinstance-1 t))))
     (typep x cls)))
 
-(defun pyb:isinstance (x cls)
+(defmethod pyb:isinstance (x cls)
   (lisp-val->py-bool (pyb::isinstance-1 x cls)))
 
 
-(defun pyb::issubclass-1 (x cls)
+(defmethod pyb::issubclass-1 (x cls)
   (if (typep cls 'py-tuple)
-      
-      (py-iterate (c cls)
-		  (when (subtypep x c)
-		    (return-from pyb::issubclass-1 t)))
-    
+      (dolist (c (py-iterate->lisp-list cls))
+	(when (subtypep x c)
+	  (return-from pyb::issubclass-1 t)))
     (subtypep x cls)))
 
-(defun pyb:issubclass (x cls)
+(defmethod pyb:issubclass (x cls)
   ;; SUPER is either a class, or a tuple of classes -- denoting
   ;; Lisp-type (OR c1 c2 ..).
   (lisp-val->py-bool (pyb::issubclass-1 x cls)))
 
 
-(defun pyb:iter (x &optional y)
+(defmethod pyb:iter (x &optional y)
   ;; Return iterator for sequence x
   ;; 
   ;; When Y supplied: make generator that calls and returns X() until
@@ -452,16 +451,16 @@
 					   y)
 	    #1#)))
 	    
-(defun pyb:len (x)
+(defmethod pyb:len (x)
   #+(or)(__len__ x)
   (call-attribute-via-class x '__len__))
 
-(defun pyb:locals ()
+(defmethod pyb:locals ()
   ;; return local variables
   (error "todo: locals()"))
 
 
-(defun pyb:map (func &rest sequences)
+(defmethod pyb:map (func &rest sequences)
   
   ;; Apply FUNC to every item of sequence, returning real list of
   ;; values. With multiple sequences, traversal is in parallel and
@@ -513,7 +512,7 @@
 			      (py-call func curr-items))))))))))
 
 
-(defun pyb:ord (s)
+(defmethod pyb:ord (s)
   (multiple-value-bind (string-des-p lisp-str)
       (py-string-designator-p s)
     (if (and string-des-p
@@ -523,7 +522,7 @@
 		"Function ord() should be given a string with ~
                  length 1 as argument (got: ~A)" lisp-str))))
 
-(defun pyb:pow (x y &optional (z nil z-p))
+(defmethod pyb:pow (x y &optional (z nil z-p))
   ;; If third argument Z is supplied, __rpow__ will not be tried.
   (macrolet ((err (&rest args)
 	       `(py-raise 'TypeError
@@ -548,7 +547,7 @@
 	       (:no-error (res)
 		 (return-from pyb:pow res)))))))
 
-(defun pyb:range (x &optional y z)
+(defmethod pyb:range (x &optional y z)
   "range( [start,] stop [,step] ) -> (start, start+1, .., stop-1)"
   ;; In fact, X is optional, while Y is required...
   (flet ((range-2 (start stop step)
@@ -572,25 +571,31 @@
 	  (t (range-2 0 x 1)))))
 
 
-(defun pyb:raw_input (&optional prompt)
+(defmethod pyb:raw_input (&optional prompt)
   "Pops up a GUI entry window to type text; returns entered string"
   (declare (ignore prompt))
   (error "todo: raw_input")) ;; XXX hmm no "prompt" CL function?
 
-(defun pyb:reduce (func seq &optional initial)
+(defmethod pyb:reduce (func seq &optional initial)
   (let (res)
     (if initial
-	(progn
-	  (setf res initial)
-	  (py-iterate (x seq)
-		      (setf res (py-call func res x)))
-	  res)
-      (let ((first t))
-	(py-iterate (x seq)
-		    (if first
-			(setf res x
-			      first nil)
-		      (setf res (py-call func res x))))))))
+	
+	(progn (setf res initial)
+	       (map-over-py-object
+		(lambda (x) (setf res (py-call func res x)))
+		seq)
+	       res)
+      
+      (let ((need-first t))
+	(map-over-py-object
+	 (lambda (x) (if need-first
+			 (setf res x
+			       need-first nil)
+		       (setf res (py-call func res x))))
+	 seq)
+	(if need-first
+	    (py-raise 'TypeError "reduce() of empty sequence with no initial value")
+	  res)))))
 
 (defmethod pyb:reload ((m py-module))
   (with-slots (module namespace) m
@@ -607,10 +612,10 @@
   m)
     
 
-(defun pyb:repr (x)
+(defmethod pyb:repr (x)
   (__repr__ x))
 
-(defun pyb:round (x &optional (ndigits 0))
+(defmethod pyb:round (x &optional (ndigits 0))
   "Round number X to a precision with NDIGITS decimal digits (default: 0).
    Returns float. Precision may be negative"
   
@@ -647,26 +652,30 @@
     (coerce x 'double-float)))
 
 
-(defun pyb:setattr (x attr val)
+(defmethod pyb:setattr (x (attr symbol) val)
   (internal-set-attribute x attr val))
 
-(defun pyb:sorted (x)
+(defmethod pyb:setattr (x (attr string) val)
+  (internal-set-attribute x (intern attr #.*package*) val))
+
+(defmethod pyb:sorted (x)
   ;;; over sequences, or over all iterable things?
   (declare (ignore x))
-  (error "todo: sorted")
-  )
+  (error "todo: sorted"))
 
-(defun pyb:sum (seq &optional (start 0))
+(defmethod pyb:sum (seq &optional (start 0))
   (ensure-py-type start number
 		  "Sum() requires number value as START argument (got: ~A)")
   (let ((res start))
-    (py-iterate (x seq)
-		(ensure-py-type x number
-				"Sum() only takes numbers (got: ~A)")
-		(incf res x))
+    (ensure-py-type res number
+		    "Sum() only takes numbers (got as start: ~A)")
+    (map-over-py-object
+     (lambda (x) (ensure-py-type x number "Sum() only takes numbers (got: ~A)")  
+	     (incf res x))
+     seq)
     res))
 
-(defun pyb:super (type &optional object-or-type)
+(defmethod pyb:super (type &optional object-or-type)
   "Returns the first class in the MRO of the second arg after (the type of) ~@
    OBJECT-OR-TYPE. A cooperative version of call-next-method."
   
@@ -706,17 +715,17 @@
 
 
 ;; `type' is also the name of the builtin class `python-type'
-(defun pyb:type (x &optional bases dict)
+(defmethod pyb:type (x &optional bases dict)
   (if (or bases dict)
       (error "type(...) to create a new type: not implemented yet (got: ~A ~A ~A)" x bases dict)
     (__class__ x)))
 
-(defun pyb:unichr (i)
+(defmethod pyb:unichr (i)
   ;; -> unicode char i
   (declare (ignore i))
   (error "todo: unichr"))
 
-(defun pyb:vars (&optional x)
+(defmethod pyb:vars (&optional x)
   "If X supplied, return it's dict, otherwise return local variables."
   (if x
       (multiple-value-bind (val found)
@@ -728,7 +737,7 @@
 		    (class-of x) x)))
     (pyb:locals)))
 
-(defun pyb:zip (&rest sequences)
+(defmethod pyb:zip (&rest sequences)
   "Return a list with tuples, where tuple i contains the i-th argument of ~
    each of the sequences. The returned list has length equal to the shortest ~
    sequence argument."

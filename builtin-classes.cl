@@ -27,7 +27,7 @@
 
 ;; XXX for now (?) add default equality tester
 (defmethod __eq__ (x y)
-  (warn "default equality tester used, indicating something TODO")
+  (break "default equality tester used, indicating something TODO")
   (eq x y))
 
 (defgeneric __class__ (x) (:documentation "The class of X"))
@@ -132,8 +132,9 @@
 				    :has-slots has-slots
 				    :namespace dict
 				    :metaclass metaclass))))
-    (progn (when (or name bases dict)
-	     (warn "type.__new__ ignoring arguments: ~A ~A ~A" name bases dict))
+    (progn #+(or)(when (or name bases dict)
+		   (warn "type.__new__ ignoring arguments" name bases dict)
+		   #+(or)(break "type.__new__ with unexpected args"))
 	   (return-from python-type-__new__
 	     (make-instance metaclass)))))
     
@@ -1024,8 +1025,7 @@
 (defmethod dict-fromkeys (seq &optional (val *None*))
   (let* ((d (make-dict))
 	 (ht (slot-value d 'hash-table)))
-    (py-iterate (key seq)
-		(setf (gethash key ht) val))
+    (map-over-py-object (lambda (key) (setf (gethash key ht) val)) seq)
     d))
 
 (defmethod dict-get ((d py-dict) key &optional (defval *None*))
@@ -1066,12 +1066,13 @@
   "Return iterator that successively returns all keys"
   (let ((res (with-hash-table-iterator (next-f (slot-value d 'hash-table))
 	       (make-iterator-from-function
-		(lambda () 
-		  (multiple-value-bind (ret key val) 
-		      (next-f)
-		    (declare (ignore val))
-		    (when ret
-		      key)))))))
+		(lambda () (multiple-value-bind (ret key val) 
+			       (next-f)
+			     (declare (ignore val))
+			     (when ret
+			       (if (symbolp key)
+				   (symbol-name key)
+				 key))))))))
     res))
 
 (defmethod dict-iter-values ((d py-dict))
@@ -1405,11 +1406,20 @@
 
 (mop:finalize-inheritance (find-class 'python-function-returning-generator))
 
-(defun make-python-function-returning-generator (params ast)
+(defun make-python-function-returning-generator (fname params ast)
   (make-instance 'python-function-returning-generator
-    :call-rewriter (apply #'make-call-rewriter params)
+    :call-rewriter (apply #'make-call-rewriter fname params)
     :generator-creator (eval (create-generator-function ast))))
 
+(defmethod __get__ ((x python-function-returning-generator) inst class)
+  (if (eq inst *None*)
+      (make-unbound-method :func x :class class)
+    (make-bound-method :func x :object inst)))
+
+(register-bi-class-attr/meth (find-class 'python-function-returning-generator)
+			     '__get__ #'__get__)
+
+ 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Package/Module
 ;; 
@@ -1628,6 +1638,21 @@
 		     (((let ((n (nthcdr (
 					 ))))))))))))
 
+(defmethod __eq__ ((x py-list) (y py-list))
+  (let ((x-list (slot-value x 'list))
+	(y-list (slot-value y 'list)))
+    (loop
+      (cond ((and (null x-list) (null y-list))
+	     (return-from __eq__ t))
+	    ((and x-list y-list (py-== (car x-list) (car y-list)))
+	     (setf x-list (cdr x-list)
+		   y-list (cdr y-list)))
+	    (t (return-from __eq__ nil))))))
+
+(defmethod __eq__ ((x py-list) y)
+  (warn "py-list.__eq__ with non-list as y: ~A" y)
+  nil)
+       
 (defmethod __getitem__ ((x py-list) item)
   (let ((list (slot-value x 'list)))
     (typecase item
@@ -1743,8 +1768,8 @@
   (format nil "[~:_~{~A~^, ~:_~}]"
 	  (mapcar #'__str__ (slot-value x 'list))))
 
-(loop for name in '(__init__
-		    __add__ __cmp__ __contains__ __delitem__ __getitem__ __hash__ __iter__ __len__ __mul__
+(loop for name in '(__init__ __add__ __cmp__ __contains__ __delitem__ __eq__
+		    __getitem__ __hash__ __iter__ __len__ __mul__
 		    __rmul__ __nonzero__ __reversed__ __setitem__)
     do (register-bi-class-attr/meth (find-class 'py-list) name (symbol-function name)))
 
@@ -1763,10 +1788,7 @@
       count (__eq__ i item)))
 
 (defmethod list-extend ((x py-list) iterable)
-  (let ((res ()))
-    (py-iterate (i iterable)
-		(push i res))
-    (setf (cdr (last (slot-value x 'list))) (nreverse res)))
+  (setf (cdr (last (slot-value x 'list))) (py-iterate->lisp-list iterable))
   x)
 
 (defmethod list-index ((x py-list) item &optional start stop)
@@ -1981,6 +2003,21 @@
       *True*
     *False*))
 
+(defmethod __eq__ ((x py-tuple) (y py-tuple))
+  (let ((x-list (slot-value x 'list))
+	(y-list (slot-value y 'list)))
+    (loop
+      (cond ((and (null x-list) (null y-list))
+	     (return-from __eq__ t))
+	    ((and x-list y-list (py-== (car x-list) (car y-list)))
+	     (setf x-list (cdr x-list)
+		   y-list (cdr y-list)))
+	    (t (return-from __eq__ nil))))))
+
+(defmethod __eq__ ((x py-tuple) y)
+  (warn "py-tuple.__eq__ on non-tuple RHS ~A" y)
+  nil)
+
 (defmethod __getitem__ ((x py-tuple) item)
   (let ((list (slot-value x 'list)))
     (typecase item
@@ -2038,8 +2075,8 @@
 	    "Cannot set items of tuples"))
 
 ;;; there are no tuple-specific methods
-(loop for name in '(__add__ __cmp__ __contains__ __getitem__ __init__ __iter__ __len__
-		    __mul__ __rmul__ __setitem__)
+(loop for name in '(__add__ __cmp__ __contains__ __eq__ __getitem__ __init__
+		    __iter__ __len__ __mul__ __rmul__ __setitem__)
     do (register-bi-class-attr/meth (find-class 'py-tuple) name (symbol-function name)))
 
 
@@ -2214,9 +2251,10 @@
   (lisp-val->py-bool (every #'lower-case-p x)))
 
 (defmethod string-isspace-1 ((x string))
-  (lisp-val->py-bool (every (lambda (c) (member c (load-time-value (list #\Space #\Tab #\Newline))))
-		    ;; XX check what is whitespace
-		    x)))
+  (lisp-val->py-bool (every (lambda (c)
+			      (member c (load-time-value (list #\Space #\Tab #\Newline))))
+			    ;; XX check what is whitespace
+			    x)))
 
 (defmethod string-istitle-1 ((x string))
   ;; It is defined to be a titel iff first char uppercase, rest lower; with anything non-alpha (even
@@ -2243,14 +2281,13 @@
 
 (defmethod string-join-1 ((x string) sequences)
   "Join a number of strings"
-  (let ((acc ()))
-    (py-iterate (str sequences)
-		(format t "str: ~S~%" str)
-		(ensure-py-type str string
-				"string.join() can only handle real strings (got: ~A)")
-		(push str acc))
-    (apply #'concatenate 'string x (nreverse acc))))
-
+  (apply #'concatenate 'string x 
+	 (mapcar 
+	  (lambda (s)
+	    (ensure-py-type s string
+			    "string.join() can only handle real strings (got: ~A)")
+	    s)
+	  (py-iterate->lisp-list sequences))))
 
 (defmacro def-unary-string-meths (data)
   `(progn ,@(loop for (name args body) in data
@@ -2289,9 +2326,8 @@
 				    (prog1 (string (aref x i))
 				      (incf i)))))))
      (__len__  (x) (length x))
-     (__mod__  (x args) (progn (warn "string modulo not supported yet")
-			       (warn "    s: ~S" x)
-			       (warn " args: ~S" (call-attribute-via-class args '__repr__))))
+     (__mod__  (x args) (py-format-string x args))
+     
      ;; rmod, rmul
      (__mul__  (x n) (__mul-1__ x n))
      
@@ -2311,6 +2347,7 @@
      (string-isalpha (x)  (string-isalpha-1 x))
      (string-isdigit (x)  (string-isdigit-1 x))
      (string-islower (x)  (string-islower-1 x))
+     (string-isspace (x)  (string-isspace-1 x))
      (string-istitle (x)  (string-istitle-1 x))
      (string-isupper (x)  (string-isupper-1 x))
      (string-join    (x seq) (string-join-1 x seq))))
@@ -2325,15 +2362,19 @@
      (__eq__ (x y)        (string= x y))
      
      (string-count    (x y) (string-count-1 x y))
-     (string-endswith (x y &optional start end)  (lisp-val->py-bool (string-endswith-1 x y start end)))
+     (string-endswith (x y &optional start end)
+		      (lisp-val->py-bool (string-endswith-1 x y start end)))
      (string-find     (x y &optional start end)  (string-find-1 x y start end))
-     (string-index    (x y &optional start end)  (string-index-1 x y (or start 0) (or end 0)))))
+     (string-index    (x y &optional start end)
+		      (string-index-1 x y (or start 0) (or end 0)))))
 
 
-(loop for name in '(__getitem__ __iter__ __len__ __mod__ __mul__)
-    do (register-bi-class-attr/meth (find-class 'py-string) name (symbol-function name)))
+(loop for name in '(__add__ __radd__ __contains__ __cmp__
+		    __getitem__ __iter__ __len__ __mod__ __mul__)
+    do (register-bi-class-attr/meth (find-class 'string) name (symbol-function name)) 
+       (register-bi-class-attr/meth (find-class 'py-string) name (symbol-function name)))
 				    
-(loop for (k v) in `((capitalize ,#'string-capitalize)
+(loop for (k v) in `((capitalize ,#'string-capitalize) ;; these are unary...
 		   (center   ,#'string-center-1)
 		   (decode   ,#'string-decode-1)
 		   (encode   ,#'string-encode-1)
@@ -2342,10 +2383,18 @@
 		   (isalpha  ,#'string-isalpha-1)
 		   (isdigit  ,#'string-isdigit-1)
 		   (islower  ,#'string-islower-1)
+		   (isspace  ,#'string-isspace)
 		   (istitle  ,#'string-istitle-1)
 		   (isupper  ,#'string-isupper-1)
-		   (join     ,#'string-join-1))
-    do (register-bi-class-attr/meth (find-class 'py-string) k v))
+		   (join     ,#'string-join-1)
+		   
+		   (count    ,#'string-count) ;; these are binary
+		   (endswith ,#'string-endswith)
+		   (find     ,#'string-find)
+		   (index    ,#'string-index))
+		   
+    do (register-bi-class-attr/meth (find-class 'string) k v)
+       (register-bi-class-attr/meth (find-class 'py-string) k v))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -2573,10 +2622,13 @@
     (write-string str stream)))
    
 (defmethod file-writelines ((f py-file) seq)
-  (py-iterate (str seq)
-	      (ensure-py-type str string
-			      "file.writelines() requires sequence of strings (got element: ~A)")
-	      (file-write f str)))
+  (map-over-py-object (lambda (str)
+			(ensure-py-type str string
+					"file.writelines() requires sequence ~@
+                                         of strings (got element: ~A)")	
+			(file-write f str))
+		      seq)
+  *None*)
 
 (defmethod file-closed ((f py-file))
   (with-slots (stream) f
@@ -2963,7 +3015,7 @@
       unless (or (digit-char-p c 16)
 		 (member c '(#\x #\. #\- #\j)))
       do (py-raise 'ValueError "Can't convert string to number: ~W" x))
-  (parse-python-string x))
+  (read-from-string x))
 
 (defmethod convert-to-number ((x number) cls)
   (declare (ignore cls))

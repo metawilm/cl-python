@@ -23,7 +23,7 @@
 (defun compy ()
   (with-compilation-unit ()
     (dolist (f '("classes" "exceptions" "pythonic"
-		 "methods" "magicmeths" "builtin-classes"
+		 "methods" "magicmeths" "builtin-classes" "formatstring"
 		 "call" "builtin-funcs" "builtin-types" "mathops"
 		 "descriptors" "attributes" "modules" "pyeval"
 		 "parsepython" "walk" "gener" "repl"

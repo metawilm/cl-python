@@ -101,7 +101,7 @@
 							 ,loop-var (funcall ,generator))
 						   (unless ,loop-var (go ,else-tag))
 						   ,repeat-tag
-						   (eval-assign-expr-1 ',targets ,loop-var)
+						   (eval-real-assign-expr ',targets ,loop-var)
 						   (:split ,(walk suite stack2))
 						   ,continue-tag
 						   (setf ,loop-var (funcall ,generator))
@@ -136,6 +136,20 @@
 		     (values `(:split ,@(loop for stmt in (second form)
 					    collect (walk stmt stack)))
 			     t))
+
+		    (try-except (destructuring-bind
+				    (suite except-clauses else-clause) (cdr form)
+				  (if (or (generator-ast-p suite)
+					  (loop for ((nil nil) handler-form) in except-clauses
+					      when (generator-ast-p handler-form) do (return t)
+					      finally (return nil))
+					  (and else-clause (generator-ast-p else-clause)))
+				      (break "TODO: `yield' inside try/except")
+				    (warn "Harmless `yield' inside try/except")))
+				(values `(py-eval ',form)
+					t))
+		    
+		    (try-finally (break "XXX TODO: try-finally in generator"))
 		    
 		    (t (values `(py-eval ',form)
 			       t)))))))

@@ -264,20 +264,29 @@
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Binary logical operations
+;; 
+;; These differ from the other mathematical operators, in that they
+;; evaluate only as many arguments as needed.
+;; 
+;; So, "3 < 0 and 3/0 > 2" will return false after (3 < 0) returned false.
+
+(defvar *math-binary-lazy-op-assoc* ())
 
 (defmethod py-or (x y)
-  (if (py-val->lisp-bool x)
-      x
-    y))
+  (let ((ex (py-eval x)))
+    (if (py-val->lisp-bool ex)
+	ex
+      (py-eval y))))
 
-(push (cons 'or #'py-or) *math-binary-op-assoc*)
+(push (cons 'or #'py-or) *math-binary-lazy-op-assoc*)
 
 (defmethod py-and (x y)
-  (if (py-val->lisp-bool x)
-      y
-    x))
+  (let ((ex (py-eval x)))
+    (if (py-val->lisp-bool ex)
+	(py-eval y)
+      ex)))
 
-(push (cons 'and #'py-and) *math-binary-op-assoc*)
+(push (cons 'and #'py-and) *math-binary-lazy-op-assoc*)
       
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;

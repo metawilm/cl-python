@@ -106,6 +106,7 @@
 	     (comparison (apply #'eval-comparison (cdr ast)))
 	     (unary (apply #'eval-unary (cdr ast)))
 	     (binary (apply #'eval-binary (cdr ast)))
+	     (binary-lazy (apply #'eval-binary-lazy (cdr ast)))
     
 	     (attributeref (apply #'eval-attributeref (cdr ast)))
 	     (subscription (apply #'eval-subscription (cdr ast)))
@@ -193,9 +194,10 @@
   (setf exctype   (when exctype (py-eval exctype))
 	value     (when value (py-eval value))
 	traceback (when traceback (py-eval traceback)))
-  
+  ;;(break "eval-raise")
   (cond ((and traceback 
 	      (not (eq traceback *None*)))
+	 (warn "raise a")
 	 ;; "If a third object is present and not None, it must be a
 	 ;; traceback object (see section 3.2), and it is substituted
 	 ;; instead of the current location as the place where the
@@ -205,6 +207,7 @@
 	
 	
 	((null exctype)
+	 (warn "raise b")
 	 ;; "If no expressions are present, raise re-raises the last
 	 ;; expression that was active in the current scope. If no
 	 ;; exception is active in the current scope, an exception is
@@ -214,7 +217,7 @@
 
 
 	((typep exctype 'class)
-
+	 (warn "raise c")
 	 ;; "If the first object is a class, it becomes the type of
 	 ;; the exception.
 	 ;; 
@@ -229,27 +232,34 @@
 	 
 	 ;; XXX  make-instance or py-call?
 	 
-	 (cond ((typep value exctype) (error exctype :args value))
+	 (cond ((typep value exctype) (warn "raise d")
+				      (error value))
 	       
-	       ((typep value 'py-tuple)  
+	       ((typep value 'py-tuple)
+		(warn "raise d")
 		(error exctype (py-call exctype (tuple->lisp-list value))))
 	       
 	       ((or (null value)
-		    (eq value *None*)) (error (make-instance exctype)))
+		    (eq value *None*))
+		(warn "raise e")
+		(error (make-instance exctype)))
 	       
-	       (t (error (make-instance exctype :args value)))))
+	       (t
+		(warn "raise f")
+		(error (make-instance exctype :args value)))))
 
 	(t
+	 (warn "raise g")
 	 ;; "If the first object is an instance, the type of the
 	 ;; exception is the class of the instance, the instance itself
 	 ;; is the value, and the second object must be None."
   
 	 (if (or (eq value *None*)
 		 (null value))
-	     (error (__class__ exctype) :var exctype)
+	     (error exctype) ;; (class-name (__class__ exctype)) :args exctype)
 	   (py-raise 'ValueError
-		     "RAISE: when first arg is instance, second argument must be None or not supplied (got: ~A)"
-		     value)))))
+		     "RAISE: when first arg is instance, second argument must ~@
+                      be None or not supplied (got: ~A)" value)))))
 
 
 (defun eval-global (varlist)
@@ -267,10 +277,20 @@
 (defun eval-del (exprlist)
   (assert (eq (car exprlist) 'exprlist))
   (dolist (place (second exprlist))
-    (cond ((eq (car place) 'identifier)
-	   (namespace-delete *scope* (second place)))
-	  (t
-	   (error "eval-del: can only do simple vars for now")))))
+    (let ((place2 (eval-one-assignment-target place)))
+      #+(or)(warn "place to del: ~A" place2)
+      (ecase (car place2)
+	
+	(identifier   (namespace-delete *scope* (second place2)))
+	(subscription (warn "deletion of subscription: buggy")
+		      (call-attribute-via-class (second place2) '__delitem__
+						(cddr place2)))
+	(attributeref (warn "deletion of attribute: buggy")
+		      (destructuring-bind (obj (identifier? att-name))
+			  (cdr place2)
+			(assert (and (eq identifier? 'identifier)))
+			;; XXX call __delattr__ always?
+			(call-attribute-via-class obj '__delattr__ (list att-name))))))))
 
 (defun eval-list (data)
   ;; either normal list or list comprehension
@@ -344,13 +364,13 @@
 	     (collect-expr () (push (py-eval expr) acc))
 	     
 	     (process-for (for-ifs)
-	       (destructuring-bind ((_list-for-in exprlist source) &rest rest)
+	       (destructuring-bind ((list-for-in? exprlist source) &rest rest)
 		   for-ifs
-		 (declare (ignore _list-for-in))
-		 (let ((esource (py-eval source)))
-		   (py-iterate ($dummy$ esource)
-			       (eval-real-assign-expr exprlist $dummy$)
-			       (process-for/ifs rest)))))
+		 (assert (eq list-for-in? 'list-for-in))
+		 (map-over-py-object (lambda (x)
+				       (eval-real-assign-expr exprlist x)	 
+				       (process-for/ifs rest))
+				     (py-eval source))))
 	     
 	     (process-if (for-ifs)
 	       (destructuring-bind ((_list-if condition) &rest rest)
@@ -478,17 +498,17 @@
 
 
 (defun eval-for-in (targets sources suite else-suite)
-  (let ((esource (py-eval sources))
-	(take-else t))
+  (let ((take-else t))
     (catch 'break
-      (py-iterate ($dummy$ esource)
-		  (setf take-else nil)
-		  (eval-real-assign-expr targets $dummy$)
-		  (catch 'continue
-		    (py-eval suite))))
-    (when (and take-else
-	       else-suite)
-      (py-eval else-suite))))
+      (map-over-py-object
+       (lambda (x) (setf take-else nil)
+	       (eval-real-assign-expr targets x)
+	       (catch 'continue
+		 (py-eval suite)))
+       (py-eval sources))
+      (when (and take-else
+		 else-suite)
+	(py-eval else-suite)))))
 
 (defun eval-continue ()
   (throw 'continue nil))
@@ -538,18 +558,18 @@
 	  target-is-list)
       (let ((i 0)
 	    (acc ()))
-	(py-iterate (x evalue)
-		    (incf i)
-		    (when (> i num-targets)
-		      (py-raise
-		       'ValueError
-		       "Too many values to unpack (needed exactly ~A values), ~@
-                        got already one more than that." num-targets))
-		    (push x acc))
+	(map-over-py-object
+	 (lambda (x) 
+	   (incf i)
+	   (when (> i num-targets)
+	     (py-raise 'ValueError "Too many values to unpack (needed exactly ~A ~@
+                        values), got already one more than that." num-targets))
+	   (push x acc))
+	 evalue)
+	
 	(when (< i num-targets)
 	  (py-raise 'ValueError
-		    "Too few values to unpack (needed exactly ~A values, ~
-                     but got only ~A)."
+		    "Too few values to unpack (needed exactly ~A values, but got only ~A)."
 		    num-targets i))
 	  
 	;; arriving here means we got exactly enough values.
@@ -612,18 +632,19 @@
 		(num-targets (length targets))
 		(i 0)
 		(acc ()))
-	   (py-iterate (x val)
-		       (incf i)
-		       (push x acc)
-		       (when (> i num-targets)
-			 (py-raise
-			  'ValueError "Too many values to unpack (needed exactly ~A ~
-                                       values, got already one more than that."
-			  num-targets)))
+	   (map-over-py-object
+	    (lambda (x)
+	      (incf i)
+	      (push x acc)
+	      (when (> i num-targets)
+		(py-raise 'ValueError "Too many values to unpack (needed exactly ~A ~
+                           values, got already one more than that." num-targets)))
+	    val)
+		       
 	   (when (< i num-targets)
-	     (py-raise 'ValueError
-		       "Too few values to unpack (needed exactly ~A values, ~
-                        but got only ~A)." num-targets i))
+	     (py-raise 'ValueError "Too few values to unpack (needed exactly ~A ~@
+                        values, but got only ~A)." num-targets i))
+	   
 	   (setf acc (nreverse acc))
 	   (loop for val in acc
 	       for tar in targets
@@ -741,7 +762,7 @@
   (if (generator-ast-p suite)
       
       (let* ((params (multiple-value-list (parse-function-parameter-list params)))
-	     (f (make-python-function-returning-generator params suite)))
+	     (f (make-python-function-returning-generator fname params suite)))
 	(namespace-bind *scope* fname f))
   
     (let* ((params (multiple-value-list (parse-function-parameter-list params)))
@@ -752,7 +773,7 @@
 			   :name (format nil "ns for function ~A" fname)
 			   :inside *scope*)
 	       :params params
-	       :call-rewriter (apply #'make-call-rewriter params))))
+	       :call-rewriter (apply #'make-call-rewriter fname params))))
 	
       ;; Content of function is not evaluated yet; only when called.
       ;; Bind function name to function object in current namespace:
@@ -761,12 +782,13 @@
 
 (defun eval-lambda (params expr)
   (let ((parsed-params (multiple-value-list (parse-function-parameter-list params))))
+    #+(or)(break "lambda")
     (make-lambda-function
      :ast expr
      :namespace (make-namespace :name "lambda namespace"
 				:inside *scope*)
      :params parsed-params
-     :call-rewriter (apply #'make-call-rewriter parsed-params))))
+     :call-rewriter (apply #'make-call-rewriter 'lambda parsed-params))))
 
 (defun parse-function-parameter-list (params)
   "Returns POS-PARAMS, KW-PARAMS, *-PAR, **-PAR as multiple values"
@@ -1263,6 +1285,13 @@
     (assert func () "Operator ~A has no corresponding py-~A function?! ~A"
 	    operator operator *math-binary-op-assoc*)
     (funcall func (py-eval left) (py-eval right))))
+
+(defun eval-binary-lazy (operator left right)
+  (declare (special *math-binary-lazy-op-assoc*)) ;; mathops.cl
+  (let ((func (cdr (assoc operator *math-binary-lazy-op-assoc*))))
+    (funcall (or func
+		 (error "no func for lazy ~A operator" operator))
+	     left right))) ;; left, right not yet evaluated!
 
 (defun eval-tuple (&rest content)
   (let ((c (mapcar #'py-eval content)))
