@@ -1163,32 +1163,31 @@
 
 (defun read-file (filename)
   (with-open-file (stream filename :direction :input)
-    (let ((len (file-length stream)))
-      (if len
-	  
-	  ;; length known beforehand
-	  (let ((res (make-array len :element-type 'character)))
-	    (loop for i from 0 below len
-		do (setf (aref res i) (read-char stream)))
-	    res)
-	
-	(let ((res (make-array 1000 :element-type 'character :adjustable t :fill-pointer 0)))
-	  (loop with c = (read-char stream nil nil)
-	      while c do (vector-push-extend c res)
-			 (setf c (read-char stream nil nil)))
-	  res)))))
+
+    ;; (file-length stream) gives number of bytes, counting
+    ;; \r\n as one, although that combination is one #\Newline
+    ;; so file-length gives maximum length. KISS for now.
+    
+    (loop with res = (make-array (or (file-length stream) 1000)
+				 :element-type 'character
+				 :adjustable t :fill-pointer 0)
+	for c = (read-char stream nil nil)
+	while c do (vector-push-extend c res)
+	finally (return res))))
 
 (defun make-module-object (module-name)
   (let* ((file-name (concatenate 'string (string module-name) ".py")))
     
     (loop
-      (with-simple-restart (continue "Reload '~A' and retry import" module-name)
+      (with-simple-restart (continue "Reload '~A' and retry import"
+				     module-name)
 	
 	;; In CPython, when the toplevel of modules is executed, the
 	;; name of the module is not yet bound to the module object
 	
 	(let* ((module-ns (make-namespace
-			   :name (format nil "namespace for module ~A" module-name)
+			   :name (format nil "namespace for module ~A"
+					 module-name)
 			   :builtins t))
 	       (file-contents (read-file file-name))
 	       (module-ast (parse-python-string file-contents)))
