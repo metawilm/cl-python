@@ -623,11 +623,11 @@
     ;; division is floor division (unless "from __future__ import division")
     ((__div__ (floor x y))
      
-    ;; bit operations -> lisp integer
-    (__and__ (logand x y))
+     ;; bit operations -> lisp integer
+     (__and__ (logand x y))
      (__xor__ (logxor x y))
      (__or__  (logior x y))
-
+    
      ;; ASH accepts both positive and negative second argument, Python only positive.
      (__lshift__ (if (>= y 0)
 		     (ash x y)
@@ -639,7 +639,7 @@
      (__rrshift__ (__rshift__ y x))
      ))
 
-(loop for name in `(__add__ __xor__ __or__ __lshift__ __rlshift__ __rshift__ __rrshift__)
+(loop for name in `(__and__ __xor__ __or__ __lshift__ __rlshift__ __rshift__ __rrshift__)
     do (loop for cls in `(,(find-class 'integer) ,(find-class 'py-int))
 	   do (register-bi-class-attr/meth cls name (symbol-function name))))
 

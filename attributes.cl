@@ -234,7 +234,7 @@
 	       (getattr-of-class-nonrec cls '__getattribute__)
 	     (when found
 	       (return-from getattr-of-instance-rec
-		 (values (py-call (maybe-bind val x (class-of x)) (list x attr))
+		 (values (py-call (maybe-bind val x (class-of x)) (list (string attr)))
 			 t))))
 	   
 	when (not attr-val)
@@ -475,7 +475,8 @@
    
 (defmethod call-attribute-via-class (x attr &optional pos-args key-args)
   "Lookup ATTR of the class of X, and call it for instance X. ~@
-   Returns RES, FOUND-P: RES is the result of calling ATTR; ~@
+   Returns RES, FOUND-P: ~@
+   RES is the result of calling ATTR (unless calling resulted in NotImplemented); ~@
    FOUND-P is T or NIL. ~
    Example use: `print' calls the class' __str__ method, not the ~@
    __str__ attribute of the instance."
@@ -485,9 +486,10 @@
 	(getattr-of-class-rec klass attr)
       (cond ((not found)          (values nil nil))
 	    ((eq val #'__get__)   (values (apply val x pos-args) t)) ;; XXX hack?
-	    (t  (let ((bound-val (maybe-bind val *None* klass)))
-		  (values (py-call bound-val (cons x pos-args) key-args)
-			  t)))))))
+	    (t  (let* ((bound-val (maybe-bind val *None* klass))
+		       (res (py-call bound-val (cons x pos-args) key-args)))
+		  (values res
+			  (not (eq res *NotImplemented*)))))))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; SET attribute

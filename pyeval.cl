@@ -386,23 +386,32 @@
 		  "Object ~A has not attribute ~A" eobj attr-name)))))
 
 (defun eval-subscription (primary data)
-  (destructuring-bind (item-list comma?)
-      data
-    (assert (consp item-list))
-    (let* ((eprim (py-eval primary))
-	   (item-list-2 (mapcar #'py-eval item-list))
-	   (item (if (or comma?
-			 (> (length item-list) 1))
-		     (make-tuple-from-list (mapcar #'py-eval item-list-2))
-		   (car item-list-2))))
-      ;; XXX call via class
-      (multiple-value-bind (getitem found)
-	  (internal-get-attribute eprim '__getitem__)
-	(if found
-	    (py-call getitem (list item))
-	  (py-raise 'TypeError
-		    "No __getitem__ found (~A)" eprim)))
-      #+(or)(__getitem__ eprim item))))
+  (let ((e-prim (if (consp primary) 
+		    (py-eval primary)
+		  primary))
+	(e-item-to-get
+	 (if (consp data)
+	     
+	     (progn 
+	       (destructuring-bind (item-list comma?)
+		   data
+		 (assert (consp item-list))
+		 (let* ((item-list-2 (mapcar #'py-eval item-list))
+			(item (if (or comma?
+				      (> (length item-list) 1))
+				  (make-tuple-from-list (mapcar #'py-eval item-list-2))
+				(car item-list-2))))
+		   item)))
+	   (progn (warn "assuming subs ~A evaluated already" data)
+		  data))))
+    	   
+    (multiple-value-bind (res found)
+	(call-attribute-via-class e-prim '__getitem__ (list e-item-to-get))
+      (if found
+	  res
+	(py-raise 'TypeError
+		  "No __getitem__ found (~A)" e-prim)))))
+
 
 (defun eval-slice (data)
   (destructuring-bind (start stop &optional step)
@@ -628,58 +637,94 @@
   ;; x[y]  ->  `(subscription ,x ,y)
   ;; x.y   ->  `(attributeref ,x y)
   ;; [x,y] ->  `(list x y)  -- x,y recursive
-  
-  (labels ((do-eval (tg)
-	     (when (atom tg)
-	       (py-raise 'SyntaxError
-			 "Cannot assign to a literal (got target: ~A)" tg))
-	     (case (car tg)
-	       ;; (IDENTIFIER a) : remains the same
-	       (identifier tg)
-	       
-	       ;; (TUPLE A B) and (LIST A B) both go to (LIST <A> <B>)
-	       ((tuple list) `(list ,@(mapcar #'do-eval (second tg))))
-	       
-	       ;; foo.x => (attributeref (identifier foo) (identifier x))
-	       ;; 
-	       ;; The primary is evaluated; the attribute identifier
-	       ;; is just a name and can't be further evaluated.
-	       (attributeref `(attributeref ,(py-eval (second tg))
-					    ,(third tg)))
-	       
-	       ;; x[1,2,3]
-	       ;; => (subscription (identifier x) ((1 2 3) nil))) nil)
-	       ;;
-	       ;; Both primary and expr-list are evaluated; result is
-	       ;;  (subscription <object> <item-or-tuple>)
-	       (subscription 
-		(destructuring-bind (primary (subs comma?))
-		    (cdr tg)
-		  `(subscription ,(py-eval primary)
-				 ,(let* ((esubs (mapcar #'py-eval subs))
-					 (make-tuple (or (> (length subs) 1)
-							 comma?)))
-				    (if make-tuple
-					(make-tuple-from-list esubs)
-				      (car esubs))))))
-	       
-	       ;; todo: slices
-	       (testlist
-		`(list ,@(loop for x in (second tg)
-			     collect (do-eval x))))
-	       
-	       (t
-		(warn "EVAL-ASSIGNMENT-TARGETS: assuming ~A is an expression ~
-                       to be evaluated." tg)
-		(py-eval tg)))))
+  (mapcar #'eval-one-assignment-target targets))
+
+(defun eval-one-assignment-target (tg)
+  (when (atom tg)
+    (py-raise 'SyntaxError
+	      "Cannot assign to a literal (got target: ~A)" tg))
+  (case (car tg)
+    ;; (IDENTIFIER a) : remains the same
+    (identifier tg)
     
-    (loop for tg in targets
-	collect (do-eval tg)))) ;; local function: can't do direct mapcar
+    ;; (TUPLE A B) and (LIST A B) both go to (LIST <A> <B>)
+    ((tuple list) `(list ,@(mapcar #'eval-one-assignment-target (second tg))))
+    
+    ;; foo.x => (attributeref (identifier foo) (identifier x))
+    ;; 
+    ;; The primary is evaluated; the attribute identifier
+    ;; is just a name and can't be further evaluated.
+    (attributeref `(attributeref ,(py-eval (second tg))
+				 ,(third tg)))
+    
+    ;; x[1,2,3]
+    ;; => (subscription (identifier x) ((1 2 3) nil))) nil)
+    ;;
+    ;; Both primary and expr-list are evaluated; result is
+    ;;  (subscription <object> <item-or-tuple>)
+    (subscription 
+     (destructuring-bind (primary (subs comma?))
+	 (cdr tg)
+       `(subscription ,(py-eval primary)
+		      ,(let* ((esubs (mapcar #'py-eval subs))
+			      (make-tuple (or (> (length subs) 1)
+					      comma?)))
+			 (if make-tuple
+			     (make-tuple-from-list esubs)
+			   (car esubs))))))
+    
+    ;; todo: slices
+    (testlist ;; how about comma?
+     `(list ,@(mapcar #'eval-one-assignment-target (second tg))))
+    
+    (t
+     (warn "EVAL-ASSIGNMENT-TARGETS: assuming ~A is an expression ~
+                       to be evaluated." tg)
+     (py-eval tg))))
 
 
-(defun eval-augassign-expr (object operator expr)
-  (break "e-a-e  ~A    ~A   ~A" object operator expr))
+(defun eval-augassign-expr (target operator expr)
+  ;; e()[ f() ] += g()  is evaluated as follows:
+  ;; 
+  ;;   e() -> m  \__in eval-one-assignment-target
+  ;;   f() -> p  /
+  ;; 
+  ;;   g() -> q
+  ;;   m[p] -> r
+  ;; try  r.__iadd__(q)
+  ;; if no __iadd__method found, try:  x[p] = r + q
+  
+  (destructuring-bind (testlist? (source-place &rest other-source-places) comma?)
+      target
+    (assert (eq testlist? 'testlist))
+    (cond ((or comma? other-source-places)
+	   (py-raise 'SyntaxError
+		     "Augmented assign to multiple places not possible~%AST or target: ~A"
+		     target))
+	  ((not (member (car source-place) '(identifier subscription attributeref)))
+	   (py-raise 'SyntaxError
+		     "Augmented assign to forbidden place (maybe TODO)~%AST of place: ~A"
+		     source-place)))
+    
+    (assert (eq (car expr) 'testlist))
+    (let* ((et (eval-one-assignment-target source-place))
+	   (evexpr (py-eval expr))
+	   (lhs-value-now (py-eval et))
+	   (op-funcs (cdr (assoc operator *math-inplace-op-assoc*)))
+	   (py-@= (car op-funcs))
+	   (py-@ (cdr op-funcs)))
+	
+      (assert op-funcs)
 
+      ;; try __iadd__ first, otherwise __add__ + store
+	
+      (unless (funcall py-@= lhs-value-now evexpr) ;; returns true iff __iadd__ found
+	  
+	(let ((value-to-store (funcall py-@ lhs-value-now evexpr)))
+	  (eval-assign-one et value-to-store)))))
+  *None*)
+
+	
 (defun eval-funcdef (fname params suite)
   "In the current namespace, FNAME becomes bound to a function object ~@
    with given formal parameters and function body."

@@ -101,12 +101,87 @@
 			 (push (cons ',py-syntax #',fname)
 			       *math-binary-op-assoc*)))
 	  
-	  ;; Because operators are roughly in order of frequency, reverse to keep original order
+	  ;; Because operators are roughly in order of frequency, reverse to keep
+	  ;; original order.
+	  
 	  (setf *math-binary-op-assoc* (nreverse *math-binary-op-assoc*))))
 
 (generate-binary-methods)
 
 
+;; a**b (to-the-power) is a special case:
+;;  - method __pow__ takes an optional third argument:
+;;    that argument can be supplied using the built-in function POW but not
+;;     syntactically (using **)
+;;  - there is no corresponding __rpow__ magic method
+;;  - so, function py-** always gets 2 arguments when called for the a**b syntax,
+;;    but may have a third argument when called for the built-in function POW.
+
+(defgeneric py-** (x y &optional z))
+
+(defmethod __pow__ :around (x y &optional z)
+  (declare (ignore x y z))
+  (if (next-method-p)
+       (call-next-method)
+    *NotImplemented*))
+  
+(defmethod py-** (x y &optional z) ;; doesn't support third arg (but built-in function POW does) (?)
+  (multiple-value-bind (meth found)
+      (internal-get-attribute (__class__ x) '__pow__)
+    (let ((result (if found
+		      (py-call meth (list x y z))
+		    *NotImplemented*)))
+      (if (eq result *NotImplemented*)
+	  (py-raise 'TypeError "Unsupported operands for ** (got: ~A, ~A, ~A)" x y z)
+	result))))
+
+(push (cons '** #'py-**) *math-binary-op-assoc*)
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; In-place operations
+;; 
+;;  x += y   -->        x.__iadd__(y)
+;;            fallback: x = x.__add__(y) - where place x evaluated only once
+;; 
+;; The fall-back is not part of the function, because it operates on
+;; _places_, while the function only tries the in-place operation on a
+;; _value_.
+;; 
+;; As these are statements, the value returned by the in-place
+;; operation is irrelevant, but whether or not the in-place method is
+;; found _is_ relevant.
+
+(defvar *math-inplace-op-assoc* ())
+
+(defmacro create-inplace-func (syntax py-@= meth-name py-@)
+  `(progn (defmethod ,py-@= (x val)
+	    (multiple-value-bind (res found)
+		(call-attribute-via-class x ',meth-name (list val))
+	      (declare (ignore res))
+	      found))
+	  (push (cons ',syntax (cons #',py-@= #',py-@)) *math-inplace-op-assoc*)))
+
+(defmacro generate-inplace-funcs ()
+  `(progn ,@(loop for (syntax py-@= meth-name py-@) in
+		  '((+=  py-+= __iadd__ py-+)
+		    (-=  py--= __isub__ py--)
+		    (*=  py-*= __imul__ py-*)
+		    (/=  py-/= __idiv__ py-/)
+		    (//= py-//= __ifloordiv__ py-//)
+		    (%=  py-%=  __imod__ py-%)
+		    (**= py-**= __ipow__ py-**)
+		    (<<= py-<<= __ilshift__ py-<<)
+		    (>>= py->>= __irshift__ py->>)
+		    (&=  py-&=  __iand__ py-&)
+		    (^=  py-^=  __ixor__ py-^)
+		    (\|= py-\|= __ior__ py-\|))
+		collect `(create-inplace-func ,syntax ,py-@= ,meth-name ,py-@))))
+
+(generate-inplace-funcs)
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; in, not in, is, is not
 
 (defmethod py-in (x seq)
@@ -143,31 +218,6 @@
     do (push (cons name func) *math-binary-op-assoc*))
 
 
-;; a**b (to-the-power) is a special case:
-;;  - method __pow__ takes an optional third argument:
-;;    that argument can be supplied using the built-in function POW but not
-;;     syntactically (using **)
-;;  - there is no corresponding __rpow__ magic method
-;;  - so, function py-** always gets 2 arguments when called for the a**b syntax,
-;;    but may have a third argument when called for the built-in function POW.
-
-(defgeneric py-** (x y &optional z))
-
-(defmethod __pow__ :around (x y &optional z)
-  (declare (ignore x y z))
-  (if (next-method-p)
-       (call-next-method)
-    *NotImplemented*))
-  
-(defmethod py-** (x y &optional z) ;; doesn't support third arg (but built-in function POW does) (?)
-  (multiple-value-bind (meth found)
-      (internal-get-attribute (__class__ x) '__pow__)
-    (let ((result (if found
-		      (py-call meth (list x y z))
-		    *NotImplemented*)))
-      (if (eq result *NotImplemented*)
-	  (py-raise 'TypeError "Unsupported operands for ** (got: ~A, ~A, ~A)" x y z)
-	result))))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;

@@ -13,6 +13,8 @@
 
 (defmethod register-bi-class-attr/meth ((class class) (meth-name symbol) attr-value)
   "Puts the method in the hash table. TYPE is either :ATTR or :METH."
+  (when (eq attr-value '__and__)
+    (warn "Registering __and__"))
   (let* ((alist (gethash meth-name *builtin-class-attr/meths*))
 	 (kons  (cons class attr-value))
 	 (assval (assoc class alist)))
