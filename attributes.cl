@@ -143,7 +143,7 @@
   (:documentation
    "Get attribute ATTR of X; returns VAL, FOUND-P. ~@
     Does not raise AttributeError itself, but any Python exception could be
-    raised in user-defined methods."))
+    raised in user-defined methods called in the process."))
 
 
 (defmethod internal-get-attribute :around ((x class) attr)
@@ -228,7 +228,7 @@
 			  t))
 	      (setf attr-val-try-__get__ nil))))
 	
-	;; Look in instance dict
+	;; Look in instance dict and slots
 	(multiple-value-bind (val found)
 	    (ud-instance-only x attr)
 	  (when found (return-from internal-get-attribute
