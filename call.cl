@@ -108,7 +108,7 @@
   
   (multiple-value-bind (meth found)
       (internal-get-attribute cls '__new__)
-    (break)
+    
     (if found
 		
 	(progn (warn "__new__ method found for class ~A: ~A" cls meth)

@@ -1007,6 +1007,9 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Function
 ;; 
+;;  - Lisp functions
+;;  - Python functions
+;;
 ;; There are two types of Python functions:
 ;; 
 ;; BUILTIN-FUNCTION represents the functions present in de __builtin__
@@ -1019,6 +1022,17 @@
   (if (eq inst *None*)
       (make-unbound-method :func x :class class) ;; <Class>.meth
     (make-bound-method :func x :object inst))) ;; <instance>.meth
+
+(defmethod __repr__ ((x function))
+  (with-output-to-string (s)
+    (print-unreadable-object (x s :identity t :type t))))
+
+(defmethod __repr__ ((x generic-function))
+  (with-output-to-string (s)
+    (print-unreadable-object (x s :identity t :type t)
+      (format s "~A" (mop:generic-function-name x)))))
+
+
 
 (register-bi-class-attr/meth (find-class 'function) '__get__ #'__get__)
 
@@ -2306,6 +2320,10 @@
 	  (y (xrange-2 x y 1))
 	  (t (xrange-2 0 x 1)))))
 
+(defmethod __new__ ((x py-xrange) &optional pos-args key-args)
+  (declare (ignore pos-args key-args))
+  (error "todo: xrange.__new__"))
+				  
 (defmethod __iter__ ((x py-xrange))
   (let* ((start (slot-value x 'start))
 	 (stop (slot-value x 'stop))

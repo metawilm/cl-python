@@ -151,7 +151,7 @@
   (getattr-of-number x attr))
 
 (defmethod getattr-of-number ((x number) attr)
-  (dolist (num-cls (list (find-class 'number)
+  (dolist (num-cls (list (find-class 'number) ;; XXX hack
 			 (find-class 'real)
 			 (find-class 'integer)
 			 (find-class 'complex)))
@@ -177,8 +177,11 @@
   (getattr-of-class-rec x attr))
 
 
+(defmethod maybe-bind ((x function) instance class)
+  (__get__ x instance class))
 
-(defun maybe-bind (object instance class)
+(defmethod maybe-bind (object instance class)
+  #+(or)(break "maybe-bind ~A ~A ~A" object instance class)
   (multiple-value-bind (bound-val get-found)
       (call-attribute-via-class object '__get__ (list instance class))
     (if get-found
@@ -189,7 +192,7 @@
 (defmethod getattr-of-instance-rec ((x builtin-instance) attr)
   (loop for cls in (mop:class-precedence-list (class-of x))
       while (typep cls 'builtin-class)
-      do (let ((meth (lookup-bi-class-attr/meth x attr)))
+      do (let ((meth (lookup-bi-class-attr/meth cls attr)))
 	   (when meth
 	       (return-from getattr-of-instance-rec
 		 (values (maybe-bind meth x (class-of x))
@@ -285,6 +288,7 @@
 		t)))
 
     ;; Finally, give up.
+
     (py-raise 'AttributeError
 	      "Object ~A has no attribute ~A" x attr)))
 
@@ -293,7 +297,7 @@
   (let ((val (lookup-bi-class-attr/meth cls attr)))
     (when val 
       (return-from getattr-of-class-nonrec
-	(values (maybe-bind val *None* cls)
+	(values val #+(or)(maybe-bind val *None* cls)
 		t)))))
 
 (defmethod getattr-of-class-nonrec ((cls user-defined-class) attr)
@@ -301,42 +305,49 @@
       (__getitem__ (slot-value cls '__dict__) attr)
     (when found
       (return-from getattr-of-class-nonrec
-	(values (maybe-bind val *None* cls)
+	(values val #+(or)(maybe-bind val *None* cls)
 		t)))))
 
 (defmethod getattr-of-class-nonrec ((cls (eql (find-class 't))) attr)
   (let ((val (lookup-bi-class-attr/meth cls attr)))
     (when val 
       (return-from getattr-of-class-nonrec
-	(values (maybe-bind val *None* cls)
+	(values val #+(or)(maybe-bind val *None* cls)
 		t)))))
 
 
 
 (defmethod getattr-of-class-rec :around ((cls class) attr)
-  (declare (ignore attr))
-  (let ((x (call-next-method)))
-    (if (typep x 'unbound-method) ;; XXX hack
-	(progn
-	  (setf (slot-value x 'class) cls)
-	  (values x t))
-      (values x t))))
+  (call-next-method)
+  #+(or)(progn (declare (ignore attr))
+	       (let ((x (call-next-method)))
+		 (if (typep x 'unbound-method) ;; XXX hack
+		     (progn
+		       (setf (slot-value x 'class) cls)
+		       (values x t))
+		   (values x t)))))
   
 (defmethod getattr-of-class-rec ((cls builtin-class) attr)
   (loop for c in (mop:class-precedence-list cls)
       while (typep c 'builtin-class)
       do (let ((val (getattr-of-class-nonrec c attr)))
 	   (when val
-	     (return-from getattr-of-class-rec (values val t)))))
+	     (return-from getattr-of-class-rec
+	       (values (maybe-bind val *None* cls)
+		       t)))))
   
   ;; fallback: methods specialized on class 'class or class 't
   (let ((val (getattr-of-class-nonrec (find-class 'class) attr)))
     (when val
-      (return-from getattr-of-class-rec (values val t))))
+      (return-from getattr-of-class-rec
+	(values (maybe-bind val *None* cls)
+		t))))
 
   (let ((val (getattr-of-class-nonrec (find-class 't) attr)))
     (when val
-      (return-from getattr-of-class-rec (values val t))))
+      (return-from getattr-of-class-rec
+	(values (maybe-bind val *None* cls)
+		t))))
  
   (values nil nil))
 
@@ -353,7 +364,9 @@
 	do (multiple-value-bind (val found)
 	       (getattr-of-class-nonrec c attr)
 	     (when found
-	       (return-from getattr-of-class-rec (values val t))))
+	       (return-from getattr-of-class-rec
+		 (values (maybe-bind val *None* cls)
+			 t))))
 	   (setf c (pop cpl)))
     
     (assert (or (member c (list (find-class 'udc-instance-w/dict)
@@ -365,17 +378,23 @@
 	do (multiple-value-bind (val found)
 	       (getattr-of-class-nonrec c attr)
 	     (when found
-	       (return-from getattr-of-class-rec (values val t))))
+	       (return-from getattr-of-class-rec
+		 (values (maybe-bind val *None* cls)
+			 t))))
 	   (setf c (pop cpl))))
-  
+    
   ;; fallback: methods specialized on class 'class and class 't
   (let ((val (getattr-of-class-nonrec (find-class 'class) attr)))
     (when val
-      (return-from getattr-of-class-rec (values val t))))
+      (return-from getattr-of-class-rec
+	(values (maybe-bind val *None* cls)
+		t))))
 
   (let ((val (getattr-of-class-nonrec (find-class 't) attr)))
     (when val
-      (return-from getattr-of-class-rec (values val t))))
+      (return-from getattr-of-class-rec
+	(values (maybe-bind val *None* cls)
+		t))))
 
   (values nil nil))
 
@@ -383,7 +402,9 @@
   (assert (member cls (list (find-class 'python-type))))
   (let ((val (lookup-bi-class-attr/meth (find-class 't) attr)))
     (when val 
-      (return-from getattr-of-class-rec (values val t)))))
+      (return-from getattr-of-class-rec
+	(values (maybe-bind val *None* cls)
+		t)))))
 
 
 

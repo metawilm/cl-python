@@ -55,7 +55,7 @@
 	
 	(let ((iterator (py-call iter-meth (list object))))
 	  (labels ((get-next-val-fun ()
-		     (handler-case (next iterator)
+		     (handler-case (values (call-attribute-via-class iterator 'next))
 		       (StopIteration () (values nil nil))
 		       (:no-error (val)  (values val t)))))
 	    (lambda () (get-next-val-fun))))

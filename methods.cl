@@ -52,22 +52,37 @@
 (defun make-bound-method (&key func object)
   (make-instance 'bound-method :func func :object object))
 
+(defmethod __repr__ ((x bound-method))
+  (with-output-to-string (s)
+    (print-unreadable-object (x s :identity t :type t)
+      (with-slots (func object) x
+	(pprint-logical-block (s nil)
+	  (format s ":func ~A ~_:object ~A"
+		  (call-attribute-via-class func '__repr__)
+		  (call-attribute-via-class object '__repr__)))))))
+
+
 (defclass unbound-method (builtin-instance)
   ((func   :initarg :func)
    (class  :initarg :class))
   (:metaclass builtin-class))
 
-(defmethod print-object ((x unbound-method) stream)
-  (print-unreadable-object (x stream :type t :identity t)
-    (with-slots (func class) x
-      (format stream ":func ~A  :class ~A" func class))))
-  
 (defun make-unbound-method (&key func class)
   (make-instance 'unbound-method :func func :class class))
+
+(defmethod __repr__ ((x unbound-method))
+  (with-output-to-string (s)
+    (print-unreadable-object (x s :identity t :type t)
+      (with-slots (func class) x
+	(pprint-logical-block (s nil)
+	  (format s ":func ~A ~_:class ~A"
+		  (call-attribute-via-class func '__repr__)
+		  (call-attribute-via-class class '__repr__)))))))
 
 (defclass class-method (builtin-instance)
   ((func :initarg :func))
   (:metaclass builtin-class))
+
 
 (defclass static-method (builtin-instance)
   ((func :initarg :func))
