@@ -62,7 +62,7 @@
   (declare (optimize (debug 3))
 	   (notinline def-python-exceptions))
   (flet ((def-sub-exc (exc-name super)
-	     (format t "defining exception   ~A  (~A)~%" exc-name super)
+	     #+(or)(format t "defining exception   ~A  (~A)~%" exc-name super)
 	   (let ((c (mop:ensure-class exc-name
 				      :direct-superclasses (list super)
 				      :metaclass 'python-type)))
