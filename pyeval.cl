@@ -73,7 +73,6 @@
       (funcdef (apply #'eval-funcdef (cdr ast)))
       (class (apply #'eval-classdef (cdr ast)))
       (import (apply #'eval-import (cdr ast)))
-      (assign-assign (apply #'eval-assign-assign (cdr ast)))
       (assign-expr (apply #'eval-assign-expr (cdr ast)))
       (del (eval-del (second ast)))
       (try-except (apply #'eval-try-except (cdr ast)))
@@ -86,7 +85,6 @@
     
       (list (apply #'eval-list (cdr ast)))
       (tuple (make-tuple-from-list (mapcar #'py-eval (cdr ast))))
-      ;; not used (listcompr (apply #'eval-listcompr (cdr ast)))
       (dict (eval-dict (second ast)))
       (string-conversion (apply #'eval-string-conv (cdr ast)))
     
@@ -191,7 +189,6 @@
 	   (error "eval-del: can only do simple vars for now")))))
 
 (defun eval-list (data)
-  
   ;; either normal list or list comprehension
   (if (and (second data)
 	   (listp (second data))
@@ -246,6 +243,7 @@
   (make-dict data))
 
 
+
 (defun eval-listcompr (expr list-for-ifs)
   (let ((acc ()))
     (labels ((process-for/ifs (for-ifs)
@@ -257,18 +255,12 @@
 	     (collect-expr () (push (py-eval expr) acc))
 	     
 	     (process-for (for-ifs)
-	       ;; copied from eval-for-in - maybe should refactor this code
-	       (destructuring-bind
-		   ((_list-for-in (_exprlist targets comma?) source) &rest rest)
+	       (destructuring-bind ((_list-for-in exprlist source) &rest rest)
 		   for-ifs
-		 (declare (ignore _list-for-in _exprlist))
-		 (let ((target (if (or comma?
-				       (> (length targets) 1))
-				   `(list ,@targets)
-				 (car targets)))
-		       (esource (py-eval source)))
+		 (declare (ignore _list-for-in))
+		 (let ((esource (py-eval source)))
 		   (py-iterate ($dummy$ esource)
-			       (eval-assign-one target $dummy$)
+			       (eval-assign-expr-1 exprlist $dummy$)
 			       (process-for/ifs rest)))))
 	     
 	     (process-if (for-ifs)
@@ -378,106 +370,80 @@
 
 
 (defun eval-for-in (targets sources suite else-suite)
-  (assert (eq (car targets) 'exprlist))
-  (assert (eq (car sources) 'testlist))
-  
-  ;; determine the assignment target
-  (destructuring-bind (place-list comma?)
-      (cdr targets)
-    (let ((place (if (or comma?
-			 (> (length place-list) 1))
-		     `(list ,@place-list)
-		   (car place-list))))
+  (let ((esource (py-eval sources))
+	(take-else t))
+    (py-iterate ($dummy$ esource)
+		(setf take-else nil)
+		(eval-assign-expr-1 targets $dummy$)
+		(py-eval suite))
+    (when take-else
+      (py-eval else-suite))))
+
+
+;; a = b,c = [1,2]
+;;  -> a = [1,2]
+;;     b = 1, c = 2
+
+(defun eval-assign-expr (items)
+  (destructuring-bind (val &rest targets)
+      (reverse items)
+    (if targets
+
+	;; real assignment statement
+	(let ((eval (py-eval val)))
+	  (dolist (tar targets)
+	    (eval-assign-expr-1 tar eval)))
       
-      (let ((esource (py-eval sources))
-	    (take-else t))
-	  
-	;; Iterate over EXPRESSION, binding TARGET-LIST, then executing
-	;; SUITE.
-	;;(warn "(eval-for-in: todo) esource: ~S" esource)
-	;;(warn "targets: ~S" targets)
-	;;(warn "place: ~S" place)
-	  
-	(py-iterate ($dummy$ esource)
-		    ;;(format t "inside py-iter in for-in:  ~S~%" $dummy$)
-		    (eval-assign-one place $dummy$)
-		    (py-eval suite))
-	(when (and take-else else-suite)
-	  (py-eval else-suite))))))
+      ;; just variable reference
+      (py-eval val))))
+    
 
-(defun eval-assign-assign (targets assignment-stmt)
-  "Nested assignment, like x = b,c = 3,4 ~@
-   ASSIGNMENT-STMT is either another ASSIGN-ASSIGN or ASSIGN-EXPR."
-  (let ((tuple (py-eval assignment-stmt)))
-    (assert (typep tuple 'py-tuple))
-    (eval-assign-expr targets tuple)))
-
-
-;; TARGETS is a CL list of targets (at least one element).
-;; EXPRESSIONS is an expression AST.
-;; 
-;; Examples:
-;;   (eval-assign-expr ((identifier . a)) (tuple (number . 42)))
-;;   (eval-assign-expr ((identifier . a) (identifier . b))
-;;                     (tuple (number . 42) (number . 13)))
-;;   (eval-assign-expr ((identifier . a) (tuple (number . 1) (number . 2))))
-;; 
-;; The order of execution of  a,b = c = 2,4
-;; is a follows:
-;;   c = (2,4)
-;;   a,b = c  -> a = 2, b = 4
-;; 
-;; In CPython, when a variable is bound, it is not bound again by an
-;; assignment before it: 
-;; 
-;;  a,b = a = b = 2,4 --> a = (2,4) and b = (2,4)
-;; 
-;; XXX We don't check that for now - should we?  (CPython doesn't
-;; give a warning.)
-;; 
-;; XXX this does not take into account a `global' declaration.
-;; 
-;; Returns all values as a CL list.
-
-(defun eval-assign-expr (targets values)
+(defun eval-assign-expr-1 (targets evalue)
+  "Assign EVALUE to TARGETS.
+   Assumes EVALUE already evaluated."
   (assert (member (car targets) '(testlist exprlist) :test 'eq))
-  (assert (member (car values) '(testlist exprlist) :test 'eq))
-  (let ((evalue (py-eval values))) ;; evalue is one item: a tuple or a single value
-    (let* ((targets (eval-assignment-targets (second targets)))
-	   (num-targets (length targets)))
-      ;; (format t "eval-ass-targets: ~S~%" targets)
-      (cond
-       ((= num-targets 0)
-	(error "no assignment targets?! ~W ~W" targets values))
+  (let* ((etargets (eval-assignment-targets (second targets)))
+	 (num-targets (length etargets))
+	 
+	 ;; both testlist and exprlist have comma? as third list element
+	 (comma? (third targets))
+	 (target-is-list (or (> num-targets 1)
+			     comma?)))
+    
+    ;; (format t "eval-ass-targets: ~S~%" etargets)
+    (cond
+     ((= num-targets 0)
+      (error "no assignment targets?! ~W ~W" etargets evalue))
        
-       ((= num-targets 1)
-	(eval-assign-one (car targets) evalue))
+     ((and (= num-targets 1)
+	   (not target-is-list))
+      (eval-assign-one (car etargets) evalue))
        
-       ((> num-targets 1)
-	(let ((i 0)
-	      (acc ()))
-	  (py-iterate (x evalue)
-		      (incf i)
-		      (when (> i num-targets)
-			(py-raise
-			 'ValueError
-			 "Too many values to unpack (needed exactly ~A values), ~@
-                          got already one more than that." num-targets))
-		      (push x acc))
-	  (when (< i num-targets)
-	    (py-raise 'ValueError
-		      "Too few values to unpack (needed exactly ~A values, ~
-                       but got only ~A)."
-		      num-targets i))
+     ((or (>= num-targets 2)
+	  target-is-list)
+      (let ((i 0)
+	    (acc ()))
+	(py-iterate (x evalue)
+		    (incf i)
+		    (when (> i num-targets)
+		      (py-raise
+		       'ValueError
+		       "Too many values to unpack (needed exactly ~A values), ~@
+                        got already one more than that." num-targets))
+		    (push x acc))
+	(when (< i num-targets)
+	  (py-raise 'ValueError
+		    "Too few values to unpack (needed exactly ~A values, ~
+                     but got only ~A)."
+		    num-targets i))
 	  
-	  ;; arriving here means we got exactly enough values.
-	  (setf acc (nreverse acc))
-	  (loop for val in acc
-	      for tar in targets
-	      do (eval-assign-one tar val))
-
-	  ;; enable chaining to assign-assign:
-	  evalue))))))
+	;; arriving here means we got exactly enough values.
+	(setf acc (nreverse acc))
+	(loop for val in acc
+	    for tar in etargets
+	    do (eval-assign-one tar val))))
+     
+     (t (error "shouldn't come here")))))
        
 (defun eval-assign-one (target val)
   "TARGET is evaluated as far as possible, but it still contains ~@
@@ -554,7 +520,6 @@
 
 
 (defun eval-assignment-targets (targets)
-  #+(or)(format t "targets: ~S~%" targets)
   (labels ((do-eval (tg)
 	     (when (atom tg)
 	       (py-raise 'SyntaxError
@@ -720,7 +685,8 @@
   (with-open-file (stream filename :direction :input)
     (let ((res (make-array 10000
 			   :element-type 'character
-			   :fill-pointer 0 :adjustable t)))
+			   :fill-pointer 0
+			   :adjustable t)))
       (loop
 	(let ((c (read-char stream nil nil)))
 	  (if c

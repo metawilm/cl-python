@@ -244,15 +244,15 @@
 	     import-stmt global-stmt exec-stmt assert-stmt)
 
  ;; XXX assign-expr only is correct for 1 level assignents (a = b, not for a=b=c)
- (expr-stmt (testlist expr-stmt2) ((cond ((and $2 (eq (car $2) '=))
-					  (list 'assign-expr $1 (caadr $2))) ;; XXX caadr ok?
+ (expr-stmt (testlist expr-stmt2) ((cond ((and $2 (eq (car $2) '=)) 
+					  `(assign-expr (,$1 ,@(second $2))))
 					 ($2
 					  (list 'augassign-expr (car $2) (car $1) (cdr $2)))
 					 (t
 					  $1))))
 
  (expr-stmt2 (augassign testlist) ((cons $1 $2)))
- (expr-stmt2 (=--testlist*) ((when $1 (list '= $1))))
+ (expr-stmt2 (=--testlist*) ((list '= $1)))
  (:=--testlist*)
  (=--testlist (= testlist) ($2))
 
