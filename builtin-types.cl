@@ -19,6 +19,7 @@
 
 #+(or) ;; todo
 (progn 
+  (defconstant pyt:basestring   xxx) ;; abstract type basestring has subtypes str and unicode
   (defconstant pyt:classmethod  (find-class 'py-classmethod))
   (defconstant pyt:staticmethod (find-class 'py-staticmethod))
   (defconstant pyt:property     (find-class 'py-property))
