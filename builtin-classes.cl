@@ -1446,7 +1446,7 @@
 
 (defclass py-tuple (builtin-instance)
   ((list :initarg :list :type list)
-   (length :initarg :length :type integer))
+   #+(or)(length :initarg :length :type integer))
   (:documentation "The Tuple type")
   (:metaclass builtin-class))
 
@@ -1455,7 +1455,7 @@
 (defun make-tuple (&rest lst)
   "Make a Python tuple from the given CL list"
   (check-type lst list "A regular Lisp list")
-  (make-instance 'py-tuple :list lst :length (length lst)))
+  (make-instance 'py-tuple :list lst))
 
 (defun make-tuple-from-list (list)
   (make-instance 'py-tuple :list list))
