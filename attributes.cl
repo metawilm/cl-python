@@ -302,7 +302,7 @@
 
 (defmethod getattr-of-class-nonrec ((cls user-defined-class) attr)
   (multiple-value-bind (val found)
-      (__getitem__ (slot-value cls '__dict__) attr)
+      (__getitem__ (slot-value cls '__dict__) attr) ;; inlined for now
     (when found
       (return-from getattr-of-class-nonrec
 	(values val #+(or)(maybe-bind val *None* cls)
@@ -318,6 +318,7 @@
 
 
 (defmethod getattr-of-class-rec :around ((cls class) attr)
+  (declare (ignore attr))
   (call-next-method)
   #+(or)(progn (declare (ignore attr))
 	       (let ((x (call-next-method)))
@@ -398,7 +399,7 @@
 
   (values nil nil))
 
-(defmethod  getattr-of-class-rec (cls attr)
+(defmethod getattr-of-class-rec (cls attr)
   (assert (member cls (list (find-class 'python-type))))
   (let ((val (lookup-bi-class-attr/meth (find-class 't) attr)))
     (when val 
@@ -411,7 +412,13 @@
 (defmethod getattr-of-ud-instance-nonrec ((x udc-instance-w/dict+slots) attr)
   (if (and (slot-exists-p x attr)
 	   (slot-boundp x attr))  ;; also if attr is `__dict__' or `__slots__'
-      (values (slot-value x attr) t)
+      (progn
+	(let ((val (slot-value x attr)))
+	  (when (or (eq attr '__dict__)
+		    (typep val 'namespace))
+	    (warn "accessing namespace as dict: partly TODO"))
+	  (values val t)))
+    
     (__getitem__ (slot-value x '__dict__) attr)))
 
 (defmethod getattr-of-ud-instance-nonrec ((x udc-instance-w/slots) attr)
@@ -425,10 +432,13 @@
 
 (defmethod getattr-of-ud-instance-nonrec ((x udc-instance-w/dict) attr)
   (if (eq attr '__dict__)
-      (values (slot-value x '__dict__) t)
+      
+      (progn (warn "Accessing namespace: partly TODO")
+	     (values (slot-value x '__dict__) t))
+    
     (handler-case 
 	(__getitem__ (slot-value x '__dict__) attr)
-      (KeyError ()
+      (KeyError ()   ;; __getitem__ on py-dict can throw it
 	(values nil nil)))))
 
 
@@ -489,7 +499,8 @@
 	 (error "todo: change __bases__"))
 	
 	(t 
-	 (__setitem__ (slot-value x '__dict__) attr val))))
+	 (call-attribute-via-class (slot-value x '__dict__) '__setitem__
+				   (list attr val)))))
 
 
 (defmethod internal-set-attribute ((x udc-instance) attr val)
@@ -499,54 +510,49 @@
   ;; value of the attribute itself if we come across it.
 
   (let ((attr-val nil))
-    
-    (let (is-udc is-bic)
-      
-      (loop for cls in (mop:class-precedence-list (__class__ x)) ;; XXX or class-of ?
-		       ;; until (eq cls (load-time-value (find-class 'python-type)))
-		       ;; XXX can we assume that none of the built-in
-		       ;; classes have a 'data descriptor' attribute?!
-		     
-	  do (setf is-udc (typep cls 'user-defined-class)
-		   is-bic (typep cls 'builtin-class))
+   
+    (loop for cls in (mop:class-precedence-list (__class__ x)) ;; XXX or class-of ?
+		     ;; until (eq cls (load-time-value (find-class 'python-type)))
+		     ;; XXX can we assume that none of the built-in
+		     ;; classes have a 'data descriptor' attribute?!
+		       
+	with (is-udc is-bic)
+	       
+	do (setf is-udc (typep cls 'user-defined-class)
+		 is-bic (typep cls 'builtin-class))
 	     
-	     ;; Only UDC could have__setattr__ hook?
-	  when is-udc
-	  do (multiple-value-bind (setattr found)
-		 (internal-get-attribute cls '__setattr__)
-	       (when found
-		 (return-from internal-set-attribute
-		   (py-call setattr (list x attr val)))))
+	when is-udc  ;; Only UDC can have__setattr__ hook
+	do (multiple-value-bind (setattr found)
+	       (getattr-of-class-nonrec cls '__setattr__) ;; XXX bind?
+	     (when found
+	       (return-from internal-set-attribute
+		 (py-call setattr (list x attr val)))))
 	   
-	  when (and (not attr-val) (or is-udc is-bic))
-	  do (multiple-value-bind (val found)
-		 (internal-get-attribute cls attr)
-	       (when found
-		 (setf attr-val val))))
-    
-      ;; Call attr-val's __set__ if availabie (i.e. if it is a data
-      ;; descriptor)
+	when (and (not attr-val) (or is-udc is-bic))
+	do (multiple-value-bind (val found)
+	       (getattr-of-class-nonrec cls attr) ;; don't bind: __set__ is called later
+	     (when found
+	       (setf attr-val val))))
+   
+    ;; Call attr-val's __set__ if availabie (i.e. if it is a data
+    ;; descriptor)
       
-      (when attr-val
-	(multiple-value-bind (__set__-meth found)
-	    (internal-get-attribute attr-val '__set__)
-	  (when found
-	    (return-from internal-set-attribute
-	      (py-call __set__-meth (list x val))))))
-  
-      ;; Set attribute in the instance __dict__/slot
-      (setattr-udi x attr val))))
+    (when attr-val
+      (multiple-value-bind (res set-found)
+	  (call-attribute-via-class attr-val '__set__ (list val))
+	(if set-found
+	    (return-from internal-set-attribute res))))
+	  
+    ;; Set attribute in the instance __dict__/slot
+    (setattr-udi x attr val)))
 
 
-(defmethod setattr-udi ((x udc-instance-w/dict+slots) attr val)
-  (if (slot-exists-p x attr)
-      (setf (slot-value x attr) val)
-    (__setitem__ (slot-value x '__dict__) attr val)))
-  
+
 (defmethod setattr-udi ((x udc-instance-w/dict) attr val)
   (if (eq attr '__dict__)
       (setf (slot-value x '__dict__) val)
-    (__setitem__ (slot-value x '__dict__) attr val)))
+    (call-attribute-via-class (slot-value x '__dict__) '__setitem__
+			      (list attr val))))
 
 (defmethod setattr-udi ((x udc-instance-w/slots) attr val)
   (if (slot-exists-p x attr)
@@ -556,9 +562,18 @@
                (these are the available slots: ~A)"
 	      (class-of x) attr (slot-value (class-of x) '__slots__))))
 
+(defmethod setattr-udi ((x udc-instance-w/dict+slots) attr val)
+  (if (slot-exists-p x attr)
+      (setf (slot-value x attr) val)
+    
+    ;; inline?
+    (call-attribute-via-class (slot-value x '__dict__) '__setitem__
+			      (list attr val))))
 
-(defmethod verify-settable-attribute ((x builtin-object) attr)
-  ;; Can't set anything.
+
+(defmethod verify-settable-attribute (x attr)
+  ;; Can't set any attribute of built-in objects (whether classes or instances).
+  ;; (Everything not of type USER-DEFINED-CLASS is a built-in type.)
   (raise-setattr-error x attr))
 
 (defmethod verify-settable-attribute ((x user-defined-class) attr)

@@ -124,8 +124,7 @@
   (:documentation "Mix-in for UDCs. Idea: all UDC instances are of class UDC-INSTANCE"))
 
 (defclass udc-instance-w/dict (udc-instance)
-  ((__dict__ :initarg :dict :initform (make-dict)
-	     ;; not restricted to :type py-dict, as everything is allowed (see attributes.cl)
+  ((__dict__ :initarg :dict :initform (make-namespace) ;; was (make-dict) 20041226
 	     ))
   (:documentation "Represents all UDC's whose instances have a __dict__."))
 

@@ -108,7 +108,7 @@
 				       (real    . py-real-designator-p)
 				       (attribute-name . attribute-name-designator-p)
 				       (string  . py-string-designator-p)
-				       (python-object . python-object-designator-p)))))
+				       #+(or)(python-object . python-object-designator-p)))))
 	(vars (if (listp vars) vars (list vars))))
     
     (assert designator-function ()

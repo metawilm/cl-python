@@ -95,6 +95,7 @@
 			 x um-class inst))))))
 
 (defmethod py-call ((x static-method) &optional pos-args kwd-args)
+  (declare (ignore pos-args kwd-args))
   (break "py-call static-method"))
 ;;  (with-slots (func) x
 ;;    (py-call func pos-args kwd-args)))

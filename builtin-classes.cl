@@ -669,19 +669,22 @@
 (defun safe-py-hash (x)
   "ACL requires hash value to be fixnum: make sure it is."
   (assert (python-object-designator-p x) ()
-      "Attempt to put a non-Python value in a Python dict: ~A" x)
-  (let ((hash-value (__hash__ x)))
+    "Attempt to put a non-Python value in a Python dict: ~A" x)
+  (let ((hash-value (call-attribute-via-class x '__hash__)))
     (assert (typep hash-value 'fixnum) () "Hash code should be fixnum! (~A ~A)"
 	    x hash-value)
     hash-value))
 
+    
 (defclass py-dict (builtin-instance)
   ;; TODO: if there are only a very few items in the dict, represent
   ;; it as an alist or something similarly compact.
-  ((hash-table :initform (make-hash-table :test '__eq__  :hash-function 'safe-py-hash)))
+  ((hash-table :initform (make-hash-table :test 'py-==
+					  :hash-function 'safe-py-hash)))
   (:metaclass builtin-class))
 
 (mop:finalize-inheritance (find-class 'py-dict))
+
 
 (defun make-dict (&optional data)
   ;; data: alist '((key1 . val1)(key2 . val2)...)
@@ -921,9 +924,9 @@
 ;; 
 ;; The methods and attributes of a class, and the lexical scope inside
 ;; a function, are represented by namespace objects. A namespace
-;; behaves like a py-dict.
+;; behaves like a py-dict, except that all its keys are SYMBOLS.
 ;; 
-;; Compared to dics, namespaces have extra atrtibutes `name' (for
+;; Compared to dics, namespaces have extra attributes `name' (for
 ;; debugging, mostly) and `enclosing-ns' (referring to the namespace
 ;; in which this namespace is enclosed: for classes defined at
 ;; top-level, this is the module namespace).
@@ -956,31 +959,46 @@
       (namespace-bind ns '__builtins__ *__builtin__-module-namespace*))
     ns))
 
+
+;; For now, a bit paranoid regarding the rule that all keys are symbols...
+
+(defmethod check-only-symbol-keys ((x namespace))
+  (maphash (lambda (k v)
+	     (declare (ignore v))
+	     (check-type k symbol))
+	   (slot-value x 'hash-table)))
+
 (defmethod namespace-bind ((x namespace) var val)
   (ensure-py-type var attribute-name "Invalid attribute name: ~A")
+  (check-type var symbol)
+  (check-only-symbol-keys x)
   (setf (gethash var (slot-value x 'hash-table)) val))
 
 (defmethod namespace-lookup ((x namespace) var)
   "Recursive lookup. Returns two values:  VAL, FOUND-P"
   (ensure-py-type var attribute-name "Invalid attribute name: ~A")
-  (let ((res (gethash var (slot-value x 'hash-table))))
-    (cond (res
-	   (values res t))
-	  ((slot-value x 'enclosing-ns)
-	   (namespace-lookup (slot-value x 'enclosing-ns) var))
-	  (t
-	   nil))))
+  (check-type var symbol)
+  (check-only-symbol-keys x)
+  (multiple-value-bind (val found) ;; m-v-b, as NIL is valid VAR
+      (gethash var (slot-value x 'hash-table))
+    (cond (found                        (values val t))
+	  ((slot-value x 'enclosing-ns) (namespace-lookup
+					 (slot-value x 'enclosing-ns) var))
+	  (t                            nil))))
 
 (defmethod namespace-delete ((x namespace) var)
   "Delete the attribute."
   ;; todo: when in an enclosing namespace
   (ensure-py-type var attribute-name "Invalid attribute name: ~A")
+  (check-type var symbol)
+  (check-only-symbol-keys x)
   (let ((res (remhash var (slot-value x 'hash-table))))
     (unless res
       (py-raise 'NameError
 		"No variable with name ~A" var))))
 
 (defmethod namespace-copy ((x namespace))
+  (check-only-symbol-keys x)
   (with-slots (name enclosing-ns hash-table) x
     (let* ((x-copy (make-namespace :inside enclosing-ns
 				   :name name))
@@ -992,9 +1010,12 @@
 
 (defmethod __getitem__ ((x namespace) key)
   "Contrary to PY-DICT, does not raise KeyError."
+  (check-only-symbol-keys x)
+  (check-type key symbol)
   (gethash key (slot-value x 'hash-table)))
 
 (defmethod __repr__ ((x namespace))
+  (check-only-symbol-keys x)
   (with-output-to-string (stream)
     (pprint-logical-block (stream nil)
       (format stream "{")
@@ -2587,16 +2608,14 @@
 
 (defgeneric python-object-designator-p (x)
   (:documentation "Returns DESIGNATOR-P, PYVAL where PYVAL is a ~
-                   Python object iff DESIGNATOR-P "))
-
-;; shield this class from Python
-(defmethod python-object-designator-p ((x (eql (find-class 'builtin-instance)))) (values nil nil))
-
-(defmethod python-object-designator-p ((x python-object)) (values t x))
-(defmethod python-object-designator-p ((x (eql (find-class 'python-type)))) (values t x))
-(defmethod python-object-designator-p ((x number)) (values t (make-py-number x)))
-(defmethod python-object-designator-p ((x string)) (values t (make-py-string x)))
-(defmethod python-object-designator-p (x) (declare (ignore x)) nil)
+                   Python object iff DESIGNATOR-P ")
+  (:method ((x (eql (find-class 'builtin-instance)))) nil)
+  (:method ((x python-object)) t)
+  (:method ((x (eql (find-class 'python-type)))) t)
+  (:method ((x number)) t)
+  (:method ((x string)) t)
+  (:method ((x symbol)) t)
+  (:method (x) (declare (ignore x)) nil))
 
 
 (defgeneric py-object-designator-val (x)
@@ -2604,6 +2623,7 @@
   (:method ((x (eql (find-class 'python-type)))) x) ;; needed?
   (:method ((x number))                        (make-py-number x))
   (:method ((x string))                        (make-py-string x))
+  #+(or)(:method ((x symbol))                        (symbol-name x))
   (:method (x) (error "Uncatched in PY-OBJECT-DESIGNATOR-VAL: ~S" x)))
 
 
