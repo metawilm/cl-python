@@ -130,6 +130,11 @@
   (eval form))
 
 (defun eval-try-except (suite except-clauses else-clause)
+  
+  ;; Note that the Exception class that an 'except' clause catches, is
+  ;; evaluated after an exception is thrown, not earlier; so long as
+  ;; there is no exception thrown, it is not evaluated.
+  
   (handler-bind
       ((Exception (lambda (e)
 		    (loop for ((class parameter) handler-form) in except-clauses
