@@ -815,12 +815,13 @@
 (defun make-namespace (&key (inside nil) (name nil) (builtins nil))
   "Make a new namespace.
    BUILTINS indicates whether attribute `__builtins__ should ~
-   be created and pointed to the namespace with built-in functions, denoted with *builtins*.
+     be created and pointed to the namespace with built-in functions
+     `<__builtin__ module>.__dict__', available as *__builtin__-module-namespace*.
    INSIDE gives the enclosing scope(s)."
   (let ((ns (make-instance 'namespace :name name :inside inside)))
-    (declare (special *builtins*))
+    (declare (special *__builtin__-module-namespace*))
     (when builtins
-      (namespace-bind ns '__builtins__ *builtins*))
+      (namespace-bind ns '__builtins__ *__builtin__-module-namespace*))
     ns))
 
 (defmethod namespace-bind ((x namespace) var val)

@@ -24,7 +24,7 @@
   (with-compilation-unit ()
     (dolist (f '("classes" "exceptions" "pythonic" "magicmeths" "builtin-classes"
 		 "call" "builtin-funcs" "builtin-types" "mathops"
-		 "descriptors" "attributes" "pyeval"
+		 "descriptors" "attributes" "modules" "pyeval"
 		 "parsepython" "walk" "gener"
 		 "repl"))
       (excl::compile-file-if-needed f)

@@ -2,6 +2,7 @@
 
 (defparameter *scope* nil "Current execution namespace")
 
+#+(or)
 (defun make-builtins-module ()
   
   ;; Fill a new namespace with all built-in names, and create a module
@@ -25,11 +26,9 @@
     (make-module :name "__builtin__"
 		 :namespace ns)))
 
-(defparameter *builtins* (make-builtins-module))
-
 (defparameter *__debug__* 1) ;; CPython readonly variable `__debug__' (see EVAL-ASSERT)
 
-(defparameter *python-modules* (make-namespace) "Registry of all modules")
+#+(or)(defparameter *sys.modules* (make-namespace) "Registry of all modules")
 
 ;;; Evaluation
 
@@ -764,11 +763,12 @@
 (defun eval-import (items)
   ;; TODO: use sys.path
   (flet ((get-module-object (mod-name) ;; -> #<MODULE>, EXISTED-ALREADY-P
-	   (let ((mod (namespace-lookup *python-modules* mod-name)))
+	   (let ((mod (namespace-lookup *sys.modules* mod-name)))
+	     (declare (special *sys.modules*))
 	     (if mod
 		 (values mod t)
 	       (let ((m (make-module-object mod-name)))
-		 (namespace-bind *python-modules* mod-name m)
+		 (namespace-bind *sys.modules* mod-name m)
 		 (values m nil)))))
 	 
 	 (normalize-item (x)
