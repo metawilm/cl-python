@@ -53,6 +53,7 @@
 
 
 (defmethod __call__ ((x python-function) &optional pos-args key-args)
+  ;; used in user-defined functions
   (with-slots (call-rewriter namespace ast) x
     (let ((actual-args (funcall call-rewriter pos-args key-args)))
       
@@ -67,6 +68,20 @@
       
 	(py-eval ast)))))
 
+(defmethod __call__ ((x python-function-returning-generator) &optional pos-args key-args)
+  (with-slots (call-rewriter generator-creator) x
+    
+    (let ((ns (make-namespace :name "generator namespace"
+			      :inside *scope*))
+	  (value-producing-f (funcall generator-creator)))
+      
+      (loop for (arg . val) in (funcall call-rewriter pos-args key-args)
+	  do (namespace-bind ns arg val))
+      
+      (make-iterator-from-function (lambda () 
+				     (let ((*scope* ns))
+				       (funcall value-producing-f)))))))
+		
 
 (defmethod __call__ ((x py-bound-method) &optional pos-args kwd-args)
   "The instance enclosed in the bound method is prefixed to pos-args"
@@ -125,7 +140,7 @@
   ;;; XXX todo: rename make-instance to __new__ everywhere
   (declare (ignore pos-args kwd-args))
   (make-instance cls))
-;;    x))
+
     
 #|    #+(or);; don't for now
     (multiple-value-bind (init found)
