@@ -1,11 +1,5 @@
 (in-package :python)
 
-;; XXX todo:
-;;  support   def f((a,b), c): print b
-;;            f((1,2),3) -> "2"
-;;   by introducing `anonymous' variable name for first argument.
-;;  http://mail.python.org/pipermail/python-dev/2003-October/038915.html
-
 (defparameter *scope* nil "Current execution namespace")
 
 
@@ -33,6 +27,8 @@
 		 :namespace ns)))
 
 (defparameter *builtins* (make-builtins-module))
+
+(defparameter *__debug__* 1) ;; CPython readonly variable `__debug__' (see EVAL-ASSERT)
 
 
 ;;; Evaluation
@@ -186,10 +182,10 @@
 		     (py-eval ',else-clause)))))
 		    
 (defun eval-assert (test expr)
-  (unless (py-val->lisp-bool (py-eval test))
-    ;; first evaluate expr, as that might lead to another exception
-    (let ((str (py-eval expr)))
-      (py-raise 'AssertionError str))))
+  "Test whether assertion holds. Is only executed when __debug__ is true"
+  (when (py-val->lisp-bool *__debug__*)
+    (unless (py-val->lisp-bool (py-eval test))
+      (py-raise 'AssertionError (py-eval expr)))))
 
 (defun eval-del (exprlist)
   (assert (eq (car exprlist) 'exprlist))
