@@ -94,7 +94,7 @@
  ;; file from CPython CVS, file Python/Grammar/Grammar, 20040827.
 
  ;; The start symbol: regular python files
- (python-grammar (file-input) ((cons 'file-input (nreverse $1))))
+ (python-grammar (file-input) ((list 'file-input (nreverse $1))))
 
  (file-input () ())
  (file-input (file-input newline) ($1))
