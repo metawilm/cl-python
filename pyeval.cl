@@ -122,6 +122,7 @@
       (suite (eval-suite (second ast)))
       (for-in (apply #'eval-for-in (cdr ast)))
       (if (apply #'eval-if (cdr ast)))
+      (while (apply #'eval-while (cdr ast)))
       (assert (apply #'eval-assert (cdr ast)))
     
       (pass) ;; nothing
@@ -767,6 +768,13 @@
 	(when else-suite
 	  (py-eval else-suite))))
 
+(defun eval-while (test suite else-suite)
+  (loop with taken = nil
+      while (py-val->lisp-bool (py-eval test))
+      do (py-eval suite)
+	 (setf taken t)
+      finally (unless taken
+		(py-eval else-suite))))
 
 (defun eval-comparison (operator left right)
   "Does comparison, returns Python boolean"
