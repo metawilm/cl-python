@@ -124,13 +124,11 @@
 
 
 (defmethod py-get-attribute :around (x attr)
-  (or (call-next-method)
-      (cond ((and (eq attr '__name__) (eq x #'iterator-next)) ;; XXX hack
-	     "next")
-	    (t
-	     (warn "Catch-all internal-get-attribute: ~S ~S" x attr)
-	     nil))))
-  
+  (cond ((and (eq attr '__name__) (eq x #'iterator-next)) ;; XXX hack
+	 "next")
+	(t
+	 (call-next-method))))
+
 (defmethod py-get-attribute :around ((x class) (attr symbol))
   (cond ((eq attr '__class__)
 	 (__class__ x))
@@ -190,6 +188,11 @@
 (defmethod py-get-attribute ((x py-module) attr)
   (getattr-of-module x attr))
 
+(defmethod py-get-attribute ((x generic-function) attr)
+  (if (eq attr '__name__)
+      (symbol-name (mop:generic-function-name x))
+    (call-next-method)))
+    
 (defmethod py-get-attribute ((x udc-with-ud-metaclass) attr)
   ;; Situation:
   ;;   class M(type): pass
@@ -222,7 +225,6 @@
   
 (defmethod getattr-of-module ((x py-module) attr)
   (getattr-of-module x (intern (py-string-designator-val attr) #.*package*)))
-
 
 (defmethod getattr-of-instance-rec ((x builtin-instance) attr)
   (loop for cls in (mop:class-precedence-list (class-of x))

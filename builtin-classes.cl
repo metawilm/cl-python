@@ -35,34 +35,6 @@
 (defmethod py-type (x)
   (__class__ x))
 
-(defgeneric __class__ (x) (:documentation "The class of X"))
-(defmethod __class__ ((x integer))       (find-class 'py-int))
-(defmethod __class__ ((x real))          (find-class 'py-float))
-(defmethod __class__ ((x complex))       (find-class 'py-complex))
-(defmethod __class__ ((x string))        (find-class 'py-string))
-
-(defmethod __class__ ((x user-defined-class))
-  (cond ((typep x 'udc-with-ud-metaclass)
-	 (loop for cls in (mop:class-precedence-list (class-of x))
-	     when (typep cls 'user-defined-class)
-	     do (return cls)))
-	(t (let ((k (class-of x)))
-	     (if (typep k 'user-defined-class)
-		 k
-	       (find-class 'python-type))))))
-
-(defmethod __class__ ((x builtin-class)) (find-class 'python-type))
-(defmethod __class__ ((x function))      (find-class 'python-type)) ;; XXX show function name
-(defmethod __class__ ((x python-object)) (class-of x)) ;; XXX check
-(defmethod __class__ ((x symbol))        (find-class 'py-string))
-
-;; PYTHON-OBJECT is both an instance and a subclass of PYTHON-TYPE.
-(defmethod __class__ ((x (eql (find-class 'python-object)))) (find-class 'python-type))
-
-;; PYTHON-TYPE is it's own type.
-(defmethod __class__ ((x (eql (find-class 'python-type)))) x)
-
-(register-bi-class-attr/meth (find-class 't) '__class__ (make-bi-class-attribute #'__class__))
 
 
 ;;; Classes have a `__mro__' attribute, which is the "Method
@@ -137,55 +109,54 @@
 
 
 
-(defmethod python-type-__new__ (metaclass &optional name bases dict)
-  (assert metaclass)
-  (when (and (not (typep metaclass 'class))
-	     (not (or name bases dict))) ;; "type(x) -> <type-of-x>"
-    (warn "type(x) -> y")
-    (return-from python-type-__new__ (py-type metaclass)))
-  
-  (unless (and name dict)
-    (warn "type.__new__(x) -> instance of x")
-    (let ((inst (make-instance metaclass)))
-      (when (and (slot-exists-p inst '__dict__)
-		 (not (slot-boundp inst '__dict__)))
-	(setf (slot-value inst '__dict__) (make-namespace))
-	(return-from python-type-__new__ inst))))
-  
-  #+(or)(error "type.__new__ got not 1 or 4 args: ~A ~A ~A ~A" metaclass name bases dict)
-  
-  (assert (or (eq metaclass (load-time-value (find-class 'python-type)))
-	      (typep metaclass 'python-type)))
-      
-  ;; Create a class with this as metaclass
-  (unless (symbolp name)
-    (ensure-py-type name string "class name must be string (got: ~A)")
-    (setf name (intern name #.*package*)))
-  
-  (multiple-value-bind (slots has-slots)
-      (values nil nil) ;; for now
-	       
-    #+(or)(let ((s (namespace-lookup dict '__slots__)))
-	    (if s 
-		(values (py-iterate->lisp-list s) t)
-	      (values nil nil)))
-	       
-    (return-from python-type-__new__
-      (make-python-class :name name
-			 :supers (cond ((null bases) ())
-				       ((consp bases) bases)
-				       (t (py-iterate->lisp-list bases)))
-			 :slots slots
-			 :has-slots has-slots
-			 :namespace dict
-			 :metaclass metaclass))))
+(defmethod python-type-__new__ (pos-args kwd-args)
+  (assert pos-args) ;; at least one arg
+  (cond ((not pos-args)
+	 (error "type.__new__: got no args"))
+	  
+	((and (eq (car pos-args) (find-class 'python-type))
+	      (not (cdr pos-args))
+	      (not kwd-args))
+	 (warn "type(x) -> y")
+	 (return-from python-type-__new__ (py-type (car pos-args))))
+	  
+	((eq (car pos-args) (find-class 'python-type))
+	 (warn "type.__new__(): creating a new clas")
+	 (destructuring-bind (metaclass name bases dict) pos-args
+	   (warn "metaclass, name, bases, dict = ~A, ~A, ~A, ~A" metaclass name bases dict)
+	   (unless (symbolp name)
+	     (ensure-py-type name string "class name must be string (got: ~A)")
+	     (setf name (intern name #.*package*)))
+	   (multiple-value-bind (slots has-slots)
+	       (values nil nil) ;; for now
+	     #+(or)(let ((s (namespace-lookup dict '__slots__)))
+		     (if s 
+			 (values (py-iterate->lisp-list s) t)
+		       (values nil nil)))
+	     (return-from python-type-__new__
+	       (make-python-class :name name
+				  :supers (cond ((null bases) ())
+						((consp bases) bases)
+						(t (py-iterate->lisp-list bases)))
+				  :slots slots
+				  :has-slots has-slots
+				  :namespace dict
+				  :metaclass metaclass)))))
+	  
+	(t (let ((cls (car pos-args)))
+	     (warn "type.__new__(): creating instance of class ~A" cls)
+	     (let ((inst (make-instance cls)))
+	       (warn "instance of cls ~A:  ~A" cls inst)
+	       (when (and (slot-exists-p inst '__dict__)
+			  (not (slot-boundp inst '__dict__)))
+		 (setf (slot-value inst '__dict__) (make-namespace)))
+	       (return-from python-type-__new__ inst))))))
 
-(register-bi-class-attr/meth (find-class 't) '__new__   ;; check which one
-			     (make-static-method #'python-type-__new__))
-(register-bi-class-attr/meth (find-class 'class) '__new__
-			     (make-static-method #'python-type-__new__))
-(register-bi-class-attr/meth (find-class 'python-type) '__new-_
-			     (make-static-method #'python-type-__new__))
+(let* ((m (make-static-method-accepting-kwd-args #'python-type-__new__)))
+  (register-bi-class-attr/meth (find-class 't) '__new__ m)
+  (register-bi-class-attr/meth (find-class 'class) '__new__ m)
+  (register-bi-class-attr/meth (find-class 'python-type) '__new__ m))
+
 
 
 (defgeneric __init__ (x &rest args)
@@ -732,7 +703,7 @@
 
 (defmethod py-int-__new__ ((cls class) &rest pos-args)
   ;; takes an optional `base' arg
-  (assert (subtypep cls (find-class 'py-int)))
+  (assert (subtypep cls (load-time-value (find-class 'py-int))))
   (cond ((py-string-designator-p (car pos-args))
 	 (destructuring-bind (str &optional base) pos-args
 	   (setf str (py-string-designator-val str)
@@ -1775,6 +1746,7 @@
 ;; Function
 
 (defmethod __get__ ((x function) inst class)
+  (declare (ignore class))
   (if (eq inst *None*)
       x  ;; #+(or)(make-unbound-method :func x :class class) ;; <Class>.meth
     (make-bound-method :func x :object inst))) ;; <instance>.meth
@@ -1809,6 +1781,7 @@
 ;; TODO: __new__, __init__
 
 (defmethod __get__ ((x python-function) inst class)
+  (declare (ignore class))
   (if (eq inst *None*) ;; Hmm what if class of None were subclassable?!
       x #+(or)(make-unbound-method :func x :class class) ;; <Class>.meth
     (make-bound-method :func x :object inst))) ;; <instance>.meth
@@ -3881,20 +3854,22 @@
 	 (stop (slot-value x 'stop))
 	 (step (slot-value x 'step))
 	 (i start)
-	 (stopped-already (= i stop)))
+	 (stopped-already (if (> step 0) (>= i stop) (<= i stop))))
     (make-iterator-from-function
      (lambda ()
        (unless stopped-already
-	 (setf stopped-already (= i stop))
+	 (setf stopped-already (if (> step 0) (>= i stop) (<= i stop)))
 	 (prog1 i
 	   (incf i step)))))))
 
 (defmethod map-over-py-object (fun (x py-xrange))
   (with-slots (start stop step) x
-    (loop with i = start
-	until (= i stop)
-	do (funcall fun i)
-	   (incf i step)))
+    (unless (= start stop 0)
+      (loop with i = start
+	  with stopped = nil
+	  until stopped do (funcall fun i)
+			   (incf i step)
+			   (setf stopped (if (> step 0) (> i stop) (< i stop))))))
   (values))
 
 (defmethod __getitem__ ((x py-xrange) index)
@@ -4196,3 +4171,35 @@
   (let ((s (py-repr argument)))
     (setf s (py-string-designator-val s)) ;; as S may be py-string subclass instance
     (write-string s stream)))
+
+
+;;; __class__
+
+(defgeneric __class__ (x) (:documentation "The class of X"))
+(defmethod __class__ ((x integer))       (find-class 'py-int))
+(defmethod __class__ ((x real))          (find-class 'py-float))
+(defmethod __class__ ((x complex))       (find-class 'py-complex))
+(defmethod __class__ ((x string))        (find-class 'py-string))
+
+(defmethod __class__ ((x user-defined-class))
+  (cond ((typep x 'udc-with-ud-metaclass)
+	 (loop for cls in (mop:class-precedence-list (class-of x))
+	     when (typep cls 'user-defined-class)
+	     do (return cls)))
+	(t (let ((k (class-of x)))
+	     (if (typep k 'user-defined-class)
+		 k
+	       (find-class 'python-type))))))
+
+(defmethod __class__ ((x builtin-class)) (find-class 'python-type))
+(defmethod __class__ ((x function))      (find-class 'python-type)) ;; XXX show function name
+(defmethod __class__ ((x python-object)) (class-of x)) ;; XXX check
+(defmethod __class__ ((x symbol))        (find-class 'py-string))
+
+;; PYTHON-OBJECT is both an instance and a subclass of PYTHON-TYPE.
+(defmethod __class__ ((x (eql (find-class 'python-object)))) (find-class 'python-type))
+
+;; PYTHON-TYPE is it's own type.
+(defmethod __class__ ((x (eql (find-class 'python-type)))) x)
+
+(register-bi-class-attr/meth (find-class 't) '__class__ (make-bi-class-attribute #'__class__))

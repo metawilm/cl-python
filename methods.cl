@@ -149,6 +149,15 @@
 			     (make-bi-class-attribute #'__name__))
 			     
 
+(defclass static-method-accepting-kwd-args (builtin-instance)
+  ((func :initarg :func))
+  (:metaclass builtin-class))
+
+(mop:finalize-inheritance (find-class 'static-method-accepting-kwd-args))
+
+(defun make-static-method-accepting-kwd-args (func)
+  (make-instance 'static-method-accepting-kwd-args :func func))
+
 
 ;; class method
 

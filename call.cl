@@ -118,7 +118,7 @@
 
 (defmethod py-call ((x unbound-method) &optional pos-args kwd-args)
   "X must be of right class, then call class method with given args."
-  (error "unbound method found")
+  (warn "unbound method called: ~A" x)
   (with-slots ((um-class class) (um-func func)) x
     (let ((inst (car pos-args)))
       (cond ((null pos-args) (py-raise 'ValueError
@@ -133,11 +133,13 @@
 			 x um-class inst))))))
 
 (defmethod py-call ((x static-method) &optional pos-args kwd-args)
-  (declare (ignore pos-args kwd-args))
-  (break "py-call static-method"))
-;;  (with-slots (func) x
-;;    (py-call func pos-args kwd-args)))
+  (warn "py-call static-method: ~A ~A ~A" x pos-args kwd-args)
+  (with-slots (func) x
+    (py-call func pos-args kwd-args)))
 
+(defmethod py-call ((x static-method-accepting-kwd-args) &optional pos-args kwd-args)
+  (with-slots (func) x
+    (funcall func pos-args kwd-args)))
 
 
 (defmethod py-call ((cls class) &optional pos-args kwd-args)
@@ -160,7 +162,7 @@
 		    
 (defmethod py-call ((x user-defined-object) &optional pos-args kwd-args)
   (if (typep x 'class)
-      (progn (warn "py-call udo -> py-call-class ~A" x)
+      (progn #+(or)(warn "py-call udo -> py-call-class ~A" x)
 	     (py-call-class x pos-args kwd-args))
     (py-call (getattr-of-class x '__call__) 
 	     (let ((args (cons x pos-args))) 
