@@ -48,6 +48,7 @@
   (let ((f (get-py-iterate-fun object)))
     (make-iterator-from-function f)))
 
+
 (defun get-py-iterate-fun (object)
   "Return a function that when called returns VAL, T, where VAL is the next value ~@
    gotten by iterating over OBJECT. Returns NIL, NIL upon exhaustion."
@@ -58,9 +59,18 @@
 	     
     (if found
 	
-	(let ((iterator (py-call iter-meth (list object))))
+	(let* ((iterator (py-call iter-meth (list object)))
+	       (next-meth (getattr-of-class iterator 'next)))
+	  
+	  ;; One could argue that looking up the `next' method should
+	  ;; only happen when the first value is requested. Doing it
+	  ;; earlier, as it is now, will detect the error below sooner.
+	  
+	  (unless next-meth
+	    (py-raise 'TypeError "Got invalid iterator (no `next' method): ~A" iterator))
+	  
 	  (labels ((get-next-val-fun ()
-		     (handler-case (values (call-attribute-via-class iterator 'next))
+		     (handler-case (values (py-call next-meth (list iterator)))
 		       (StopIteration () (values nil nil))
 		       (:no-error (val)  (values val t)))))
 	    (lambda () (get-next-val-fun))))
@@ -86,8 +96,11 @@
 			     (values val t)))))
 		(lambda () (get-next-val-fun))))
 	  
+	  ;; If nothing works...
+	  
 	  (py-raise 'TypeError
 		    "Iteration over non-sequence (got: ~A)" object))))))
+
 
 (defun py-iterate->lisp-list (object)
   (map-over-py-object #'identity object))

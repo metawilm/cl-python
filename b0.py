@@ -15,7 +15,9 @@ def proto___repr__(self):
 
 class MetaToken(type):
     def __new__(metacls, name, bases, vars):
+        # print "MetaToken.__new__( %s, %s, %s, %s)" % (metacls, name, bases, vars)
         cls = type.__new__(metacls, name, bases, vars)
+        # print "cls = %s" % cls
         cls.__new__ = staticmethod(proto___new__)
         cls.__repr__ = cls.__str__ = proto___repr__
         cls.next = 0

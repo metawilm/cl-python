@@ -811,15 +811,61 @@
 (register-bi-class-attr/meth (find-class 'py-dict) '__new__
 			     (make-static-method #'py-dict-__new__))
 
-;; XXX dict() takes keyword args... TODO
-(defmethod __init__ ((x py-dict) &rest args)
-  (cond ((null args))
-	((null (cdr args)) (if (typep (car args) 'py-dict)
-			       (progn (dict-clear x)
-				      (loop for (k . v) in (dict->alist (car args))
-					  do (__setitem__ (car args) k v)))
-			     (error "dict.__init__() with a ~A as arg: TODO" (car args))))
-	(t (error "dict.__init__ with multiple args: TODO"))))
+
+;; The __init__ of py-dict is exceptional, in that it takes keyword
+;; arguments. (Nearly?) None of the other built-in functions do.
+
+(defmethod py-dict-__init__ (pos-arg key-arg)
+  
+  (let ((x (car pos-arg)))
+    (assert (typep x 'py-dict))
+    (setf pos-arg (cdr pos-arg))
+  
+    ;; Either:   - no arguments (empty dict);
+    ;;           - one positional argument (mapping)
+    ;;           - keyword arguments: the content of the dict (only strings as keys)
+    
+    (cond ((not (or pos-arg key-arg)) )
+
+	  ((and (car pos-arg)
+		(not (cdr pos-arg))
+		(not key-arg))
+	 
+	   (let ((src (car pos-arg))
+		 (ht (slot-value x 'hash-table)))
+	   
+	     ;; Try it as mapping first, using  keys()  and  __getitem__()
+	   
+	     (multiple-value-bind (src-keys found)
+		 (call-attribute-via-class src 'keys)
+
+	       (if found
+		   (let ((getitem-meth (getattr-of-class src '__getitem__)))
+		     (map-over-py-object
+		      (lambda (key) (let ((val (py-call getitem-meth (list src key))))
+				      (setf (gethash key ht) val)))
+		      src-keys))
+	       
+		 ;; Otherwise try it as iterable.
+	       
+		 (map-over-py-object
+		  (lambda (item) (let ((kv (py-iterate->lisp-list item)))
+				   (unless (= (length kv) 2)
+				     (py-raise 'TypeError
+					       "dict(seq): seq must contains elements ~@
+                                              of length 2 (got: ~A for (key value))" kv))
+				   (setf (gethash (first kv) ht) (second kv))))
+		  src)))))
+	
+	  ((and key-arg
+		(not pos-arg)) 
+	   (loop with ht = (slot-value x 'hash-table)
+	       for (k . v) in key-arg
+	       do (setf (gethash (symbol-name k) ht) v))))
+    *None*))
+
+(register-bi-class-attr/meth (find-class 'py-dict) '__init__
+			     (make-bi-function-accepting-kw-args #'py-dict-__init__))
 
 
 (defun make-dict (&optional data)
@@ -911,7 +957,7 @@
 (defmethod __nonzero__ ((d py-dict))
   (lisp-val->py-bool (/= 0 (hash-table-count (slot-value d 'hash-table)))))
 
-(loop for name in '(__init__ __cmp__ __contains__ __eq__ __getitem__ __setitem__
+(loop for name in '(__cmp__ __contains__ __eq__ __getitem__ __setitem__
 		    __delitem__ __iter__ __len__ __nonzero__)
     do (register-bi-class-attr/meth (find-class 'py-dict) name (symbol-function name)))
 

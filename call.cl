@@ -22,6 +22,10 @@
   (apply x pos-args))
 
 
+(defmethod py-call ((x bi-function-accepting-kw-args) &optional pos-arg kwd-arg)
+  (funcall (slot-value x 'func) pos-arg kwd-arg))
+
+
 ;;; user-defined functions/methods:   
 
 (defmethod py-call :around ((x user-defined-function) &optional pos-args key-args)

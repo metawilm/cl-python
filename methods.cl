@@ -93,3 +93,14 @@
 (defun make-static-method (func)
   (make-instance 'static-method :func func))
 
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; A special kind of built-in function
+
+(defclass bi-function-accepting-kw-args (builtin-instance)
+  ((func :initarg :func))
+  (:metaclass builtin-class))
+
+(defun make-bi-function-accepting-kw-args (func)
+  (make-instance 'bi-function-accepting-kw-args :func func))
+
