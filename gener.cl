@@ -39,7 +39,7 @@
 		  (case (car form)
 		     
 		    (yield (let ((tag (new-tag :yield)))
-			     (values `(:split (ret (py-eval ',(second form)) ,tag)
+			     (values `(:split (ret (py-eval-1 ',(second form)) ,tag)
 					      ,tag)
 				     t)))
 
@@ -48,11 +48,11 @@
 			     (let ((tag (new-strtag :while)))
 			       (with-derived-tags
 				   tag ((repeat-tag "-repeat")(else-tag "-else")(after-tag "-end/break-target"))
-				   (values `(:split (unless (py-val->lisp-bool (py-eval ',test))
+				   (values `(:split (unless (py-val->lisp-bool (py-eval-1 ',test))
 						      (go ,else-tag))
 						    ,repeat-tag
 						    (:split ,(walk suite (cons (cons repeat-tag after-tag) stack)))
-						    (if (py-val->lisp-bool (py-eval ',test))
+						    (if (py-val->lisp-bool (py-eval-1 ',test))
 							 (go ,repeat-tag)
 						       (go ,after-tag))
 						    ,else-tag
@@ -73,7 +73,7 @@
 			  
 				  (multiple-value-bind (tests suites)
 				      (loop for (then-tag expr suite) in indexed-clauses
-					  collect `((py-val->lisp-bool (py-eval ',expr))
+					  collect `((py-val->lisp-bool (py-eval-1 ',expr))
 						    (go ,then-tag)) into tests
 					  collect `(:split ,then-tag
 							   (:split ,(walk suite stack))
@@ -97,7 +97,7 @@
 				(let ((stack2 (cons (cons continue-tag end-tag) stack)))
 				  (push loop-var vars)
 				  (push generator vars)
-				  (values `(:split (setf ,generator (get-py-iterate-fun (py-eval ',sources))
+				  (values `(:split (setf ,generator (get-py-iterate-fun (py-eval-1 ',sources))
 							 ,loop-var (funcall ,generator))
 						   (unless ,loop-var (go ,else-tag))
 						   ,repeat-tag
@@ -146,12 +146,12 @@
 					  (and else-clause (generator-ast-p else-clause)))
 				      (break "TODO: `yield' inside try/except")
 				    (warn "Harmless `yield' inside try/except")))
-				(values `(py-eval ',form)
+				(values `(py-eval-1 ',form)
 					t))
 		    
 		    (try-finally (break "XXX TODO: try-finally in generator"))
 		    
-		    (t (values `(py-eval ',form)
+		    (t (values `(py-eval-1 ',form)
 			       t)))))))
 	  
 	  (let ((walked-as-list (multiple-value-list (apply-splits (walk ast ()))))

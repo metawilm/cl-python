@@ -392,7 +392,7 @@
     (
      ;; CPython prints *sys-neg-maxint* <= x <= *sys-pos-maxint* as X,
      ;; outside that range as XL:  3 vs 3L. Let's not bother.
-     (__repr__     (format nil "~A" (coerce x 'single-float)))
+     (__repr__     (format nil "~A" (coerce x 'long-float)))
 			    ;; do floats like `3.1d0' don't print `d', etc
      
      (__nonzero__  (lisp-val->py-bool (/= x 0)))
@@ -1354,8 +1354,9 @@
 
 ;; XXX register?
 
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Function stuff
+;; Function
 
 (defmethod __get__ ((x function) inst class)
   (if (eq inst *None*)
@@ -1375,6 +1376,7 @@
 (register-bi-class-attr/meth (find-class 'function) '__get__ #'__get__)
 
 
+;; Python-function
 
 (defmethod print-object ((x python-function) stream)
   (print-unreadable-object (x stream :identity t :type t)
@@ -1398,6 +1400,7 @@
 (register-bi-class-attr/meth (find-class 'python-function) '__get__ #'__get__)
 
 
+;; Lambda
 
 (defun make-lambda-function (&rest options)
   (apply #'make-instance 'py-lambda-function options))
@@ -1407,6 +1410,7 @@
     (print-unreadable-object (x s :type t :identity t))))
 
 
+;; User-defined-function
 
 (defmethod __repr__ ((x user-defined-function))
   (with-output-to-string (s)
@@ -1418,6 +1422,8 @@
   (check-type namespace namespace)
   (apply #'make-instance 'user-defined-function options))
 
+
+;; Python-function-returning-generator
 
 (defun make-python-function-returning-generator (fname params ast)
   (make-instance 'python-function-returning-generator
@@ -2304,7 +2310,7 @@
     (declare (ignore max-octet-code))
     (loop for ch across string
 	do (let ((code (char-code ch)))
-	     (when (> (the integer code) (the integer max-code))
+	     (when (> code max-code)
 	       (py-raise 'UnicodeEncodeError
 			 "During encoding of string, encountered a character whose ~
                           code is out of the allowed range (got character code: ~A; ~

@@ -20,7 +20,10 @@
 
 (defvar *py-eval-handler-set* nil)
 
-;; XXX todo: `global'
+
+;; During evaluation of Python code, a some Lisp errors may
+;; occur. Some of them are catched and converted to the
+;; corresponding Python exception.
 
 (defmacro with-py-error-handlers (&body body)
   `(handler-bind
@@ -35,6 +38,15 @@
 	   (if (string= (slot-value c 'excl::format-control)
 			"~1@<Stack overflow (signal 1000)~:@>")
 	       (py-raise 'RuntimeError "Stack overflow"))))
+	
+	#+allegro
+	(excl:interrupt-signal
+	 (lambda (c)
+	   (let ((fa (slot-value c 'excl::format-arguments)))
+	     (when (and (listp fa)
+			(string= (second fa) "Keyboard interrupt"))
+	       (py-raise 'KeyboardInterrupt "Keyboard interrupt")))))
+	
 	;; XXX more?
 	)
      ,@body))
@@ -42,106 +54,104 @@
 
 (defun py-eval (ast)
   "Evaluate AST. Assumes *scope* is set appropriately."
+  (if *py-eval-handler-set*
+      (py-eval-1 ast)
+    (with-py-error-handlers
+	(let ((*py-eval-handler-set* t))
+	  (py-eval-1 ast)))))
 
-  ;; During evaluation of Python code, a some Lisp errors may
-  ;; occur. Some of them are catched and converted to the
-  ;; corresponding Python exception.
-  (flet ((do-py-eval ()
-	   (typecase ast
-	     (python-object (return-from py-eval ast)) ;; already evaluated
-	     (python-type (return-from py-eval ast))
-	     (number (return-from py-eval ast)) ;; Lisp objects (for efficiency)
-	     (string (return-from py-eval ast))
-	     ((and symbol
-	       (not (eql nil)))
-	      (return-from py-eval ast)) ;; string designator
-	     ((eql nil) (error "PY-EVAL of NIL")))
+(defun py-eval-1 (ast)
+  "Evaluate AST. Assumes *scope* and error handlers are set."
+  (typecase ast
+    (python-object (return-from py-eval-1 ast)) ;; already evaluated
+    (python-type (return-from py-eval-1 ast))
+    (number (return-from py-eval-1 ast)) ;; Lisp objects (for efficiency)
+    (string (return-from py-eval-1 ast))
+    ((and symbol
+      (not (eql nil)))
+     (return-from py-eval-1 ast)) ;; string designator
+    ((eql nil) (error "PY-EVAL of NIL")))
     
-	   (when (eql ast (find-class 'python-type))
-	     (return-from py-eval ast))
+  (when (eql ast (find-class 'python-type))
+    (return-from py-eval-1 ast))
+  
+  ;; This allows all kinds of Lisp values to be used directly in Python,
+  ;; e.g. using `clpy(...)' -- experimental
+  (unless (listp ast)
+    (return-from py-eval-1 ast))
+  
+  (case (car ast)
+    (inline-lisp (eval-inline-lisp (second ast)))
+    (file-input (apply #'eval-file-input (cdr ast)))
+    (testlist (apply #'eval-testlist (cdr ast)))
+    
+    ;; special hook for inserting Lisp code directly in AST
+    ;; (implicit PROGN)
+    #+(or)(lisp (eval `(progn ,@(cdr ast))))
+    
+    ;; these bind names and create new scope:
+    (module (apply #'eval-module "mod_name_here" (cdr ast)))
+    (funcdef (apply #'eval-funcdef (cdr ast)))
+    (class (apply #'eval-classdef (cdr ast)))
+    
+    (import (apply #'eval-import (cdr ast)))
+    (import-from (apply #'eval-import-from (cdr ast)))
+    
+    (assign-expr (apply #'eval-perhaps-assign-expr (cdr ast)))
+    (augassign-expr (apply #'eval-augassign-expr (cdr ast)))
+    (del (eval-del (second ast)))
+    (global (eval-global (second ast)))
 
-	   ;; This allows all kinds of Lisp values to be used directly in Python,
-	   ;; e.g. using `clpy(...)' -- experimental
-	   (unless (listp ast)
-	     (return-from py-eval ast))
-	   
-	   (case (car ast)
-	     (inline-lisp (eval-inline-lisp (second ast)))
-	     (file-input (apply #'eval-file-input (cdr ast)))
-	     (testlist (apply #'eval-testlist (cdr ast)))
+    (try-except (apply #'eval-try-except (cdr ast)))
+    (raise (apply #'eval-raise (cdr ast)))
     
-	     ;; special hook for inserting Lisp code directly in AST
-	     ;; (implicit PROGN)
-	     #+(or)(lisp (eval `(progn ,@(cdr ast))))
-	   
-	     ;; these bind names and create new scope:
-	     (module (apply #'eval-module "mod_name_here" (cdr ast)))
-	     (funcdef (apply #'eval-funcdef (cdr ast)))
-	     (class (apply #'eval-classdef (cdr ast)))
+    ;; expressions:
+    (identifier (eval-identifier (second ast)))
+    (string (make-py-string (cdr ast)))
+    (number (check-type (cdr ast) number)
+	    (make-py-number (cdr ast)))
+    
+    (list (apply #'eval-list (cdr ast)))
+    (tuple (make-tuple-from-list (mapcar #'py-eval-1 (cdr ast))))
+    (dict (eval-dict (second ast)))
+    (backticks (eval-backticks (second ast)))
+    
+    (call (apply #'eval-call (cdr ast)))
+    
+    (comparison (apply #'eval-comparison (cdr ast)))
+    (unary (apply #'eval-unary (cdr ast)))
+    (binary (apply #'eval-binary (cdr ast)))
+    (binary-lazy (apply #'eval-binary-lazy (cdr ast)))
+    
+    (attributeref (apply #'eval-attributeref (cdr ast)))
+    (subscription (apply #'eval-subscription (cdr ast)))
+    
+    ;;(simple-slice (apply #'eval-simple-slice (cdr ast)))
+    ;;(extended-slice (apply #'eval-extended-slice (cdr ast)))
+    (slice (eval-slice (cdr ast)))
+    
+    (lambda (apply #'eval-lambda (cdr ast)))
+    
+    (print (apply #'eval-print (cdr ast)))
+    (print>> (apply #'eval-print>> (cdr ast)))
+    
+    (ellipsis *Ellipsis*)
+
+    ;; statements
+    (pass) ;; nothing
+    (suite (eval-suite (second ast)))
       
-	     (import (apply #'eval-import (cdr ast)))
-	     (import-from (apply #'eval-import-from (cdr ast)))
-		   
-	     (assign-expr (apply #'eval-perhaps-assign-expr (cdr ast)))
-	     (augassign-expr (apply #'eval-augassign-expr (cdr ast)))
-	     (del (eval-del (second ast)))
-	     (global (eval-global (second ast)))
-
-	     (try-except (apply #'eval-try-except (cdr ast)))
-	     (raise (apply #'eval-raise (cdr ast)))
-    
-	     ;; expressions:
-	     (identifier (eval-identifier (second ast)))
-	     (string (make-py-string (cdr ast)))
-	     (number (check-type (cdr ast) number)
-		     (make-py-number (cdr ast)))
-    
-	     (list (apply #'eval-list (cdr ast)))
-	     (tuple (make-tuple-from-list (mapcar #'py-eval (cdr ast))))
-	     (dict (eval-dict (second ast)))
-	     (backticks (eval-backticks (second ast)))
-    
-	     (call (apply #'eval-call (cdr ast)))
-    
-	     (comparison (apply #'eval-comparison (cdr ast)))
-	     (unary (apply #'eval-unary (cdr ast)))
-	     (binary (apply #'eval-binary (cdr ast)))
-	     (binary-lazy (apply #'eval-binary-lazy (cdr ast)))
-    
-	     (attributeref (apply #'eval-attributeref (cdr ast)))
-	     (subscription (apply #'eval-subscription (cdr ast)))
-    
-	     ;;(simple-slice (apply #'eval-simple-slice (cdr ast)))
-	     ;;(extended-slice (apply #'eval-extended-slice (cdr ast)))
-	     (slice (eval-slice (cdr ast)))
-    
-	     (lambda (apply #'eval-lambda (cdr ast)))
-    
-	     (print (apply #'eval-print (cdr ast)))
-	     (print>> (apply #'eval-print>> (cdr ast)))
-    
-	     (ellipsis *Ellipsis*)
-
-	     ;; statements
-	     (pass) ;; nothing
-	     (suite (eval-suite (second ast)))
-      
-	     (for-in (apply #'eval-for-in (cdr ast)))
-	     (while (apply #'eval-while (cdr ast)))
-	     (break (eval-break))
-	     (continue (eval-continue))
-	     (if (apply #'eval-if (cdr ast)))
+    (for-in (apply #'eval-for-in (cdr ast)))
+    (while (apply #'eval-while (cdr ast)))
+    (break (eval-break))
+    (continue (eval-continue))
+    (if (apply #'eval-if (cdr ast)))
             
-	     (return (eval-return (cadr ast)))
-	     (assert (apply #'eval-assert (cdr ast)))
+    (return (eval-return (cadr ast)))
+    (assert (apply #'eval-assert (cdr ast)))
     
-	     (t (error "uncatched in py-eval: ~S~%" ast)))))
+    (t (error "uncatched in py-eval: ~S~%" ast))))
 
-    (if *py-eval-handler-set*
-	(do-py-eval)
-      (with-py-error-handlers
-       (let ((*py-eval-handler-set* t))
-	 (do-py-eval))))))
 
 (defun eval-inline-lisp (form)
   (eval form))
@@ -160,7 +170,7 @@
       ((Exception (lambda (exc)
 		    (loop for ((cls/tuple parameter) handler-form) in except-clauses
 			do (cond ((and cls/tuple  ;; `except Something:'  where Something a class or tuple
-				      (let ((ecls/tuple (py-eval cls/tuple)))
+				      (let ((ecls/tuple (py-eval-1 cls/tuple)))
 					(typecase ecls/tuple
 					  (class    (typep exc ecls/tuple))
 					  (py-tuple (loop for cls in (tuple->lisp-list ecls/tuple)
@@ -173,11 +183,11 @@
 				  (when parameter
 				    (assert (eq (first parameter) 'identifier))
 				    (namespace-bind *scope* (second parameter) exc)) ;; right scope??
-				  (py-eval handler-form)
+				  (py-eval-1 handler-form)
 				  (return-from eval-try-except nil))
 				 
 				 ((null cls/tuple) ;; a bare `except:' matches all exceptions
-				  (py-eval handler-form)
+				  (py-eval-1 handler-form)
 				  (return-from eval-try-except nil))
 				 
 				 (t (error "assumed unreachable")))))))
@@ -188,19 +198,19 @@
     ;; Exception is not active anymore.
     
     (with-py-error-handlers
-	(py-eval suite)))
+	(py-eval-1 suite)))
 
   (when else-clause
-    (py-eval else-clause)))
+    (py-eval-1 else-clause)))
 
 
 (defun eval-raise (first second third) ;; exctype value traceback)
   ;; Complicated interpretation of parameters. See Python Reference Manual, par 6.9
   
-  (setf first  (when first (py-eval first))
-	second (when second (py-eval second))
+  (setf first  (when first (py-eval-1 first))
+	second (when second (py-eval-1 second))
 	third  (when (and third (not (eq third *None*)))
-		 (py-eval third)))
+		 (py-eval-1 third)))
 
   (cond (third
 	 ;; "If a third object is present and not None, it must be a
@@ -263,8 +273,8 @@
 (defun eval-assert (test expr)
   "Test whether assertion holds. Is only executed when __debug__ is true"
   (when (py-val->lisp-bool *__debug__*)
-    (unless (py-val->lisp-bool (py-eval test))
-      (py-raise 'AssertionError (py-eval expr)))))
+    (unless (py-val->lisp-bool (py-eval-1 test))
+      (py-raise 'AssertionError (py-eval-1 expr)))))
 
 (defun eval-del (exprlist)
   (assert (eq (car exprlist) 'exprlist))
@@ -297,7 +307,7 @@
 	;;(format t "expr=~A~%for-ifs=~A~%" expr for-ifs)
 	(eval-listcompr expr for-ifs))
 
-    (make-py-list-from-list (map-into data #'py-eval data))))
+    (make-py-list-from-list (map-into data #'py-eval-1 data))))
     
 (defun eval-testlist (items comma?)
   (unless (or items comma?)
@@ -307,15 +317,15 @@
   (let ((make-tuple (or comma?
 			(>= (length items) 2))))
     (if make-tuple
-	(make-tuple-from-list (mapcar #'py-eval items))
-      (py-eval (car items)))))
+	(make-tuple-from-list (mapcar #'py-eval-1 items))
+      (py-eval-1 (car items)))))
    
 (defun eval-file-input (data)
-  (cons :file-input (mapcar #'py-eval data)))
+  (cons :file-input (mapcar #'py-eval-1 data)))
 
 (defun eval-suite (stmts)
   "Evaluate all statements in suite; return None"
-  (mapc #'py-eval stmts)
+  (mapc #'py-eval-1 stmts)
   *None*)
 
 (defun eval-identifier (name)
@@ -333,13 +343,13 @@
 
 (defun eval-return (val)
   (throw 'function-block (if val 
-			     (py-eval val)
+			     (py-eval-1 val)
 			   *None*)))
 
 (defun eval-dict (data)
   ;; eval keys and values in this order: key1, val1, key2, val2, ...
-  (mapc (lambda (kv) (setf (car kv) (py-eval (car kv))
-			   (cdr kv) (py-eval (cdr kv))))
+  (mapc (lambda (kv) (setf (car kv) (py-eval-1 (car kv))
+			   (cdr kv) (py-eval-1 (cdr kv))))
 	data)
   (make-dict data))
 
@@ -353,7 +363,7 @@
 		       ((eq (car clause) 'list-for-in) (process-for for-ifs))
 		       ((eq (car clause) 'list-if)     (process-if for-ifs)))))
 	     
-	     (collect-expr () (push (py-eval expr) acc))
+	     (collect-expr () (push (py-eval-1 expr) acc))
 	     
 	     (process-for (for-ifs)
 	       (destructuring-bind ((list-for-in? exprlist source) &rest rest)
@@ -362,13 +372,13 @@
 		 (map-over-py-object (lambda (x)
 				       (eval-real-assign-expr exprlist x)	 
 				       (process-for/ifs rest))
-				     (py-eval source))))
+				     (py-eval-1 source))))
 	     
 	     (process-if (for-ifs)
 	       (destructuring-bind ((_list-if condition) &rest rest)
 		   for-ifs
 		 (declare (ignore _list-if))
-		 (when (py-val->lisp-bool (py-eval condition))
+		 (when (py-val->lisp-bool (py-eval-1 condition))
 		   (process-for/ifs rest)))))
       
       (process-for/ifs list-for-ifs)
@@ -376,7 +386,7 @@
 
   
 (defun eval-backticks (lst)
-  (let* ((ev (mapcar #'py-eval lst))
+  (let* ((ev (mapcar #'py-eval-1 lst))
 	 (obj (if (cdr lst)
 		  (make-tuple-from-list ev)
 		(car ev))))
@@ -388,7 +398,7 @@
 
 (defun eval-attributeref (obj attr)
   (assert (eq (car attr) 'identifier))
-  (let ((eobj (py-eval obj))
+  (let ((eobj (py-eval-1 obj))
 	(attr-name (second attr)))
     (multiple-value-bind (val found)
 	(internal-get-attribute eobj attr-name)
@@ -399,7 +409,7 @@
 
 (defun eval-subscription (primary data)
   (let ((e-prim (if (consp primary) 
-		    (py-eval primary)
+		    (py-eval-1 primary)
 		  primary))
 	(e-item-to-get
 	 (if (consp data)
@@ -408,10 +418,10 @@
 	       (destructuring-bind (item-list comma?)
 		   data
 		 (assert (consp item-list))
-		 (let* ((item-list-2 (mapcar #'py-eval item-list))
+		 (let* ((item-list-2 (mapcar #'py-eval-1 item-list))
 			(item (if (or comma?
 				      (> (length item-list) 1))
-				  (make-tuple-from-list (mapcar #'py-eval item-list-2))
+				  (make-tuple-from-list (mapcar #'py-eval-1 item-list-2))
 				(car item-list-2))))
 		   item)))
 	   (progn (warn "assuming subs ~A evaluated already" data)
@@ -428,13 +438,13 @@
 (defun eval-slice (data)
   (destructuring-bind (start stop &optional step)
       data
-    (make-slice (if start (py-eval start) *None*)
-		(if stop (py-eval stop) *None*)
-		(if step (py-eval step) *None*))))
+    (make-slice (if start (py-eval-1 start) *None*)
+		(if stop (py-eval-1 stop) *None*)
+		(if step (py-eval-1 step) *None*))))
 
 
 (defun eval-call (primary args)
-  (let ((eprim (py-eval primary)))
+  (let ((eprim (py-eval-1 primary)))
     
     ;; f(1, 2, b=3, c=4, *(1,2), **{'q':6})
     ;; corresponds with ARGS:
@@ -446,19 +456,19 @@
     (let* ((x (pop args))
 	   
 	   (pos-args  (loop while (eq (car x) 'pos)
-			  collect (py-eval (second x))
+			  collect (py-eval-1 (second x))
 			  do (setf x (pop args))))
 	   
 	   (kw-args   (loop while (eq (car x) 'key)
-			  collect (cons (second x) (py-eval (third x)))
+			  collect (cons (second x) (py-eval-1 (third x)))
 			  do (setf x (pop args))))
       
 	   (*-arg     (when (eq (car x) '*)
-			(prog1 (py-eval (second x))
+			(prog1 (py-eval-1 (second x))
 			  (setf x (pop args)))))
 	      
 	   (**-arg    (when (eq (car x) '**)
-			(py-eval (second x)))))
+			(py-eval-1 (second x)))))
       
       (assert (null args))
       
@@ -496,11 +506,11 @@
        (lambda (x) (setf take-else nil)
 	       (eval-real-assign-expr targets x)
 	       (catch 'continue
-		 (py-eval suite)))
-       (py-eval sources))
+		 (py-eval-1 suite)))
+       (py-eval-1 sources))
       (when (and take-else
 		 else-suite)
-	(py-eval else-suite)))))
+	(py-eval-1 else-suite)))))
 
 (defun eval-continue ()
   (throw 'continue nil))
@@ -517,12 +527,12 @@
   (destructuring-bind (val &rest targets)
       (reverse items)
     (if targets
-	(let ((eval (py-eval val))) ;; real assignment statement
+	(let ((eval (py-eval-1 val))) ;; real assignment statement
 	  (unless eval
 	    (error "PY-EVAL returned NIL for value to be assigned: ~A" val))
 	  (dolist (tar targets)
 	    (eval-real-assign-expr tar eval)))
-      (py-eval val)))) ;; just variable reference
+      (py-eval-1 val)))) ;; just variable reference
 
  
 (defun eval-real-assign-expr (targets evalue)
@@ -669,7 +679,7 @@
     ;; 
     ;; The primary is evaluated; the attribute identifier
     ;; is just a name and can't be further evaluated.
-    (attributeref `(attributeref ,(py-eval (second tg))
+    (attributeref `(attributeref ,(py-eval-1 (second tg))
 				 ,(third tg)))
     
     ;; x[1,2,3]
@@ -680,8 +690,8 @@
     (subscription 
      (destructuring-bind (primary (subs comma?))
 	 (cdr tg)
-       `(subscription ,(py-eval primary)
-		      ,(let* ((esubs (mapcar #'py-eval subs))
+       `(subscription ,(py-eval-1 primary)
+		      ,(let* ((esubs (mapcar #'py-eval-1 subs))
 			      (make-tuple (or (> (length subs) 1)
 					      comma?)))
 			 (if make-tuple
@@ -695,7 +705,7 @@
     (t
      (warn "EVAL-ASSIGNMENT-TARGETS: assuming ~A is an expression ~
                        to be evaluated." tg)
-     (py-eval tg))))
+     (py-eval-1 tg))))
 
 
 (defun eval-augassign-expr (target operator expr)
@@ -723,8 +733,8 @@
     
     (assert (eq (car expr) 'testlist))
     (let* ((et (eval-one-assignment-target source-place))
-	   (evexpr (py-eval expr))
-	   (lhs-value-now (py-eval et))
+	   (evexpr (py-eval-1 expr))
+	   (lhs-value-now (py-eval-1 et))
 	   (op-funcs (cdr (assoc operator *math-inplace-op-assoc*)))
 	   (py-@= (car op-funcs))
 	   (py-@ (cdr op-funcs)))
@@ -812,7 +822,7 @@
     
     (loop for x in pos-kw-params
 	if (consp x) 
-	collect (progn (setf (cdr x) (py-eval (cdr x)))
+	collect (progn (setf (cdr x) (py-eval-1 (cdr x)))
 		       x)
 	into kw-args
 	     
@@ -842,7 +852,7 @@
 	 
 	 (supers (mapcar
 		  (lambda (x)
-		    (let ((c (py-eval x)))
+		    (let ((c (py-eval-1 x)))
 		      (etypecase c
 			(symbol (find-class c))
 			(class c))))
@@ -857,7 +867,7 @@
     
     (when suite
       (let ((*scope* ns))
-	(py-eval suite)))
+	(py-eval-1 suite)))
     
     (multiple-value-bind (slots has-slots)
 	(multiple-value-bind (val found)
@@ -919,7 +929,7 @@
 	    (declare (special *scope*))
 	    (namespace-bind module-ns '__name__ (string module-name))
 	    (namespace-bind module-ns '__file__ file-name)
-	    (py-eval module-ast))
+	    (py-eval-1 module-ast))
 
 	  ;; Now bind module name to the object in the enclosing namespace
 	  (return-from make-module-object
@@ -995,7 +1005,7 @@
 			 do (namespace-bind ns k v))
 		   
 		     (let ((*scope* ns))
-		       (py-eval mod-ast))
+		       (py-eval-1 mod-ast))
 		     
 		     (return-from load-py-source-file
 		       (make-py-package :namespace ns
@@ -1021,7 +1031,7 @@
 			 do (namespace-bind ns k v))
 		     
 		     (let ((*scope* ns))
-		       (py-eval mod-ast))
+		       (py-eval-1 mod-ast))
 		     
 		     (return-from load-py-source-file
 		       (make-py-module :namespace ns
@@ -1129,7 +1139,7 @@
 			    do (namespace-bind ns k v))
 		   
 			(let ((*scope* ns))
-			  (py-eval mod-name-ast))
+			  (py-eval-1 mod-name-ast))
 			 
 			(setf curr-pkg
 			  (make-py-package
@@ -1243,23 +1253,23 @@
       
 (defun eval-if (clauses else-suite)
   (loop for (expr suite) in clauses
-      when (py-val->lisp-bool (py-eval expr))
-      do (py-eval suite)
+      when (py-val->lisp-bool (py-eval-1 expr))
+      do (py-eval-1 suite)
 	 (return)
       finally
 	(when else-suite
-	  (py-eval else-suite))))
+	  (py-eval-1 else-suite))))
 
 (defun eval-while (test suite else-suite)
   (let ((taken nil))
     (catch 'break
-      (loop while (py-val->lisp-bool (py-eval test))
+      (loop while (py-val->lisp-bool (py-eval-1 test))
 	  do (catch 'continue
 	       (setf taken t)
-	       (py-eval suite))))
+	       (py-eval-1 suite))))
     
     (when (and (not taken) else-suite)
-      (py-eval else-suite))))
+      (py-eval-1 else-suite))))
 
 (defun eval-comparison (operator left right)
   "Does comparison, returns Python boolean"
@@ -1267,14 +1277,14 @@
     (assert comp-fun () "No comparison function corresponding to ~
                          comparison operator ~A?! ~A"
 	    operator *math-binary-cmp-assoc*)
-    (lisp-val->py-bool (funcall comp-fun (py-eval left) (py-eval right)))))
+    (lisp-val->py-bool (funcall comp-fun (py-eval-1 left) (py-eval-1 right)))))
 
 (defun eval-unary (operator val)
   (declare (special *math-unary-op-assoc*))
   (let ((func (cdr (assoc operator *math-unary-op-assoc*))))
     (unless func
       (error "No function for unary operator ~A?! ~A" operator *math-unary-op-assoc*))
-    (funcall func (py-eval val))))
+    (funcall func (py-eval-1 val))))
 
 (defun eval-binary (operator left right)
   (declare (special *math-binary-op-assoc*)) ;; defined in mathops.cl
@@ -1284,7 +1294,7 @@
   (let ((func (cdr (assoc operator *math-binary-op-assoc*))))
     (assert func () "Operator ~A has no corresponding py-~A function?! ~A"
 	    operator operator *math-binary-op-assoc*)
-    (funcall func (py-eval left) (py-eval right))))
+    (funcall func (py-eval-1 left) (py-eval-1 right))))
 
 (defun eval-binary-lazy (operator left right)
   (declare (special *math-binary-lazy-op-assoc*)) ;; mathops.cl
@@ -1294,7 +1304,7 @@
 	     left right))) ;; left, right not yet evaluated!
 
 (defun eval-tuple (&rest content)
-  (let ((c (mapcar #'py-eval content)))
+  (let ((c (mapcar #'py-eval-1 content)))
     (make-tuple-from-list c)))
 
 (defun get-slice (obj start end &optional (step nil))
@@ -1321,7 +1331,7 @@
   "The Python PRINT statement (a rough approximation)"
   
   (dolist (x objs)
-    (let* ((ex (py-eval x))
+    (let* ((ex (py-eval-1 x))
 	   (str (call-attribute-via-class ex '__str__)))
       (format stream "~A " str)))
   

@@ -32,6 +32,19 @@
 (mop:finalize-inheritance (find-class 'python-function))
 
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; A special kind of built-in function
+
+(defclass lisp-function-accepting-kw-args (python-function) ;; WWW was: builtin-instance
+  ((func :initarg :func))
+  (:metaclass builtin-class))
+
+(mop:finalize-inheritance (find-class 'lisp-function-accepting-kw-args))
+
+(defun make-lisp-function-accepting-kw-args (func)
+  (make-instance 'lisp-function-accepting-kw-args :func func))
+
+
 ;; Lambda
 
 (defclass py-lambda-function (python-function)

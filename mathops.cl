@@ -273,17 +273,17 @@
 (defvar *math-binary-lazy-op-assoc* ())
 
 (defmethod py-or (x y)
-  (let ((ex (py-eval x)))
+  (let ((ex (py-eval-1 x)))
     (if (py-val->lisp-bool ex)
 	ex
-      (py-eval y))))
+      (py-eval-1 y))))
 
 (push (cons 'or #'py-or) *math-binary-lazy-op-assoc*)
 
 (defmethod py-and (x y)
-  (let ((ex (py-eval x)))
+  (let ((ex (py-eval-1 x)))
     (if (py-val->lisp-bool ex)
-	(py-eval y)
+	(py-eval-1 y)
       ex)))
 
 (push (cons 'and #'py-and) *math-binary-lazy-op-assoc*)

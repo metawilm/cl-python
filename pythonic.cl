@@ -12,39 +12,6 @@
 ;; XXX All uses of PY-ITERATE should be changed to use GET-PY-ITERATE-FUN instead.
 ;; There's no need for this macro, and this macro is even incorrect in that it calls __iter__.
 
-#+(or)
-(defmacro py-iterate ((val object) &body body)
-  "Iterate over OBJECT, successively binding VAL to the new value
-   and executing BODY.
-   This works is OBJECT implements either __iter__ or __getitem__."
-  ;; XX assumes OBJECT is a first-class object.
-
-  (let ((iterator '#:iterator))
-    `(block py-iterate
-       (tagbody 
-	 (handler-case (__iter__ ,object)
-	   (AttributeError () (go try-getitem))
-	   (:no-error (,iterator) (loop (handler-case (iterator-next ,iterator)
-					  (StopIteration () (return-from py-iterate))
-					  (:no-error (,val) ,@body)))))
-	try-getitem
-	 ,(let ((index '#:index))
-	    `(let ((,index 0))
-	       (loop 
-		 (handler-case (__getitem__ ,object ,index)
-		   (AttributeError () (if (= ,index 0)
-					  (go error)
-					(return-from py-iterate)))
-		   (IndexError () ;; even ok if index = 0 (empty sequence)
-		     (return-from py-iterate))
-		   (:no-error (,val)
-		     ,@body
-		     (incf ,index))))))
-	error
-	 (py-raise 'TypeError
-		   "Iteration over non-sequence (got: ~A)" ,object)))))
-	      
-
 (defun make-py-iterator-for-object (object)
   (let ((f (get-py-iterate-fun object)))
     (make-iterator-from-function f)))
@@ -53,6 +20,17 @@
 (defun get-py-iterate-fun (object)
   "Return a function that when called returns VAL, T, where VAL is the next value ~@
    gotten by iterating over OBJECT. Returns NIL, NIL upon exhaustion."
+  
+  (when (let ((kl (class-of object)))
+	  (or (eq kl (find-class 'py-tuple))
+	      (eq kl (find-class 'py-list))))
+    (return-from get-py-iterate-fun 
+      (let ((copy-list (copy-list (slot-value object 'list))))
+	(declare (dynamic-extent copy-list))
+	(lambda ()
+	  (let ((val (pop copy-list)))
+	    (when val
+	      (values val t)))))))
   
   ;; Using __iter__ is the prefered way.
   (multiple-value-bind (iter-meth found)
@@ -103,10 +81,27 @@
 
 
 (defun py-iterate->lisp-list (object)
-  (map-over-py-object #'identity object))
+  "Returns a Lisp list, that may not be modified destructively."
+  (when (or (eq (class-of object) (find-class 'py-tuple))
+	    (eq (class-of object) (find-class 'py-list)))
+    (return-from py-iterate->lisp-list (slot-value object 'list)))
+  
+  (let ((res ()))
+    (map-over-py-object (lambda (x) (push x res))
+			object)
+    (nreverse res)))
 
 (defun map-over-py-object (fun object)
-  "Iterate over OBJECT, calling Lisp function FUN on each value."
+  "Iterate over OBJECT, calling Lisp function FUN on each value. Returns nothing."
+  (loop with f = (get-py-iterate-fun object)
+      with val = (funcall f)
+      while val do (funcall fun val)
+		   (setf val (funcall f)))
+  (values))
+
+#+(or) ;; old
+(defun map-over-py-object (fun object)
+  "Iterate over OBJECT, calling Lisp function FUN on each value. Returns nothing."
   (loop with f = (get-py-iterate-fun object)
       with val = (funcall f)
       when val collect (funcall fun val)

@@ -190,14 +190,14 @@
   (getattr-of-number x attr))
 
 (defmethod internal-get-attribute ((x string) attr)
-  (multiple-value-bind (res found)
-      (internal-get-attribute (load-time-value (make-py-string "iga-dummy-string"))
-			      attr)   ;; XXX hack...
-    (if found
-	(typecase res
-	  (bound-method  (setf (slot-value res 'object) x)
-			 (values res t))
-	  (t (values res t))))))
+  (let ((cls (find-class 'py-string)))
+    (multiple-value-bind (res found)
+	(internal-get-attribute cls attr)
+      (if found
+	  (progn (when (typep res 'unbound-method)
+		   (setf (slot-value res 'class) (find-class 'string)))
+		 (values (maybe-bind res x cls) t))
+	(values nil nil)))))
 
 (defmethod internal-get-attribute ((x builtin-instance) attr)
   (getattr-of-instance-rec x attr))
@@ -251,7 +251,8 @@
   (dolist (num-cls (list (find-class 'number) ;; XXX hack
 			 (find-class 'real)
 			 (find-class 'integer)
-			 (find-class 'complex)))
+			 (find-class 'complex)
+			 (find-class 't)))
     (when (typep x num-cls)
       (let ((meth (lookup-bi-class-attr/meth num-cls attr)))
 	(when meth
@@ -351,7 +352,14 @@
 		   (values (maybe-bind val x (class-of x))
 			   t))))
 	     (setf cls (pop cpl))))
-
+    
+    ;; try built-in class method (like __str__ for user-defined subclass of py-string)
+    (let ((val (lookup-bi-class-attr/meth (find-class 't) attr)))
+      (when val
+	(return-from getattr-of-instance-rec
+	  (values (maybe-bind val x (class-of x))
+		  t))))
+    
     ;; Arriving here means: no regular attribute value, no
     ;; __getattribute__, but perhaps __getattr__ or attr-val.
 
@@ -584,7 +592,7 @@
 	(getattr-of-class-rec klass attr)
       (cond ((not found)          (values nil nil))
 	    ((eq val #'__get__)   (values (apply val x pos-args) t)) ;; XXX hack?
-	    (t  (let* ((bound-val (maybe-bind val *None* klass))
+	    (t  (let* ((bound-val (maybe-bind val nil klass)) ;; nil was *None*
 		       (res (py-call bound-val (cons x pos-args) key-args)))
 		  (values res
 			  (not (eq res *NotImplemented*)))))))))

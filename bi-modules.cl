@@ -137,7 +137,7 @@
 		    (prof_t #'py-profile-time)
 		    (prof_s #'py-profile-space)
 		    (prof_sc #'py-profile-space-count)
-		    (prof_tc #'py-profile-space-count)
+		    (prof_tc #'py-profile-time-count)
 		    (prof_sg #'py-profile-space-graph)
 		    (prof_tg #'py-profile-time-graph))))
 

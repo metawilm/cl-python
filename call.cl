@@ -90,7 +90,7 @@
       (let ((*scope* namespace-copy))
 	(declare (special *scope*))
 	(catch 'function-block
-	  (py-eval ast))))))
+	  (py-eval-1 ast))))))
 
     
     #+(or)(call-next-method)
@@ -112,7 +112,7 @@
       
       (let ((*scope* namespace))
 	(declare (special *scope*))
-	(py-eval ast)))))
+	(py-eval-1 ast)))))
 
 
 (defmethod py-call ((x python-function-returning-generator) &optional pos-args key-args)
