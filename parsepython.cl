@@ -190,22 +190,26 @@
 
  ;; "import" module ["as" name] ( "," module ["as" name] )*
  (import-stmt :or import-normal import-from)
- (import-normal (import dotted-as-name comma--dotted-as-name*) ((list $1 $2 $3)))
+ (import-normal (import dotted-as-name comma--dotted-as-name*) (`(import (,$2 ,@$3))))
  (:comma--dotted-as-name*)
  (comma--dotted-as-name ( |,| dotted-as-name) ($2))
- (import-from (from dotted-name import import-from-2) ((list $1 $2 $3)))
+ (import-from (from dotted-name import import-from-2) ((list 'import-from $2 $4)))
  (import-from-2 :or
 		*
-		((import-as-name comma--import-as-name*) . ((list $1 $2))))
+		((import-as-name comma--import-as-name*) . ((cons $1 $2))))
  (:comma--import-as-name*)
  (comma--import-as-name (|,| import-as-name) ($2))
- (import-as-name (identifier) ((list 'normal $1)))
- (import-as-name (identifier as identifier) ((list 'as $2 $3)))
- (dotted-as-name (dotted-name) ((list 'normal $1)))
- (dotted-as-name (dotted-name as identifier) ((list 'as $1 $2 $3)))
- (dotted-name (identifier dot--name*) ((list $1 $2)))
+ (import-as-name (identifier) ($1))
+ (import-as-name (identifier as identifier) ((list 'as $1 $3)))
+ (dotted-as-name (dotted-name) ($1))
+ (dotted-as-name (dotted-name as identifier) ((list 'as $1 $3)))
+ (dotted-name (identifier dot--name*) ((if $2
+					   `(dotted ,$1 ,@(if (eq (first $2) 'dotted)
+							      (second $2)
+							    $2))
+					 $1)))
  (:dot--name*)
- (dot--name (|.| identifier))
+ (dot--name (|.| identifier) ($2))
 
  (global-stmt (global identifier comma--identifier*) ((list $1 $2 $3)))
  (:comma--identifier*)
