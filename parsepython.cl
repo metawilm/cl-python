@@ -809,8 +809,9 @@
 ;; XXX take a function that gives characters
 (defun make-py-lexer (&optional (*standard-input* *standard-input*))
   (let ((tokens-todo (list))
-	(indentation-stack (list 0)))
-
+	(indentation-stack (list 0))
+	(open-lists ()))
+    
     (lambda (grammar &optional op)
       (declare (ignore grammar op))
       (block lexer
@@ -867,21 +868,7 @@
 		 ((identifier-char1-p c)
 		  (let* ((read-id (read-identifier c))
 			 (token (intern read-id)))
-		    #+(or)(if (member token *reserved-words*
-				:test #'eq)
-			(progn
-			  (when *lex-debug*
-			    (format t "lexer returning reserved word: ~s~%" token))
-			  (return-from lexer
-			    (values (tcode-1 (find-class 'python-grammar) token)
-				    token)))
-		      (progn
-			(when *lex-debug*
-			  (format t "lexer returning identifier: ~s~%" read-id))
-			(return-from lexer
-			  (values (tcode identifier)
-				  read-id))))
-		    
+		    		    
 		    (cond ((eq token 'clpy) ;; allows mixing Lisp code in Python files clpy(3) -> 3
 			   (let ((lisp-form (read)))
 			     (when *lex-debug*
@@ -910,6 +897,15 @@
 		      (punct-char-not-punct-char1-p c))
 		  (let* ((punct (read-punctuation c))
 			 (token (punctuation->token punct)))
+		    
+		    ;; Keep track of whether we are in a bracketed
+		    ;; expression, because in that case newlines are
+		    ;; ignored.
+		    
+		    (case token
+		      (( [ { \( ) (push token open-lists))
+		      (( ] } \) ) (pop open-lists)))
+		    
 		    (when *lex-debug*
 		      (format t "lexer returning punctuation token: ~s  ~s~%" token punct))
 		    (return-from lexer (values (tcode-1 (find-class 'python-grammar) token)
@@ -919,32 +915,32 @@
 		  (unread-char c)
 		  (multiple-value-bind (newline new-indent)
 		      (read-whitespace)
+		    
+		    (when (or (not newline)
+			      open-lists)
+		      (go next-char))
+		    
+		    ;; Return Newline now, but also determine if
+		    ;; there are any indents or dedents to be
+		    ;; returned in next calls.
+		      
+		    (cond
+		     ((= (car indentation-stack) new-indent)) ;; same indentation
 
-		    (when newline
-		      ;; Always return Newline now, but also determine if
-		      ;; there are any indents or dedents to be
-		      ;; returned in next calls.
-		      (cond
-		       ((= (car indentation-stack) new-indent)) ;; same indentation
+		     ((< (car indentation-stack) new-indent) ; one indent
+		      (push new-indent indentation-stack)
+		      (lex-todo indent 'indent))
 
-		       ((< (car indentation-stack) new-indent) ; one indent
-			(push new-indent indentation-stack)
-			(lex-todo indent 'indent))
+		     ((> (car indentation-stack) new-indent) ; dedent(s)
+		      (loop while (> (car indentation-stack) new-indent)
+			  do (pop indentation-stack)
+			     (lex-todo dedent 'dedent))
+		      (unless (= (car indentation-stack) new-indent)
+			(error "Dedent didn't arrive at a previous indentation ~
+                                level (indent level after dedent: ~A spaces)"
+			       new-indent))))
 
-		       ((> (car indentation-stack) new-indent) ; dedent(s)
-			(excl:while (> (car indentation-stack) new-indent)
-			  (pop indentation-stack)
-			  (lex-todo dedent 'dedent))
-			(assert (= (car indentation-stack) new-indent) ()
-			  "SyntaxError: Dedent didn't arrive at a previous indentation ~
-                           level (indent level after dedent: ~A spaces)"
-			  new-indent)))
-
-		      ;;(format t "lexer returning: newline~%")
-		      (lex-return newline 'newline))
-
-		    ;; ordinary whitespace is ignored
-		    (go next-char)))
+		    (lex-return newline 'newline)))
 
 		 ;;((char= c #\;) ;; equivalent to Newline (used for >1 stms on same line)
 		 ;; (lex-return Newline))
