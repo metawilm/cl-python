@@ -121,6 +121,8 @@
       ;; for now, SUITE returns the values of all stmts/exprs in it.
       (suite (eval-suite (second ast)))
       (for-in (apply #'eval-for-in (cdr ast)))
+      (break (eval-break))
+      (continue (eval-continue))
       (if (apply #'eval-if (cdr ast)))
       (while (apply #'eval-while (cdr ast)))
       (assert (apply #'eval-assert (cdr ast)))
@@ -383,12 +385,20 @@
 (defun eval-for-in (targets sources suite else-suite)
   (let ((esource (py-eval sources))
 	(take-else t))
-    (py-iterate ($dummy$ esource)
-		(setf take-else nil)
-		(eval-assign-expr-1 targets $dummy$)
-		(py-eval suite))
+    (catch 'break
+      (py-iterate ($dummy$ esource)
+		  (setf take-else nil)
+		  (eval-assign-expr-1 targets $dummy$)
+		  (catch 'continue
+		    (py-eval suite))))
     (when take-else
       (py-eval else-suite))))
+
+(defun eval-continue ()
+  (throw 'continue nil))
+
+(defun eval-break ()
+  (throw 'break nil))
 
 
 ;; a = b,c = [1,2]
@@ -769,12 +779,15 @@
 	  (py-eval else-suite))))
 
 (defun eval-while (test suite else-suite)
-  (loop with taken = nil
-      while (py-val->lisp-bool (py-eval test))
-      do (py-eval suite)
-	 (setf taken t)
-      finally (unless taken
-		(py-eval else-suite))))
+  (let ((taken nil))
+    (catch 'break
+      (loop
+	  while (py-val->lisp-bool (py-eval test))
+	  do (catch 'continue
+	       (py-eval suite)
+	       (setf taken t))))
+    (unless taken
+      (py-eval else-suite))))
 
 (defun eval-comparison (operator left right)
   "Does comparison, returns Python boolean"
