@@ -319,10 +319,23 @@
 (defun pyb:hex (x)
   (__hex__ x))
 
+
+;; As objects may be moved in memory, while the `id' value must remain
+;; the same, a hash-table is used to keep track of pseudo object
+;; id's. As this hash-table must have weak keys, this is
+;; non-portable.
+
+#+allegro 
+(let ((ht (make-hash-table :test #'eq :weak-keys t))
+      (counter 0))
+  (defun pyb:id (x)
+    (or (gethash x ht)
+	(setf (gethash x ht) (incf counter)))))
+
+#-allegro
 (defun pyb:id (x)
-  (declare (ignore x))
-  ;;XXX pointer-value x as integer
-  (error "todo: py-id"))
+  (error "ID not implemented"))
+
 
 (defun pyb:input (&rest args)
   (declare (ignore args))
