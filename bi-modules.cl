@@ -117,13 +117,19 @@
 		  (with-simple-restart (continue "Resume execution")
 		    (error (if (typep exc 'class) (make-instance exc) exc)))))
 		    
-      ;; #+py-exception-stack
       (active_excepts ,(lambda ()  ;; list of tuples of active `except' clauses
+			 (unless *track-exception-stack*
+			   (py-raise 'NameError
+				     "In order to use clpy.active_excepts(), ~
+                                      set *track-exception-stack* to T"))
 			 (make-py-list-from-list
 			  (mapcar #'make-tuple-from-list *active-excepts*))))
 		    
-      ;; #+py-exception-stack
       (catcher ,(lambda (exc)
+		  (unless *track-exception-stack*
+		    (py-raise 'NameError
+			      "In order to use clpy.catcher(), ~
+                               set *track-exception-stack* to T"))
 		  (block catcher
 		    (loop for x in *active-excepts*
 			do (loop for e in x

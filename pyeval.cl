@@ -5,11 +5,6 @@
   "CPython readonly variable `__debug__' (see EVAL-ASSERT)")
 (defparameter *__future__.division* nil)
 
-#+(or) ;; namespace re-use optimization?
-(defparameter *namespace-cache*
-    (make-array 100 :fill-pointer 0 :adjustable nil))
-
-;; #+py-exception-stack
 (defparameter *active-excepts* nil)
 
 ;;; Evaluation
@@ -117,7 +112,8 @@
     (slice (funcall #'eval-slice (cdr ast)))
     (subscription (funcall #'eval-subscription (cdr ast)))
     (suite (funcall #'eval-suite (cdr ast)))
-    (testlist (funcall #'eval-testlist (cdr ast)))
+    #+(or)(testlist (funcall #'eval-testlist (cdr ast)))
+    (tuple (funcall #'eval-tuple (cdr ast)))
     (try-except (funcall #'eval-try-except (cdr ast)))
     (try-finally (funcall #'eval-try-finally (cdr ast)))
     (unary (funcall #'eval-unary (cdr ast)))
@@ -175,6 +171,7 @@
 (defun eval-file-input (list-ast-items)
   (cons 'file-input (mapcar #'py-eval-1 (car list-ast-items))))
 
+#+(or)
 (defun eval-testlist (items-comma?)
   (let ((items (first items-comma?))
 	(comma? (second items-comma?)))
@@ -242,7 +239,7 @@
   (destructuring-bind
       (dummy (&rest suites)) suite
     (declare (ignore dummy))
-    `(suite (,@suites (return (testlist ((identifier None)) nil))))))
+    `(suite (,@suites (return (identifier None))))))
 
 (defun parse-function-parameter-list (params)
   "Returns POS-PARAMS, KW-PARAMS, *-PAR, **-PAR as multiple values"
@@ -556,13 +553,13 @@
 			       (namespace-bind *scope* name-here obj)))))))))))
 
 (defun eval-assign-expr (items)
-  ;;(setf items (car items))
   (destructuring-bind (val targets) items
-    (let ((eval (py-eval-1 val))) ;; real assignment statement
-      (unless eval
+    (let ((ev-val (py-eval-1 val)))
+      (unless ev-val
 	(error "PY-EVAL returned NIL for value to be assigned: ~A" val))
       (dolist (tar targets)
-	(eval-real-assign-expr tar eval)))))
+	(eval-assign-one (eval-one-assignment-target tar) ev-val)
+	#+(or)(eval-real-assign-expr tar ev-val)))))
 
 (defun eval-augassign-expr (target-operator-expr)
   (destructuring-bind (target operator expr) target-operator-expr
@@ -576,125 +573,67 @@
     ;;   m[p] -> r
     ;; try  r.__iadd__(q)
     ;; if no __iadd__method found, try:  x[p] = r + q
-  
-    (destructuring-bind (testlist? (source-place &rest other-source-places) comma?)
-	target
-      (assert (eq testlist? 'testlist))
-      (cond ((or comma? other-source-places)
-	     (py-raise 'SyntaxError
-		       "Augmented assign to multiple places not possible~%AST or target: ~A"
-		       target))
-	    ((not (member (car source-place) '(identifier subscription attributeref)))
-	     (py-raise 'SyntaxError
-		       "Augmented assign to forbidden place (maybe TODO)~%AST of place: ~A"
-		       source-place)))
     
-      (assert (eq (car expr) 'testlist))
-      (let* ((et (eval-one-assignment-target source-place))
-	     (evexpr (py-eval-1 expr))
-	     (lhs-value-now (py-eval-1 et))
-	     (op-funcs (cdr (assoc operator *math-inplace-op-assoc*)))
-	     (py-@= (car op-funcs))
-	     (py-@ (cdr op-funcs)))
-	
-	(assert op-funcs)
-
-	;; try __iadd__ first, otherwise __add__ + store
-	
-	(unless (funcall py-@= lhs-value-now evexpr) ;; returns true iff __iadd__ found
+    (cond ((not (listp target))
+	   (py-raise 'SyntaxError "Augmented assignment can't have atom as target (got: ~A)" target))
 	  
-	  (let ((value-to-store (funcall py-@ lhs-value-now evexpr)))
-	    (eval-assign-one et value-to-store))))))
+	  ((eq (car target) 'tuple)
+	   (py-raise 'SyntaxError
+		     "Augmented assign to multiple places not possible (target AST: ~A)" target))
+	  
+	  ((not (member (car target) '(identifier subscription attributeref)))
+	   (py-raise 'SyntaxError
+		     "Augmented assign to forbidden place (maybe TODO) (target AST: ~A)" target))
+	  
+	  (t (let* ((ev-target (eval-one-assignment-target (car target)))
+		    (ev-expr (py-eval-1 expr))
+		    (target-value-now (py-eval-1 ev-target))
+		    (op-funcs (cdr (assoc operator *math-inplace-op-assoc*)))
+		    (py-@= (car op-funcs))
+		    (py-@ (cdr op-funcs)))
+	       
+	       (assert (and py-@= py-@))
+	       ;; try __iadd__ first, otherwise __add__ + store
+	       (unless (funcall py-@= target-value-now ev-expr) ;; returns true iff __iadd__ found
+		 (let ((value-to-store (funcall py-@ target-value-now ev-expr)))
+		   (eval-assign-one ev-target value-to-store)))))))
   *None*)
 
-(defun eval-real-assign-expr (targets evalue)
-  "Assign EVALUE to TARGETS.
-   Assumes EVALUE already evaluated."
-  (declare (optimize (speed 3) (safety 0) (debug 0)))
-  (if (member (car targets) '(testlist exprlist) :test 'eq)
-      
-      (let* ((etargets (eval-assignment-targets (second targets)))
-	     (num-tg (length (second targets)))
-	     (val-vec (py-iterate-n-values evalue num-tg)))
-	(loop for val across val-vec
-	    for tar in etargets
-	    do (eval-assign-one tar val)))
-    
-    (eval-assign-one (eval-one-assignment-target targets) evalue)))
        
 (defun eval-assign-one (target val)
   "TARGET is evaluated as far as possible, but it still contains ~@
    identifier, subscription, attributeref. VAL is the fully evaluated ~@
    value to be assigned."
   
-  (cond ((eq (car target) 'identifier)   ;; x = 5
-	 ;; (identifier name)
-	 (namespace-bind *scope* (second target) val))
-	
-	((eq (car target) 'attributeref)  ;; x.y = 5
-	 ;; (attributeref <primary> (identifier attr-name))
-	 (destructuring-bind (primary (identifier attr-name))
-	     (cdr target)
-	   (declare (ignore identifier))
-	   ;;(assert (eq (car attr-name) 'identifier))
-	   (internal-set-attribute primary attr-name val)))
-	
-  	((eq (car target) 'subscription)  ;; x[y] = 5
-	 ;; (subscription <primary> <subs>)
-	 (destructuring-bind (primary subs)
-	     (cdr target)
-	   
-	   (multiple-value-bind (setitem found)
-	       (internal-get-attribute primary '__setitem__)
-	     (if found
-		 (py-call setitem (list subs val))
-	       (py-raise 'TypeError "No __setitem__ found (~A)" primary)))
-	   
-	   #+(or) ;; not correct for UDC with method __setitem__
-	   (__setitem__ primary subs val)))
-	
-	((or (numberp target) (stringp target))
-	 (error "Literal target -- (should have been catched already in ~@
-                 EVAL-ASSIGNMENT-TARGETS) A~" target))
+  (when (not (listp target))
+    (py-raise 'SyntaxError "A literal is not a valid assignment target (got: ~A)" target))
 
-	((eq (car target) 'testlist)
-	 (destructuring-bind (item-list comma?)
-	     (cdr target)
-	   (let ((new-target (if (or comma?
-				 (> (length item-list) 1))
-			     `(list ,@item-list)
-			   (car item-list))))
-	     (eval-assign-one new-target val))))
-	  
-	((eq (car target) 'list)
-	 ;; (list <A> <B> ...)
-	 ;; List, tuple are both made `list' by EVAL-ASSIGNMENT-TARGETS.
-	 ;; VAL must be iterable, otherwise py-iterate raises TypeError
-	 (let* ((targets (cdr target))
-		(num-targets (length targets))
-		(i 0)
-		(acc ()))
-	   (map-over-py-object
-	    (lambda (x)
-	      (incf i)
-	      (push x acc)
-	      (when (> i num-targets)
-		(py-raise 'ValueError "Too many values to unpack (needed exactly ~A ~
-                           values, got already one more than that." num-targets)))
-	    val)
-		       
-	   (when (< i num-targets)
-	     (py-raise 'ValueError "Too few values to unpack (needed exactly ~A ~@
-                        values, but got only ~A)." num-targets i))
-	   
-	   (setf acc (nreverse acc))
-	   (loop for val in acc
-	       for tar in targets
-	       do (eval-assign-one tar val))))
-	
-	(t
-	 (error "uncatched situation in EVAL-ASSIGN-ONE: ~@
-                 target = ~A  val = ~A" target val))))
+  (ecase (car target)
+    
+    (identifier    ;; x = 5  (identifier x)
+     (namespace-bind *scope* (second target) val))
+	 
+    (attributeref  ;; x.y = 5  (attributeref <primary> (identifier attr-name))
+     (destructuring-bind (primary (identifier attr-name))
+	 (cdr target)
+       (assert (eq identifier 'identifier))
+       (internal-set-attribute primary attr-name val)))
+    
+    (subscription  ;; x[y] = 5  (subscription <primary> <subs>)
+     (destructuring-bind (primary subs)
+	 (cdr target)
+       (multiple-value-bind (res setitem-found)
+	   (call-attribute-via-class primary '__setitem__ (list subs val))
+	 (declare (ignore res))
+	 (unless setitem-found
+	   (py-raise 'TypeError "Can't set item on object ~A" primary)))))
+    
+    ((tuple list)   ;; [a,b] = (c,d) = 3,4  (list (<A> <B> ...))
+     (let* ((targets (second target))
+	    (val-vec (py-iterate-n-values val (length targets))))
+       (loop for val across val-vec
+	   for tar in targets
+	   do (eval-assign-one tar val))))))
 
 
 (defun eval-assignment-targets (targets)
@@ -710,15 +649,12 @@
     (py-raise 'SyntaxError
 	      "Cannot assign to a literal (got target: ~A)" tg))
   
-  (case (car tg)
+  (ecase (car tg)
     ;; (IDENTIFIER a) : remains the same
     (identifier tg)
   
-    (testlist ;; how about comma?
-     `(list ,@(mapcar #'eval-one-assignment-target (second tg))))
-      
-    ;; (TUPLE A B) and (LIST A B) both go to (LIST <A> <B>)
-    ((tuple list) `(list ,@(mapcar #'eval-one-assignment-target (second tg))))
+    ;; (TUPLE (A B)) and (LIST (A B)) both go to (LIST (<A> <B>))
+    ((tuple list) `(,(car tg) ,@(mapcar #'eval-one-assignment-target (second tg))))
     
     ;; foo.x => (attributeref (identifier foo) (identifier x))
     ;; 
@@ -732,43 +668,44 @@
     ;; Both primary and expr-list are evaluated; result is
     ;;  (subscription <object> <item-or-tuple>)
     (subscription 
-     (destructuring-bind (primary (subs comma?))
+     (destructuring-bind (primary sub)
 	 (cdr tg)
        `(subscription ,(py-eval-1 primary)
-		      ,(let* ((esubs (mapcar #'py-eval-1 subs))
-			      (make-tuple (or (> (length subs) 1)
-					      comma?)))
-			 (declare (dynamic-extent esubs))
-			 (if make-tuple
-			     (make-tuple-from-list esubs)
-			   (car esubs))))))
+		      ,(py-eval-1 sub)))) ;; check -- tuple etc
       
+    #+(or) ;; needed?
     (t
      (warn "EVAL-ASSIGNMENT-TARGETS: assuming ~A is an expression ~
-                       to be evaluated." tg)
+            to be evaluated." tg)
      (py-eval-1 tg))))
 
 (defun eval-del (item)
   (setf item (car item))
-  (dolist (place (if (eq (car item) 'exprlist)
-		     (second item)
-		   (list item)))
-    (let ((place2 (eval-one-assignment-target place)))
-      (ecase (car place2)
-	
-	(identifier   (or (namespace-delete *scope* (second place2))
-			  (py-raise 'ValueError
-				    "Can't delete variable ~A: it's not bound"
-				    (second place2))))
-	(subscription (call-attribute-via-class (second place2) '__delitem__
-						(cddr place2)))
-	(attributeref (warn "deletion of attribute: a bit buggy")
-		      (destructuring-bind (obj (identifier? att-name))
-			  (cdr place2)
-			(assert (and (eq identifier? 'identifier)))
-			;; XXX call __delattr__ always?
-			(call-attribute-via-class obj '__delattr__
-						  (list att-name))))))))
+  (let ((place2 (eval-one-assignment-target (second item))))
+    (ecase (car place2)
+      
+      (identifier   (or (namespace-delete *scope* (second place2))
+			(py-raise 'ValueError "Can't delete variable ~A: it's not bound"
+				  (second place2))))
+      
+      (subscription (let ((primary (second place2)))
+		      (multiple-value-bind (res delitem-found)
+			  (call-attribute-via-class primary '__delitem__ (cddr place2))
+			(declare (ignore res))
+			(unless delitem-found
+			  (py-raise 'TypeError "Can't delete items from ~A (no __delitem__ in class)"
+				    primary)))))
+      
+      (attributeref (warn "deletion of attribute: a bit buggy")
+		    (destructuring-bind (primary (identifier att-name))
+			(cdr place2)
+		      (assert (and (eq identifier 'identifier)))
+		      (multiple-value-bind (res delattr-found)
+			  (call-attribute-via-class primary '__delattr__ (list att-name))
+			(declare (ignore res))
+			(unless delattr-found
+			  (py-raise 'TypeError "Can't delete attribute from ~A (no __delattr__ in class)"
+				    primary))))))))
 
 (defun eval-global (varlist)
   (setf varlist (car varlist))
@@ -790,71 +727,68 @@
   
   (destructuring-bind
       (suite except-clauses else-clause) suite--except-clauses--else-clause
-    (let ((handler-scope *scope*))
-    
-      (handler-bind 
-	  
-	  ((Exception
+    (let* ((handler-scope *scope*)
+	   (handler-func
 	    (lambda (exc)
 	      (loop for ((cls/tuple parameter) handler-form) in except-clauses
 		  do (cond 
-		      
+		     
 		      ;; `except Something:'  where Something a class or tuple
 		      ((and cls/tuple  
 			    (let ((ecls/tuple (let ((*scope* handler-scope))
 						(py-eval-1 cls/tuple))))
 			      (typecase ecls/tuple
 				(class    (typep exc ecls/tuple))
-				(py-tuple (loop for cls in
-						(tuple->lisp-list ecls/tuple)
+				(py-tuple (loop for cls in (tuple->lisp-list ecls/tuple)
 					      when (typep exc cls)
 					      do (return t)
 					      finally (return nil)))
 				(t (warn "Non-class as `except' specializer ~
                                           (ignored): ~S" ecls/tuple)
 				   nil))))
-				 
-				 (let ((*scope* handler-scope))
-				   (when parameter
-				     (assert (eq (first parameter)
-						 'identifier))
-				     (namespace-bind
-				      handler-scope
-				      (second parameter) exc))
-				   (py-eval-1 handler-form))
-				 (return-from eval-try-except nil))
+		       (let ((*scope* handler-scope))
+			 (when parameter
+			   (assert (eq (first parameter) 'identifier))
+			   (namespace-bind handler-scope (second parameter) exc))
+			 (py-eval-1 handler-form))
+		       (return-from eval-try-except nil))
 				
 		      ((null cls/tuple)
 		       ;; a bare `except:' matches all exceptions
 		       (let ((*scope* handler-scope))
 			 (py-eval-1 handler-form))
 		       (return-from eval-try-except nil))
-		      
+		     
 		      (t ;; error not catched by this exception
 		       ))))))
+	  
+      (handler-bind 
+	  ((Exception handler-func))
 	
 	;; The `py-error-handlers' we re already set in py-eval. Need to
 	;; set them here again, because when one of the py-eval
 	;; handler-bind handlers takes control, the handler above for
 	;; Exception is not active anymore.
-    
-	#+(or)(with-py-error-handlers
-		  (py-eval-1 suite))
-
-	;; #+py-exception-stack
-	(loop with excepts = ()
-	    for ((cls/tuple nil) nil) in except-clauses
-	    do (if (null cls/tuple)
-		   (push (find-class 'Exception) excepts) ;; bare `except: ...'
-		 (let ((ecls/tuple (py-eval-1 cls/tuple)))
-		   (etypecase ecls/tuple
-		     (class (push ecls/tuple excepts))
-		     (py-tuple (dolist (cls (tuple->lisp-list ecls/tuple))
-				 (push cls excepts))))))
-	    finally (let ((*active-excepts* (cons (nreverse excepts) *active-excepts*)))
-		      (with-py-error-handlers
-			  (py-eval-1 suite)))))
-		  
+	
+	(if *track-exception-stack*
+	    
+	    ;; XXX combine with stuff in handler-func
+	    (loop with excepts = ()
+		for ((cls/tuple nil) nil) in except-clauses
+		do (if (null cls/tuple)
+		       (push (find-class 'Exception) excepts) ;; bare `except: ...'
+		     (let ((ecls/tuple (py-eval-1 cls/tuple)))
+		       (etypecase ecls/tuple
+			 (class (push ecls/tuple excepts))
+			 (py-tuple (dolist (cls (tuple->lisp-list ecls/tuple))
+				     (push cls excepts))))))
+		finally (let ((*active-excepts* (cons (nreverse excepts) *active-excepts*)))
+			  (with-py-error-handlers
+			      (py-eval-1 suite))))
+	  
+	  (with-py-error-handlers
+	      (py-eval-1 suite))))
+      
       (assert (eq *scope* handler-scope))
       (when else-clause
 	(py-eval-1 else-clause)))))
@@ -947,96 +881,39 @@
   (make-py-list-from-list (mapcar #'py-eval-1 (car data))))
   
 (defun eval-list-compr (data)
-  (destructuring-bind (expr for/ifs) data
-    #+(or)(format t "expr=~A~%for-ifs=~A~%" expr for/ifs)
-    (eval-listcompr expr for/ifs)))
-
-
-(defvar *eval-listcompr-nesting* 0)
-
-(defun eval-listcompr (expr list-for-ifs)
-  (declare (optimize (speed 3) (safety 0) (debug 0)))
-  ;;
-  (let* ((acc (if (= *eval-listcompr-nesting* 0)
-		  (let ((vec (load-time-value (make-array 0 :adjustable t :fill-pointer 0))))
-		    (setf (fill-pointer vec) 0)
-		    vec)
-		(make-array 0 :adjustable t :fill-pointer 0)))
-	 (*eval-listcompr-nesting* (1+ *eval-listcompr-nesting*)))
+  (let* ((expr (first data))
+	 (list-for-ifs (second data))
+	 (acc (make-array 0 :adjustable t :fill-pointer 0)))
     
     (labels ((process-for/ifs (for-ifs)
-	       (let ((clause (car for-ifs)))
-		 (cond ((null for-ifs)                 (collect-expr))
-		       ((eq (car clause) 'list-for-in) (process-for for-ifs))
-		       ((eq (car clause) 'list-if)     (process-if for-ifs)))))
+	       (if (null for-ifs)
+		   (vector-push-extend (py-eval-1 expr) acc)
+		 (let ((clause (pop for-ifs)))
+		   (ecase (car clause)
+		     (list-for-in (process-for-in (second clause) (third clause) for-ifs))
+		     (list-if     (process-if (second clause) for-ifs))))))
 	     
-	     (collect-expr () (vector-push-extend (py-eval-1 expr) acc))
+	     (process-for-in (exprlist source for-ifs)
+	       (let ((f (lambda (x) (eval-assign-one exprlist x) (process-for/ifs for-ifs))))
+		 (declare (dynamic-extent f))
+		 (map-over-py-object f (py-eval-1 source))))
 	     
-	     (process-for (for-ifs)
-	       (destructuring-bind ((list-for-in? exprlist source) &rest rest)
-		   for-ifs
-		 (assert (eq list-for-in? 'list-for-in))
-		 (map-over-py-object (lambda (x)
-				       (eval-real-assign-expr exprlist x)	 
-				       (process-for/ifs rest))
-				     (py-eval-1 source))))
-	     
-	     (process-if (for-ifs)
-	       (destructuring-bind ((_list-if condition) &rest rest)
-		   for-ifs
-		 (declare (ignore _list-if))
-		 (when (py-val->lisp-bool (py-eval-1 condition))
-		   (process-for/ifs rest)))))
+	     (process-if (condition for-ifs)
+	       (when (py-val->lisp-bool (py-eval-1 condition))
+		 (process-for/ifs for-ifs))))
       
       (process-for/ifs list-for-ifs)
-      (make-py-list (make-array (length acc) :adjustable t :fill-pointer (length acc)
-				:initial-contents acc)))))
+      (make-py-list acc))))
 
-#+(or)
-(defun eval-listcompr (expr list-for-ifs)
-  (declare (optimize (speed 3) (safety 0) (debug 0)))
-  (let ((acc ()))
-    (labels ((process-for/ifs (for-ifs)
-	       (let ((clause (car for-ifs)))
-		 (cond ((null for-ifs)                 (collect-expr))
-		       ((eq (car clause) 'list-for-in) (process-for for-ifs))
-		       ((eq (car clause) 'list-if)     (process-if for-ifs)))))
-	     
-	     (collect-expr () (push (py-eval-1 expr) acc))
-	     
-	     (process-for (for-ifs)
-	       (destructuring-bind ((list-for-in? exprlist source) &rest rest)
-		   for-ifs
-		 (assert (eq list-for-in? 'list-for-in))
-		 (map-over-py-object (lambda (x)
-				       (eval-real-assign-expr exprlist x)	 
-				       (process-for/ifs rest))
-				     (py-eval-1 source))))
-	     
-	     (process-if (for-ifs)
-	       (destructuring-bind ((_list-if condition) &rest rest)
-		   for-ifs
-		 (declare (ignore _list-if))
-		 (when (py-val->lisp-bool (py-eval-1 condition))
-		   (process-for/ifs rest)))))
-      
-      (process-for/ifs list-for-ifs)
-      (make-py-list-from-list (nreverse acc)))))
 
 (defun eval-dict (data)
   ;; eval keys and values in this order: key1, val1, key2, val2, ...
-  (make-dict
-   (mapcar (lambda (kv) (cons (py-eval-1 (car kv))
-			      (py-eval-1 (cdr kv))))
-	   (car data))))
+  (make-dict (mapcar (lambda (kv) (cons (py-eval-1 (car kv))
+					(py-eval-1 (cdr kv))))
+		     (car data))))
 
-(defun eval-backticks (lst)
-  (setf lst (car lst))
-  (let* ((ev (mapcar #'py-eval-1 lst))
-	 (obj (if (cdr lst)
-		  (make-tuple-from-list ev)
-		(car ev))))
-    (py-repr obj)))
+(defun eval-backticks (obj)
+  (py-repr (py-eval-1 (first obj))))
 
 (defun eval-call (primary-args)
   (destructuring-bind (primary args) primary-args
@@ -1096,87 +973,65 @@
 	(py-call eprim pos-args kw-args)))))
 
 (defun eval-comparison (operator-left-right)
+  "Does comparison, returns Python boolean"
   (destructuring-bind (operator left right) operator-left-right
-    "Does comparison, returns Python boolean"
     (let ((comp-fun (cdr (assoc operator *math-binary-cmp-assoc*))))
-      (assert comp-fun () "No comparison function corresponding to ~
-                         comparison operator ~A?! ~A"
-	      operator *math-binary-cmp-assoc*)
+      (declare (special *math-binary-cmp-assoc*))
+      (assert comp-fun)
       (lisp-val->py-bool (funcall comp-fun (py-eval-1 left) (py-eval-1 right))))))
 
 (defun eval-unary (operator-val)
   (destructuring-bind (operator val) operator-val
     (declare (special *math-unary-op-assoc*))
     (let ((func (cdr (assoc operator *math-unary-op-assoc*))))
-      (unless func
-	(error "No function for unary operator ~A?! ~A" operator *math-unary-op-assoc*))
+      (assert func)
       (funcall func (py-eval-1 val)))))
 
 (defun eval-binary (operator-left-right)
   (declare (special *math-binary-op-assoc*)) ;; defined in mathops.cl
   (destructuring-bind (operator left right) operator-left-right
-    #+(or)(when (and (eq operator '/)
-		     *__future__.division*)
-	    (setf operator '/t/))
+    #+(or) ;; XXX check this...
+    (when (and (eq operator '/)
+	       *__future__.division*)
+      (setf operator '/t/))
     (let ((func (cdr (assoc operator *math-binary-op-assoc*))))
-      #+(or)(assert func () "Operator ~A has no corresponding py-~A function?! ~A"
-		    operator operator *math-binary-op-assoc*)
+      (assert func)
       (funcall func (py-eval-1 left) (py-eval-1 right)))))
 
 (defun eval-binary-lazy (operator-left-right)
-  (declare (special *math-binary-lazy-op-assoc*)) ;; mathops.cl
   (destructuring-bind (operator left right) operator-left-right
     (let ((func (cdr (assoc operator *math-binary-lazy-op-assoc*))))
-      (funcall (or func
-		   (error "no func for lazy ~A operator" operator))
-	       left right))))
+      (declare (special *math-binary-lazy-op-assoc*)) ;; mathops.cl
+      (assert func)
+      (funcall func left right))))
 
 (defun eval-attributeref (obj-attr)
   (destructuring-bind (obj attr) obj-attr
     (assert (eq (car attr) 'identifier))
-    (let ((eobj (py-eval-1 obj))
+    (let ((ev-obj (py-eval-1 obj))
 	  (attr-name (second attr)))
       (multiple-value-bind (val found)
-	  (internal-get-attribute eobj attr-name)
+	  (internal-get-attribute ev-obj attr-name)
 	(if found
 	    val
 	  (py-raise 'AttributeError
-		    "Object ~A has not attribute ~A" eobj attr-name))))))
+		    "Object ~A has not attribute ~A" ev-obj attr-name))))))
 
 (defun eval-subscription (primary-data)
   (destructuring-bind (primary data) primary-data
-    (let ((e-prim (if (consp primary) 
-		      (py-eval-1 primary)
-		    primary))
-	  (e-item-to-get
-	   (if (consp data)
-	     
-	       (progn 
-		 (destructuring-bind (item-list comma?)
-		     data
-		   (assert (consp item-list))
-		   (let* ((item-list-2 (mapcar #'py-eval-1 item-list))
-			  (item (if (or comma?
-					(> (length item-list) 1))
-				    (make-tuple-from-list (mapcar #'py-eval-1 item-list-2))
-				  (car item-list-2))))
-		     item)))
-	     (progn (warn "assuming subs ~A evaluated already" data)
-		    data))))
-    	   
+    (let ((ev-prim (py-eval-1 primary)))
       (multiple-value-bind (res found)
-	  (call-attribute-via-class e-prim '__getitem__ (list e-item-to-get))
+	  (call-attribute-via-class ev-prim '__getitem__ (list (py-eval-1 data)))
 	(if found
 	    res
-	  (py-raise 'TypeError
-		    "No __getitem__ found (~A)" e-prim))))))
+	  (py-raise 'TypeError "No __getitem__ found (~A)" ev-prim))))))
 
 (defun eval-slice (data)
   (destructuring-bind (start stop &optional step)
       data
     (make-slice (if start (py-eval-1 start) *None*)
-		(if stop (py-eval-1 stop) *None*)
-		(if step (py-eval-1 step) *None*))))
+		(if stop  (py-eval-1 stop)  *None*)
+		(if step  (py-eval-1 step)  *None*))))
 
 (defun eval-lambda (params-expr)
   (destructuring-bind (params expr) params-expr
@@ -1239,24 +1094,29 @@
 (defun eval-suite (stmts)
   "Evaluate all statements in suite; return None"
   (setf stmts (car stmts))
-  (mapc #'py-eval-1 stmts)
-  *None*)
+  (mapc #'py-eval-1 stmts))
 
-(defun eval-for-in (targets-sources-suite-else-suite)
-  (destructuring-bind (targets sources suite else-suite) targets-sources-suite-else-suite
-    (let ((take-else t))
+
+(defun eval-for-in (target-sources-suite-else-suite)
+  (destructuring-bind (target sources suite else-suite) target-sources-suite-else-suite
+    (let ((take-else t)
+	  (ev-targets (eval-one-assignment-target target)))
       (catch 'break
 	(let ((f (lambda (x) 
 		   (setf take-else nil)
-		   (eval-real-assign-expr targets x)
+		   (eval-assign-one ev-targets x)
 		   (catch 'continue
 		     (py-eval-1 suite)))))
 	  (declare (dynamic-extent f))
 	  (map-over-py-object f (py-eval-1 sources))))
-      (when (and take-else
-		 else-suite)
+      (when (and take-else else-suite)
 	(py-eval-1 else-suite)))))
 
+(defun eval-tuple (items)
+  (let ((items (first items)))
+    (make-tuple-from-list (mapcar #'py-eval-1 items))))
+
+  
 (defun eval-while (test-suite-else-suite)
   (destructuring-bind (test suite else-suite) test-suite-else-suite
     (let ((taken nil))
@@ -1265,7 +1125,6 @@
 	    do (catch 'continue
 		 (setf taken t)
 		 (py-eval-1 suite))))
-    
       (when (and (not taken) else-suite)
 	(py-eval-1 else-suite)))))
 
@@ -1281,26 +1140,20 @@
   (destructuring-bind (clauses else-suite) clauses--else-suite
     (loop for (expr suite) in clauses
 	when (py-val->lisp-bool (py-eval-1 expr))
-	do (py-eval-1 suite)
-	   (return)
+	do (return-from eval-if (py-eval-1 suite))
 	finally
 	  (when else-suite
 	    (py-eval-1 else-suite)))))
 
 (defun eval-return (val)
   (setf val (car val))
-  
   (let ((res (if val (py-eval-1 val) *None*)))
-    
-    #+(or) ;; namespace reuse optimization
-    (vector-push *scope* *namespace-cache*)
-    
     (throw 'function-block res)))
 
 (defun eval-assert (test-expr)
   "Test whether assertion holds. Is only executed when __debug__ is true"
-  (destructuring-bind (test expr) test-expr
-    (when (py-val->lisp-bool *__debug__*)
+  (when (py-val->lisp-bool *__debug__*)
+    (destructuring-bind (test expr) test-expr
       (unless (py-val->lisp-bool (py-eval-1 test))
 	(py-raise 'AssertionError (py-eval-1 expr))))))
 

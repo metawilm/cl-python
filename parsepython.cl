@@ -90,7 +90,373 @@
 		  res))
     `(progn ,@(nreverse res))))
 
+;; new version
+(python-prods
 
+ ;; Rules (including their names) are taken from the CPython grammar
+ ;; file from CPython CVS, file Python/Grammar/Grammar, 20040827.
+
+ ;; The start symbol: regular python files
+ (python-grammar (file-input) ((list 'file-input (nreverse $1))))
+
+ (file-input () ())
+ (file-input (file-input newline) ($1))
+ (file-input (file-input stmt) ((cons $2 $1)))
+
+ (decorator (@ dotted-name newline) ((list 'decorator $1 $2)))
+ (decorator (@ dotted-name |(| arglist |)| newline) ((list 'decorator $2 $4)))
+ (:decorator+)
+ (:decorator+?)
+
+ ;; XXX for now: ignore decorators above function definition
+ (funcdef (decorator+? def identifier parameters |:| suite) ((list 'funcdef $3 $4 $6)))
+
+ (parameters ( |(| |)| ) ((list nil nil nil)))
+ (parameters ( |(| parameter-list5 |)| ) ($2))
+
+ (parameter-list5 (defparameter+)                        ((list $1 nil nil)))
+ (parameter-list5 (defparameter+ ni-*-ident ni-**-ident) ((list $1 $2 $3)))
+ (parameter-list5 (defparameter+ ni-*-ident            ) ((list $1 $2 nil)))
+ (parameter-list5 (defparameter+            ni-**-ident) ((list $1 nil $2)))
+ (parameter-list5 (              *-ident    ni-**-ident) ((list nil $1 $2)))
+ (parameter-list5 (              *-ident               ) ((list nil $1 nil)))
+ (parameter-list5 (                         **-ident   ) ((list nil nil $1)))
+
+ (defparameter+ (defparameter) ((list $1)))
+ (defparameter+ (defparameter+ |,| defparameter) ((append $1 (list $3))))
+
+ (ni-*-ident  ( |,| *-ident ) ($2))
+ (*-ident ( * identifier ) ($2))
+
+ (ni-**-ident ( |,| **-ident) ($2))
+ (**-ident ( ** identifier ) ($2))
+
+ (defparameter (fpdef) ($1))
+ (defparameter (fpdef = test) ((cons $1 $3)))
+ 
+ (fpdef :or
+	((identifier) . ($1))
+	((|(| fplist |)|) . (`(list ,$2)))) ;; WWW or just $2
+
+ (fplist (fpdef comma--fpdef* comma?) ((cons $1 $2)))
+ (:comma--fpdef*)
+ (comma--fpdef (|,| fpdef) ($2))
+
+ (:comma?)
+ (comma (|,|) ((list $1)))
+
+ (stmt :or simple-stmt compound-stmt)
+ (simple-stmt (small-stmt semi--small-stmt* semi? newline) ((if $2 (list 'suite (cons $1 $2))
+							      $1)))
+
+ (semi--small-stmt (|;| small-stmt) ($2))
+ (:semi--small-stmt*)
+ (:semi?)
+ (semi (|;|))
+
+ (small-stmt :or expr-stmt print-stmt del-stmt pass-stmt flow-stmt
+	     import-stmt global-stmt exec-stmt assert-stmt)
+
+ (expr-stmt (testlist expr-stmt2)
+	    (#+(or)(break "expr-stmt: ~A -- ~A" $1 $2)
+	       (cond ((null $2) ;; not an assignment expression
+		      $1)
+		     ((and $2 (eq (car $2) '=))
+		      (let ((items (nreverse `(,$1 ,@(second $2)))))
+			`(assign-expr ,(car items) ,(cdr items))))
+		     ($2
+		      #+(or)(warn "aug: ~S -- ~S" $1 $2)
+		      (list 'augassign-expr $1 (car $2) (cdr $2)))
+		     (t
+		      #+(or)(break "expr-stmt: what is this??  ~A -- ~A" $1 $2)
+		      $1))
+	       #+(or)(cond ((and $2 (eq (car $2) '=)) 
+			    `(assign-expr (,$1 ,@(second $2))))
+			   ($2
+			    (warn "aug: ~S ~S" $1 $2)
+			    (list 'augassign-expr $1 (car $2) (cdr $2)))
+			   (t
+			    (warn "not a real assign expr?!: ~A" $1)
+			    $1))))
+
+ (expr-stmt2 (augassign testlist) ((cons $1 $2))) ;; todo: return empty list, so "foo" = (identifier 'foo), not testlist
+ (expr-stmt2 (=--testlist*) ((when $1 (list '= $1))))
+ (:=--testlist*)
+ (=--testlist (= testlist) ($2))
+
+ (augassign :or += -= *= /= %= &= |\|=| ^= <<= >>= **= //= )
+
+ (print-stmt :or
+	     ((print) . (`(print nil nil)))
+	     ((print test |,--test*| comma?) . ((list 'print (cons $2 $3) (if $4 t nil))))
+	     ((print >> test |,--test*| comma?) . ((list 'print->> $3 $4 (if $5 t nil)))))
+ (:|,--test*|)
+ (|,--test| (|,| test) ($2))
+
+ (del-stmt (del exprlist) ((list $1 $2)))
+ (pass-stmt (pass) ((list $1)))
+ (flow-stmt :or break-stmt continue-stmt return-stmt raise-stmt yield-stmt)
+
+ (break-stmt (break) ((list $1)))
+ (continue-stmt (continue) ((list $1)))
+ (return-stmt (return testlist?) ((list $1 $2)))
+ (:testlist?)
+ (yield-stmt (yield testlist?) ((list $1 $2)))
+
+ (raise-stmt (raise) ((list $1 nil nil nil)))
+ (raise-stmt (raise test) ((list $1 $2 nil nil)))
+ (raise-stmt (raise test |,| test) ((list $1 $2 $4 nil)))
+ (raise-stmt (raise test |,| test |,| test) ((list $1 $2 $4 $6)))
+ 
+ ;; "import" module ["as" name] ( "," module ["as" name] )*
+ (import-stmt :or import-normal import-from)
+ (import-normal (import dotted-as-name comma--dotted-as-name*) (`(import (,$2 ,@$3))))
+ (:comma--dotted-as-name*)
+ (comma--dotted-as-name ( |,| dotted-as-name) ($2))
+ (import-from (from dotted-name import import-from-2) (`(import-from ,$2 ,$4)))
+ (import-from-2 :or
+		*
+		((import-as-name comma--import-as-name*) . ((cons $1 $2))))
+ (:comma--import-as-name*)
+ (comma--import-as-name (|,| import-as-name) ($2))
+ (import-as-name (identifier) ((list 'as $1 $1)))
+ (import-as-name (identifier as identifier) ((list 'as $1 $3)))
+ (dotted-as-name (dotted-name) ((list 'not-as $1)))
+ (dotted-as-name (dotted-name as identifier) ((list 'as $1 $3)))
+ (dotted-name (identifier dot--name*) ((if $2
+					   `(dotted ,$1 ,@(if (eq (first $2) 'dotted)
+							      (second $2)
+							    $2))
+					 $1)))
+ (:dot--name*)
+ (dot--name (|.| identifier) ($2))
+
+ (global-stmt (global identifier comma--identifier*)
+	      (`(global ,(if $3 (cons $2 $3) (list $2)))))
+ (:comma--identifier*)
+ (comma--identifier (|,| identifier) ($2))
+ (exec-stmt (exec expr) ((list $1 $2)))
+ (exec-stmt (exec expr in test) ((list $1 $2 $4)))
+ (exec-stmt (exec expr in test |,| test) ((list $1 $2 $4 $6)))
+ (assert-stmt (assert test comma--test?) ((list $1 $2 $3)))
+ (:comma--test?)
+ (comma--test (|,| test) ($2))
+
+ (compound-stmt :or if-stmt while-stmt for-stmt try-stmt funcdef classdef)
+ (if-stmt (if test |:| suite elif--test--suite* else--suite)
+	  (`(if ((,$2 ,$4) ,@$5) ,$6)))
+ (if-stmt (if test |:| suite elif--test--suite*)
+	  (`(if ((,$2 ,$4) ,@$5) nil)))
+ (:elif--test--suite*)
+ (elif--test--suite (elif test |:| suite) ((list $2 $4)))
+ (else--suite (else |:| suite) ($3))
+ (while-stmt (while test |:| suite else--suite?) ((list $1 $2 $4 $5)))
+ (:else--suite?)
+ (for-stmt (for exprlist in testlist |:| suite else--suite?)
+	   ((list 'for-in $2 $4 $6 $7))
+	   (:precedence high-prec))
+ (try-stmt :or
+	   ((try |:| suite except--suite+ else--suite?) . ((list 'try-except $3 $4 $5)))
+	   ((try |:| suite finally |:| suite)  	        . ((list 'try-finally $3 $6))))
+
+ (except--suite (except |:| suite) (`((nil nil) ,$3)))
+ (except--suite (except test |:| suite) (`((,$2 nil) ,$4)))
+ (except--suite (except test |,| test |:| suite) (`((,$2 ,$4) ,$6)))
+
+ (except--suite+ (except--suite) ((list $1)))
+ (except--suite+ (except--suite+ except--suite) ((append $1 (list $2))))
+
+ (suite :or
+	((simple-stmt) . ((list 'suite (list $1))))
+	((newline indent stmt+ dedent) . ((list 'suite $3))))
+
+ (stmt+ (stmt) ((list $1)))
+ (stmt+ (stmt+ stmt) ((append $1 (list $2))))
+
+ (expr (binop2-expr) ($1))
+
+ (test :or
+       lambdef
+       binop-expr)
+
+ (binop-expr :or
+	     ((binop-expr and binop-expr) . ((list 'binary-lazy $2 $1 $3)))
+	     ((binop-expr or  binop-expr) . ((list 'binary-lazy $2 $1 $3)))
+	     ((not binop-expr)            . ((list 'unary $1 $2)))
+	     ((binop-expr <  binop-expr)  .  ((list 'comparison $2 $1 $3)))
+	     ((binop-expr <= binop-expr)  . ((list 'comparison $2 $1 $3)))
+	     ((binop-expr >  binop-expr)  .  ((list 'comparison $2 $1 $3)))
+	     ((binop-expr >= binop-expr)  . ((list 'comparison $2 $1 $3)))
+	     ((binop-expr != binop-expr)  . ((list 'comparison $2 $1 $3)))
+	     ((binop-expr <> binop-expr)  . ((list 'comparison '!= $1 $3))) ;; <> is same as !=
+	     ((binop-expr == binop-expr)  . ((list 'comparison $2 $1 $3)))
+	     ((binop-expr in binop-expr)  . ((list 'binary $2 $1 $3)))
+	     ((binop-expr is binop-expr)  . ((list 'binary $2 $1 $3))))
+ (binop-expr (binop2-expr) ($1) (:precedence or))
+
+ (binop2-expr :or
+	      atom
+	      ((atom trailer+) . ((parse-trailers (list 'trailers $1 $2))))
+	      ((binop2-expr +  binop2-expr) . ((list 'binary $2 $1 $3)))
+	      ((binop2-expr -  binop2-expr) . ((list 'binary $2 $1 $3)))
+	      ((binop2-expr *  binop2-expr) . ((list 'binary $2 $1 $3)))
+	      ((binop2-expr /  binop2-expr) . ((list 'binary $2 $1 $3)))
+	      ((binop2-expr ** binop2-expr) . ((list 'binary $2 $1 $3)))
+	      ((binop2-expr // binop2-expr) . ((list 'binary $2 $1 $3)))
+
+	      ((binop2-expr << binop2-expr) . ((list 'binary $2 $1 $3)))
+	      ((binop2-expr >> binop2-expr) . ((list 'binary $2 $1 $3)))
+	      ((binop2-expr &  binop2-expr) . ((list 'binary $2 $1 $3)))
+	      ((binop2-expr ^  binop2-expr) . ((list 'binary $2 $1 $3)))
+	      ((binop2-expr \| binop2-expr) . ((list 'binary $2 $1 $3)))
+	      (( ~ binop2-expr) . ((list 'unary $1 $2)))
+	      ((binop2-expr %  binop2-expr) . ((list 'binary $2 $1 $3)))
+	      )
+ 
+ ;; some with explicit precedences
+ 
+ (binop-expr (binop-expr not in binop-expr)
+	     ((list 'binary '|not in| $1 $4)) (:precedence in)) ;; was binop2
+ (binop-expr (binop-expr is not binop-expr)
+	     ((list 'binary '|is not| $1 $4)) (:precedence is)) ;; was binop2
+ 
+ (binop2-expr (+ binop2-expr) ((list 'unary $1 $2))
+	      (:precedence unary-plusmin))
+ (binop2-expr (- binop2-expr) ((list 'unary $1 $2))
+	      (:precedence unary-plusmin))
+
+ (atom :or
+       ((|(| comma? |)|) . ((list 'tuple nil)))
+       ((|(| testlist-gexp |)|) . ($2))
+
+       ((|[| |]|) . ((list 'list nil)))
+       ((|[| listmaker |]|) . ($2))
+       ((|{| |}|) . ((list 'dict nil)))
+       ((|{| dictmaker |}|) . ((list 'dict $2)))
+       ((|`| testlist1 |`|) . ((list 'backticks $2)))
+       ((identifier) . ((list 'identifier $1)))
+       ((number) . ($1))
+       ((string+) . ($1)))
+
+ (string+ (string) ($1))  ;; join consecutive string literals: "s" "b" => "sb"
+ (string+ (string+ string) ((concatenate 'string $1 $2))) 
+
+ (listmaker (test list-for) ((list 'list-compr $1 $2)))
+ (listmaker (test comma--test* comma?) ((list 'list (cons $1 $2))))
+ (:comma--test*)
+
+
+ (testlist-gexp (test gen-for) (`(tuple (,$1 . ,$2))))
+ (testlist-gexp (test comma--test* comma?) ((if (or $2 $3)
+						`(tuple (,$1 . ,$2))
+					      $1)))
+ 
+ (lambdef (lambda parameter-list5 |:| test) ((list $1 $2 $4)))
+ (lambdef (lambda                 |:| test) ((list $1 '(nil nil nil) $3)))
+
+ (trailer+ :or
+	   ((|(| arglist? |)|) . ((list (list 'call $2))))
+	   ((|[| subscriptlist |]|) . ((list (list 'subscription $2))))
+	   ((|.| identifier) . (`((attributeref (identifier ,$2)))))
+	   ((trailer+ |(| arglist? |)|) . ((append $1 (list (list 'call $3)))))
+	   ((trailer+ |[| subscriptlist |]|) . ((append $1 (list (list 'subscription $3)))))
+	   ((trailer+ |.| identifier) . ((append $1 `((attributeref (identifier ,$3)))))))
+
+
+ (:arglist?)
+ (subscriptlist (subscript comma--subscript* comma?) ((if (or $2 $3)
+							  `(tuple (,$1 . ,$2))
+							$1)))
+ (:comma--subscript*)
+ (comma--subscript (|,| subscript) ($2))
+ (subscript :or
+	    |...|
+	    test
+	    ((test? |:| test? sliceop?) . (`(slice ,$1 ,$3 ,$4))))
+ (:sliceop?)
+ (sliceop (|:| test?) ($2))
+ (:test?)
+
+ (exprlist (expr exprlist2) (#+(or)(break "exprlist: ~A -- ~A" $1 $2)
+			       (if $2
+				 (list 'tuple
+				       (cons $1 (butlast $2))
+				       (car (last $2)))
+			       $1)))
+ (exprlist2 :or
+	    (() . (nil))
+	    ((|,|) . ((list t)))
+	    ((|,| expr exprlist2) . ((list $2 $3))))
+
+ (testlist (test testlist2) (#+(or)(break "testlist: ~A -- ~A" $1 $2)
+			     (if $2
+				   `(tuple ,(cons $1 $2))
+			       $1)
+			     #+(or)(list 'testlist
+					 (cons $1 (butlast $2))
+					 (car (last $2)))))
+ (testlist2 :or
+	    (() . (nil))
+	    ((|,|) . ((list t)))
+	    ((|,| test testlist2) . ((cons $2 $3))))
+
+
+ (testlist-safe :or
+		((test) . ($1))
+		((test comma--test+ comma?) . ((list $1 $2))))
+ (:comma--test+)
+
+ (dictmaker :or
+	    ;;((test |:| test comma?) . ((cons $1 $3)))
+	    ((test |:| test comma--test--\:--test* comma?) . ((cons (cons $1 $3) $4))))
+ (:comma--test--\:--test*)
+ (comma--test--\:--test (|,| test |:| test) ((cons $2 $4)))
+ 
+ (classdef (class identifier OB--testlist--CB? |:| suite)
+	   (`(classdef ,$2 ,(when $3 (second $3)) ,$5)))
+ (:OB--testlist--CB?)
+ (OB--testlist--CB (|(| testlist |)|) ((if (eq (car $2) 'testlist)
+					   $2
+					 `(testlist (,$2) nil))))
+
+ (arglist (argument--comma* arglist-2) ((append $1 $2)))
+
+ (arglist-2 :or
+	    ;; optional comma is semantically meaningless
+	    ((argument comma?) . ((list $1)))
+	    ((|*| test comma--**--test?) . ((append (list (list $1 $2))
+						    $3
+						    nil)))
+	    ((|**| test) . ((list (list $1 $2)))))
+ (:argument--comma*)
+ (argument--comma (argument |,|) ($1))
+ (:comma--**--test?)
+ (comma--**--test (|,| ** test) ((list (list $2 $3))))
+
+ (argument (test) ((list 'pos $1)))
+ 
+ #+(or) ;; kw = val: kw must be identifier
+ (argument (test = test) ((list 'key $1 $3)))
+ 
+ (argument (identifier = test) ((list 'key $1 $3)))
+ (argument (test gen-for) ((list 'gen-for $1 $2)))
+
+ (list-iter :or list-for list-if)
+ (list-for (for exprlist in testlist-safe list-iter?) 
+	   (`((list-for-in ,$2 ,$4) . ,$5)))
+ (:list-iter?)
+ (list-if (if test list-iter?) (`((list-if ,$2) . ,$3)))
+ (gen-iter :or gen-for gen-if)
+ (gen-for (for exprlist in test gen-iter?))
+ (gen-if (if test gen-iter?) ((list $1 $2 $3)))
+ (:gen-iter?)
+ (testlist1 (test |,--test*|) ((if $2
+				   `(tuple (,$1 . ,$2))
+				 $1))))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+#+(or) ;; old version
 (python-prods
 
  ;; Rules (including their names) are taken from the CPython grammar

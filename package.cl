@@ -6,19 +6,6 @@
 (when (find-package :python)
   (delete-package :python))
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Features to be included
-;;  
-;;  Some of them aid debugging of Lisp or Python code, but slow down
-;;  execution.
-
-#.(progn
-    (loop for (feat yes) in
-	  '((:py-exception-stack t) ;; enables assertions about outstanding exception handlers
-	    ;; ...more?
-	    )
-	when yes do (pushnew feat *features*))
-    nil)
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Package definitions
@@ -76,3 +63,13 @@
 (defpackage :python-module-sys
   (:use)
   (:export :modules))
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Features to be included
+;;  
+;;  Some of them aid debugging of Lisp or Python code, but slow down
+;;  execution.
+
+(defvar *track-exception-stack* t) ;; slightly violates Python semantics
+
