@@ -151,8 +151,22 @@
 (defmethod internal-get-attribute :around (x attr)
   (assert (symbolp attr))
   (cond ((eq attr '__class__) (values (pyb:type x) t))   ;; a bit hackish
+	
 	((and (eq attr '__mro__)
 	      (typep x 'class)) (values (__mro__ x) t))
+	
+	((eq attr '__name__)
+	 (typecase x
+	   (class (return-from internal-get-attribute  ;; XXX hack. todo: remove prefix `py-'
+		    (values (symbol-name (class-name x)) t)))
+	   (bound-method
+	    (return-from internal-get-attribute  ;; XXX hack. todo: remove prefix `py-'
+	      (values (internal-get-attribute (slot-value x 'func) '__name__)
+		      t)))
+	   #+allegro
+	   (generic-function (return-from internal-get-attribute
+			       (values (symbol-name (slot-value x 'excl::name)) t)))))
+		 
 	(t (call-next-method))))
 
 (defmethod internal-get-attribute (x attr)

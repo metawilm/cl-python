@@ -1261,6 +1261,7 @@
   (with-input-from-string (stream string)
     (parse-python stream)))
 
-
+(defun parse-python-string-literal (string)
+  (second (py-eval (parse-python-string string))))
 
 (build-grammar python-grammar t t)

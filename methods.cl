@@ -38,6 +38,8 @@
   ((func :initarg :func))
   (:metaclass builtin-class))
 
+(mop:finalize-inheritance (find-class 'bi-class-attribute))
+
 (defun make-bi-class-attribute (func)
   (make-instance 'bi-class-attribute :func func))
 
@@ -52,6 +54,8 @@
   ((func   :initarg :func)
    (object :initarg :object))
   (:metaclass builtin-class))
+
+(mop:finalize-inheritance (find-class 'bound-method))
 
 (defun make-bound-method (&key func object)
   (make-instance 'bound-method :func func :object object))
@@ -85,6 +89,8 @@
    (class  :initarg :class))
   (:metaclass builtin-class))
 
+(mop:finalize-inheritance (find-class 'unbound-method))
+
 (defun make-unbound-method (&key func class)
   (make-instance 'unbound-method :func func :class class))
 
@@ -116,6 +122,8 @@
   ((func :initarg :func))
   (:metaclass builtin-class))
 
+(mop:finalize-inheritance (find-class 'static-method))
+
 (defun make-static-method (func)
   (make-instance 'static-method :func func))
 
@@ -146,6 +154,8 @@
   ((func :initarg :func))
   (:metaclass builtin-class))
 
+(mop:finalize-inheritance (find-class 'class-method))
+
 (defmethod class-method-__new__ ((cls class) func)
   (assert (subtypep cls 'class-method))
   (make-instance cls :func func))
@@ -167,6 +177,8 @@
 (defclass bi-function-accepting-kw-args (builtin-instance)
   ((func :initarg :func))
   (:metaclass builtin-class))
+
+(mop:finalize-inheritance (find-class 'bi-function-accepting-kw-args))
 
 (defun make-bi-function-accepting-kw-args (func)
   (make-instance 'bi-function-accepting-kw-args :func func))

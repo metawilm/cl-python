@@ -1617,6 +1617,10 @@
   (make-instance 'py-list :list lst))
   
 
+(defun make-py-list-from-vector (vec)
+  (make-py-list-from-list (loop for x across vec collect x)))
+
+
 (defmethod py-list-__new__ ((cls class) &rest args)
   (assert (subtypep cls 'py-list))
   (when args
@@ -2036,6 +2040,9 @@
 (defun make-tuple-from-list (list)
   (make-instance 'py-tuple :list list))
 
+(defun make-tuple-from-vector (vec)
+  (make-tuple-from-list (loop for x across vec collect x)))
+
 (defun tuple->lisp-list (tup)
   "internal use only"
   (slot-value tup 'list))
@@ -2192,20 +2199,36 @@
   (print-unreadable-object (x stream :type t)
     (format stream "~S" (slot-value x 'string))))
 
-(defmethod py-string-__new__ ((cls (eql (find-class 'py-string))) &rest args)
-  (let ((str (if args
-		 (call-attribute-via-class (car args) '__str__)
-	       "")))
-    (cond ((typep str 'string)    str)
-	  ((typep str 'py-string) str)
-	  (t (error "__str__ returned non-string ~A" str)))))
-   
-(defmethod py-string-__new__ ((cls class) &rest args)
+(defmethod py-string-__new__ (cls &rest args)
   (assert (subtypep cls 'py-string))
-  (error "todo: string.__new__ nonsimple"))
+  
+  (let ((res (cond ((null args) "")
+	
+		   ((and (py-string-designator-p (first args))
+			 (second args))
+		    ;; decode string
+		    (if (py-string-designator-p (second args))
+			(py-decode-unicode (py-string-designator-val (first args))
+					   (py-string-designator-val (second args)))
+		      (py-raise 'TypeError
+				"string.__new__(..): (optional) second arg must be ~
+                                 string indicating encoding (got: ~A)" (second args))))
+	
+		   (t (if (py-string-designator-p (first args))
+			  (py-decode-unicode (py-string-designator-val (first args))
+					     "ascii")
+			(call-attribute-via-class (car args) '__str__))))))
+    
+    (if (eq cls (find-class 'py-string))
+	res
+      (let ((inst (make-instance cls)))
+	(setf (slot-value inst 'string) res)
+	inst))))
 
-(register-bi-class-attr/meth (find-class 'string) '__new__ (make-static-method #'py-string-__new__))
-(register-bi-class-attr/meth (find-class 'py-string) '__new__ (make-static-method #'py-string-__new__))
+(register-bi-class-attr/meth (find-class 'string) '__new__
+			     (make-static-method #'py-string-__new__))
+(register-bi-class-attr/meth (find-class 'py-string) '__new__
+			     (make-static-method #'py-string-__new__))
 
 
 (defmethod __mul-1__ ((x string) n)
@@ -2304,22 +2327,20 @@
   
   (setf name (string-lower (py-string-designator-val name)))
   (cond 
-   ((member name '("ascii" "646") :test 'string=) 
+   ((member name '("ascii" "646" "us") :test 'string=) 
     (values :latin1 127 127))
    
-   ((member name '("latin" "latin1") :test 'string=) 
+   ((member name '("latin" "latin1" "latin-1") :test 'string=) 
     (values :latin1 255 255))
    
-   ((member name '("utf8" "utf_8" "utf" "u8") :test 'string=)
+   ((member name '("utf8" "utf_8" "utf-8" "utf" "u8") :test 'string=)
     (values :utf8 #16x0010FFFF 255))
    
    (t (py-raise 'UnicodeError "Unrecognized Unicode external format: ~A" name))))
 
 
 #+allegro
-(defmethod py-encode-unicode ((string string) &optional external-format errors)
-  (unless external-format
-    (error "TODO: default encoding for unicode = ???"))
+(defmethod py-encode-unicode ((string string) &optional (external-format "ascii") errors)
   (when errors
     (error "TODO: errors parameter for unicode encode"))
   
@@ -2338,26 +2359,36 @@
 	do (let ((code (char-code ch)))
 	     (when (> (the integer code) (the integer max-code))
 	       (py-raise 'UnicodeEncodeError
-			 "While encoding string: ~@
-                          character code out of allowed range (got character code: ~A; ~@
+			 "During encoding of string, encountered a character whose ~
+                          code is out of the allowed range (got character code: ~A; ~
                           external format: ~A; max code allowed for external format: ~A)"
 			 code external-format max-code))))
-    (let* ((octets (excl:string-to-octets string :external-format ex-format :null-terminate nil))
-	   (res-string (make-array (length octets) :element-type 'character)))
-      (map-into res-string #'code-char octets)
-      res-string)))
+    (multiple-value-bind (octets num-bytes-copied)
+	(excl:string-to-octets string :external-format ex-format
+			       :null-terminate nil)
+      (when (< num-bytes-copied (length string))
+	#+(or)(warn "encode: <")
+	(py-raise 'UnicodeEncodeError "Not all bytes valid"))
+      
+      (loop with string = (make-array (length octets) :element-type 'character)
+	  for oc across octets
+	  for i from 0
+	  do (setf (aref string i) (code-char oc))
+	  finally (return string)))))
 
+#-allegro
+(defmethod py-encode-unicode ((string string) &optional (external-format "ascii") errors)
+  (declare (ignorable string external-format errors))
+  (error "TODO: string.encode()"))
 
 #+allegro
-(defmethod py-decode-unicode ((string string) &optional external-format errors)
-
-  (unless external-format
-    (error "TODO: default decoding for unicode = ???"))
+(defmethod py-decode-unicode ((string string) &optional (external-format "ascii") errors)
+  
   (when errors
-    (error "TODO: errors parameter for unicode encode"))
+    (error "TODO: `errors' parameter for unicode encode"))
 
   ;; Python has no separate data type for the returned vector of
-  ;; octets, so that' also a string.
+  ;; octets: that's also a string.
 
   (multiple-value-bind (ex-format max-code max-octet-code)
       (py-unicode-external-format->lisp-external-format external-format)
@@ -2368,11 +2399,22 @@
       (loop for code across vec
 	  when (> code max-octet-code)
 	  do (py-raise 'UnicodeDecodeError
-		       "While decoding string: ~@
-                        character code out of allowed range (got character code: ~A; ~@
+		       "During decoding of string, encountered a character whose ~
+                        code is out of allowed range (got character code: ~A; ~
                         external format: ~A; max octet code allowed for external format: ~A)"
 		       code ex-format max-octet-code))
-      (excl:octets-to-string vec :external-format ex-format))))
+      (multiple-value-bind (string-res chars-copied octets-used)
+	  (excl:octets-to-string vec :external-format ex-format)
+	(declare (ignore chars-copied))
+	(when (< octets-used (length vec))
+	  #+(or)(warn "decode: octets-used < length vec")
+	  (py-raise 'UnicodeDecodeError "Not all octets valid"))
+	string-res))))
+
+#-allegro
+(defmethod py-decode-unicode ((string string) &optional (external-format "ascii") errors)
+  (declare (ignorable string external-format errors))
+  (error "TODO: string.decode()"))
 
 ;;; string-specific methods
 
@@ -3302,6 +3344,74 @@
     
     (nth index list)))
 
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Property
+
+;; Property is a built-in class; it's instances implement all three of
+;; the `descriptor' methods (even if not all three arguments are
+;; filled by arguments given in the constructor).
+;; 
+;; Usage is like:
+;; 
+;;   class C:
+;;     def getx(self): ..
+;;     def setx(self, val): ..
+;;     def delx(self): ..
+;;     x = property(getx, setx, delx, "doc")
+;; 
+;; Relevant documentation on how CPython behaves:
+;;  http://mail.python.org/pipermail/python-dev/2003-May/035791.html
+
+(defclass py-property (builtin-object)
+  ((get    :initarg :get)
+   (set    :initarg :set)
+   (delete :initarg :delete)
+   (doc    :initarg :doc))
+  (:documentation "The PROPERTY built-in class. User-defined `properties' ~
+                   are instances of this class.")
+  (:metaclass builtin-class))
+
+(mop:finalize-inheritance (find-class 'py-property))
+
+(defmethod py-property-__new__ (&optional pos-args kwd-args)
+  (let ((cls (car pos-args)))
+    (assert (and cls
+		 (subtypep cls (find-class 'py-property))))
+    (let* ((call-rewriter (make-call-rewriter 'property.__new__
+					      () '((fget . nil) (fset . nil)
+						   (fdel . nil) (doc . nil))
+					      nil nil))
+	   (args (funcall call-rewriter (cdr pos-args) kwd-args))
+	   (fget (or (assoc 'fget args) *None*))
+	   (fset (or (assoc 'fset args) *None*))
+	   (fdel (or (assoc 'fdel args) *None*))
+	   (doc  (or (assoc 'doc args) *None*))
+	       
+	   (inst (make-instance cls)))
+      (setf (slot-value inst 'get) fget
+	    (slot-value inst 'set) fset
+	    (slot-value inst 'delete) fdel
+	    (slot-value inst 'doc) doc)
+      inst)))
+
+(register-bi-class-attr/meth (find-class 'py-property) '__new__
+			     (make-static-method
+			      (make-bi-function-accepting-kw-args #'py-property-__new__)))
+
+(defmethod fget ((x py-property))
+  (slot-value x 'get))
+
+(defmethod fset ((x py-property))
+  (slot-value x 'set))
+
+(defmethod fdel ((x py-property))
+  (slot-value x 'delete))
+
+(register-bi-class-attr/meth (find-class 'py-property) 'fget (make-bi-class-attribute #'fget))
+(register-bi-class-attr/meth (find-class 'py-property) 'fset (make-bi-class-attribute #'fset))
+(register-bi-class-attr/meth (find-class 'py-property) 'fdel (make-bi-class-attribute #'fdel))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Type

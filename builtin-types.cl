@@ -10,6 +10,7 @@
 (defconstant pyt:list    (find-class 'py-list))
 (defconstant pyt:long    (find-class 'py-int))
 (defconstant pyt:object  (find-class 'python-object))
+(defconstant pyt:property (find-class 'py-property))
 (defconstant pyt:slice   (find-class 'py-slice))
 (defconstant pyt:str     (find-class 'py-string))
 (defconstant pyt:tuple   (find-class 'py-tuple))
@@ -23,7 +24,7 @@
 #+(or) ;; todo
 (progn 
   (defconstant pyt:basestring   xxx) ;; abstract type basestring has subtypes str and unicode
-  (defconstant pyt:property     (find-class 'py-property))
+
   )
 
 

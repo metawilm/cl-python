@@ -779,11 +779,19 @@
   "Return a list with tuples, where tuple i contains the i-th argument of ~
    each of the sequences. The returned list has length equal to the shortest ~
    sequence argument."
+  
   ;;XXX CPython looks up __len__, __iter__, __getitem__ attributes here
   ;; need to make an iterator for each sequence first, then call the iterators
-  (declare (ignore sequences))
-  (error "todo: zip")
-  #+(or)(make-py-list (apply #'mapcar
-			  (lambda (&rest args) (apply #'make-tuple args))
-			  sequences)))
-    
+  
+  (loop with iter-vec = (make-array (length sequences)
+				    :initial-contents (mapcar #'get-py-iterate-fun sequences))
+      with res = (make-array 20 :adjustable t :fill-pointer 0)
+      with current-tuple-values = (make-array (length sequences))
+      for tuple-no from 0
+      do (loop for iter-i from 0
+	     for iter-func across iter-vec
+	     do (let ((val (funcall iter-func)))
+		  (if val
+		      (setf (aref current-tuple-values iter-i) val)
+		    (return-from pyb:zip (make-py-list-from-vector res)))))
+	 (vector-push-extend (make-tuple-from-vector current-tuple-values) res)))

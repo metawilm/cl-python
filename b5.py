@@ -4,7 +4,7 @@ show = True
 
 def check(a, b):
     print "begin check", a, b
-    clpy(format t "lisp: a: ~A  b: ~A" (namespace-lookup *scope* 'a) (namespace-lookup *scope* 'b))
+    #clpy(format t "lisp: a: ~A  b: ~A" (namespace-lookup *scope* 'a) (namespace-lookup *scope* 'b))
     
     if __debug__:
         if show:
@@ -24,8 +24,8 @@ def exception(exc, f, *args):
             if show:
                 print "%s%r raised %s" % (f.__name__, args, exc.__name__)
     else:
-        raise AssertionError("%s not raised by %s%r",
-                             exc.__name__, f.__name__, args)
+        raise AssertionError("%s not raised by %s%r" %
+	       (exc.__name__, f.__name__, args))
 
 def xx_check_functions(i=0, j=0):
     check(abs(42*i), 42*j)
@@ -226,10 +226,10 @@ def xx_check_functions(i=0, j=0):
     check(type(C), type)
     check(type(D), MC)
     check(type(E), MC)
-    check(unicode("abc"), u"abc") # unicode normalization
 
 def check_functions(i=0, j=0):
-    
+
+    check(unicode("abc"), u"abc") # unicode normalization
     check("abc".decode(), u"abc")
     check(unicode("abc", "ASCII"), u"abc")
     check("abc".decode("646"), u"abc")
@@ -241,6 +241,7 @@ def check_functions(i=0, j=0):
     exception(UnicodeError, "abc\xff".decode)
     exception(UnicodeError, unicode, "abc\xff", "us_ascii")
     exception(UnicodeError, "abc\xff".decode, "Ascii")
+    
     exception(UnicodeError, unicode, "abc\xff", "UTF-8")
     exception(UnicodeError, "abc\xff".decode, "utf8")
     check(u"abc\xff".encode("utf-8"), "abc\xc3\xbf")
@@ -271,6 +272,8 @@ def check_descriptors(i, j):
             if args:
                 return None
             return super(C, cls).__new__(cls)
+
+        __new__ = staticmethod(__new__) ## WB
 
         def __init__(self):
             self.__dict__["foo"] = 42
