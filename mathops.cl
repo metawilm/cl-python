@@ -46,12 +46,12 @@
        
 	 (setf (gethash ',py-punct *math-op-mapping*) #',name)
        
+	 #+(or) ;; can't specialize like this
 	 (defmethod no-applicable-method ((f (eql #',name)) &rest args)
 	   (let ((x (first args))
 		 (y (second args)))
 	     ,type-error))
-	 
-	 
+	 	 
 	 ;; go to general implementation when at least one of the args
 	 ;; is udc-i.
 	 ;; 

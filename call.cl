@@ -63,6 +63,7 @@
 
 (defmethod __call__ ((x py-bound-method) &optional pos-args kwd-args)
   "The instance enclosed in the bound method is prefixed to pos-args"
+  ;;(break "xyz")
   (__call__ (slot-value x 'func)
 	    (cons (slot-value x 'self)
 		  pos-args)
@@ -163,7 +164,10 @@
 	     f** fpos fkey f*))
     
     (lambda (pos-args key-args)
-      ;; (format t "call rewriter: got ~A ~A~%" pos-args key-args)
+      #+(or)(format t "call rewriter for {pos: ~A, key: ~A, f*: ~A, f**: ~A}"
+		    fpos fkey f* f**)
+      #+(or)(format t "got ~A ~A~%" pos-args key-args)
+      
       (let ((result ()))
 	(declare (dynamic-extent result))
 	;; Because the result is only used for extending an

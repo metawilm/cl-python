@@ -1167,7 +1167,7 @@
     (format t "time: ~A:~A:~A~%" h m s)))
 
 (defparameter *show-ast* nil)
-
+(defvar *last-val* nil)
 
 (defun goto-python-top-level ()
   (let ((r (find-restart 'return-python-toplevel)))
@@ -1204,7 +1204,8 @@
 					     (eval-print (list ev) nil)
 					   (error ()
 					     (format t "~A (PE)~%" ev)))
-					 (namespace-bind *scope* '_ ev)))))
+					 (namespace-bind *scope* '_ ev)
+					 (setf *last-val* ev)))))
 				 (return-from eval-print-ast))
 			     (retry-py-eval ()
 				 :report "Retry (py-eval AST)" ())))))

@@ -62,9 +62,12 @@
 ;;    __repr__      returns by default the print-unreadable-object representation
 
 (defmethod print-object ((x python-object) stream)
-  (write-string (__str__ x) stream))
+  (print-unreadable-object (x stream :identity t :type t))
+  ;; it's not a good idea to fall back to __str__, because it gives
+  ;; infinite loops when debugging __str__ methods, for example
+  #+(or)(write-string (__str__ x) stream))
 
-(defmethod __str__ (x)
+(defmethod __str__ (x) 
   ;; This method is not only for X of type python-object, but also for
   ;; regular numbers, for example.
   (__repr__ x))
@@ -474,9 +477,6 @@
   (format stream 
 	  (if (eq x *True*) "True" "False")))
 
-(defmethod __str__ ((x py-bool))
-  (__repr__ x))
-
 (defmethod __repr__ ((x py-bool))
   (with-output-to-string (s)
     (print-object x s)))
@@ -601,9 +601,13 @@
 (defmethod __eq__ ((x py-dict) (y py-dict))
   "Returns T or NIL."
   (= (__cmp__ x y) 0))
-  
+
 (defmethod __getitem__ ((d py-dict) key)
-  (gethash key (slot-value d 'hash-table)))
+  (multiple-value-bind (val found)
+      (gethash key (slot-value d 'hash-table))
+    (if found
+	val
+      (py-raise 'KeyError "No such key: ~A" (__str__ key)))))
 
 (defmethod __setitem__ ((d py-dict) key val)
   (setf (gethash key (slot-value d 'hash-table) d) val))
@@ -791,6 +795,9 @@
 ;; in which this namespace is enclosed: for classes defined at
 ;; top-level, this is the module namespace).
 ;; 
+;; When a key doesn't exist, no KeyError is raised (as py-dict does);
+;; instead, (nil nil) are returned as values.
+;; 
 ;; (This class might correlate to CPython's Dictproxy, not sure to
 ;; what degree. Dictproxies don't allow manipulation by the user
 ;; directly, so d.__getitem__ and d.__setitem__ don't work, although
@@ -839,10 +846,12 @@
       (py-raise 'NameError
 		"No variable with name ~A" var))))
 
-  
+(defmethod __getitem__ ((x namespace) key)
+  (gethash key (slot-value x 'hash-table)))
+
 (defmethod print-object ((x namespace) stream)
   (pprint-logical-block (stream nil)
-    (format stream "{")
+    (format stream "Namespace{")
     (maphash (lambda (k v) 
 	       (declare (special *builtins*))
 	       (format stream "~S: ~S,~_ " k 
@@ -1637,9 +1646,12 @@
      ;; rmod, rmul
      (__mul__  (x n) (__mul-1__ x n))
      
-     ;; __reduce__
+     ;; __reduce__ : todo
+     
+     ;; __repr__ : with quotes (todo: if string contains ', use " as quote etc)
+     ;; __str__  : without surrounding quotes
      (__repr__ (x) (format nil "~S" x))
-     (__str__  (x) (format nil "~S" x))
+     (__str__  (x) (format nil "~A" x))
      
      (py-string-capitalize (x) (string-capitalize x)) ;; lisp function
      (string-center (x width) (string-center-1 x width))

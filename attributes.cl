@@ -382,7 +382,10 @@
 (defmethod ud-instance-only ((x udc-instance-w/dict) attr)
   (if (eq attr '__dict__)
       (values (slot-value x '__dict__) t)
-    (__getitem__ (slot-value x '__dict__) attr)))
+    (handler-case 
+	(__getitem__ (slot-value x '__dict__) attr)
+      (KeyError ()
+	(values nil nil)))))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
