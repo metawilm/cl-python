@@ -882,36 +882,23 @@
 
 (defun eval-comparison (operator left right)
   "Does comparison, returns Python boolean"
-  (check-type operator symbol) ;; not a _quoted_ symbol
-  (let ((comp-fun (cdr (assoc operator *math-cmp-assoc*))))
+  (let ((comp-fun (cdr (assoc operator *math-binary-cmp-assoc*))))
     (assert comp-fun () "No comparison function corresponding to ~
-                         comparison operator ~A ?!~%~A~%~A"
-	    operator comp-fun *math-cmp-assoc*)
-    ;;(format t "trying py-eval left...~%")
-    (let ((e-left (py-eval left)))
-      ;;(format t "e=left: ~A~%" e-left)
-      (let ((e-right (py-eval right)))
-	;;(format t "e-right: ~A~%" e-right)
-	(make-bool (funcall comp-fun e-left e-right))))))
-
-
-
+                         comparison operator ~A?! ~A" operator *math-binary-cmp-assoc*)
+    (lisp-val->py-bool (funcall comp-fun (py-eval left) (py-eval right)))))
 
 (defun eval-unary (operator val)
-  (declare (special *math-unary-assoc*))
-  (let ((eval (py-eval val))
-	(k (assoc operator *math-unary-assoc*)))
-    (unless k
-      (error "No operator for ~A ?! EVAL-UNARY" operator))
-    (funcall (cdr k) eval)))
-
+  (declare (special *math-unary-op-assoc*))
+  (let ((func (cdr (assoc operator *math-unary-op-assoc*))))
+    (unless func
+      (error "No function for unary operator ~A?! ~A" operator *math-unary-op-assoc*))
+    (funcall func (py-eval val))))
 
 (defun eval-binary (operator left right)
-  (declare (special *math-op-mapping*)) ;; defined in mathops.cl
-  (let ((func (gethash operator *math-op-mapping*)))
-    (assert func ()
-      "Operator ~A has no corresponding py-~A function?! ~A"
-      operator operator (gethash operator *math-op-mapping*))
+  (declare (special *math-binary-op-assoc*)) ;; defined in mathops.cl
+  (let ((func (cdr (assoc operator *math-binary-op-assoc*))))
+    (assert func () "Operator ~A has no corresponding py-~A function?! ~A"
+	    operator operator *math-binary-op-assoc*)
     (funcall func (py-eval left) (py-eval right))))
 
 (defun eval-tuple (&rest content)

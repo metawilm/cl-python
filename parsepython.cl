@@ -267,7 +267,7 @@
 	     ((binop-expr >  binop-expr)  .  ((list 'comparison $2 $1 $3)))
 	     ((binop-expr >= binop-expr)  . ((list 'comparison $2 $1 $3)))
 	     ((binop-expr != binop-expr)  . ((list 'comparison $2 $1 $3)))
-	     ((binop-expr <> binop-expr)  . ((list 'comparison '!= $1 $3)))
+	     ((binop-expr <> binop-expr)  . ((list 'comparison '!= $1 $3))) ;; <> is same as !=
 	     ((binop-expr == binop-expr)  . ((list 'comparison $2 $1 $3)))
 	     ((binop-expr in binop-expr)  . ((list 'comparison $2 $1 $3)))
 	     ((binop-expr is binop-expr)  . ((list 'comparison $2 $1 $3))))
@@ -284,7 +284,7 @@
 	      ((binop2-expr // binop2-expr) . ((list 'binary $2 $1 $3)))
 
 	      ((binop2-expr << binop2-expr) . ((list 'binary $2 $1 $3)))
-	      ((binop2-expr >> not binop2-expr) . ((list 'binary $2 $1 $3)))
+	      ((binop2-expr >> binop2-expr) . ((list 'binary $2 $1 $3)))
 	      ((binop2-expr &  binop2-expr) . ((list 'binary $2 $1 $3)))
 	      ((binop2-expr ^  binop2-expr) . ((list 'binary $2 $1 $3)))
 	      ((binop2-expr \| binop2-expr) . ((list 'binary $2 $1 $3)))
