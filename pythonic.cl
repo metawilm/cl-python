@@ -62,12 +62,11 @@
       
       ;; Fall-back: __getitem__ with successive integers, starting from 0.
       ;; 
-      ;; XXX There is the theoretical possibility that the object's
-      ;; class, or just the __getitem__ method, changes while we do
-      ;; this. By storing the __getitem__ method we just found, we
-      ;; don't take that into account. Might be semantically wrong,
-      ;; but changing __getitem__ while iterating over the object is
-      ;; insane.
+      ;; There is the theoretical possibility that the object's class,
+      ;; or just the __getitem__ method, is changed or removed while
+      ;; we do this iteration.  By storing the __getitem__ method we
+      ;; just found, we evade that; however, it might be semantically
+      ;; wrong, theoretically speaking.
       
       (multiple-value-bind (getitem-meth found)
 	  (getattr-of-class object '__getitem__)
