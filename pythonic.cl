@@ -12,6 +12,7 @@
   "Raise Python exception with simple value"
   `(error ,exc-type :args ,val))
 
+#+(or) ;; old version, using %signals% that are not used anymore
 (defmacro py-iterate ((val object) &body body)
   "Iterate over OBJECT, successively binding VAL to the new value
    and executing BODY.
@@ -44,8 +45,78 @@
 	error
 	 (py-raise 'TypeError
 		   "Iteration over non-sequence (got: ~A)" ,object)))))
+
+(defmacro py-iterate ((val object) &body body)
+  "Iterate over OBJECT, successively binding VAL to the new value
+   and executing BODY.
+   This works is OBJECT implements either __iter__ or __getitem__."
+  ;; XX assumes OBJECT is a first-class object.
+  (let ((iterator '#:iterator))
+    `(block py-iterate
+       (tagbody 
+	 (handler-case (__iter__ ,object)
+	   (AttributeError () (go try-getitem))
+	   (:no-error (,iterator) (loop (handler-case (next ,iterator)
+					  (StopIteration () (return-from py-iterate))
+					  (:no-error (,val) ,@body)))))
+	try-getitem
+	 ,(let ((index '#:index))
+	    `(let ((,index 0))
+	       (loop 
+		 (handler-case (__getitem__ ,object ,index)
+		   (AttributeError () (if (= ,index 0)
+					  (go error)
+					(return-from py-iterate)))
+		   (IndexError () ;; even ok if index = 0 (empty sequence)
+		     (return-from py-iterate))
+		   (:no-error (,val)
+		     ,@body
+		     (incf ,index))))))
+	error
+	 (py-raise 'TypeError
+		   "Iteration over non-sequence (got: ~A)" ,object)))))
 	      
-  
+
+(defun get-py-iterate-fun (object)
+  "Return a function that when called returns VAL, T, where VAL is the next value ~@
+   gotten by iterating over OBJECT. Returns NIL, NIL upon exhaustion."
+
+  ;; Using __iter__ is the prefered way.
+  (multiple-value-bind (iter-meth found)
+      (getattr-of-class object '__iter__)
+	     
+    (if found
+	
+	(let ((iterator (__call__ iter-meth (list object))))
+	  (labels ((get-next-val-fun ()
+		     (handler-case (next iterator)
+		       (StopIteration () (values nil nil))
+		       (:no-error (val)  (values val t)))))
+	    (lambda () (get-next-val-fun))))
+      
+      ;; Fall-back: __getitem__ with successive integers, starting from 0.
+      ;; 
+      ;; XXX There is the possibility that the object's class changes
+      ;; while we do this. By storing the __getitem__ method we just
+      ;; found, we don't take that into account. Might be semantically
+      ;; wrong, but looking __getitem__ up again all the time is wasteful.
+      
+      (multiple-value-bind (getitem-meth found)
+	  (getattr-of-class object '__getitem__)
+	(if found
+
+	    (let ((index 0))
+	      (labels ((get-next-val-fun ()
+			 (handler-case (__call__ getitem-meth index)
+			   (IndexError () (values nil nil))  ;; even ok if index = 0 (empty sequence)
+			   (:no-error (val)
+			     (incf index)
+			     (values val t)))))
+		(lambda () (get-next-val-fun))))
+	  
+	  (py-raise 'TypeError
+		    "Iteration over non-sequence (got: ~A)" object))))))
+
 (defmacro ensure-py-type (vars cl-type err-str)
   "Ensure that all vars in VARS are a designator for CL-TYPE, if so SETF all vars
    to the CL-TYPE value they designate. Raise TypeError if check fails; ERR-STR
