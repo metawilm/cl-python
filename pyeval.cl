@@ -261,8 +261,9 @@
   (cons :file-input (mapcar #'py-eval data)))
 
 (defun eval-suite (stmts)
-  "Return value of last stmt in suite"
-  (mapc #'py-eval stmts))
+  "Evaluate all statements in suite; return None"
+  (mapc #'py-eval stmts)
+  *None*)
 
 (defun eval-identifier (name)
   "Look up the identifier in the active namespaces, and fall back to

@@ -143,7 +143,8 @@
  (comma (|,|) ((list $1)))
 
  (stmt :or simple-stmt compound-stmt)
- (simple-stmt (small-stmt semi--small-stmt* semi? newline) ((if $2 (list $1 $2) $1)))
+ (simple-stmt (small-stmt semi--small-stmt* semi? newline) ((if $2 (list 'suite (cons $1 $2))
+							      $1)))
 
  (semi--small-stmt (|;| small-stmt) ($2))
  (:semi--small-stmt*)
@@ -168,6 +169,7 @@
  (augassign :or += -= *= /= %= &= |\|=| ^= <<= >>= **= //= )
 
  (print-stmt :or
+	     ((print) . (`(print nil nil)))
 	     ((print test |,--test*| comma?) . ((list 'print (cons $2 $3) (if $4 t nil))))
 	     ((print >> test |,--test*| comma?) . ((list 'print->> $3 $4 (if $5 t nil)))))
  (:|,--test*|)
