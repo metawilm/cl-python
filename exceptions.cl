@@ -14,8 +14,9 @@
 ;; and a Lisp condition type: CLOS is impressive.
 
 (defmethod print-object ((x Exception) stream)
-  (format stream "~A: ~A"
-	  (class-name (class-of x)) (slot-value x 'args)))
+  (format stream "~A" (class-name (class-of x)))
+  (when (slot-boundp x 'args)
+    (format stream ": ~A" (slot-value x 'args))))
 
 
 (defvar *exceptions-tree* ;; XXX CPython has explanation string for every exception

@@ -173,37 +173,67 @@
 (defun eval-raise (exctype value traceback)
   ;; Complicated interpretation of parameters. See Python Reference Manual, par 6.9
   
-  (cond (traceback
+  (setf exctype   (when exctype (py-eval exctype))
+	value     (when value (py-eval value))
+	traceback (when traceback (py-eval traceback)))
+  
+  (cond ((and traceback 
+	      (not (eq traceback *None*)))
+	 ;; "If a third object is present and not None, it must be a
+	 ;; traceback object (see section 3.2), and it is substituted
+	 ;; instead of the current location as the place where the
+	 ;; exception occurred."
+	 
 	 (error "Traceback parameter to RAISE not supported (yet?)"))
 	
-	((null exctype) ;; the others are nil as well reraise last exception
-	 (error "TODO: reraise previous exception"))
-	 
-	((typep exctype 'class)
-	 (cond ((null value) (py-raise-simple value *None*))	
-		
-		((typep value exctype) (py-raise-simple exctype value))
-	  
-	       ((typep value 'py-tuple)  
-		(error "TODO: making exception instance from tuple")
-		(py-raise-simple exctype 
-				 (__call__ exctype (tuple->lisp-list value))))
-	       
-	       ((eq value *None*)
-		(error "TODO: making exception instance")
-		(py-raise-simple exctype 
-				 (__call__ exctype nil nil)))
-	       (t (error "TODO: making exception instance")
-		  (py-raise-simple exctype 
-				   (__call__ exctype (list value) nil)))))
 	
-	(t  ;; exctype is an instance
-	 (unless (eq value *None*)
+	((null exctype)
+	 ;; "If no expressions are present, raise re-raises the last
+	 ;; expression that was active in the current scope. If no
+	 ;; exception is active in the current scope, an exception is
+	 ;; raised indicating this error." 
+	 
+	 (error "TODO: reraise previous exception"))
+
+
+	((typep exctype 'class)
+
+	 ;; "If the first object is a class, it becomes the type of
+	 ;; the exception.
+	 ;; 
+	 ;; The second object is used to determine the exception
+	 ;; value: If it is an instance of the class, the instance
+	 ;; becomes the exception value. If the second object is a
+	 ;; tuple, it is used as the argument list for the class
+	 ;; constructor; if it is None, an empty argument list is
+	 ;; used, and any other object is treated as a single argument
+	 ;; to the constructor. The instance so created by calling the
+	 ;; constructor is used as the exception value."
+	 
+	 ;; XXX  make-instance or __call__?
+	 
+	 (cond ((typep value exctype) (error exctype :args value))
+	       
+	       ((typep value 'py-tuple)  
+		(error exctype (__call__ exctype (tuple->lisp-list value))))
+	       
+	       ((or (null value)
+		    (eq value *None*)) (error (make-instance exctype)))
+	       
+	       (t (error (make-instance exctype :args value)))))
+
+	(t
+	 ;; "If the first object is an instance, the type of the
+	 ;; exception is the class of the instance, the instance itself
+	 ;; is the value, and the second object must be None."
+  
+	 (if (or (eq value *None*)
+		 (null value))
+	     (error (__class__ exctype) :var exctype)
 	   (py-raise 'ValueError
-		     "RAISE: when first arg is instance, second argument must be None (got: ~A)"
-		     value))
-	 (py-raise-simple (__class__ exctype)
-			  exctype))))
+		     "RAISE: when first arg is instance, second argument must be None or not supplied (got: ~A)"
+		     value)))))
+
 		
 		    
 (defun eval-assert (test expr)
