@@ -20,9 +20,11 @@
 
 (defmethod __call__ ((x generic-function) &optional pos-args kwd-args)
   (when kwd-args
-    (error "__call__ on GF ~A got keyword args?! (pos-args: ~A; kwd-args: ~A - ignored)"
+    (warn "__call__ on GF ~A got keyword args?! (pos-args: ~A; kwd-args: ~A)"
 	   x pos-args kwd-args))
-  (apply x pos-args))
+  (let ((*check-attr-exists* nil))
+    (declare (special *check-attr-exists*)) ;; see attributes.cl
+    (apply x pos-args)))
 
 (defmethod __call__ ((x function) &optional pos-args kwd-args)
   (when kwd-args
@@ -30,7 +32,6 @@
            (pos-args: ~A; kwd-args: ~A - ignored)"
 	  x pos-args kwd-args))
   (apply x pos-args))
-
 
 
 ;;; user-defined functions/methods:   
@@ -76,16 +77,26 @@
   "X must be of right class, then call class method with given args."
   (unless pos-args
     (py-raise 'TypeError
-	      "Unbound method ~X must be called with instance as ~
+	      "Unbound method~% ~X~% must be called with instance as ~
                first argument (got no positional args instead)"
 	      x))
   (let ((inst (car pos-args))
 	(cls (slot-value x 'class)))
+    
+    #+(or) ;; this check fails in cases where inst=3, cls=<py-int> TODO
     (unless (typep inst cls)
       (py-raise 'TypeError
 		"Unbound method ~A must be called with instance of ~
                  class ~A as first argument (got as first arg: ~A)"
 		x cls inst))
+    
+    (when (typep cls (find-class 'user-defined-class))
+      (unless (typep inst cls)
+	(py-raise 'TypeError
+		  "Unbound method~% ~A~% must be called with instance of ~
+                  class ~A as first argument (got as first arg: ~A)"
+		  x cls inst)))
+    
     (__call__ (slot-value x 'func) pos-args kwd-args)))
 
 
