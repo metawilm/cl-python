@@ -1159,10 +1159,10 @@
 (defmethod __getitem__ ((x py-list) item)
   (let ((list (slot-value x 'list)))
     (typecase item
-      (py-int-designator (list-getitem-integer list item))
-      (py-slice (list-getitem-slice list item))
-      (t (py-raise 'TypeError
-		   "List indices must be integers (got: ~A)" item)))))
+      (py-int-designator (extract-list-item-by-index list item))
+      (py-slice          (make-py-list-from-list (extract-list-slice list item)))
+      (t                 (py-raise 'TypeError
+				   "List indices must be integers (got: ~A)" item)))))
   
 (defun list-getitem-integer (list index)
   (ensure-py-type index integer
@@ -1176,34 +1176,6 @@
 		"List index out of range (got: ~A, len: ~A)"
 		index len))
     (car (nthcdr index list))))
-
-(defun list-getitem-slice (x slice)
-  ;; XXX getting this behaviour correct is a bit tricky, and therefore
-  ;; there might still be errors here.
-  (let* ((list (if (consp x) x (slot-value x 'list)))
-	 (len (length list)))
-    (destructuring-bind (start stop step)
-	(slot-value (indices slice len) 'list)
-      (when (< start 0)
-	(setf start 0))
-      (when (>= stop len)
-	(setf stop (1- len)))
-      (when (<= stop start)
-	(return-from list-getitem-slice (make-py-list)))
-      
-      ;; now, we know the range contains at least one item
-      (let ((current (copy-list (nthcdr start list)))
-	    (acc ())
-	    (i start))
-	(loop
-	  (push (car current) acc)
-	  (setf current (nthcdr step current))
-	  (incf i step)
-	  (when (or (= i stop)
-		    (null current))
-	    (return)))
-	
-	(make-py-list-from-list (nreverse acc))))))
 
 (defmethod __hash__ ((x py-list))
   (py-raise 'TypeError "List objects are unhashable"))
@@ -1476,6 +1448,7 @@
 (defun make-tuple-from-list (list)
   (make-instance 'py-tuple :list list))
 
+#+(or) ;; defer to __repr__
 (defmethod print-object ((x py-tuple) stream)
   (format stream "(~{~_~S~^, ~})" (slot-value x 'list)))
 
@@ -1509,10 +1482,10 @@
 (defmethod __getitem__ ((x py-tuple) item)
   (let ((list (slot-value x 'list)))
     (typecase item
-      (py-int-designator (list-getitem-integer list item))
-      (py-slice (list-getitem-slice list item))
-      (t (py-raise 'TypeError
-		   "List indices must be integers (got: ~A)" item)))))
+      (py-int-designator (extract-list-item-by-index list item))
+      (py-slice          (make-tuple-from-list (extract-list-slice list item)))
+      (t                 (py-raise 'TypeError
+				   "Tuple indices must be integers (got: ~A)" item)))))
 
 (defmethod __hash__ ((x py-tuple))
   ;; Try to avoid  hash( (x,(x,y)) ) = hash( (y) )
@@ -1547,7 +1520,7 @@
 
 (defmethod __repr__ ((x py-tuple))
   (with-output-to-string (s)
-    (format s "(~{~A~^, ~})" (mapcar #'__repr__ (slot-value x 'list)))))
+    (format s "(~{~A,~^ ~})" (mapcar #'__repr__ (slot-value x 'list)))))
 
 ;; __reversed__ ?
 
@@ -2073,11 +2046,19 @@
   (print-unreadable-object (x stream :type t)
     (with-slots (start stop step) x
       (format stream ":start ~A  :stop ~A  :step ~A" start stop step))))
-	    
+
 (defmethod indices ((x py-slice) length)
   "Return tuple with three integers: start, stop, step.~@
    In case of empty range, returns (length,length,1)."
+  (multiple-value-bind (start stop step)
+      (slice-indices x length)
+    (make-tuple start stop step)))
 
+(defmethod slice-indices ((x py-slice) length)
+  "Return 1 or 4 values (nonempty, start, stop, step) indicating requested slice.
+   nonempty: T or nil
+   if nonempty is T: 0 <= start <= stop <= length"
+  
   ;; CPython doesn't define the outcome of this method exactly. Like,
   ;; where is this documented:
   ;; 
@@ -2125,35 +2106,64 @@
       (ensure-py-type step integer "Slice indices must be integers (got: ~A)"))
     
     (flet ((empty-slice ()
-	     (make-tuple length length 1)))
-      (cond
-       ((= step 0)
-	(py-raise 'ValueError "Slice step cannot be zero"))
-       
-       ((= start stop)
-	(empty-slice))
-     
-       ((and (< start stop)
-	     (> step 0))
-	(setf start (max start 0))
-	(setf stop  (min stop length))
-	(make-tuple start stop step))
-     
-       ((and (< start stop)
-	     (< step 0))
-	(empty-slice))
-       
-       ((and (> start stop)
-	     (< step 0))
-	(setf stop (max stop 0))
-	(setf start (min start length))
-	(make-tuple start stop step))
-       
-       ((and (> start stop)
-	     (> step 0))
-	(empty-slice))))))
-					  
+	     (values nil length length 1)))
+      
+      (cond ((= step 0) 	  (py-raise 'ValueError "Slice step cannot be zero"))
+       	    
+	    ((= start stop)	  (empty-slice))
+            
+	    ((and (>= start length)
+		  (> step 0))     (empty-slice))
+	    
+	    ((and (< start 0)
+		  (< step 0))     (empty-slice))
+	    
+	    ((and (< start stop)
+		  (> step 0))	  (progn (setf start (max start 0))
+					 (setf stop  (min stop length))
+					 (values t start stop step)))
+	    
+	    ((and (< start stop)
+		  (< step 0))	  (empty-slice))
 
+	    ((and (> start stop)
+		  (< step 0))	  (progn (setf stop (max stop 0))
+					 (setf start (min start length))
+					 (values t start stop step)))
+	    
+	    ((and (> start stop)
+		  (> step 0))	  (empty-slice))))))
+
+
+(defmethod extract-list-slice ((list cons) (slice py-slice))
+  "Given a (Lisp) list, extract the sublist corresponding to the slice as a fresh list."
+  (multiple-value-bind (nonempty start stop step)
+      (slice-indices slice (length list))
+    (unless nonempty
+      (return-from extract-list-slice (make-py-list)))
+    (let ((current (nthcdr start list))
+	  (acc ())
+	  (i start))
+      (loop
+	(push (car current) acc)
+	(setf current (nthcdr step current))
+	(incf i step)
+	(cond ((= i stop) (return-from extract-list-slice (nreverse acc)))
+	      ((null current) (error "internal error: slice indices incorrect")))))))
+
+(defmethod extract-list-item-by-index ((list cons) (index integer))
+  (ensure-py-type index integer
+		  "internal error: ~A")
+  (let ((len (length list)))
+    (when (< index 0)
+      (incf index len))
+    (when (or (< index 0)
+	      (> index (1- len)))
+      (py-raise 'IndexError
+		"List index out of range (got: ~A, len: ~A)"
+		index len))
+    (nth index list)))
+			    
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; General Python object stuff
 
