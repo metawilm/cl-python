@@ -2,15 +2,7 @@
 
 (in-package :python)
 
-(eval-when (:compile-toplevel)
-  ;; update when yacc integrated
-  (require :yacc (merge-pathnames #p"yacc.fasl" *compile-file-pathname*))
-  (use-package :yacc))
-
-(eval-when (:load-toplevel :execute)
-  ;; update when yacc integrated
-  (require :yacc (merge-pathnames #p"yacc.fasl" *load-pathname*))
-  (use-package :yacc))
+(require :yacc)
 
 (defvar *reserved-words*
     ;; A few of these are not actually reserved words in CPython yet,
@@ -74,7 +66,6 @@
 
 	(#\? `((,dp (,name python-grammar) ())
 	       (,dp (,name python-grammar) (,item) ($1))))))))
-
 
 (defmacro python-prods (&rest prodrules)
   (let ((res ()))
