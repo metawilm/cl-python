@@ -4,5 +4,5 @@
 - no properties
 - generator functions not handled yet
 - exceptions must be recast as python exceptions as much as possible (what about tracebacks?)
-
+- lexer should allow newlines inside lists, tuples, dicts
 
