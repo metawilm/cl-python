@@ -2,7 +2,9 @@
 
 (in-package :python)
 
-(require :yacc)
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (require :yacc)
+  (use-package :yacc))
 
 (defvar *reserved-words*
     ;; A few of these are not actually reserved words in CPython yet,
