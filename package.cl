@@ -22,12 +22,14 @@
 
 (defun compy ()
   (with-compilation-unit ()
-    (dolist (f '("classes" "exceptions" "pythonic" "magicmeths" "builtin-classes"
+    (dolist (f '("classes" "exceptions" "pythonic"
+		 "methods" "magicmeths" "builtin-classes"
 		 "call" "builtin-funcs" "builtin-types" "mathops"
 		 "descriptors" "attributes" "modules" "pyeval"
 		 "parsepython" "walk" "gener"
 		 "repl"))
-      (excl::compile-file-if-needed f)
+      #+allegro(excl::compile-file-if-needed f)
+      #-allegro(compile-file (concatenate 'string f ".cl"))
       (load f)))
   'done)
 

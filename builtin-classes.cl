@@ -2,68 +2,24 @@
 
 ;;; Built-in classes and their methods
 
-;; Class-specific methods, both magic and non-magic, like the `clear'
-;; methods of dicts, and the `append' method of lists, and the
-;; `__repr__' method of all objects, are stored in a hashtable, where
-;; the key is the method name as a symbol, and the value is an alist
-;; where the class is the key, and the method for that class and its
-;; type are in the cons that is the value.
-
-(defparameter *builtin-class-attr/meths* (make-hash-table :test #'eq))
-
-(defmethod register-bi-class-attr/meth ((class class) (meth-name symbol) (func function) (type symbol))
-  "Puts the method in the hash table. TYPE is either :ATTR or :METH."
-  (assert (member type '(:attr :meth)))
-  (let* ((alist (gethash meth-name *builtin-class-attr/meths*))
-	 (kons  (cons class (cons func type)))
-	 (assval (assoc class alist)))
-    (when assval
-      (warn "builtin-class-methods already had a func for method ~A of class ~A"
-	    meth-name class))
-    (if alist
-	(push kons alist)
-      (setf (gethash meth-name *builtin-class-attr/meths*) (list kons)))))
-
-(defmethod lookup-bi-class-attr/meth ((class class) (meth-name symbol))
-  "Returns METHOD, TYPE. Both are NIL if not found."
-  (let ((val (cdr (assoc class (gethash meth-name *builtin-class-attr/meths*)))))
-    (values (car val) (cdr val))))
-
-(defmacro def-class-specific-methods (class data)
-  `(progn ,@(loop for (attname func kind) in data
-		collect `(register-bi-class-attr/meth
-			  (find-class ',class) ',attname ,func ,kind))))
-
-
-;; There is a special method __new__ that accepts as first argument
-;; classes instead of instances. Need to special-case them in
-;; __call__, therefore keep track of them in a hash-table.
-
-(defparameter *__new__-methods* (make-hash-table :test #'eq))
-
-(defmethod register-as-__new__method ((f function))
-  (setf (gethash f *__new__-methods*) t))
-
-(defmethod is-a-__new__-method ((f function))
-  (gethash f *__new__-methods*))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;;; Now, we defined the `magic methods' shared by all objects.
+;;; The `magic methods' shared by all objects.
 ;;; 
 ;;; Those not shared by all objects (like `__len__', `__eq__') are
-;;; defined as Generic Function in magicmeths.cl.
+;;; defined as Generic Function in magicmeths.cl, and registered for
+;;; the right class (number) below.
 ;;; 
-;;; The methods shared by all standard objects are:
+;;; The methods shared by all standard objects are (using `dir(object)'):
 ;;; 
-;;; __class__, __delattr__, __doc__, __getattribute__, __hash__,
-;;; __init__, __new__, __reduce__, __reduce_ex__, __repr__,
-;;; __setattr__, __str__
+;;;   __class__, __delattr__, __doc__, __getattribute__, __hash__,
+;;;   __init__,  __new__, __reduce__, __reduce_ex__, __repr__,
+;;;   __setattr__, __str__
 ;;; 
 ;;; Using metaclasses, classes can be created that might not have
 ;;; these methods. XXX todo figure that out
 
 (defgeneric __class__ (x) (:documentation "The class of X"))
-
 (defmethod __class__ ((x integer))       (find-class 'py-int))
 (defmethod __class__ ((x real))          (find-class 'py-float))
 (defmethod __class__ ((x complex))       (find-class 'py-complex))
@@ -79,7 +35,7 @@
 ;; PYTHON-TYPE is it's own type.
 (defmethod __class__ ((x (eql (find-class 'python-type)))) x)
 
-(register-bi-class-attr/meth (find-class 't) '__class__ #'__class__ :attr)
+(register-bi-class-attr/meth (find-class 't) '__class__ (make-bi-class-attribute #'__class__))
 
 
 ;;; Classes have a `__mro__' attribute, which is the "Method
@@ -94,7 +50,7 @@
 				   (typep cls 'builtin-class))
 			    collect cls)))
 
-(register-bi-class-attr/meth (find-class t) '__mro__ #'__mro__ :attr)
+(register-bi-class-attr/meth (find-class 'class) '__mro__ (make-bi-class-attribute #'__mro__))
 
 
 ;;; Classes have a `__bases__' attribute, indicating the direct superclasses
@@ -108,7 +64,8 @@
 				   (typep cls 'builtin-class))
 			    collect cls)))
 
-(register-bi-class-attr/meth (find-class 't) '__bases__ #'__bases__ :attr)
+(register-bi-class-attr/meth (find-class 'class) '__bases__ (make-bi-class-attribute #'__bases__))
+
 
 ;;; Object creation: __new__ and __init__
 ;;; 
@@ -121,19 +78,24 @@
 
 (defgeneric __new__ (cls &optional pos-arg key-arg)
   (:documentation "Create a new instance of class CLS"))
+
 (defmethod __new__ ((cls class) &optional pos-arg key-arg)
     (when (or pos-arg key-arg)
       (warn (format nil "Default __new__ ignoring args: ~A ~A" pos-arg key-arg)))
   (make-instance cls))
-(register-bi-class-attr/meth (find-class 't) '__new__ #'__new__ :meth)
-(register-as-__new__method #'__new__)
+
+(register-bi-class-attr/meth (find-class 'class) '__new__ (make-static-method #'__new__))
+
 
 (defgeneric __init__ (x &optional pos-arg key-arg)
   (:documentation "Object initialization"))
+
 (defmethod __init_ (x &optional pos-arg key-arg)
   (declare (ignore x pos-arg key-arg)
 	   (special *None*))
   *None*)
+
+(register-bi-class-attr/meth (find-class 'class) '__init__ #'__init__)
 
 
 ;;; String representation of Python objects:
@@ -145,12 +107,12 @@
 
 (defgeneric __str__ (x) (:documentation "String representation of X, intended for humans"))
 (defmethod __str__ (x) (call-attribute-via-class x '__repr__)) ;; defaults to __repr__
-(register-bi-class-attr/meth (find-class 't) '__str__ #'__str__ :meth)
+(register-bi-class-attr/meth (find-class 't) '__str__ #'__str__)
 
 (defgeneric __repr__ (x) (:documentation "String representation of X, preferably eval-able"))
 (defmethod __repr__ (x) (with-output-to-string (s) 
 		 (print-unreadable-object (x s :identity t :type t))))
-(register-bi-class-attr/meth (find-class 't) '__repr__ #'__repr__ :meth)
+(register-bi-class-attr/meth (find-class 't) '__repr__ #'__repr__)
 
 
 ;;; Attribute setting, getting, deleting
@@ -160,15 +122,15 @@
 (defmethod __getattribute__ (x attr)
   (or (internal-get-attribute x attr)
       (py-raise 'AttributeError "~A ~A" x attr)))
-(register-bi-class-attr/meth (find-class 't) '__getattribute__ #'__getattribute__ :meth)
+(register-bi-class-attr/meth (find-class 't) '__getattribute__ #'__getattribute__)
 
 (defgeneric __setattr__ (x attr val) (:documentation "Set attribute ATTR of X to VAL"))
 (defmethod __setattr__ (x attr val) (internal-set-attribute x attr val))
-(register-bi-class-attr/meth (find-class 't) '__setattr__ #'__setattr__ :meth)
+(register-bi-class-attr/meth (find-class 't) '__setattr__ #'__setattr__)
 
 (defgeneric __delattr__ (x attr) (:documentation "Delete attribute named ATTR of X"))
 (defmethod __delattr__ (x attr) (internal-del-attribute x attr))
-(register-bi-class-attr/meth (find-class 't) '__delattr__ #'__delattr__ :meth)
+(register-bi-class-attr/meth (find-class 't) '__delattr__ #'__delattr__)
 
 
 ;;; Documentation string
@@ -192,26 +154,25 @@
   (or (lookup-doc-string x)
       *None*))
 
-(register-bi-class-attr/meth (find-class 't) '__doc__ #'__doc__ :attr)
+(register-bi-class-attr/meth (find-class 't) '__doc__ (make-bi-class-attribute #'__doc__))
 
 ;;; XXX todo: register docstrings of all builtin-functions and builtin-classes
 
 
-;;; An object can have a hash code, used for storing them in a
-;;; dictionary. Some mutable objects (lists, tuples) are not hashable
-;;; (but they can be subclassed, and for the subclass hashing acn be
-;;; defined) because equality for those object is defined recursively
-;;; as equality of the items they contain.
+;;; An object can have a hash code. Some mutable objects (lists) are
+;;; not hashable because equality for those object is defined
+;;; recursively as equality of the items they contain. (However, they
+;;; can be subclassed, and for the subclass hashing can be defined.)
 ;;; 
-;;; Modules are mutable yet hashable, because the equality between two
-;;; modules doesn't change when a module is changed.
+;;; Modules are hashable, because the equality between two modules
+;;; doesn't change when a module is changed.
 
 (defgeneric __hash__ (x) (:documentation "Hash value (integer)"))
 (defmethod __hash__ (x) (pyb:id x)) ;; hash defaults to id, the (fake) pointer value
-(register-bi-class-attr/meth (find-class 't) '__hash__ #'__hash__ :meth)
+(register-bi-class-attr/meth (find-class 't) '__hash__ #'__hash__)
 
 
-;; XXX __reduce__ ?   they have something to do with pickling
+;; XXX __reduce__ ?   they have something to do with pickling, but are not documented?
 ;; XXX __reduce_ex__ ?
 
 
@@ -344,6 +305,10 @@
      (__abs__      (abs x))
      (__complex__  (make-complex x))))
 
+(loop for name in `(__nonzero__ __neg__ __pos__ __abs__ __complex__)
+    do (register-bi-class-attr/meth (find-class 'number) name (function name)))
+
+
 (def-binary-meths py-number number (slot-value x 'val) (slot-value y 'val)
 
 		  ;; comparison -> t/nil	
@@ -359,6 +324,10 @@
 		   (__truediv__  (/ x y))
 		   (__rtruediv__ (/ y x))
 		   (__rsub__     (- y x))))
+
+(loop for name in `(__eq__ __ne__ __add__ __radd__ __sub__ __mul__ __rmul__ __truediv__ __rtruediv__ __rsub__)
+    do (register-bi-class-attr/meth (find-class 'number) name (function name)))
+
 
 ;; Power
 ;; 
@@ -401,6 +370,10 @@
   (__pow__ y x m))
 
 
+(register-bi-class-attr/meth (find-class 'number) '__pow__ #'__pow__)
+(register-bi-class-attr/meth (find-class 'number) '__rpow__ #'__rpow__)
+
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Real
 ;; 
@@ -426,6 +399,10 @@
     ((__int__     (make-int (truncate x))) ;; CPython: returns a long int for X large enough
      (__long__    (make-int (truncate x))) ;; CPython: returns long int
      (__float__   (make-float x))))
+
+(loop for name in `(__int__ __long__ __float__)
+    do (register-bi-class-attr/meth (find-class 'real) name (function name)))
+
 
 (def-binary-meths
     py-real real (slot-value x 'val) (slot-value y 'val)
@@ -453,6 +430,10 @@
      (__divmod__    (make-tuple-from-list (multiple-value-list (floor x y))))
      (__rdivmod__   (__divmod__ y x))))
 
+(loop for name in `(__mod__ __rmod__ __cmp__ __div__ __rdiv__ __floordiv__
+			    __divmod__ __rdivmod__)
+    do (register-bi-class-attr/meth (find-class 'real) name (function name)))
+
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Complex (corresponds to Lisp type `complex')
@@ -479,13 +460,9 @@
      (complex-imag (imagpart x))
      (complex-conjugate (conjugate x))))
 
-
-
-(def-class-specific-methods
-    py-complex
-    ((real      #'complex-real      :attr)
-     (imag      #'complex-imag      :attr)
-     (conjugate #'complex-conjugate :attr)))
+(register-bi-class-attr/meth (find-class 'complex) 'real (make-bi-class-attribute #'complex-real))
+(register-bi-class-attr/meth (find-class 'complex) 'imag (make-bi-class-attribute #'complex-imag))
+(register-bi-class-attr/meth (find-class 'complex) 'conjugate (make-bi-class-attribute #'complex-conjugate))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -514,8 +491,8 @@
 ;; these are the min-max Python `normal' integer values; outside this
 ;; range it becomes a `long'. Not used yet: we don't separate the two
 ;; integer types anywhere, as CPython doesn't do that often, either.
-#+(or)(defconstant *sys-pos-maxint* 2147483647)
-#+(or)(defconstant *sys-neg-maxint* -2147483648)
+#+(or)(progn (defconstant *sys-pos-maxint* 2147483647)
+	     (defconstant *sys-neg-maxint* -2147483648))
     
 (defclass py-int (py-real)
   ((val :type integer :initarg :val :initform 0))
@@ -559,8 +536,11 @@
 		     (ash x (- y))
 		   (py-raise 'ValueError "Negative shift count")))
      (__rrshift__ (__rshift__ y x))
-     
      ))
+
+(loop for name in `(__add__ __xor__ __or__ __lshift__ __rlshift__ __rshift__ __rrshift__)
+    do (register-bi-class-attr/meth (find-class 'integer) name (function name)))
+
 
 (defmethod mod-to-fixnum ((x integer))
   "Return result of MODding i with most-positive-fixnum (which is ~@
@@ -587,6 +567,9 @@
      ;; string representations
      (__oct__  (format nil "0~O" x))
      (__hex__  (format nil "0x~X" x))))
+
+(loop for name in `(__invert__ __hash__ __complex__ __int__ __long__ __float__ __oct__ __hex__)
+    do (register-bi-class-attr/meth (find-class 'integer) name (function name)))
      
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -701,8 +684,6 @@
 	     (slot-value x 'hash-table))
     res))
 
-#+(or) ;; todo
-(defmethod __new__ ((x py-dict)))
 
 (defmethod __cmp__ ((x py-dict) (y py-dict))
   (when (eq x y)
@@ -728,8 +709,6 @@
 	     hx))
   0)
     
-  
-
 (defmethod __eq__ ((x py-dict) (y py-dict))
   "Returns T or NIL."
   (= (__cmp__ x y) 0))
@@ -765,6 +744,12 @@
 
 (defmethod __nonzero__ ((d py-dict))
   (lisp-val->py-bool (/= 0 (hash-table-count (slot-value d 'hash-table)))))
+
+(loop for name in '(__cmp__ __eq__ __getitem__ __setitem__ __delitem__
+		    ;; __add__ etc...
+		    __len__ __nonzero__)
+    do (register-bi-class-attr/meth (find-class 'py-dict) name (function name)))
+
 
 ;;;; Dict-specific methods, in alphabetic order
 
@@ -899,23 +884,22 @@
 	     h)
     (make-py-list-from-list res)))
 
-(def-class-specific-methods
-    py-dict
-    ((clear      #'dict-clear       :meth)
-     (copy       #'dict-copy        :meth)
-     (fromkeys   #'dict-fromkeys    :meth)
-     (get        #'dict-get         :meth)
-     (has_key    #'dict-has-key     :meth)
-     (items      #'dict-items       :meth)
-     (iteritems  #'dict-iter-items  :meth)
-     (iterkeys   #'dict-iter-keys   :meth)
-     (itervalues #'dict-iter-values :meth)
-     (keys       #'dict-keys        :meth)
-     (pop        #'dict-pop         :meth)
-     (popitem    #'dict-popitem     :meth)
-     (setdefault #'dict-setdefault  :meth)
-     (values     #'dict-values      :meth)))
-     
+(loop for (k v) in `((clear      ,#'dict-clear)
+		     (copy       ,#'dict-copy)
+		     (fromkeys   ,#'dict-fromkeys)
+		     (get        ,#'dict-get)
+		     (has_key    ,#'dict-has-key)
+		     (items      ,#'dict-items)
+		     (iteritems  ,#'dict-iter-items)
+		     (iterkeys   ,#'dict-iter-keys)
+		     (itervalues ,#'dict-iter-values)
+		     (keys       ,#'dict-keys)
+		     (pop        ,#'dict-pop)
+		     (popitem    ,#'dict-popitem)
+		     (setdefault ,#'dict-setdefault)
+		     (values     ,#'dict-values))
+    do (register-bi-class-attr/meth (find-class 'py-dict) k v))
+
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Namespace
@@ -992,6 +976,7 @@
       x-copy)))
 
 (defmethod __getitem__ ((x namespace) key)
+  "Contrary to PY-DICT, does not raise KeyError."
   (gethash key (slot-value x 'hash-table)))
 
 (defmethod __repr__ ((x namespace))
@@ -1001,6 +986,8 @@
       (maphash (lambda (k v) (format stream "~A: ~A,~_ " (__repr__ k) (__repr__ v)))
 	       (slot-value x 'hash-table)))
     (format stream "}")))
+
+;; XXX register?
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Function
@@ -1116,103 +1103,24 @@
 (defmethod namespace-lookup ((x py-module) var)
   (namespace-lookup (slot-value x 'namespace) var))
 
-(def-class-specific-methods
-    py-module
-    ((__dict__ #'module-dict :attr)))
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Methods: they come in `bound' and `unbound' flavors
-;;
-;; An UNBOUND METHOD is a method that is looked up via the class,
-;; while a BOUND-METHOD is the result of looking up a class method via
-;; an instance. For example:
-;;
-;;   class C:
-;;      def meth(self, ...): ...
-;;
-;;   C.meth  -> is an unbound method
-;;   x = C()
-;;   x.meth  -> is a bound method
-;;
-;; Python attributes of both bound and unbound methods:
-;;  `im_class' : the class attribute (here: C)
-;;
-;; Extra Python attributes for bound methods:
-;;  `im_self'  : the instance (here: x)
-;;  `im_func'  : the function object (meth)
-
-(defclass py-method (builtin-instance) ()
-  (:metaclass builtin-class))
-
-(mop:finalize-inheritance (find-class 'py-method))
-
-;;;; Unbound
-
-(defclass py-unbound-method (py-method)
-  ((class :initarg :class
-	  :documentation "The class from which the method is taken.")
-   (func :initarg :func :type python-function
-	 :documentation "The method itself (of type PYTHON-FUNCTION)."))
-  (:documentation "A method from a Python class (NOT bound to ~
-                   a class instance).")
-  (:metaclass builtin-class))
-
-(mop:finalize-inheritance (find-class 'py-unbound-method))
-
-(defun make-unbound-method (&rest options)
-  (apply #'make-instance 'py-unbound-method options))
-
-(defun unbound-method-p (m)
-  (typep m 'py-unbound-method))
-
-(defmethod __repr__ ((x py-unbound-method))
-  (with-output-to-string (stream)
-    (print-unreadable-object (x stream :identity nil :type t)
-      (with-slots (class func) x
-	(format stream "~_:class ~S ~_:func ~S" class func)))))
+(register-bi-class-attr/meth (find-class 'py-module) '__dict__ (make-bi-class-attribute #'module-dict))
 
 
-;;;; Bound
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Methods and attributes of Methods
 
-(defclass py-bound-method (py-method)
-  ((class :initarg :class
-	  :documentation "The class from which the method is taken.")
-   (func :initarg :func :type python-function
-	 :documentation "The method itself (of type PYTHON-FUNCTION).")
-   (self :initarg :self
-	 :documentation "The instance to which the method is bound."))
-  (:documentation "A method from a Python class, bound to a class instance.")
-  (:metaclass builtin-class))
+(defmethod class-method-get ((x class-method) inst class)
+  ;; Not sure if CLASS is a required argument or if it may be None,
+  ;; so take into account the situation in which it is not provided.
+  (let ((klass (if (eq class *None*)
+		   (__class__ inst)
+		 class)))
+    (make-instance 'bound-method
+      :func (slot-value x 'func)
+      :object klass)))
 
-(mop:finalize-inheritance (find-class 'py-bound-method))
-
-;; Make bound method given attributes, or given an unbound method
-;; (that will be destructively changed).
-
-(defun convert-unbound-to-bound-method (unbound-method self)
-  (check-type unbound-method py-unbound-method)
-  (change-class unbound-method 'py-bound-method)
-  (setf (slot-value unbound-method 'self) self)
-  unbound-method)
-
-(defun make-bound-method (&key self class func)
-  (when class
-    (check-type class class))
-  (when (and self class)
-    (check-type self class))
-  (make-instance 'py-bound-method
-    :self self :class (or class (class-of self)) :func func))
-
-(defun bound-method-p (m)
-  (typep m 'py-bound-method))
-
-(defmethod __repr__ ((x py-bound-method))
-  (with-output-to-string (stream)
-    (print-unreadable-object (x stream :identity nil :type t)
-      (with-slots (class func self) x
-	(format stream ":class ~S ~_:func ~S ~_:self ~S"
-		class func self)))))
-
+(register-bi-class-attr/meth (find-class 'class-method) '__get__ #'class-method-get)
+  
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; List
@@ -1370,6 +1278,16 @@
   (with-output-to-string (s)
     (format s "[~{~A~^, ~}]" (mapcar #'__repr__ (slot-value x 'list)))))
 
+;; to ease debugging, for now the in-place operations return the
+;; (modified) list they work on
+
+(defmethod __reversed__ ((x py-list))
+  "Return a reverse iterator"
+  ;; new in Py ?.?
+  (let ((rev (reverse (slot-value x 'list))))
+    (make-iterator-from-function
+     (lambda ()
+       (pop rev)))))
 
 (defmethod __setitem__ ((x py-list) item new-item)
   (typecase item
@@ -1423,19 +1341,12 @@
   (format nil "[~:_~{~A~^, ~:_~}]"
 	  (mapcar #'__str__ (slot-value x 'list))))
 
+(loop for name in '(__add__ __cmp__ __contains__ __delitem__ __getitem__ __hash__ __iter__ __len__ __mul__
+		    __rmul__ __nonzero__ __reversed__ __setitem__)
+    do (register-bi-class-attr/meth (find-class 'py-list) name (function name)))
+
 
 ;;; list-specific methods
-
-;; to ease debugging, for now the in-place operations return the
-;; (modified) list they work on
-
-(defmethod __reversed__ ((x py-list))
-  "Return a reverse iterator"
-  ;; new in Py ?.?
-  (let ((rev (reverse (slot-value x 'list))))
-    (make-iterator-from-function
-     (lambda ()
-       (pop rev)))))
   
 (defmethod list-append ((x py-list) item)
   (setf (cdr (last (slot-value x 'list))) (cons item nil))
@@ -1533,17 +1444,16 @@
 ;; XXX "x < y" => operator.lt => uses __lt__ if defined, otherwise __cmp__
 ;; XXX __lt__ never falls back to __cmp__
 
-(def-class-specific-methods
-    py-list
-    ((append  #'list-append  :meth)
-     (count   #'list-count   :meth)
-     (extend  #'list-extend  :meth)
-     (index   #'list-index   :meth)
-     (insert  #'list-insert  :meth)
-     (pop     #'list-pop     :meth)
-     (remove  #'list-remove  :meth)
-     (reverse #'list-reverse :meth)
-     (sort    #'list-sort    :meth)))
+(loop for (k v) in `((append  ,#'list-append)
+		     (count   ,#'list-count)
+		     (extend  ,#'list-extend)
+		     (index   ,#'list-index)
+		     (insert  ,#'list-insert)
+		     (pop     ,#'list-pop)
+		     (remove  ,#'list-remove)
+		     (reverse ,#'list-reverse)
+		     (sort    ,#'list-sort))
+    do (register-bi-class-attr/meth (find-class 'py-list) k v))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Iterator
@@ -1567,6 +1477,9 @@
    can do:  for i in iter(iter(iter(iter(foo))))."
   x)
 
+(register-bi-class-attr/meth (find-class 'py-iterator) '__iter__ #'__iter__)
+
+
 (defvar *StopIteration* '|stop-iteration|)
 
 (defclass py-func-iterator (py-iterator)
@@ -1584,7 +1497,7 @@
   (check-type f function)
   (make-instance 'py-func-iterator :func f :end-value end-value))
 
-(defmethod next ((f py-func-iterator))
+(defmethod iterator-next ((f py-func-iterator))
   "This is the only function that an iterator has to provide."
   (when (slot-value f 'stopped-yet)
     #1=(py-raise 'StopIteration
@@ -1594,6 +1507,8 @@
       (setf (slot-value f 'stopped-yet) t)
       #1#)
     res))
+
+(register-bi-class-attr/meth (find-class py-iterator) 'next #'iterator-next)
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -1620,24 +1535,14 @@
   (slot-value tup 'list))
 
 
-(defmethod tuple-__new__ (cls &rest options)
-  (let ((instance
-	 (cond ((not options) (make-tuple))
-	       ((cdr options) (py-raise 'TypeError "tuple.__new__() takes at most 1 argument (got: ~A)" options))
-	       (t             (make-tuple-from-list (py-iterate->lisp-list (car options)))))))
-    (if (eq cls (find-class 'py-tuple))
-	instance
-      (if (and (typep cls 'class)
-	       (subtypep cls (find-class 'py-tuple)))
-	  (change-class instance cls)
-	(py-raise 'TypeError "~S is not a subclass of ~S" cls (find-class 'py-tuple))))))
-
-(register-as-__new__method #'tuple-__new__)
-
-(defmethod __init__ ((x py-tuple) &optional pos-args kwd-args)
-  (declare (ignore pos-args kwd-args)))
-
 ;;;; magic methods
+
+(defmethod __new__ ((cls (eql (find-class 'py-tuple))) &optional pos-arg key-arg)
+  (cond (key-arg       (py-raise 'TypeError "tuple.__new__ takes no key args"))
+	((cdr pos-arg) (py-raise 'TypeError "tuple.__new__ takes at most 1 pos arg"))
+	((car pos-arg) (make-tuple-from-list (py-iterate->lisp-list (car pos-arg))))
+	(t             (make-tuple-from-list nil))))
+
 
 ;;; XXX Many methods are similar as for py-list. Maybe move some to a
 ;;; shared superclass py-sequence. However, the implementation of
@@ -1714,9 +1619,10 @@
 	    "Cannot set items of tuples"))
 
 ;;; there are no tuple-specific methods
-(def-class-specific-methods
-    py-tuple
-    ((__new__ #'tuple-__new__ :meth)))
+(loop for name in '(__add__ __cmp__ __contains__ __getitem__ __iter__ __len__
+		    __mul__ __rmul__ __setitem__)
+    do (register-bi-class-attr/meth (find-class 'py-tuple) name (function name)))
+
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; String
@@ -1750,6 +1656,12 @@
 (defmethod print-object ((x py-string) stream)
   (print-unreadable-object (x stream :type t)
     (format stream "~S" (slot-value x 'string))))
+
+(defmethod __new__ ((x (eql (find-class 'py-string))) &optional pos-arg key-arg)
+  (cond (key-arg       (py-raise 'TypeError "string.__new__ takes no key arg"))
+	((cdr pos-arg) (py-raise 'TypeError "string.__new__ takes at most 1 key arg"))
+	((car pos-arg) (make-py-string (call-attribute-via-class (car pos-arg) '__str__)))
+	(t             "")))
 
 
 (defmethod __mul-1__ ((x string) n)
@@ -1974,6 +1886,8 @@
      (string-isupper (x)  (string-isupper-1 x))
      (string-join    (x seq) (string-join-1 x seq))))
 
+
+
 (def-binary-string-meths
     ((__add__      (x y)  (concatenate 'string x y))
      (__radd__     (x y)  (__add__ y x))
@@ -1989,20 +1903,21 @@
      (string-index    (x y &optional start end)  (string-index-1 x y (or start 0) (or end 0)))))
 
 
-(def-class-specific-methods
-    py-string
-    ((capitalize #'string-capitalize :meth) ;; lisp function
-     (center   #'string-center-1   :meth)
-     (decode   #'string-decode-1   :meth)
-     (encode   #'string-encode-1   :meth)
-     (expandtabs  #'string-expandtabs-1  :meth)
-     (isalnum  #'string-isalnum-1  :meth)
-     (isalpha  #'string-isalpha-1  :meth)
-     (isdigit  #'string-isdigit-1  :meth)
-     (islower  #'string-islower-1  :meth)
-     (istitle  #'string-istitle-1  :meth)
-     (isupper  #'string-isupper-1  :meth)
-     (join     #'string-join-1     :meth)))
+(loop for name in '(__getitem__ __iter__ __len__ __mul__)
+    do (register-bi-class-attr/meth (find-class 'py-string) name (function name)))
+				    
+(loop for k v in `((capitalize ,#'string-capitalize)
+		   (center   ,#'string-center-1)
+		   (decode   ,#'string-decode-1)
+		   (encode   ,#'string-encode-1)
+		   (expandtabs  ,#'string-expandtabs-1)
+		   (isalnum  ,#'string-isalnum-1)
+		   (isalpha  ,#'string-isalpha-1)
+		   (isdigit  ,#'string-isdigit-1)
+		   (islower  ,#'string-islower-1)
+		   (istitle  ,#'string-istitle-1)
+		   (isupper  ,#'string-isupper-1)
+		   (join     ,#'string-join-1)))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -2267,6 +2182,7 @@
 (defmethod file-softspace ((f py-file))
   )
 
+;; XXX todo register...
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Enumerate

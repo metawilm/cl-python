@@ -22,7 +22,7 @@
        (tagbody 
 	 (handler-case (__iter__ ,object)
 	   (AttributeError () (go try-getitem))
-	   (:no-error (,iterator) (loop (handler-case (next ,iterator)
+	   (:no-error (,iterator) (loop (handler-case (iterator-next ,iterator)
 					  (StopIteration () (return-from py-iterate))
 					  (:no-error (,val) ,@body)))))
 	try-getitem
@@ -65,8 +65,8 @@
       ;; There is the theoretical possibility that the object's class,
       ;; or just the __getitem__ method, is changed or removed while
       ;; we do this iteration.  By storing the __getitem__ method we
-      ;; just found, we evade that; however, it might be semantically
-      ;; wrong, theoretically speaking.
+      ;; evade that; however, it might be semantically wrong,
+      ;; theoretically speaking.
       
       (multiple-value-bind (getitem-meth found)
 	  (getattr-of-class object '__getitem__)
