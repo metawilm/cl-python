@@ -25,7 +25,7 @@
     (dolist (f '("classes" "exceptions" "pythonic" "magicmeths" "builtin-classes"
 		 "call" "builtin-funcs" "builtin-types" "mathops"
 		 "descriptors" "attributes" "pyeval"
-		 #+(or)"gener" "parsepython" "repl"))
+		 #+(or)"gener" "parsepython" "walk" "repl"))
       (excl::compile-file-if-needed f)
       (load f)))
   'done)
