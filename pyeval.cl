@@ -134,6 +134,8 @@
   ;; Note that the Exception class that an 'except' clause catches, is
   ;; evaluated after an exception is thrown, not earlier; so long as
   ;; there is no exception thrown, it is not evaluated.
+
+  ;; XXX todo: `class' may be a tuple, catching all exceptions in the tuple.
   
   (handler-bind
       ((Exception (lambda (e)
