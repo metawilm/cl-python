@@ -306,7 +306,7 @@
        ((|[| listmaker |]|) . ((list 'list $2)))
        ((|{| |}|) . ((list 'dict nil)))
        ((|{| dictmaker |}|) . ((list 'dict $2)))
-       ((|`| testlist1 |`|) . ((list 'repr-list $2)))
+       ((|`| testlist1 |`|) . ((list 'backticks $2)))
        ((identifier) . ((list 'identifier $1)))
        ((number) . ($1))
        ((string+) . ($1))
@@ -413,7 +413,7 @@
  (gen-for (for exprlist in test gen-iter?))
  (gen-if (if test gen-iter?) ((list $1 $2 $3)))
  (:gen-iter?)
- (testlist1 (test |,--test*|) ((list $1 $2))))
+ (testlist1 (test |,--test*|) (`(,$1 ,@(when $2 $2)))))
 
 
 

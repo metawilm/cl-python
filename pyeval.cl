@@ -41,7 +41,7 @@
 	     (return-from py-eval ast))
 
 	   ;; This allows all kinds of Lisp values to be used directly in Python,
-	   ;; e.g. using `clpy(...)'
+	   ;; e.g. using `clpy(...)' -- experimental
 	   (unless (listp ast)
 	     (return-from py-eval ast))
 	   
@@ -77,7 +77,7 @@
 	     (list (apply #'eval-list (cdr ast)))
 	     (tuple (make-tuple-from-list (mapcar #'py-eval (cdr ast))))
 	     (dict (eval-dict (second ast)))
-	     (string-conversion (apply #'eval-string-conv (cdr ast)))
+	     (backticks (eval-backticks (second ast)))
     
 	     (call (apply #'eval-call (cdr ast)))
     
@@ -321,10 +321,16 @@
       (make-py-list-from-list (nreverse acc)))))
 
   
-#+(or)
-(defun eval-string-conv (tuple)
-  (declare (ignore tuple))
-  (error 'todo))
+(defun eval-backticks (lst)
+  (let* ((ev (mapcar #'py-eval lst))
+	 (obj (if (cdr lst)
+		  (make-tuple-from-list ev)
+		(car ev))))
+    (multiple-value-bind (res found)
+	(call-attribute-via-class obj '__repr__)
+      (unless found
+	(error "no __repr__ for ~A, in backticks" obj))
+      res)))
 
 (defun eval-attributeref (obj attr)
   (assert (eq (car attr) 'identifier))

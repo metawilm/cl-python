@@ -1395,7 +1395,10 @@
 
 (defmethod __repr__ ((x py-list))
   (with-output-to-string (s)
-    (format s "[~{~A~^, ~}]" (mapcar #'__repr__ (slot-value x 'list)))))
+    (format s "[")
+    (dolist (item (slot-value x 'list))
+      (format s "~A, " (call-attribute-via-class item '__repr__)))
+    (format s "]")))
 
 ;; to ease debugging, for now the in-place operations return the
 ;; (modified) list they work on
@@ -1728,7 +1731,10 @@
   (let ((list (slot-value x 'list)))
     (if list
 	(with-output-to-string (s)
-	  (format s "(~{~A,~^ ~})" (mapcar #'__repr__ list)))
+	  (format s "(")
+	  (dolist (item (slot-value x 'list))
+	    (format s "~A, " (call-attribute-via-class item '__repr__)))
+	  (format s ")"))
       "(,)")))
 
 ;; __reversed__ ?
