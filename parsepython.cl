@@ -543,13 +543,10 @@
   
   (assert (not raw))
   
-  (let ((second (read-char-error))
-	(third (read-char-nil)))
-
+  (let* ((second (read-char-error))
+	 (third (read-char-nil)))
     (cond 
-      
      ((char= first-char second third)      ;; """ or ''': a probably long multi-line string
-	
       (loop
 	  with res = (make-array 50 :element-type 'character :adjustable t :fill-pointer 0)
 	  with x = (read-char-error) and y = (read-char-error) and z = (read-char-error)
@@ -557,25 +554,20 @@
 	  do (vector-push-extend (shiftf x y z (read-char-error)) res)
 	  finally (return-from read-string res)))
 
-     
      ((char= first-char second)  ;; ""/'' but not """/''' --> empty string
-	
       (when third
 	(unread-char third))
       (return-from read-string ""))
      
-
      (t ;; Non-empty string with one starting quote, possibly containing escapes
       (unless third
 	(py-raise 'SyntaxError "Quoted string not finished"))
-      
       (let ((res (make-array 30 :element-type 'character :adjustable t :fill-pointer 0))
 	    (c third)
-	    (prev-backslash (char= second #\\)))
+	    (prev-backslash (char= second #\\ )))
 	
 	(unless (char= second #\\)
 	  (vector-push-extend second res))
-	
 	(loop 
 	  (cond
 	   (prev-backslash
@@ -616,15 +608,16 @@
 			     
 			     (loop for i below (if (char= c #\u) 4 8) ;; \uf7d6 \U12345678
 				 with code = 0
-				 with ch = (read-char-error)
-				 do (setf code
-				      (+ (* 16 code) 
-					 (or (digit-char-p ch 16)
-					     (py-raise 'SyntaxError "Non-hex digit in \"\~A...\": ~S" c ch)))
-				      ch (read-char-error))
+				 with ch
+				 do (setf ch   (read-char-error)
+					  code (+ (* 16 code) 
+						  (or (digit-char-p ch 16)
+						      (py-raise
+						       'SyntaxError
+						       "Non-hex digit in \"\~A...\": ~S" c ch))))
 				 finally (vector-push-extend (code-char code) res))
 			   
-			   (progn (warn "Unicode escape \~A... found in non-unicode string" c)
+			   (progn (warn "Unicode escape \\~A... found in non-unicode string" c)
 				  (vector-push-extend #\\ res)
 				  (vector-push-extend #\N res))))
 	        

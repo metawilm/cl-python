@@ -112,6 +112,9 @@
 
 (defmethod py-call ((cls class) &optional pos-args kwd-args)
   
+  (when (subtypep cls 'Exception)
+    (return-from py-call (py-call-exception cls pos-args kwd-args)))
+  
   ;; type(x) is a function returning type of x
   (when (and (eq cls (find-class 'python-type))
 	     (= (length pos-args) 1))
@@ -131,66 +134,16 @@
 	  (unless found
 	    (warn "Class ~S has no __init__ method" cls-name)))
 	(return-from py-call inst)))))
- 
-  
 
-#+(or)
-(defmethod py-call (#+(or)(cls python-type)
-		    (cls class) &optional pos-args kwd-args)
-  
-  ;; When CLS is a subtype of PYTHON-TYPE (`type'), calling it either
-  ;;  - create a new class K, where the metaclass of K is CLS (when there are 3 args)
-  ;;  - or return the type of CLS (when there is 1 arg)
-
-  (warn "subtypep ~A ~A: ~A" (class-name cls) 'python-type (subtypep cls 'python-type))
-  
-  (when (or (eq cls (find-class 'python-type))
-	    (typep cls 'udc-with-ud-metaclass))
-    
-    (warn "py-call: Creating class with metaclass ~A" (class-name cls))
-    (when kwd-args
-      (warn "While calling class ~A, which is subtype of `type': ignored ~@
-             keyword arguments ~A" (class-name cls) kwd-args))
-    (return-from py-call
-      (case (length pos-args)
-	(1 (pyb:type cls))
-	(3 (multiple-value-bind (__new__-meth found)
-	       (internal-get-attribute cls '__new__)
-	     (if found
-		 (return-from py-call
-		   (py-call __new__-meth (cons cls pos-args)))
-	       (error "While creating class ~A, which has class ~A as metaclass: ~@
-                       class ~A has no __new__ method (which should allocate class ~A)"
-		      (car pos-args) (class-name cls) (class-name cls) (car pos-args))))
-	 #+ ;; incorrect
-	 (or)(call-attribute-via-class cls '__new__ pos-args))
-	 
-	(t (py-raise 'TypeError "Calling class that is subtype of built-in class: ~@
-                                 expecting 1 or 3 args (got: ~A)" (length pos-args))))))
-  
-  
-  ;; When CLS is a regular class, calling it creates an instance of it.
-  ;;  <cls>.( ..args.. ) --> cls-instance = <cls>.__new__(<cls>, ..)              : allocation
-  ;;                         <class-of cls-instance>.__init__(<cls-instance>, ..) : initialization
-  (warn "py-call: creating instance of class ~A (not ~A as metaclass)"
-	(class-name cls) (class-name cls))
-  
-  (multiple-value-bind (__new__-meth found)
-      (internal-get-attribute cls '__new__)
-    
-    (unless found 
-      (error "Class ~S has no method __new__" (class-name cls))) ;; not sure when this happens?
-    
-    (let ((instance (py-call __new__-meth (cons cls pos-args) kwd-args))) ;; CLS is first pos arg
-      
-      (multiple-value-bind (res found)
-	  (call-attribute-via-class instance '__init__ pos-args kwd-args)
-	(declare (ignore res))
-	(unless found
-	  (warn "Class ~S has no method __init__" (class-name cls))))
-      
-      instance)))
-
+(defmethod py-call-exception ((cls class) &optional pos-args kwd-args)
+  (assert (subtypep cls 'Exception))
+  (if (typep cls 'user-defined-class)
+      (error "TODO: calling UDC exceptions")
+    (progn (when (or kwd-args (cdr pos-args))
+	     (py-raise 'TypeError "Built-in exceptions must be called with at ~@
+                                   most one positional arg (got: ~A with ~A ~A)"
+		       cls pos-args kwd-args))
+	   (make-condition cls :args (or (car pos-args) *None*)))))
 
 #+(or)
 (let ((cr (make-call-rewriter '(a b) '((c . 3)(d . 4)) 'args 'kwd))

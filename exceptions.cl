@@ -18,6 +18,9 @@
   (when (slot-boundp x 'args)
     (format stream ": ~A" (slot-value x 'args))))
 
+(defmethod __repr__ ((x Exception))
+  (with-output-to-string (s)
+    (print-object x s)))
 
 (defvar *exceptions-tree* ;; XXX CPython has explanation string for every exception
     (quote

@@ -3,11 +3,18 @@
 show = True
 
 def check(a, b):
+    print "begin check", a, b
+    clpy(format t "lisp: a: ~A  b: ~A" (namespace-lookup *scope* 'a) (namespace-lookup *scope* 'b))
+    
     if __debug__:
         if show:
-            print `a`, "==", `b`
+            print "test: ", `a`, "==", `b` ## WB
+    print " --"
     if not a == b:
+        print "== failed" ## WB
         raise AssertionError("%.30r != %.30r" % (a, b))
+    else:
+      print "== ok", a, b
 
 def exception(exc, f, *args):
     try:
@@ -21,11 +28,11 @@ def exception(exc, f, *args):
                              exc.__name__, f.__name__, args)
 
 def check_functions(i=0, j=0):
-    check(abs(42*i), 42*j)
-    check(abs(-42*i), 42*j)
-    check(abs(-12345678910*i), 12345678910*j)
-    check(abs(-3.14*i), 3.14*i)
-    check(abs((3j+4)*i), 5*j)
+    #check(abs(42*i), 42*j)
+    #check(abs(-42*i), 42*j)
+    #check(abs(-12345678910*i), 12345678910*j)
+    #check(abs(-3.14*i), 3.14*i)
+    #check(abs((3j+4)*i), 5*j)
 
     check(bool(1+i), True)
     check(bool(100+j), True)

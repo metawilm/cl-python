@@ -188,35 +188,29 @@
     (py-eval else-clause)))
 
 
-(defun eval-raise (exctype value traceback)
+(defun eval-raise (first second third) ;; exctype value traceback)
   ;; Complicated interpretation of parameters. See Python Reference Manual, par 6.9
   
-  (setf exctype   (when exctype (py-eval exctype))
-	value     (when value (py-eval value))
-	traceback (when traceback (py-eval traceback)))
-  ;;(break "eval-raise")
-  (cond ((and traceback 
-	      (not (eq traceback *None*)))
-	 (warn "raise a")
+  (setf first  (when first (py-eval first))
+	second (when second (py-eval second))
+	third  (when (and third (not (eq third *None*)))
+		 (py-eval third)))
+
+  (cond (third
 	 ;; "If a third object is present and not None, it must be a
 	 ;; traceback object (see section 3.2), and it is substituted
 	 ;; instead of the current location as the place where the
 	 ;; exception occurred."
-	 
-	 (error "Traceback parameter to RAISE not supported (yet?)"))
+	 (error "TODO: Traceback parameter to RAISE"))
 	
-	
-	((null exctype)
-	 (warn "raise b")
+	((null first)
 	 ;; "If no expressions are present, raise re-raises the last
 	 ;; expression that was active in the current scope. If no
 	 ;; exception is active in the current scope, an exception is
 	 ;; raised indicating this error." 
-	 
 	 (error "TODO: reraise previous exception"))
 
-
-	((typep exctype 'class)
+	((typep first 'class)
 	 (warn "raise c")
 	 ;; "If the first object is a class, it becomes the type of
 	 ;; the exception.
@@ -229,37 +223,29 @@
 	 ;; used, and any other object is treated as a single argument
 	 ;; to the constructor. The instance so created by calling the
 	 ;; constructor is used as the exception value."
-	 
-	 ;; XXX  make-instance or py-call?
-	 
-	 (cond ((typep value exctype) (warn "raise d")
-				      (error value))
+	 (cond ((typep second first)
+		(error second))
 	       
-	       ((typep value 'py-tuple)
-		(warn "raise d")
-		(error exctype (py-call exctype (tuple->lisp-list value))))
-	       
-	       ((or (null value)
-		    (eq value *None*))
-		(warn "raise e")
-		(error (make-instance exctype)))
-	       
-	       (t
-		(warn "raise f")
-		(error (make-instance exctype :args value)))))
+	       (second
+		;; not quite correct, but will do for now... (XXX call __new__ etc)
+		(let ((cond (make-condition first :args second)))
+		  (error cond)))
 
+	       ((null second)
+		(let ((cond (make-condition first)))
+		  (error cond)))
+	       (t
+		(error "shouldn't come here"))))
+	       
 	(t
-	 (warn "raise g")
 	 ;; "If the first object is an instance, the type of the
 	 ;; exception is the class of the instance, the instance itself
 	 ;; is the value, and the second object must be None."
-  
-	 (if (or (eq value *None*)
-		 (null value))
-	     (error exctype) ;; (class-name (__class__ exctype)) :args exctype)
+  	 (if (not second)
+	     (error first)
 	   (py-raise 'ValueError
 		     "RAISE: when first arg is instance, second argument must ~@
-                      be None or not supplied (got: ~A)" value)))))
+                      be None or not supplied (got: ~A)" second)))))
 
 
 (defun eval-global (varlist)

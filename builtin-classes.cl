@@ -751,12 +751,17 @@
   ;; Contrary to int.__new__, bool.__new__ accepts any arg and will
   ;; check its truth value.
   (assert (subtypep cls 'py-bool))
-  (let ((inst (make-instance cls)))
-    (setf (slot-value inst 'val) 
-      (if (car args)
-	  (if (py-val->lisp-bool (car args)) 1 0)
-	0))
-    inst))
+  (if (eq cls (find-class 'py-bool))
+      
+      (cond ((null args) *False*)
+	    ((cdr args) (py-raise 'TypeError "bool() takes at most one arg (got: ~A)" args))
+	    (t  (if (py-val->lisp-bool (car args)) *True* *False*)))
+    
+    (let ((inst (make-instance cls)))
+      (cond ((null args) (setf (slot-value inst 'val) 0))
+	    (t (setf (slot-value inst 'val)
+		 (if (py-val->lisp-bool (car args)) 1 0))))
+      inst)))
 
 (register-bi-class-attr/meth (find-class 'py-bool) '__new__
 			     (make-static-method #'py-bool-__new__))
@@ -2937,12 +2942,12 @@
 
 
 (defmethod extract-list-slice ((list cons) (slice py-slice))
-  "Given a (Lisp) list, extract the sublist corresponding to the slice as a fresh list."
+  "Given a (Lisp) list, extract the sublist corresponding to the slice as a fresh Lisp list."
   (multiple-value-bind (nonempty start stop step)
       (slice-indices slice (length list))
     
     (unless nonempty
-      (return-from extract-list-slice (make-py-list)))
+      (return-from extract-list-slice ()))
     
     (let ((in-reverse (< step 0)))
       
@@ -3004,6 +3009,11 @@
 (defmethod convert-to-number :around (x cls)
   (declare (ignore x))
   (let ((res (call-next-method)))
+    
+    (when (and (eq cls 'complex) ;; XXX check if correct
+	       (not (typep res 'complex)))
+      (setf res (complex res 0)))
+    
     (unless (typep res cls)
       (py-raise 'TypeError "Expected a ~A, got (perhaps after conversion) ~A" cls res))
     res))
@@ -3026,8 +3036,7 @@
   (slot-value x 'val))
 
 (defmethod convert-to-number ((x py-string) cls)
-  (declare (ignore cls))
-  (slot-value x 'string))
+  (convert-to-number (slot-value x 'string) cls))
 
 (defmethod convert-to-number (x cls)
   (declare (ignore cls))
