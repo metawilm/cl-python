@@ -56,13 +56,17 @@
 (defgeneric __mro__ (cls)
   (:documentation "Method resolution order (as tuple, including itself)"))
 
+(defmethod py-class-mro ((x class))
+  (loop for cls in (mop:class-precedence-list x)
+      if (or (typep cls 'user-defined-class)
+	     (typep cls 'builtin-class))
+      collect cls))
+   
 (defmethod __mro__ ((c class))
-  (make-tuple-from-list (loop for cls in (mop:class-precedence-list c)
-			    if (or (typep cls 'user-defined-class)
-				   (typep cls 'builtin-class))
-			    collect cls)))
+  (make-tuple-from-list (py-class-mro c)))
 
-(register-bi-class-attr/meth (find-class 'class) '__mro__ (make-bi-class-attribute #'__mro__))
+(register-bi-class-attr/meth (find-class 'class) '__mro__
+			     (make-bi-class-attribute #'__mro__))
 
 
 ;;; Classes have a `__bases__' attribute, indicating the direct superclasses
@@ -76,7 +80,8 @@
 				   (typep cls 'builtin-class))
 			    collect cls)))
 
-(register-bi-class-attr/meth (find-class 'class) '__bases__ (make-bi-class-attribute #'__bases__))
+(register-bi-class-attr/meth (find-class 'class) '__bases__
+			     (make-bi-class-attribute #'__bases__))
 
 
 ;;; Object creation: __new__ and __init__
@@ -97,7 +102,8 @@
     (warn (format nil "Default __new__ ignoring args: ~A" args)))
   (make-instance cls))
 
-(register-bi-class-attr/meth (find-class 'class) '__new__ (make-static-method #'__new__))
+(register-bi-class-attr/meth (find-class 'class) '__new__
+			     (make-static-method #'__new__))
 
 #+(or)
 (defmethod python-type-__new__ (metaclass name bases dict)
@@ -1363,11 +1369,18 @@
 (register-bi-class-attr/meth (find-class 'class-method) '__get__ #'__get__)
   
 
+#+(or)
 (defmethod __get__ ((x bi-class-attribute) inst class)
   ;; It's an attribute of the instance, not a method of the class.
   (declare (ignore class))
   (assert (not (eq inst *None*)))
   (py-call (slot-value x 'func) (list inst)))
+
+(defmethod __get__ ((x bi-class-attribute) inst class)
+  ;; It's an attribute of the instance, not a method of the class.
+  (assert (eq inst *None*))
+  (py-call (slot-value x 'func) (list class)))
+
 
 (register-bi-class-attr/meth (find-class 'bi-class-attribute) '__get__ #'__get__)
 
