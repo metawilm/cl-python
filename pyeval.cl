@@ -331,8 +331,8 @@
 	     (**-arg (find '** args :key (lambda (x) (when (consp x)
 						       (car x)))))
 	     (temp-key-args (loop for a in args
-			   when (and (consp a)
-				     (eq (car a) '=))
+				when (and (consp a)
+					  (eq (car a) '=))
 				collect a))
 	     
 	     (key-args (mapcar (lambda (a)
@@ -355,7 +355,7 @@
 	      **-arg (second **-arg))
 	
 	#+(or)(format t "EVAL-CALL: pos: ~A  key: ~A  *: ~A  **: ~A~%" 
-		pos-args key-args *-arg **-arg)
+		      pos-args key-args *-arg **-arg)
 	  
 	(setf pos-args (mapcar #'py-eval pos-args)
 	      pos-args (append pos-args (when *-arg
@@ -365,7 +365,7 @@
 	      key-args (append key-args (when **-arg
 					  (dict->alist (py-eval **-arg)))))
 	;; **-arg can only contain already evaluated stuff, is the assumption
-	;; (format t "call: ~A~%" `(__call__ ,eprim ,pos-args ,key-args))
+	#+(or)(format t "call: ~A~%" `(__call__ ,eprim ,pos-args ,key-args))
 	(__call__ eprim pos-args key-args)))))
 
 
@@ -800,12 +800,9 @@
 (defun eval-print-stream (stream objs comma?)
   "The Python PRINT statement (a rough approximation)"
   
-  ;;(format stream "PR  ")
   (dolist (x objs)
     (let* ((ex (py-eval x))
-	   (str (handler-case (__str__ ex)
-		  (error ()
-		    (format nil "~A" ex)))))
+	   (str (__str__ ex)))
       (format stream "~A " str)))
   
   (unless comma?

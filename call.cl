@@ -8,6 +8,7 @@
   (:documentation "Call X with given arguments. Call arg rewriting must take ~
                    place _before_ calling __call__ (or in __CALL__ :AROUND ?)"))
 
+#+(or) ;; can't discriminate like this
 (defmethod no-applicable-method ((f (eql #'__call__)) &rest args)
   (signal '%magic-method-missing%)
   (py-raise 'TypeError
@@ -63,7 +64,7 @@
 
 (defmethod __call__ ((x py-bound-method) &optional pos-args kwd-args)
   "The instance enclosed in the bound method is prefixed to pos-args"
-  ;;(break "xyz")
+  #+(or)(break "xyz")
   (__call__ (slot-value x 'func)
 	    (cons (slot-value x 'self)
 		  pos-args)

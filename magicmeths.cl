@@ -15,7 +15,8 @@
 	     `(progn
 		(defgeneric ,methname ,params
 			    (:documentation ,doc))
-		
+
+		#+(or) ;; can't discriminate like this
 		(defmethod no-applicable-method ((f (eql #',methname)) &rest args)
 		  (signal '%magic-method-missing%)
 		  (py-raise 'TypeError
@@ -78,8 +79,9 @@
  ;;; 3.3.1: Basic Customization
  
  ;; string representation
- (__repr__ (x) "repr(x) -> readable string representation of x") ;; both must return string
- (__str___ (x) "str(x) -> string representation of x") ;; fallback: __repr__
+ ;; XXX these are handled in builtin-classes.cl
+ #+(or)(__repr__ (x) "repr(x) -> readable string representation of x") ;; both must return string
+ #+(or)(__str___ (x) "str(x) -> string representation of x") ;; fallback: __repr__
 
  ;; Comparison
  (__eq__ (x y) "x == y") ;; these can return any value, but bool (True/False) is common
