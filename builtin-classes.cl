@@ -115,8 +115,10 @@
     (error "type.__call__ excepted class as first arg, got: ~A"))
   
   (let ((inst (py-call (or (internal-get-attribute x '__new__)
-			   (py-raise 'TypeError "Can't create ~A instance: no __new__ method" x))
-		       (list clsname bases dict))))
+			   
+			   ;; This should use PY-RAISE, but order of loading is incorrect for that
+			   (error "TypeError: Can't create ~A instance: no __new__ method" x))
+		       (list x clsname bases dict))))
     ;; CPython doesn't initialize INST if it not an instance of PYTHON-TYPE ?!
     (let ((init (internal-get-attribute x '__init__)))
       (when init
@@ -131,14 +133,20 @@
 
 
 (defmethod python-type-__new__ (metaclass &optional name bases dict)
-  
-  (when (not (or name bases dict)) ;; "type(x) -> <type-of-x>"
+  (assert metaclass)
+  (when (and (not (typep metaclass 'class))
+	     (not (or name bases dict))) ;; "type(x) -> <type-of-x>"
+    (warn "type(x) -> y")
     (return-from python-type-__new__ (py-type metaclass)))
   
   (unless (and name dict)
-    (error "type.__new__ got not 1 or 4 args: ~A ~A ~A ~A" metaclass name bases dict))
+    (warn "type.__new__(x) -> instane of x")
+    (make-instance metaclass))
   
-  (assert (subtypep metaclass 'python-type))
+  #+(or)(error "type.__new__ got not 1 or 4 args: ~A ~A ~A ~A" metaclass name bases dict)
+  
+  (assert (or (eq metaclass (load-time-value (find-class 'python-type)))
+	      (typep metaclass 'python-type)))
       
   ;; Create a class with this as metaclass
   (unless (symbolp name)
@@ -1620,7 +1628,8 @@
 	     nil))))
 
 (defun al-namespace-lookup (ns key)
-  (assert (symbolp key))
+  (declare (optimize (speed 3) (safety 0) (debug 0)))
+  ;;(assert (symbolp key))
   ;;(format t "lookup ~A~%" key)
   ;;(break)
   (let ((k (assoc key (al-namespace-alist ns) :test 'eq)))
@@ -1669,6 +1678,10 @@
 	(setf (al-namespace-builtins new-ns) bi-ns)))
     new-ns))
 
+(defun al-namespace-clear (ns)
+  (setf (al-namespace-alist ns) nil
+	(al-namespace-global-ns ns) nil))
+
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Namespace-proxy
@@ -1715,6 +1728,9 @@
   (with-slots (namespace) x
     (al-namespace-declare-global namespace key)))
   
+(defmethod namespace-clear ((x namespace-proxy))
+  (with-slots (namespace) x
+    (al-namespace-clear namespace)))
 
 ;; __{get,set,del}item__ : these raise errors when not found
 
@@ -2215,7 +2231,7 @@
 	  (t                1))))
 
 (defmethod __contains__ ((x py-list/tuple) item)
-  (if (member item (slot-value x 'vec) :test #'py-==) *True* *False*))
+  (if (position item (slot-value x 'vec) :test #'py-==) *True* *False*))
 
 (defmethod __eq__-vectors ((x vector) (y vector))
   (if (= (length x) (length y))
@@ -2288,6 +2304,11 @@
 (defmethod __iter__ ((x py-list/tuple))
   (make-iterator-from-function
    (__iter__-fun x)))
+
+(defmethod map-over-py-object (fun (x py-list/tuple))
+  (loop for elm across (slot-value x 'vec)
+      do (funcall fun elm))
+  (values))
 
 (defmethod __len__ ((x py-list/tuple))
   (length (slot-value x 'vec)))
@@ -3859,6 +3880,14 @@
 	 (prog1 i
 	   (incf i step)))))))
 
+(defmethod map-over-py-object (fun (x py-xrange))
+  (with-slots (start stop step) x
+    (loop with i = start
+	until (= i stop)
+	do (funcall fun i)
+	   (incf i step)))
+  (values))
+
 (defmethod __getitem__ ((x py-xrange) index)
   (ensure-py-type index integer
 		  "index arguments to xrange[] must be int (got: ~A)")
@@ -4111,6 +4140,7 @@
   (:method ((x number)) t)
   (:method ((x string)) t)
   (:method ((x symbol)) t)
+  (:method ((x function)) t)
   (:method (x) (declare (ignore x)) nil))
 
 

@@ -14,7 +14,6 @@
 ;; USER-DEFINED-FUNCTION is used for representing all functions
 ;; defined while running Python.
 
-
 (defclass python-function (builtin-instance)
   ((ast             :initarg :ast   
 		    :documentation "AST of the function code")
@@ -26,10 +25,24 @@
 		    :documentation "The namespace in which the function code is ~
                                     executed (the lexical scope -- this is not ~
                                     func.__dict__)")
-   (name :initarg :name :initform "<no name>"))
+   (name :initarg :name :initform "<no name>")
+   
+   ;; update internal data structure that keeps track of function calling
+   #+(or)(id :initform (new-python-function-defined)))
   (:metaclass builtin-class))
 
 (mop:finalize-inheritance (find-class 'python-function))
+
+
+;; namespace reuse optimization hack
+
+#+(or)
+(defvar *python-function-counter* 0)
+
+#+(or)
+(defun new-python-function-defined ()
+  (prog1 *python-function-counter*
+    (incf *python-function-counter*)))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;

@@ -72,6 +72,7 @@
 (defmethod py-eval-1 ((x python-type))   x)
 (defmethod py-eval-1 ((x number))        x)
 (defmethod py-eval-1 ((x string))        x)
+(defmethod py-eval-1 ((x function))      x)
 (defmethod py-eval-1 ((x symbol))
   (unless x (warn "py-eval of NIL"))  ;; TODO check NIL as identifier
   x)  ;; string designator
@@ -1279,15 +1280,16 @@
   (destructuring-bind (targets sources suite else-suite) targets-sources-suite-else-suite
     (let ((take-else t))
       (catch 'break
-	(map-over-py-object
-	 (lambda (x) (setf take-else nil)
-		 (eval-real-assign-expr targets x)
-		 (catch 'continue
-		   (py-eval-1 suite)))
-	 (py-eval-1 sources))
-	(when (and take-else
-		   else-suite)
-	  (py-eval-1 else-suite))))))
+	(let ((f (lambda (x) 
+		   (setf take-else nil)
+		   (eval-real-assign-expr targets x)
+		   (catch 'continue
+		     (py-eval-1 suite)))))
+	  (declare (dynamic-extent f))
+	  (map-over-py-object f (py-eval-1 sources))))
+      (when (and take-else
+		 else-suite)
+	(py-eval-1 else-suite)))))
 
 (defun eval-while (test-suite-else-suite)
   (destructuring-bind (test suite else-suite) test-suite-else-suite
@@ -1341,16 +1343,20 @@
 
 (defun read-file (filename)
   (with-open-file (stream filename :direction :input)
-    (let ((res (make-array (or (file-length stream)
-			       10000)
-			   :element-type 'character
-			   :fill-pointer 0
-			   :adjustable t)))
-      (let ((c (read-char stream nil nil)))
-	(loop while c do
-	      (vector-push-extend c res)
-	      (setf c (read-char stream nil nil))))
-      res)))
+    (let ((len (file-length stream)))
+      (if len
+	  
+	  ;; length known beforehand
+	  (let ((res (make-array len :element-type 'character)))
+	    (loop for i from 0 below len
+		do (setf (aref res i) (read-char stream)))
+	    res)
+	
+	(let ((res (make-array 1000 :element-type 'character :adjustable t :fill-pointer 0)))
+	  (loop with c = (read-char stream nil nil)
+	      while c do (vector-push-extend c res)
+			 (setf c (read-char stream nil nil)))
+	  res)))))
 
 (defun make-module-object (module-name)
   (let* ((file-name (concatenate 'string (string module-name) ".py")))
@@ -1387,6 +1393,10 @@
        (eq (excl.osi:stat-type (excl.osi:stat path)) :file)))
 
 
+(defmethod load-py-source-file ((mod-name string) (paths list) &key (module-ok t) (package-ok t))
+  (load-py-source-file (intern mod-name #.*package*) paths
+		       :module-ok module-ok :package-ok package-ok))
+		       
 (defmethod load-py-source-file ((mod-name symbol) (paths list)
 				&key (module-ok t) (package-ok t))
   

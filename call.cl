@@ -20,10 +20,8 @@
 (defmethod py-call ((x lisp-function-accepting-kw-args) &optional pos-arg kwd-arg)
   (funcall (slot-value x 'func) pos-arg kwd-arg))
 
-
-;;; user-defined functions/methods:   
-
-(defmethod py-call ((x user-defined-function) &optional pos-args key-args)
+    
+(defmethod py-call ((x python-function) &optional pos-args key-args) ;; was: user-defined-function
   "Evaluate function body in function definition namespace."
   
   ;; If the AST contains `return', it exists from this FUNCTION-BLOCK
@@ -32,10 +30,10 @@
   ;; When the function doesn't do `return', None is returned implicitly.
   ;; 
   ;; TODO: rewrite function body to contain block as `return' target
-
+  
   (with-slots (call-rewriter namespace ast) x
     (let ((actual-args (funcall call-rewriter pos-args key-args))
-	  (namespace-copy (namespace-copy namespace)))
+	  (namespace-to-use (namespace-copy namespace)))
       
       ;; Copying the function namespace for every call is expensive,
       ;; but otherwise recursive programs don't work right as
@@ -45,29 +43,54 @@
       ;; extended with the current argument values.
       
       (loop for (arg . val) in actual-args
-	  do (namespace-bind namespace-copy arg val))
+	  do (namespace-bind namespace-to-use arg val))
       
-      (let ((*scope* namespace-copy))
+      (let ((*scope* namespace-to-use))
 	(declare (special *scope*))
+	
 	(catch 'function-block
 	  (py-eval-1 ast))))))
 
+(defmethod py-call ((x py-lambda-function) &optional pos-args key-args)
+  "Evaluate function body in function definition namespace."
 
-(defmethod py-call ((x python-function) &optional pos-args key-args)
-
-  ;; used in user-defined functions
   (with-slots (call-rewriter namespace ast) x
-    (let ((actual-args (funcall call-rewriter pos-args key-args)))
+    (let ((actual-args (funcall call-rewriter pos-args key-args))
+	  (namespace-to-use namespace)) ;; not a copy
+      
+      ;; Copying the function namespace for every call is expensive,
+      ;; but otherwise recursive programs don't work right as
+      ;; different calls mess with each others local variables.
       
       ;; Evaluate function AST in the function definition namespace
       ;; extended with the current argument values.
-
-      (loop for (arg . val) in actual-args
-	  do (namespace-bind namespace arg val))
       
-      (let ((*scope* namespace))
+      (loop for (arg . val) in actual-args
+	  do (namespace-bind namespace-to-use arg val))
+      
+      (let ((*scope* namespace-to-use))
 	(declare (special *scope*))
+	
+	;; no catch function block needed
 	(py-eval-1 ast)))))
+
+
+#+(or)
+(defmethod py-call ((x python-function) &optional pos-args key-args)
+      
+      ;; used in user-defined functions
+      (with-slots (call-rewriter namespace ast) x
+	(let ((actual-args (funcall call-rewriter pos-args key-args)))
+	  
+	  ;; Evaluate function AST in the function definition namespace
+	  ;; extended with the current argument values.
+	  
+	  (loop for (arg . val) in actual-args
+	      do (namespace-bind namespace arg val))
+	  
+	  (let ((*scope* namespace))
+	    (declare (special *scope*))
+	    (py-eval-1 ast)))))
 
 
 (defmethod py-call ((x python-function-returning-generator) &optional pos-args key-args)
@@ -146,6 +169,10 @@
 	     kwd-args)))
 
 
+(defmethod py-call-class ((cls class) pos-args kwd-args)
+  (or (call-attribute-via-class cls '__call__ pos-args kwd-args)
+      (error "cls of ~A, (p: ~A, l: ~A), has no __call__ method?" cls (__class__ cls) (class-of cls))))
+#+(or)
 (defmethod py-call-class ((cls udc-with-ud-metaclass) pos-args kwd-args)
   (or (call-attribute-via-class cls '__call__ pos-args kwd-args)
       (error "cls of ~A, (p: ~A, l: ~A), has no __call__ method?" cls (__class__ cls) (class-of cls))))

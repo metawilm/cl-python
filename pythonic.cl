@@ -8,6 +8,8 @@
    where STRING with FORMAT-ARGS is the exception argument."
   `(error ,exc-type :args (format nil ,string ,@format-args)))
 
+(defun py-raise-1 (exc-type string &rest format-args)
+  (error exc-type :args (apply #'format nil string format-args)))
 
 ;; XXX All uses of PY-ITERATE should be changed to use GET-PY-ITERATE-FUN instead.
 ;; There's no need for this macro, and this macro is even incorrect in that it calls __iter__.
@@ -198,13 +200,6 @@
       while val do (funcall fun val)
 		   (setf val (funcall f)))
   (values))
-
-(eval-when (:execute) ;; TODO: change load order, remove EVAL-WHEN
-  (defmethod map-over-py-object (fun (x py-list/tuple))
-    (loop for elm across (slot-value x 'vec)
-	do (funcall fun elm))
-    (values)))
-
 
 (defmacro ensure-py-type (vars cl-type err-str)
   "Ensure that all vars in VARS are a designator for CL-TYPE, if so SETF all vars

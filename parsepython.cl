@@ -421,7 +421,7 @@
  (:gen-iter?)
  (testlist1 (test |,--test*|) (`(,$1 ,@(when $2 $2)))))
 
-
+(build-grammar python-grammar t t)
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; AST manipulating
@@ -448,26 +448,50 @@
 |#
 
 
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Lexer
+
 (defvar *tab-width-spaces* 8)
+
 
 (defmacro read-char-nil ()
   "Returns a character, or NIL on eof"
   `(read-char *standard-input* nil nil t))
 
+(defmacro read-char-error ()
+  `(or (read-char-nil)
+       (error "Unexpected end of file")))
+
+(defmacro char-member (ch list)
+  (let ((char '#:char))
+    `(let ((,char ,ch))
+       (and ,char (member ,char ,list :test #'char=)))))
+
+
+(defun raise-syntax-error (s &rest args)
+  ;; Raise SyntaxError, if available
+  (let ((s-err (find-class 'SyntaxError nil))
+	(s (apply #'format nil s args)))
+    (if s-err
+	(error 'SyntaxError :args s)
+      (error (concatenate 'string "SyntaxError: " s)))))
+
+;; Identifier
 
 (defmacro identifier-char1-p (c)
   "Says whether C is a valid character to start an identifier with. ~@
    C must be either a character or nil."
   `(and ,c
        (or (alpha-char-p ,c)
-	   (eql ,c #\_))))
+	   (char= ,c #\_))))
 
 (defmacro identifier-char2-p (c)
   "Says whether C is a valid character to occur in an identifier as ~@
    second or later character. C must be either a character or nil."
   `(and ,c
        (or (alphanumericp ,c)
-	   (eql ,c #\_))))
+	   (char= ,c #\_))))
 
 (defun read-identifier (first-char)
   "Returns the identifier read as string. ~@
@@ -489,11 +513,7 @@
     (intern (simple-string-from-vec res) #.*package*)))
 
 
-;;; STRINGS
-
-(defun read-char-error ()
-  (or (read-char-nil)
-      (error "Unexpected end of file")))
+;; String
 
 (defun simple-string-from-vec (vec)
   (make-array (length vec)
@@ -505,8 +525,8 @@
   ;; Rules:
   ;; <http://meta.kabel.utwente.nl/specs/Python-Docs-2.3.3/ref/strings.html>
 
-  (assert (member first-char '(#\' #\") :test 'eql))
-    
+  (assert (char-member first-char '( #\' #\" )))
+  
   (when raw
     ;; Include escapes literally in the resulting string.
       
@@ -529,22 +549,24 @@
 			   with ch = (read-char-error)
 			   do (setf code (+ (* code 16)
 					    (or (digit-char-p ch 16)
-						(py-raise 'SyntaxError
-							  "Non-hex digit in \"\u...\": ~S" ch)))
+						(raise-syntax-error
+						 "Non-hex digit in \"\u...\": ~S" ch)))
 				    ch (read-char-error))
 			   finally (vector-push-extend (code-char code) res))
 		       
 		     (vector-push-extend #\u res))
 		   (setf num-bs 0))
 	       
-	     ((#\' #\") (cond ((and (char= ch first-char)
-				    (> num-bs 0))         (progn (vector-push-extend ch res)
-				    (setf num-bs 0)))
-			      ((char= ch first-char)      (return-from read-string
-							    (simple-string-from-vec res)))
-			      (t                          (vector-push-extend ch res)
-							  (setf num-bs 0))))
-	       
+	     ((#\' #\") (cond ((and (char= ch first-char) (> num-bs 0))         
+			       (vector-push-extend ch res)
+			       (setf num-bs 0))
+			      
+			      ((char= ch first-char)
+			       (return-from read-string (simple-string-from-vec res)))
+			      (t
+			       (vector-push-extend ch res)
+			       (setf num-bs 0))))
+	     
 	     (t (vector-push-extend ch res)
 		(setf num-bs 0)))
 	     
@@ -574,7 +596,7 @@
        
      (t ;; Non-empty string with one starting quote, possibly containing escapes
       (unless third
-	(py-raise 'SyntaxError "Quoted string not finished"))
+	(raise-syntax-error "Quoted string not finished"))
       (let ((res (load-time-value
 		  (make-array 30 :element-type 'character :adjustable t :fill-pointer 0)))
 	    (c third)
@@ -603,10 +625,11 @@
 		     
 		   (let ((ch2 (read-char-error))) 
 		     (unless (char= ch2 #\{)
-		       (py-raise 'SyntaxError
-				 "In Unicode string: \N{...} expected, but got ~S after \N" ch2))
+		       (raise-syntax-error
+			"In Unicode string: \N{...} expected, but got ~S after \N" ch2))
 		     (loop with ch = (read-char-error)
-			 with vec = (make-array 10 :element-type 'character :adjustable t :fill-pointer 0)
+			 with vec = (make-array 10 :element-type 'character
+						:adjustable t :fill-pointer 0)
 			 while (char/= ch #\}) do
 			   (vector-push-extend (if (char= ch #\space) #\_ ch) vec)
 			   (setf ch (read-char-error))
@@ -626,8 +649,7 @@
 				 do (setf ch   (read-char-error)
 					  code (+ (* 16 code) 
 						  (or (digit-char-p ch 16)
-						      (py-raise
-						       'SyntaxError
+						      (raise-syntax-error
 						       "Non-hex digit in \"\~A...\": ~S" c ch))))
 				 finally (vector-push-extend (code-char code) res))
 			     
@@ -649,11 +671,14 @@
 	      (#\x (let* ((a (read-char-error)) ;; char code: up to two hex digits
 			  (b (read-char-error)))
 		     
-		     (cond ((not (digit-char-p a 16)) (py-raise 'SyntaxError
-								"Non-hex digit found in \x..: ~S" a))
-			   ((digit-char-p b 16) (vector-push-extend (code-char (+ (* 16 (digit-char-p a 16))
-										  (digit-char-p b 16)))
-								    res))
+		     (cond ((not (digit-char-p a 16))
+			    (raise-syntax-error "Non-hex digit found in \x..: ~S" a))
+			   
+			   ((digit-char-p b 16)
+			    (vector-push-extend (code-char (+ (* 16 (digit-char-p a 16)) 
+							      (digit-char-p b 16)))
+						res))
+			   
 			   (t (vector-push-extend (digit-char-p a 16) res)
 			      (unread-char b)))))
 	        
@@ -676,6 +701,8 @@
 	      
 	  (setf c (read-char-error))))))))
 
+
+;; Number
 
 ;; integers:     input  -> base-10 val  system used
 ;;                 11           11         10 (decimal)
@@ -726,8 +753,9 @@
 	
     (flet ((read-int (&optional (res 0))
 	     
-	     ;; This version calls the Lisp reader on the string with numbers
-	     (loop with vec = (make-array 5 :adjustable t :fill-pointer 0 :element-type 'character)
+	     ;; This version calls the Lisp reader on the string with digits
+	     (loop with vec = (make-array 5 :adjustable t :fill-pointer 0
+					  :element-type 'character)
 		 with ch = (read-char-nil)
 			   
 		 initially 
@@ -743,7 +771,9 @@
 			 (let ((*read-base* base))
 			   (return (read-from-string vec))))
 	     
-	     #+(or) ;; Equivalent code, but not calling the lisp reader, so slightly slower than the above.
+	     #+(or)
+	     ;; Equivalent code, but not calling the lisp reader, so
+	     ;; slightly slower than the above.
 	     (loop with ch = (read-char-nil)
 			while (and ch (digit-char-p ch base))
 			do (setf res (+ (* res base) (digit-char-p ch base))
@@ -757,7 +787,7 @@
 	  (let ((second (read-char-nil)))
 	    (setf res (cond ((null second) 0) ;; eof
 			     
-			    ((member second '(#\x #\X))
+			    ((char-member second '(#\x #\X))
 			     (setf base 16)
 			     (read-int))
 			    
@@ -772,8 +802,9 @@
 			    ((digit-char-p second 10) 
 			     (read-int (digit-char-p second 10)))
 			    
-			    ((member second '(#\j #\J))  (complex 0 0))
-			    ((member second '(#\l #\L))  0)
+			    ((char-member second '(#\j #\J))  (complex 0 0))
+			    ((char-member second '(#\l #\L))  0)
+			    
 			    (t (unread-char second)
 			       0)))) ;; non-number, like `]' in `x[0]'
 	
@@ -783,7 +814,7 @@
 	
 	(when (= base 10)
 	  (let ((dot? (read-char-nil)))
-	    (if (eql dot? #\.)
+	    (if (and dot? (char= dot? #\.))
 		
 		(progn
 		  (setf has-frac t)
@@ -811,7 +842,7 @@
 	;; exponent marker
 	(when (= base 10)
 	  (let ((ch (read-char-nil)))
-	    (if (member ch '(#\e #\E))
+	    (if (char-member ch '(#\e #\E))
 		
 		(progn
 		  (setf has-exp t)
@@ -825,17 +856,16 @@
 		     ((char= ch2 #\-)       (setf minus t))
 		     ((digit-char-p ch2 10) (setf exp (digit-char-p ch2 10)
 						  got-num t))
-		     (t (py-raise 'SyntaxError
-				  "Exponent for literal number invalid: ~A ~A" ch ch2)))
+		     (t (raise-syntax-error 
+			 "Exponent for literal number invalid: ~A ~A" ch ch2)))
 		  
 		    (unless got-num
 		      (let ((ch3 (read-char-error)))
 			(if (digit-char-p ch3 10)
 			    (setf exp (+ (* 10 exp) (digit-char-p ch3 10)))
-			  (py-raise 'SyntaxError
-				    "Exponent for literal number invalid: ~A ~A ~A"
-				    ch ch2 ch3))))
-		  
+			  (raise-syntax-error
+			   "Exponent for literal number invalid: ~A ~A ~A" ch ch2 ch3))))
+		    
 		    (loop with ch
 			while (and (setf ch (read-char-nil))
 				   (digit-char-p ch 10))
@@ -857,40 +887,39 @@
 	;; suffix `L' for `long integer'
 	(unless (or has-frac has-exp)
 	  (let ((ch (read-char-nil)))
-	    (if (and (not (member ch '(#\l #\L)))
-		     ch)
+	    (if (and ch 
+		     (not (char-member ch '(#\l #\L))))
 		(unread-char ch))))
 		
 	;; suffix `j' means imaginary
 	(let ((ch (read-char-nil)))
-	  (if (member ch '(#\j #\J))
+	  (if (char-member ch '(#\j #\J))
 	      (setf res (complex 0 res))
 	    (when ch (unread-char ch)))))
 		
       res)))
 		
-		
 
-;;; punctuation
+;;; Punctuation
 
 (defmacro punct-char1-p (c)
   `(and ,c
-	(find ,c "`=[]()<>{}.,:|^&%+-*/~;@")))
+	(position ,c "`=[]()<>{}.,:|^&%+-*/~;@")))
 
 (defmacro punct-char-not-punct-char1-p (c)
   "Punctuation  !  may only occur in the form  !=  "
   `(and ,c
-	(char= ,c #\!)))
+	(char= ,c #\! )))
 
 (defmacro punct-char2-p (c1 c2)
   "Recognizes: // << >>  <> !=  <= >=
                == += -= *= /= %=  ^= |= &= ** **= <<= >>= "
   `(and ,c1 ,c2
 	(or (and (char= ,c2 #\= )
-		 (member ,c1 '( #\+ #\- #\* #\/ #\%  #\^ #\&
-			       #\| #\! #\= #\< #\> )))
+		 (char-member ,c1 '( #\+ #\- #\* #\/ #\%  #\^ #\&
+				    #\| #\! #\= #\< #\> )))
 	    (and (char= ,c1 ,c2)
-		 (member ,c1 '( #\* #\< #\> #\/ #\< #\> )))
+		 (char-member ,c1 '( #\* #\< #\> #\/ #\< #\> )))
 	    (and (char= ,c1 #\< )
 		 (char= ,c2 #\> )))))
 
@@ -899,7 +928,7 @@
   `(and ,c1 ,c2 ,c3
 	(char= ,c3 #\= )
 	(char= ,c1 ,c2)
-	(member ,c1 '( #\* #\< #\> #\/ ))))
+	(char-member ,c1 '( #\* #\< #\> #\/ ))))
 
 (defun read-punctuation (c1)
   "Returns puncutation as symbol."
@@ -942,15 +971,6 @@
 	  (error
 	   "Character `!' may only occur as in `!=', not standalone"))))))
 
-#+(or)
-(defun punctuation->token (punc-str)
-  " Punctuation
-      1 char:  =[]()<>{}.,:|^%+-*/~  and also: ;
-      2 chars: != // << >>  <> !=
-               += -= *= /= %=  ^= |=  **= <<= >>=
-      3 chars: **= <<= >>=  "
-  (intern punc-str #.*package*))
-
 
 (defun read-whitespace ()
   "Reads all whitespace and comments, until first non-whitespace ~@
@@ -992,62 +1012,7 @@
     (when c
       (unread-char c))))
 
-#+(or)
-(defun test-prog ()
-"if a == 2:
-   if b > 3:
-      pass
-   else:
-      pass
- else:
-   pass")
 
-#+(or)
-(defun test-prog ()
-"if a == 2:
-   b = 24
-   if b > 3:
-      pass
-   else:
-      pass
- else:
-   pass")
-
-#+(or)
-(defun test-prog ()
-"def foo(a, b):
-   if a == 1:
-      a = 2
-      if b > 3:
-         3 + 23
-         b
-      else:
-         6 + 23
-         a = 5
-         return a
-   elif a == 6:
-      pass71
-      pass72
-   elif a == 8:
-      b = 9
-   else:
-      pass10
-      pass11")
-
-#+(or)
-(defun test-prog ()
-"def foo(a, b):
-   if a == 2:
-      a = 4
-      if b > 3:
-         return a + b
-      else:
-         return 'bazzz'
-   else:
-      return 42")
-
-
-;;; tests
 
 
 (defvar *lex-debug* nil)
@@ -1084,9 +1049,6 @@
 		     
 		     (find-token-code (token) ;; (find-token-code name)
 		       `(tcode-1 (load-time-value (find-class 'python-grammar)) ,token))
-		     
-		     (char-member (ch list)
-		       `(member ,ch ,list :test #'char=))
 		     
 		     (member-eq (item list)
 		       `(member ,item ,list :test #'eq)))
@@ -1140,8 +1102,9 @@
 			   (let ((is-unicode (member-eq token '(u U  ur uR Ur UR)))
 				 (is-raw     (member-eq token '(r R  ur uR Ur UR)))
 				 (ch (read-char-nil)))
-			     (if (and ch (char-member ch '(#\' #\")))
-				 (lex-return string (read-string ch :unicode is-unicode :raw is-raw))
+			     (if (char-member ch '(#\' #\"))
+				 (lex-return string
+					     (read-string ch :unicode is-unicode :raw is-raw))
 			       (progn
 				 (when ch (unread-char ch))
 				 (lex-return identifier token)))))
@@ -1184,8 +1147,7 @@
 		  (multiple-value-bind (newline new-indent)
 		      (read-whitespace)
 		    
-		    (when (or (not newline)
-			      open-lists)
+		    (when (or (not newline) open-lists)
 		      (go next-char))
 		    
 		    ;; Return Newline now, but also determine if
@@ -1247,4 +1209,4 @@
 (defun parse-python-string-literal (string)
   (second (py-eval (parse-python-string string))))
 
-(build-grammar python-grammar t t)
+

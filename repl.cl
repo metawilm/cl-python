@@ -131,8 +131,10 @@
 		      (when ast
 			(assert (eq (first ast) 'file-input))
 			(when (and (= (length ast) 2)
-				   (member (caar (second ast))
-					   '(testlist assign-expr import del) :test 'eq))
+				   #+(or)(member (caar (second ast))
+						 '(testlist assign-expr import del) :test 'eq)
+				   (not (member (caar (second ast))
+						'(try-except for-in funcdef classdef if while))))
 			  (show-ast ast)
 			  (eval-print-ast ast)
 			  (setf acc nil)))))))))))))))

@@ -598,22 +598,29 @@
   (flet ((range-2 (start stop step)
 	   (ensure-py-type (start stop step) integer
 			   "arguments to range() must be int (got: ~A)")
-	   (make-py-list-from-list
-	    (cond
-	     
-	     ((and (< start stop) (< 0 step))
-	      (loop for i from start below stop by step
-		  collect i))
-	     
-	     ((and (> start stop) (> 0 step))
-	      (loop for i from start above stop by (- step)
-		  collect i))
-	     
-	     (t ())))))
+	   (cond ((and (< start stop) (< 0 step))
+		  (setf stop (1- stop))
+		  (let* ((len (floor (1+ (/ (- stop start) step))))
+			 (vec (make-array len :adjustable t :fill-pointer len)))
+		    (loop for i from 0
+			for k from start to stop by step
+			do (setf (aref vec i) k))
+		    vec))
+		 
+		 ((and (> start stop) (> 0 step))
+		  (setf stop (1+ stop))
+		  (let* ((len (floor (1+ (/ (- stop start) step))))
+			 (vec (make-array len :adjustable t :fill-pointer len)))
+		    (loop for i from 0
+			for k from start downto stop by (- step)
+			do (setf (aref vec i) k))
+		    vec))
+		 
+		 (t (make-array 0 :adjustable t :fill-pointer 0)))))
     
-    (cond (z (range-2 x y z))
-	  (y (range-2 x y 1))
-	  (t (range-2 0 x 1)))))
+    (make-py-list (cond (z (range-2 x y z))
+			(y (range-2 x y 1))
+			(t (range-2 0 x 1))))))
 
 
 (defmethod pyb:raw_input (&optional prompt)
