@@ -822,23 +822,11 @@
     (terpri)))
 
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Utils
 
-(defun subst-treelist (old new tree)
-  "Like SUBST, but works on lists with N elements instead of conses ~@
-   with CAR,CDR branches."
-  (cond ((equal old tree)
-	 new)
-	((atom tree) tree)
-	((consp (cdr tree))
-	 (mapcar (lambda (tr) (subst-treelist old new tr))
-		 tree))
-	(t tree)))
 
-(defun subst-treelist-all (repl tree)
-  "REPL is ASSOC list with (old . new) pairs"
-  (loop for (old . new) in repl
-      do (setf tree (subst-treelist old new tree))
-      finally (return tree)))
+
+
+
+
+
 
