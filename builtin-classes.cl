@@ -1589,23 +1589,211 @@
 (register-bi-class-attr/meth (find-class 'static-method) '__get__ #'__get__)
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Slice object
+;; 
+;; Denotes sub-items of a sequence-like object.
+;; 
+;; slice( [start,] stop [, step )
+;;
+;; foo[a] -> foo.__getitem__(a)
+;; foo[a:b] -> foo.__getitem__( slice(a,b,None) )
+;; foo[a:b:c] -> foo.__getitem__( slice(a,b,c) )
+;; 
+;; However, there's interplay with `Ellipsis':
+;; 
+;; foo[1:2,...,4:3]
+;;  -> foo.__getitem__(
+;;           (slice(1, 2, None), Ellipsis, slice(4, 3, None))  <-- tuple!
+;;     )
+
+(defclass py-slice (builtin-instance)
+  ((start :initarg :start) ;; these can be any type
+   (stop  :initarg :stop)
+   (step :initarg :step))
+  (:metaclass builtin-class))
+
+(mop:finalize-inheritance (find-class 'py-slice))
+
+(defun make-slice (x &optional y z)
+  ;; X,Y,Z don't have to be integers
+  (cond (z (make-instance 'py-slice  :start x       :stop y  :step z))
+	(y (make-instance 'py-slice  :start x       :stop y  :step *None*))
+	(t (make-instance 'py-slice  :start *None*  :stop x  :step *None*))))
+
+(defmethod print-object ((x py-slice) stream)
+  (print-unreadable-object (x stream :type t)
+    (with-slots (start stop step) x
+      (format stream ":start ~A  :stop ~A  :step ~A" start stop step))))
+
+(defmethod indices ((x py-slice) length)
+  "Return tuple with three integers: start, stop, step.~@
+   In case of empty range, returns (length,length,1)."
+  (multiple-value-bind (start stop step)
+      (slice-indices x length)
+    (make-tuple start stop step)))
+
+(defmethod slice-indices ((x py-slice) length)
+  "Return 1 or 4 values (nonempty, start, stop, step) indicating requested slice.
+   nonempty: T or nil
+   if nonempty is T: START is the index of the first item of the resulting slice
+                     STOP the index of the last item
+                     STEP the amount by which to increase each time (can be negative; is not zero)
+                     if step > 0:
+                       0 <= start <= stop <= length-1
+                     if step < 0:
+                       0 <= stop <= start <= length-1"
+
+  ;; CPython doesn't define the outcome of this method exactly. Like,
+  ;; where is this documented:
+  ;; 
+  ;;  >>> s = slice(10,15,-1)
+  ;;  >>> s.indices(5)
+  ;;  (4, 5, -1)
+  ;; 
+  ;; (For such cases, maybe Python should have a way to specify 'empty
+  ;; slice', for clarity.)
+  ;; 
+  ;; Here's what we do, for slice [x:y:s] and len L. (For CPython
+  ;; compatibility, indices are required to be integers.)
+  ;; 
+  ;;  s == 0        [1:10: 0]  => error
+  ;; 
+  ;; Then, if X or Y is < 0, one time the length L is added to it.
+  ;; Then we proceed as follows:
+  ;; 
+  ;;  x == y        [4: 4: 1]  => empty slice (L,L,1)
+  ;;  x < y, s > 0  [2:10: 1]  => ok: (2,10,1)  (x < 0 => x = 0;  y > L => x = L)
+  ;;  x < y, s < 0  [1:10:-1]  => empty slice (L,L,1)
+  ;;  x > y, s < 0  [10:1:-2]  => ok: (10,1,-2)  (x > L => x = L;  y < 0 => y = 0)
+  ;;  x > y, s < 0  [10:1:-1]  => empty slice (L,L,1)
+  
+  (ensure-py-type length integer
+		  "Argument to 'indices' method must be integer (got: ~A)")
+  (let ((start (slot-value x 'start))
+	(stop  (slot-value x 'stop))
+	(step  (slot-value x 'step)))
+    
+    (if (eq start *None*)
+	(setf start 0)
+      (progn (ensure-py-type start integer "Slice indices must be integers (got: ~A)")
+	     (when (< start 0)
+	       (incf start length))))
+    
+    (if (eq stop *None*)
+	(setf stop length)
+      (progn (ensure-py-type stop integer "Slice indices must be integers (got: ~A)")
+	     (when (< stop 0)
+	       (incf stop length))))
+    
+    (if (eq step *None*)
+	(setf step 1)
+      (ensure-py-type step integer "Slice indices must be integers (got: ~A)"))
+    
+    (flet ((empty-slice ()
+	     (values nil)))
+      
+      (cond ((= step 0) 	  (py-raise 'ValueError "Slice step cannot be zero"))
+       	    
+	    ((= start stop)	  (empty-slice))
+            
+	    ((and (>= start length)
+		  (> step 0))     (empty-slice))
+	    
+	    ((and (< start 0)
+		  (< step 0))     (empty-slice))
+	    
+	    ((and (< start stop)
+		  (> step 0))	  (let ((start (max start 0))
+					(stop  (min stop length))
+					(real-stop (+ start (* step (floor (- stop 1 start)
+									   step)))))
+				    (assert (<= real-stop stop))
+				    (values t start real-stop step)))
+	    
+	    ((and (< start stop)
+		  (< step 0))	  (empty-slice))
+
+	    ((and (> start stop)
+		  (< step 0))	  (let ((start (min start length))
+					(stop  (max stop 0))
+					(real-stop (+ start (* step (floor (- stop -1 start)
+									   step)))))
+				    (assert (>= real-stop stop))
+				    (values t start real-stop step)))
+	    
+	    ((and (> start stop)
+		  (> step 0))	  (empty-slice))))))
+
+
+(defmethod extract-list-slice ((list cons) (slice py-slice))
+  "Given a (Lisp) list, extract the sublist corresponding to the slice as a fresh Lisp list."
+  (multiple-value-bind (nonempty start stop step)
+      (slice-indices slice (length list))
+    
+    (unless nonempty
+      (return-from extract-list-slice ()))
+    
+    (let ((in-reverse (< step 0)))
+      
+      (when in-reverse
+	(rotatef start stop)
+	(setf step (* -1 step)))
+      
+      (let* ((current (subseq list start (1+ stop)))
+	     (acc ())
+	     (i start))
+	(loop
+	  (push (car current) acc)
+	  (cond ((= i stop) (return-from extract-list-slice
+			      (if in-reverse
+				  acc
+				(nreverse acc))))
+		((null current) (error "internal error: slice indices incorrect")))
+	  (setf current (nthcdr step current))
+	  (incf i step))))))
+
+
+(defmethod extract-list-item-by-index ((list cons) (index integer))
+  ;; todo: support subclassed integers
+  (ensure-py-type index integer
+		  "internal error: ~A")
+  (let ((len (length list)))
+    
+    (when (< index 0)
+      (incf index len))
+    
+    (when (or (< index 0)
+	      (> index (1- len)))
+      (py-raise 'IndexError
+		"List index out of range (got: ~A, valid range: 0..~A)"
+		index (- len 1)))
+    
+    (nth index list)))
+
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; List
 ;; 
 ;; For now, implemented internally as a List consed list. Perhaps an
 ;; adjustable vector is more efficient.
 
+#+(or)
 (defclass py-list (builtin-instance)
   ((list :type list :initarg :list :initform ()))
   (:documentation "The List type")
   (:metaclass builtin-class))
 
+#+(or)
 (mop:finalize-inheritance (find-class 'py-list))
 
+#+(or)
 (defun make-py-list (&rest lst)
   "Make a Python list from the given CL list"
   (make-py-list-from-list lst))
 
 
+#+(or)
 (defun make-py-list-from-list (lst)
   (check-type lst list "A regular Lisp list")
   ;; XXX for now
@@ -1616,19 +1804,23 @@
   (make-instance 'py-list :list lst))
   
 
+#+(or)
 (defun make-py-list-from-vector (vec)
   (make-py-list-from-list (loop for x across vec collect x)))
 
 
+#+(or)
 (defmethod py-list-__new__ ((cls class) &rest args)
   (assert (subtypep cls 'py-list))
   (when args
     (warn "list.__new__ ignoring args: ~A" args))
   (make-instance cls))
 
+#+(or)
 (register-bi-class-attr/meth (find-class 'py-list) '__new__ (make-static-method #'py-list-__new__))
 
 		    
+#+(or)
 (defmethod __init__ ((x py-list) &rest args)
   (cond ((cdr args) (py-raise 'TypeError "list.__init__ takes at most 1 pos arg (got: ~A)" args))
 	((car args) (setf (slot-value x 'list) ;; override, not extend
@@ -1638,6 +1830,7 @@
   
 ;;;; magic methods
 
+#+(or)
 (defmethod __add__ ((x py-list) (y py-list))
   "structure is shared"
   (make-py-list-from-list
@@ -1646,9 +1839,11 @@
 ;; CPython lists: no __radd__ but do have __iadd__ - functionally,
 ;; that's not needed, but it is a tiny bit more efficient to have it. Don't for now...
 
+#+(or)
 (defmethod __cmp__ ((x py-list) (y py-list))
   (__cmp-list__ (slot-value x 'list) (slot-value y 'list)))
 
+#+(or)
 (defmethod __cmp-list__ (x y)
   "For tuples and lists: compare the underlying lists. If all elements ~@
    eq, longest wins, otherwise they are eq."
@@ -1663,12 +1858,14 @@
 	    ((< res 0) (return-from __cmp-list__ -1))
 	    ((> res 0) (return-from __cmp-list__ 1))))))
 
+#+(or)
 (defmethod __contains__ ((x py-list) item)
   (if (some (lambda (y) (__eq__ item y))
 	    (slot-value x 'list))
       *True*
     *False*))
 
+#+(or)
 (defmethod __delitem__ ((x py-list) item)
   (typecase item
     (py-int-designator (list-delitem-integer x item))
@@ -1676,6 +1873,7 @@
     (t (py-raise 'TypeError
 		 "List indices must be integers (got: ~A)" item))))
 
+#+(or)
 (defun list-delitem-integer (x index)
   (ensure-py-type index integer "internal error: ~A (list-delitem-integer)")
   (let* ((list (slot-value x 'list))
@@ -1696,6 +1894,7 @@
   x)
 
 
+#+(or)
 (defun list-delitem-slice (x slice)
   (declare (ignore x slice))
   ;; XXX needs work
@@ -1716,6 +1915,7 @@
 		     (((let ((n (nthcdr (
 					 ))))))))))))
 
+#+(or)
 (defmethod __eq__ ((x py-list) (y py-list))
   (let ((x-list (slot-value x 'list))
 	(y-list (slot-value y 'list)))
@@ -1727,10 +1927,12 @@
 		   y-list (cdr y-list)))
 	    (t (return-from __eq__ nil))))))
 
+#+(or)
 (defmethod __eq__ ((x py-list) y)
   (warn "py-list.__eq__ with non-list as y: ~A" y)
   nil)
        
+#+(or)
 (defmethod __getitem__ ((x py-list) item)
   (let ((list (slot-value x 'list)))
     (typecase item
@@ -1739,6 +1941,7 @@
       (t                 (py-raise 'TypeError
 				   "list.__getitem__: expected integer or slice (got: ~A)" item)))))
   
+#+(or)
 (defun list-getitem-integer (list index)
   (ensure-py-type index integer
 		  "internal error: ~A (list-getitem-integer)")
@@ -1752,30 +1955,37 @@
 		index len))
     (car (nthcdr index list))))
 
+#+(or)
 (defmethod __hash__ ((x py-list))
   (py-raise 'TypeError "List objects are unhashable"))
 
+#+(or)
 (defmethod __iter__ ((x py-list))
   (let ((list (slot-value x 'list))) ;; copy-tree ?!
     (make-iterator-from-function
      (lambda ()
        (pop list)))))
 
+#+(or)
 (defmethod __len__ ((x py-list))
   (length (slot-value x 'list)))
 
+#+(or)
 (defmethod __mul__ ((x py-list) (n integer))
   "structure is copied n times"
   ;; n <= 0 => empty list
   (make-py-list-from-list (loop for i from 1 to n
 			      append (slot-value x 'list))))
 
+#+(or)
 (defmethod __rmul__ ((x py-list) (n integer)) 
   (__mul__ x n))
 
+#+(or)
 (defmethod __nonzero__ ((x py-list))
   (lisp-val->py-bool (/= 0 (length (slot-value x 'list)))))
 
+#+(or)
 (defmethod __repr__ ((x py-list))
   (with-slots (list) x
     (format nil "[~{~/python:format-py-repr/~^, ~}]" list)))
@@ -1783,6 +1993,7 @@
 ;; to ease debugging, for now the in-place operations return the
 ;; (modified) list they work on
 
+#+(or)
 (defmethod __reversed__ ((x py-list))
   "Return a reverse iterator"
   ;; new in Py ?.?
@@ -1791,6 +2002,7 @@
      (lambda ()
        (pop rev)))))
 
+#+(or)
 (defmethod __setitem__ ((x py-list) item new-item)
   (typecase item
     (py-int-designator (list-setitem-integer x item new-item))
@@ -1798,6 +2010,7 @@
     (t (py-raise 'TypeError
 		 "List indices must be integers (got: ~A)" item))))
 	     
+#+(or)
 (defun list-setitem-integer (x index new-item)  
   (ensure-py-type index integer "List indices must be integers (got: ~A)")
   (let* ((list (slot-value x 'list))
@@ -1812,6 +2025,7 @@
     (setf (car (nthcdr index list)) new-item))
   x)
 
+#+(or)
 (defun list-setitem-slice (x slice new-items)
   (declare (ignore x slice new-items))
   (error "todo: setitem list slice")
@@ -1839,10 +2053,12 @@
 			(cdr new-last-cons) rest-cons)))))))
 
 
+#+(or)
 (defmethod __str__ ((x py-list))
   (format nil "[~:_~{~A~^, ~:_~}]"
 	  (mapcar #'__str__ (slot-value x 'list))))
 
+#+(or)
 (loop for name in '(__init__ __add__ __cmp__ __contains__ __delitem__ __eq__
 		    __getitem__ __hash__ __iter__ __len__ __mul__
 		    __rmul__ __nonzero__ __reversed__ __setitem__)
@@ -1851,6 +2067,7 @@
 
 ;;; list-specific methods
 
+#+(or)
 (defmethod list-append ((x py-list) y)
   (with-slots (list) x
     (if list
@@ -1858,14 +2075,17 @@
       (setf list (list y))))
   *None*)
 
+#+(or)
 (defmethod list-count ((x py-list) item)
   (loop for i in (slot-value x 'list)
       count (__eq__ i item)))
 
+#+(or)
 (defmethod list-extend ((x py-list) iterable)
   (setf (cdr (last (slot-value x 'list))) (py-iterate->lisp-list iterable))
   x)
 
+#+(or)
 (defmethod list-index ((x py-list) item &optional start stop)
   (let ((res (position-if (lambda (v) (__eq__ v item))
 			  (slot-value x 'list)
@@ -1879,6 +2099,7 @@
 		  "list.index(x): value ~A not found in this part of the list"
 		  item)))))
 
+#+(or)
 (defmethod list-insert ((x py-list) index object)
   (ensure-py-type index integer
 		  "list.insert(): index must be an integer (got: ~A)")
@@ -1892,6 +2113,7 @@
 	  (setf (cdr just-before) (cons object after))))))
   x)
 
+#+(or)
 (defmethod list-pop ((x py-list) &optional index)
   (let* ((list (slot-value x 'list))
 	 (len (length list)))
@@ -1921,18 +2143,21 @@
 		 (cadr cons-before)
 	       (setf (cdr cons-before) (cddr cons-before))))))))
 
+#+(or)
 (defmethod list-remove ((x py-list) item)
   "Remove first occurance of item"
   (setf (slot-value x 'list)
     (delete item (slot-value x 'list) :test #'__eq__ :count 1))
   x)
 
+#+(or)
 (defmethod list-reverse ((x py-list))
   "In-place"
   (setf (slot-value x 'list)
     (nreverse (slot-value x 'list)))
   x)
 
+#+(or)
 (defmethod list-sort ((x py-list) &optional (cmpfunc *None*))
   "Stable sort, in-place"
   (let ((lt-pred (if (eq cmpfunc *None*)
@@ -1947,6 +2172,7 @@
 ;; XXX "x < y" => operator.lt => uses __lt__ if defined, otherwise __cmp__
 ;; XXX __lt__ never falls back to __cmp__
 
+#+(or)
 (loop for (k v) in `((append  ,#'list-append)
 		     (count   ,#'list-count)
 		     (extend  ,#'list-extend)
@@ -2119,13 +2345,15 @@
   (assert (subtypep cls 'py-list))
   (make-instance cls))
 
-(defmethod __init__ ((x py-list) &optional iterable)
+(defmethod __init__ ((x py-list) &rest args)
   (let ((new-vec (make-array 10 :adjustable t :fill-pointer 0)))
-    (if iterable (loop with f = (get-py-iterate-fun iterable)
-		     with val = (funcall f)
-		     while val do (vector-push-extend new-vec val)
-				  (setf val (funcall f))))
-    (make-py-list new-vec)))
+    (cond ((null args) (make-py-list new-vec))
+	  ((cdr args) (py-raise 'TypeError
+				"list.__init__(): takes at most one pos arg (got: ~A)" args))
+	  (t (loop with f = (get-py-iterate-fun (car args))
+		 with val = (funcall f)
+		 while val do (vector-push-extend new-vec val)
+			      (setf val (funcall f)))))))
 
 ;; regular magic methods
 
@@ -2140,13 +2368,13 @@
 		      new-vec)))))
 
 (defmethod __cmp__ ((x py-list) (y py-list))
-  (seq-__cmp__ (slot-value x 'vec) (slot-value y 'vec)))
+  (__cmp__-vectors (slot-value x 'vec) (slot-value y 'vec)))
 
-(defmethod seq-__cmp__ ((x vector) (y vector))
+(defmethod __cmp__-vectors ((x vector) (y vector))
   "If all elements eq, longest wins, otherwise they are eq."
   (let ((x-len (length x)) (y-len (length y)))
     (cond ((= x-len y-len) (loop for xi across x 
-			       for yi across yi
+			       for yi across y
 			       do (unless (eq xi yi)
 				    (let ((res (pyb:cmp xi yi)))
 				      (cond ((= res 0)) ;; continue...
@@ -2156,77 +2384,312 @@
 	  ((< x-len y-len) -1)
 	  (t                1))))
 
-(defmethod __contains__ ((x py-list))
-  (if (member x (slot-value x 'vec) :test #'py-==) *True* *False*))
+(defmethod __contains__ ((x py-list) item)
+  (if (member item (slot-value x 'vec) :test #'py-==) *True* *False*))
 
 (defmethod __delitem__ ((x py-list) item)
-  (etypecase item
+  (typecase item
     (py-int-designator (list-delitem-integer x (py-int-designator-val item)))
     (py-slice (list-delitem-slice x item))
     (t (py-raise 'TypeError "list.__delitem__: expected integer of slice (got: ~A)" item))))
 
-(defun list-delitem-integer ((x py-list) (index integer))
+(defmethod list-delitem-integer ((x py-list) (index integer))
   (let* ((vec (slot-value x 'vec))
 	 (len (length vec)))
     (when (< index 0) 
       (incf index len))
     (unless (<= 0 index (1- len))
       (py-raise 'IndexError "List index out of range (got: ~A, len: ~A)" index len))
-    (loop for i from index below len
+    (loop for i from index below (1- len)
 	do (setf (aref vec i) (aref vec (1+ i))))
+    (setf (aref vec (1- len)) nil) ;; enable GC
     (decf (fill-pointer vec))))
 
-(defun list-delitem-slice ((x py-list) (slice py-slice))
-  (let ((vec (slot-value x 'vec)))
-    (multiple-value-bind (nonempty? start stop step) (slice-indices slice (length vec))
-      (when nonempty
-	(when (< step -1)
+(defmethod list-delitem-slice ((x py-list) (slice py-slice))
+  (let* ((vec (slot-value x 'vec))
+	 (len (length vec)))
+    (multiple-value-bind (nonempty? start stop step) (slice-indices slice len)
+      (when nonempty?
+	(when (< step 0)
 	  (rotatef start stop)
-	  (assert (<= 0 start stop (1- (len vec))))
-	  (loop for old-i from stop below (length vec)
+	  (assert (<= 0 start stop (1- len)))
+	  (loop for old-i from stop below len
 	      for new-i from start
-	      do (setf (aref vec new-i) (aref vec old-i)))
-	  (setf (fill-pointer vec) (- (fill-pointer vec) (- stop start))))))))
+	      do (shiftf (aref vec new-i) (aref vec old-i) nil)) ;; enable GC
+	  (setf (fill-pointer vec) (- len (- stop start))))))))
 
 (defmethod __eq__ ((x py-list) (y py-list))
-  (with-slots ((x-vec vec)) x
-    (with-slots ((y-vec vec)) y
-      (if (= (length x-vec) (length y-vec))
-	  (loop for xi across x-vec
-	      for yi across y-vec
-	      unless (py-== xi yi)
-	      do (return-from __eq__ *False*)
-	      finally (return *True*))
-	*False*))))
+  (if (eq x y)
+      *True*
+    (with-slots ((x-vec vec)) x
+      (with-slots ((y-vec vec)) y
+	(if (= (length x-vec) (length y-vec))
+	    (if (mismatch x-vec y-vec :test (lambda (x y) (or (eq x y) (py-== x y))))
+		*False*
+	      *True*)
+	  *False*)))))
 
 (defmethod __eq__ ((x py-list) y)
+  (declare (ignore y))
   *False*)
 
 (defmethod __getitem__ ((x py-list) item)
   (let ((vec (slot-value x 'vec)))
-    (etypecase item
-      (py-int-designator (let ((i (py-int-designator-val item)))
-			   (when (< i 0)
-			     (incf i (length vec)))
-			   (if (<= 0 i (1- (length vec)))
-			       (aref vec i)
-			     (py-raise 'IndexError "List index out of bounds (got: ~A, len: ~A)"
-				       i (length vec)))))
-      (py-slice (multiple-value-bind (nonempty? start stop step) (slice-indices item (length vec))
-		  (if nonempty?
-		      (let* ((slice-span (if (> step 0) (- stop start) (- start stop)))
-			     (slice-len (abs (/ slice-span step)))
-			     (new-vec (make-array slice-len :adjustable t :fill-pointer 0)))
-			(if (> step 0)
-			    (loop for i from start to stop by step
-				do (vector-push new-vec (aref vec i)))
-			  (loop for i from stop downto start by step
-			      do (vector-push new-vec (aref vec i))))
-			(make-py-list new-vec))
-		    (make-empty-py-list))))
+    (typecase item
+      
+      (py-int-designator
+       (let ((i (py-int-designator-val item)))
+	 (when (< i 0)
+	   (incf i (length vec)))
+	 (if (<= 0 i (1- (length vec)))
+	     (aref vec i)
+	   (py-raise 'IndexError "List index out of bounds (got: ~A, len: ~A)"
+		     i (length vec)))))
+      
+      (py-slice
+       (multiple-value-bind (nonempty? start stop step) (slice-indices item (length vec))
+	 (if nonempty?
+	     (let* ((slice-span (if (> step 0) (- stop start) (- start stop)))
+		    (slice-len (abs (/ slice-span step)))
+		    (new-vec (make-array slice-len :adjustable t :fill-pointer 0)))
+	       (if (> step 0)
+		   (loop for i from start to stop by step
+		       do (vector-push new-vec (aref vec i)))
+		 (loop for i from stop downto start by step
+		     do (vector-push new-vec (aref vec i))))
+	       (make-py-list new-vec))
+	   (make-empty-py-list))))
       (t (py-raise 'TypeError "list.__getitem__ expected integer or slice (got: ~A)" item)))))
 
-	       
+(defmethod __hash__ ((x py-list))
+  (py-raise 'TypeError "List objects are unhashable"))
+
+(defmethod __iter__ ((x py-list))
+  (let ((vec (slot-value x 'vec))
+	(i -1))
+    (make-iterator-from-function
+     (lambda ()
+       (if (<= 0 (incf i) (1- (length vec))) ;; may be modified in between
+	   (aref vec i)
+	 nil)))))
+
+(defmethod __len__ ((x py-list))
+  (length (slot-value x 'vec)))
+
+(defmethod __mul__ ((x py-list) n)
+  (setf n (py-int-designator-val n))
+  (if (<= n 0) 
+      (make-empty-py-list)
+    (let* ((vec (slot-value x 'vec))
+	   (len (length vec))
+	   (new-len (* n len))
+	   (new-vec (make-array new-len :adjustable t :fill-pointer new-len)))
+      (loop for copy from 0 below n
+	  do (loop for x across vec
+		 for i from 0
+		 do (setf (aref new-vec (+ (* len copy) i)) x)))
+      (make-py-list new-vec))))
+
+(defmethod __nonzero__ ((x py-list))
+  (if (= (length (slot-value x 'vec)) 0) *False* *True*))
+
+(defmethod __repr__ ((x py-list))
+  (with-slots (vec) x
+    (if (= (length vec) 0)
+	"[]"
+      (let* ((size-est (* (length vec) 4)) ;; just a guess
+	     (res (make-array size-est :adjustable t :fill-pointer 0
+			      :element-type 'character)))
+	(vector-push #\[ res)
+	(loop for item across vec
+	    do (loop for ch across (py-string-designator-val (py-repr item))
+		   do (vector-push-extend ch res)
+		      (vector-push-extend #\, res)
+		      (vector-push-extend #\Space res)))
+	(decf (fill-pointer res) 2)  ;; added ", " one time too many
+	(vector-push-extend #\] res)
+	res))))
+
+(defmethod __reversed__ ((x py-list))
+  "Return a reverse iterator"
+  (let* ((vec (slot-value x 'vec))
+	 (i (length vec)))
+    (make-iterator-from-function
+     (lambda ()
+       (if (<= 0 (decf i) (1- (length vec))) ;; may be modified in between
+	   (aref vec i)
+	 nil)))))
+
+(defmethod __setitem__ ((x py-list) item new-item)
+  (let* ((vec (slot-value x 'vec))
+	 (len (length vec)))
+    (typecase item
+      (py-int-designator
+       (let ((i (py-int-designator-val item)))
+	 (when (< i 0)	
+	   (incf i len))
+	 (if (<= 0 i (1- len))
+	     (setf (aref vec i) new-item)
+	   (py-raise 'ValueError "list.__setitem__: index out of range (got: ~A; len: ~A)"
+		     item len))))
+      
+      (py-slice 
+       (multiple-value-bind (nonempty? start stop step) (slice-indices new-item len)
+	 (declare (ignore nonempty?))
+	 (when step
+	   (error "todo: list.__setitem__ with slice with step"))
+	 (when (< step 0)
+	   (rotatef start stop))
+	 (let* ((old-slice-len (- stop start))
+		(source-vec (if (typep new-item 'py-list)
+				(slot-value new-item 'vec)
+			      (let ((tmp-vec (make-array 5 :adjustable t :fill-pointer 0))
+				    (iter-fun (get-py-iterate-fun new-item)))
+				(loop with val = (funcall iter-fun)
+				    while val do (vector-push-extend val tmp-vec)
+						 (setf val (funcall iter-fun))
+				    finally (return tmp-vec)))))
+		(new-slice-len (length source-vec))
+		(new-vec-len (- (+ len new-slice-len) old-slice-len)))
+	   
+	   (adjust-array vec new-vec-len)
+
+	   ;; make room for new slice, by moving data after insertion point to end of list
+	   (loop for src-i from stop to (1- len)
+	       for dest-i from (- new-vec-len (- (1- len) stop))
+	       do (setf (aref vec dest-i) (aref vec src-i)))
+	   
+	   ;; insert new slice
+	   (loop for i from start
+	       for x across source-vec
+	       do (setf (aref vec i) x))))))))
+
+(defmethod __str__ ((x py-list))
+  (with-slots (vec) x
+    (if (= (length vec) 0)
+	"[]"
+      (let* ((size-est (* (length vec) 4)) ;; just a guess
+	     (res (make-array size-est :adjustable t :fill-pointer 0
+			      :element-type 'character)))
+	(vector-push #\[ res)
+	(loop for item across vec
+	    do (loop for ch across (py-string-designator-val (py-str item))
+		   do (vector-push-extend ch res)
+		      (vector-push-extend #\, res)
+		      (vector-push-extend #\Space res)))
+	(decf (fill-pointer res) 2)  ;; added ", " one time too many
+	(vector-push-extend #\] res)
+	res))))
+
+
+;;; list-specific methods
+
+(defmethod list-append ((x py-list) item)
+  (vector-push-extend (slot-value x 'vec) item)
+  *None*)
+
+(defmethod list-count ((x py-list) item)
+  (loop for i across (slot-value x 'vec)
+      count (py-== i item)))
+
+(defmethod list-extend ((x py-list) (y py-list))
+  (with-slots ((x-vec vec)) x
+    (with-slots ((y-vec vec)) y
+      (loop for item across y-vec
+	  do (vector-push-extend item x-vec))))
+  *None*)
+   
+(defmethod list-extend ((x py-list) iterable)
+  (let ((iter-fun (get-py-iterate-fun iterable))
+	(vec (slot-value x 'vec)))
+    (loop with val = (funcall iter-fun)
+	while val do (vector-push-extend val vec)
+		     (setf val (funcall iter-fun))))
+  *None*)
+
+(defmethod list-index ((x py-list) item &optional start stop)
+  (or (position item (slot-value x 'vec) :test #'py-== :start (or start 0) :end stop)
+      (when start
+	(py-raise 'ValueError
+		  "list.index(x): value ~A not found in this part of the list" item))
+      (py-raise 'ValueError
+		"list.index(x): value ~A not found in this part of the list" item)))
+
+(defmethod list-insert ((x py-list) index object)
+  "Insert ITEM before INDEX"
+  (setf index (py-int-designator-val index))
+  (let* ((vec (slot-value x 'vec))
+	 (len (length vec)))
+    (when (< index 0) ;; XXX TODO make a method for this
+      (incf index len))
+    (when (> index len)
+      (setf index len))
+    (when (< index 0)
+      (setf index 0))
+    (assert (<= 0 index len))
+    
+    ;; make room; move items starting from the end; insert object
+    (vector-push-extend nil vec)
+    (loop for src-i from (1- len) downto index
+	do (setf (aref vec (1+ src-i))
+	     (aref vec src-i)))
+    (setf (aref vec index) object))
+  *None*)
+
+(defmethod list-pop ((x py-list) &optional index)
+  "Remove and return item at index (default: last item)"
+  (let* ((vec (slot-value x 'vec))
+	 (len (length vec))
+	 (index (if index
+		    (prog1 (setf index (py-int-designator-val index))
+		      (unless (<= 0 index (1- len))
+			(py-raise 'ValueError
+				  "list.pop(): index out of range (got: ~A; len: ~A)"
+				  index len)))
+		  (1- len))))
+    (when (= 0 len)
+      (py-raise 'IndexError "list.pop(): list is empty"))
+    
+    (prog1
+	(aref vec index)
+      (loop for i from index below (1- len)
+	  do (setf (aref vec i) (aref vec (1+ i))))
+      (setf (aref vec (1- len)) nil) ;; enable GC
+      (decf (fill-pointer vec)))))
+
+(defmethod list-remove ((x py-list) item)
+  "Remove first occurance of item"
+  (list-pop x (or (position item (slot-value x 'vec) :test #'py-==)
+		  (py-raise 'ValueError "list.remove(): item not in list (got: ~A)" item)))
+  *None*)
+
+(defmethod list-reverse ((x py-list))
+  "In-place"
+  (with-slots (vec) x
+    (setf vec (nreverse (slot-value x 'vec))))
+  *None*)
+
+(defmethod list-sort ((x py-list) &optional (cmpfunc *None*))
+  "Stable sort, in-place"
+  (let ((lt-pred (if (eq cmpfunc *None*)
+		     #'py-<
+		   (lambda (x y) (< (py-call cmpfunc (list x y)) 0)))))
+    (with-slots (vec) x
+      (setf vec (stable-sort vec lt-pred))))
+  *None*)
+
+(loop for (k v) in `((append  ,#'list-append)
+		     (count   ,#'list-count)
+		     (extend  ,#'list-extend)
+		     (index   ,#'list-index)
+		     (insert  ,#'list-insert)
+		     (pop     ,#'list-pop)
+		     (remove  ,#'list-remove)
+		     (reverse ,#'list-reverse)
+		     (sort    ,#'list-sort))
+    do (register-bi-class-attr/meth (find-class 'py-list) k v))
+
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Iterator
 ;; 
@@ -3290,189 +3753,6 @@
 (loop for name in '(__len__ __getitem__ __iter__)
     do (register-bi-class-attr/meth (find-class 'py-xrange) name (symbol-function name)))
 
-
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Slice object
-;; 
-;; Denotes sub-items of a sequence-like object.
-;; 
-;; slice( [start,] stop [, step )
-;;
-;; foo[a] -> foo.__getitem__(a)
-;; foo[a:b] -> foo.__getitem__( slice(a,b,None) )
-;; foo[a:b:c] -> foo.__getitem__( slice(a,b,c) )
-;; 
-;; However, there's interplay with `Ellipsis':
-;; 
-;; foo[1:2,...,4:3]
-;;  -> foo.__getitem__(
-;;           (slice(1, 2, None), Ellipsis, slice(4, 3, None))  <-- tuple!
-;;     )
-
-(defclass py-slice (builtin-instance)
-  ((start :initarg :start) ;; these can be any type
-   (stop  :initarg :stop)
-   (step :initarg :step))
-  (:metaclass builtin-class))
-
-(mop:finalize-inheritance (find-class 'py-slice))
-
-(defun make-slice (x &optional y z)
-  ;; X,Y,Z don't have to be integers
-  (cond (z (make-instance 'py-slice  :start x       :stop y  :step z))
-	(y (make-instance 'py-slice  :start x       :stop y  :step *None*))
-	(t (make-instance 'py-slice  :start *None*  :stop x  :step *None*))))
-
-(defmethod print-object ((x py-slice) stream)
-  (print-unreadable-object (x stream :type t)
-    (with-slots (start stop step) x
-      (format stream ":start ~A  :stop ~A  :step ~A" start stop step))))
-
-(defmethod indices ((x py-slice) length)
-  "Return tuple with three integers: start, stop, step.~@
-   In case of empty range, returns (length,length,1)."
-  (multiple-value-bind (start stop step)
-      (slice-indices x length)
-    (make-tuple start stop step)))
-
-(defmethod slice-indices ((x py-slice) length)
-  "Return 1 or 4 values (nonempty, start, stop, step) indicating requested slice.
-   nonempty: T or nil
-   if nonempty is T: START is the index of the first item of the resulting slice
-                     STOP the index of the last item
-                     STEP the amount by which to increase each time (can be negative; is not zero)
-                     if step > 0:
-                       0 <= start <= stop <= length-1
-                     if step < 0:
-                       0 <= stop <= start <= length-1"
-
-  ;; CPython doesn't define the outcome of this method exactly. Like,
-  ;; where is this documented:
-  ;; 
-  ;;  >>> s = slice(10,15,-1)
-  ;;  >>> s.indices(5)
-  ;;  (4, 5, -1)
-  ;; 
-  ;; (For such cases, maybe Python should have a way to specify 'empty
-  ;; slice', for clarity.)
-  ;; 
-  ;; Here's what we do, for slice [x:y:s] and len L. (For CPython
-  ;; compatibility, indices are required to be integers.)
-  ;; 
-  ;;  s == 0        [1:10: 0]  => error
-  ;; 
-  ;; Then, if X or Y is < 0, one time the length L is added to it.
-  ;; Then we proceed as follows:
-  ;; 
-  ;;  x == y        [4: 4: 1]  => empty slice (L,L,1)
-  ;;  x < y, s > 0  [2:10: 1]  => ok: (2,10,1)  (x < 0 => x = 0;  y > L => x = L)
-  ;;  x < y, s < 0  [1:10:-1]  => empty slice (L,L,1)
-  ;;  x > y, s < 0  [10:1:-2]  => ok: (10,1,-2)  (x > L => x = L;  y < 0 => y = 0)
-  ;;  x > y, s < 0  [10:1:-1]  => empty slice (L,L,1)
-  
-  (ensure-py-type length integer
-		  "Argument to 'indices' method must be integer (got: ~A)")
-  (let ((start (slot-value x 'start))
-	(stop  (slot-value x 'stop))
-	(step  (slot-value x 'step)))
-    
-    (if (eq start *None*)
-	(setf start 0)
-      (progn (ensure-py-type start integer "Slice indices must be integers (got: ~A)")
-	     (when (< start 0)
-	       (incf start length))))
-    
-    (if (eq stop *None*)
-	(setf stop length)
-      (progn (ensure-py-type stop integer "Slice indices must be integers (got: ~A)")
-	     (when (< stop 0)
-	       (incf stop length))))
-    
-    (if (eq step *None*)
-	(setf step 1)
-      (ensure-py-type step integer "Slice indices must be integers (got: ~A)"))
-    
-    (flet ((empty-slice ()
-	     (values nil)))
-      
-      (cond ((= step 0) 	  (py-raise 'ValueError "Slice step cannot be zero"))
-       	    
-	    ((= start stop)	  (empty-slice))
-            
-	    ((and (>= start length)
-		  (> step 0))     (empty-slice))
-	    
-	    ((and (< start 0)
-		  (< step 0))     (empty-slice))
-	    
-	    ((and (< start stop)
-		  (> step 0))	  (let ((start (max start 0))
-					(stop  (min stop length))
-					(real-stop (+ start (* step (floor (- stop 1 start)
-									   step)))))
-				    (assert (<= real-stop stop))
-				    (values t start real-stop step)))
-	    
-	    ((and (< start stop)
-		  (< step 0))	  (empty-slice))
-
-	    ((and (> start stop)
-		  (< step 0))	  (let ((start (min start length))
-					(stop  (max stop 0))
-					(real-stop (+ start (* step (floor (- stop -1 start)
-									   step)))))
-				    (assert (>= real-stop stop))
-				    (values t start real-stop step)))
-	    
-	    ((and (> start stop)
-		  (> step 0))	  (empty-slice))))))
-
-
-(defmethod extract-list-slice ((list cons) (slice py-slice))
-  "Given a (Lisp) list, extract the sublist corresponding to the slice as a fresh Lisp list."
-  (multiple-value-bind (nonempty start stop step)
-      (slice-indices slice (length list))
-    
-    (unless nonempty
-      (return-from extract-list-slice ()))
-    
-    (let ((in-reverse (< step 0)))
-      
-      (when in-reverse
-	(rotatef start stop)
-	(setf step (* -1 step)))
-      
-      (let* ((current (subseq list start (1+ stop)))
-	     (acc ())
-	     (i start))
-	(loop
-	  (push (car current) acc)
-	  (cond ((= i stop) (return-from extract-list-slice
-			      (if in-reverse
-				  acc
-				(nreverse acc))))
-		((null current) (error "internal error: slice indices incorrect")))
-	  (setf current (nthcdr step current))
-	  (incf i step))))))
-
-
-(defmethod extract-list-item-by-index ((list cons) (index integer))
-  ;; todo: support subclassed integers
-  (ensure-py-type index integer
-		  "internal error: ~A")
-  (let ((len (length list)))
-    
-    (when (< index 0)
-      (incf index len))
-    
-    (when (or (< index 0)
-	      (> index (1- len)))
-      (py-raise 'IndexError
-		"List index out of range (got: ~A, valid range: 0..~A)"
-		index (- len 1)))
-    
-    (nth index list)))
 
 
 
