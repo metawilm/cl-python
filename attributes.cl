@@ -147,6 +147,12 @@
     Does not raise AttributeError itself, but any Python exception could be
     raised in methods called in the process."))
 
+(defmethod internal-get-attribute :around (x attr)
+  (declare (ignore x))
+  (assert (symbolp attr))
+  (call-next-method))
+    
+
 (defmethod internal-get-attribute ((x number) attr)
   (getattr-of-number x attr))
 
@@ -176,6 +182,14 @@
 (defmethod internal-get-attribute ((x user-defined-class) attr)
   (getattr-of-class-rec x attr))
 
+(defmethod internal-get-attribute ((x py-module) attr)
+  (getattr-of-module x attr))
+
+
+(defmethod getattr-of-module ((x py-module) attr)
+  ;; XXX for now...
+  (namespace-lookup x attr))
+   
 
 (defmethod maybe-bind ((x function) instance class)
   (__get__ x instance class))
@@ -353,11 +367,17 @@
   (values nil nil))
 
 
+(defmethod getattr-of-class-rec :around ((cls user-defined-class) attr)
+  (if (member attr '(__dict__ __name__))
+      (values (slot-value cls attr)
+	      t)
+    (call-next-method)))
+	
 (defmethod getattr-of-class-rec ((cls user-defined-class) attr)
   ;; All udc's have a <py-dict> instance in slot named
   ;; __dict__; that dict contains class attribs and
   ;; methods are stored. TODO: metaclasses
-  
+  		    
   (let* ((cpl (mop:class-precedence-list cls))
 	 (c (pop cpl)))
       
@@ -480,7 +500,7 @@
 (defmethod internal-set-attribute :around (x attr val)
   (declare (ignore val))
   ;; (format t "internal-set-attribute: ~S ~S~%" x attr)
-  (ensure-py-type attr attribute-name "Not a valid attribute name: ~S")
+  (check-type attr symbol)
   (verify-settable-attribute x attr)
   (call-next-method))
 

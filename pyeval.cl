@@ -768,7 +768,7 @@
 	
       (let ((*scope* module-ns))
 	(declare (special *scope*))
-	(namespace-bind module-ns '__name__ module-name)
+	(namespace-bind module-ns '__name__ (string module-name))
 	(namespace-bind module-ns '__file__ file-name)
 	(py-eval module-ast))
 	

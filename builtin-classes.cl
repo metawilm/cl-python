@@ -5,6 +5,8 @@
 ;;; Built-in classes and their methods
 
 
+;; XXX todo:  eval-for-in calls __iter__
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; The `magic methods' shared by all objects.
 ;;; 
@@ -20,6 +22,11 @@
 ;;; 
 ;;; Using metaclasses, classes can be created that might not have
 ;;; these methods. XXX todo figure that out
+
+;; XXX for now (?) add default equality tester
+(defmethod __eq__ (x y)
+  (warn "default equality tester used, indicating something TODO")
+  (eq x y))
 
 (defgeneric __class__ (x) (:documentation "The class of X"))
 (defmethod __class__ ((x integer))       (find-class 'py-int))
@@ -278,6 +285,9 @@
 
 (mop:finalize-inheritance (find-class 'py-number))
 
+(defmethod print-object ((x py-number) stream)
+  (print-unreadable-object (x stream :identity t :type t)
+    (format stream ":val ~A" (slot-value x 'val))))
 
 (defmethod __new__ ((x (eql (find-class 'py-number))) &optional pos-arg key-arg)
   (when (or key-arg (cdr pos-arg))
@@ -321,7 +331,8 @@
      (__complex__  (make-complex x))))
 
 (loop for name in `(__nonzero__ __neg__ __pos__ __abs__ __complex__)
-    do (register-bi-class-attr/meth (find-class 'number) name (symbol-function name)))
+    do (loop for cls in `(,(find-class 'number) ,(find-class 'py-number))
+	   do (register-bi-class-attr/meth cls name (symbol-function name))))
 
 
 (def-binary-meths py-number number (slot-value x 'val) (slot-value y 'val)
@@ -340,8 +351,10 @@
 		   (__rtruediv__ (/ y x))
 		   (__rsub__     (- y x))))
 
-(loop for name in `(__eq__ __ne__ __add__ __radd__ __sub__ __mul__ __rmul__ __truediv__ __rtruediv__ __rsub__)
-    do (register-bi-class-attr/meth (find-class 'number) name (symbol-function name)))
+(loop for name in `(__eq__ __ne__ __add__ __radd__ __sub__ __mul__ __rmul__
+			   __truediv__ __rtruediv__ __rsub__)
+    do (loop for cls in `(,(find-class 'number) ,(find-class 'py-number))
+	   do (register-bi-class-attr/meth cls name (symbol-function name))))
 
 
 ;; Power
@@ -386,7 +399,10 @@
 
 
 (register-bi-class-attr/meth (find-class 'number) '__pow__ #'__pow__)
+(register-bi-class-attr/meth (find-class 'py-number) '__pow__ #'__pow__)
+
 (register-bi-class-attr/meth (find-class 'number) '__rpow__ #'__rpow__)
+(register-bi-class-attr/meth (find-class 'py-number) '__rpow__ #'__rpow__)
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -416,7 +432,8 @@
      (__float__   (make-float x))))
 
 (loop for name in `(__int__ __long__ __float__)
-    do (register-bi-class-attr/meth (find-class 'real) name (symbol-function name)))
+    do (loop for cls in `(,(find-class 'real) ,(find-class 'py-real))
+	   do (register-bi-class-attr/meth cls name (symbol-function name))))
 
 
 (def-binary-meths
@@ -446,8 +463,9 @@
      (__rdivmod__   (__divmod__ y x))))
 
 (loop for name in `(__mod__ __rmod__ __cmp__ __div__ __rdiv__ __floordiv__
-			    __divmod__ __rdivmod__)
-    do (register-bi-class-attr/meth (find-class 'real) name (symbol-function name)))
+			    __rfloordiv__ __divmod__ __rdivmod__)
+    do (loop for cls in `(,(find-class 'real) ,(find-class 'py-real))
+	   do (register-bi-class-attr/meth cls name (symbol-function name))))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -476,8 +494,13 @@
      (complex-conjugate (conjugate x))))
 
 (register-bi-class-attr/meth (find-class 'complex) 'real (make-bi-class-attribute #'complex-real))
+(register-bi-class-attr/meth (find-class 'py-complex) 'real (make-bi-class-attribute #'complex-real))
+
 (register-bi-class-attr/meth (find-class 'complex) 'imag (make-bi-class-attribute #'complex-imag))
+(register-bi-class-attr/meth (find-class 'py-complex) 'imag (make-bi-class-attribute #'complex-imag))
+
 (register-bi-class-attr/meth (find-class 'complex) 'conjugate (make-bi-class-attribute #'complex-conjugate))
+(register-bi-class-attr/meth (find-class 'py-complex) 'conjugate (make-bi-class-attribute #'complex-conjugate))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -554,7 +577,8 @@
      ))
 
 (loop for name in `(__add__ __xor__ __or__ __lshift__ __rlshift__ __rshift__ __rrshift__)
-    do (register-bi-class-attr/meth (find-class 'integer) name (symbol-function name)))
+    do (loop for cls in `(,(find-class 'integer) ,(find-class 'py-int))
+	   do (register-bi-class-attr/meth cls name (symbol-function name))))
 
 
 (defmethod mod-to-fixnum ((x integer))
@@ -584,7 +608,8 @@
      (__hex__  (format nil "0x~X" x))))
 
 (loop for name in `(__invert__ __hash__ __complex__ __int__ __long__ __float__ __oct__ __hex__)
-    do (register-bi-class-attr/meth (find-class 'integer) name (symbol-function name)))
+    do (loop for cls in `(,(find-class 'integer) ,(find-class 'py-int))
+	   do (register-bi-class-attr/meth cls name (symbol-function name))))
      
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -726,7 +751,16 @@
 		   (return-from __cmp__ 1))))
 	     hx))
   0)
-    
+
+(defmethod __contains__ ((x py-dict) y)
+  (maphash (lambda (k v)
+	     (declare (ignore v))
+	     (when (py-== k y)
+	       (return-from __contains__ *True*)))
+	   (slot-value x 'hash-table))
+  *False*)
+
+
 (defmethod __eq__ ((x py-dict) (y py-dict))
   "Returns T or NIL."
   (= (__cmp__ x y) 0))
@@ -737,6 +771,9 @@
     (if found
 	val
       (py-raise 'KeyError "No such key: ~A" (__str__ key)))))
+
+(defmethod __iter__ ((d py-dict))
+  (dict-iter-keys d))
 
 (defmethod __setitem__ ((d py-dict) key val)
   (setf (gethash key (slot-value d 'hash-table) d) val))
@@ -763,7 +800,7 @@
 (defmethod __nonzero__ ((d py-dict))
   (lisp-val->py-bool (/= 0 (hash-table-count (slot-value d 'hash-table)))))
 
-(loop for name in '(__cmp__ __eq__ __getitem__ __setitem__ __delitem__
+(loop for name in '(__cmp__ __contains__ __eq__ __getitem__ __setitem__ __delitem__ __iter__
 		    ;; __add__ etc...
 		    __len__ __nonzero__)
     do (register-bi-class-attr/meth (find-class 'py-dict) name (symbol-function name)))
@@ -1011,6 +1048,10 @@
 (defmethod __getitem__ ((x namespace) key)
   "Contrary to PY-DICT, does not raise KeyError."
   (check-only-symbol-keys x)
+  (cond ((symbolp key))
+	((stringp key) (setf key (intern key #.*package*)))
+	((typep key 'py-string) (setf key (intern (slot-value key 'val) #.*package*)))
+	(t (error "__getitem__ for namespace wants symbol (or string) KEY, got: ~A" key)))
   (check-type key symbol)
   (gethash key (slot-value x 'hash-table)))
 
@@ -1019,7 +1060,7 @@
   (with-output-to-string (stream)
     (pprint-logical-block (stream nil)
       (format stream "{")
-      (maphash (lambda (k v) (format stream "~A: ~A,~_ " (__repr__ k) (__repr__ v)))
+      (maphash (lambda (k v) (format stream "'~A': ~A,~_ " k (__repr__ v)))
 	       (slot-value x 'hash-table)))
     (format stream "}")))
 
@@ -1965,8 +2006,6 @@
      (string-isupper (x)  (string-isupper-1 x))
      (string-join    (x seq) (string-join-1 x seq))))
 
-
-
 (def-binary-string-meths
     ((__add__      (x y)  (concatenate 'string x y))
      (__radd__     (x y)  (__add__ y x))
@@ -2320,20 +2359,19 @@
 	   (ensure-py-type (start stop step) integer
 			   "arguments to xrange() must be int (got: ~A)")
 	   (let (max-num-steps)
-	     (cond
-	      ((or (and (< start stop)
-			(< 0 step))
-		   (and (> start stop)
-			(> 0 step)))
-	       ;; range ok
-	       (setf max-num-steps (floor (/ (- (- stop 1) start)
-					     step)))
-	       (setf stop (+ start (* step max-num-steps))))
-	    
-	      (t
-	       ;; bogus range: return no values at all
-	       (setf start 0 stop 0 step 0 max-num-steps 0)))
-	   
+	     (cond ((or (and (< start stop)
+			     (< 0 step))
+			(and (> start stop)
+			     (> 0 step)))
+		    ;; range ok
+		    (setf max-num-steps (floor (/ (- (- stop 1) start)
+						  step)))
+		    (setf stop (+ start (* step max-num-steps))))
+		   
+		   (t
+		    ;; bogus range: return no values at all
+		    (setf start 0 stop 0 step 0 max-num-steps 0)))
+	     
 	     (make-instance 'py-xrange :start start :stop stop
 			    :step step :max-num-steps max-num-steps))))
     
@@ -2341,10 +2379,17 @@
 	  (y (xrange-2 x y 1))
 	  (t (xrange-2 0 x 1)))))
 
-(defmethod __new__ ((x py-xrange) &optional pos-args key-args)
-  (declare (ignore pos-args key-args))
-  (error "todo: xrange.__new__"))
-				  
+(defmethod __new__ ((x (eql (find-class 'py-xrange))) &optional pos-args key-args)
+  (when key-args
+    (py-raise 'ValueError "xrange(): takes no key args (got: ~A)" key-args))
+  (unless pos-args
+    (py-raise 'ValueError "xrange(): at least 1 pos-arg required"))
+  (apply #'make-xrange pos-args)) 
+
+(register-bi-class-attr/meth (find-class 'py-xrange) '__new__ (make-static-method #'__new__))
+
+;; xrange has default noop __init__
+
 (defmethod __iter__ ((x py-xrange))
   (let* ((start (slot-value x 'start))
 	 (stop (slot-value x 'stop))
@@ -2389,6 +2434,11 @@
   (mod-to-fixnum (logxor (slot-value x 'start)
 			 (slot-value x 'stop)
 			 (slot-value x 'step))))
+
+(loop for name in '(__len__ __getitem__ __iter__)
+    do (register-bi-class-attr/meth (find-class 'py-xrange) name (symbol-function name)))
+
+
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Slice object

@@ -85,12 +85,35 @@
       (py-raise 'TypeError "Function chr() should be given an integer in range 0..255 (got: ~A)" i))))
 
 
+
+;; numbers
+
 (defmethod pyb:cmp ((x number) (y number))
   ;; This special case is not needed, because this case is already
   ;; handled before this function is called.
   (cond ((< x y) -1)
 	((> x y)  1)
 	(t        0)))
+
+(defmethod pyb:cmp ((x number) y)
+  (pyb:cmp (make-py-number x) y))
+
+(defmethod pyb:cmp (x (y number))
+  (pyb:cmp x (make-py-number y)))
+
+(defmethod pyb:cmp ((x py-number) (y py-number))
+  (pyb:cmp (slot-value x 'val) (slot-value y 'val)))
+
+;; lisp strings
+
+(defmethod pyb:cmp ((x string) (y string))
+  (__cmp__ x y))
+
+(defmethod pyb:cmp ((x string) y)
+  (pyb:cmp (make-py-string x) y))
+
+(defmethod pyb:cmp (x (y string))
+  (pyb:cmp x (make-py-string y)))
 
 (defmethod pyb:cmp ((x user-defined-object) y)
   (pyb::cmp-2 (py-object-designator-val x) (py-object-designator-val y)))
@@ -99,7 +122,11 @@
   (pyb::cmp-2 (py-object-designator-val x) (py-object-designator-val y)))
 
 (defmethod pyb:cmp ((x builtin-object) (y builtin-object))
-  (if (eq x y) 0 (__eq__ x y)))
+  (if (eq x y)
+      0
+    (if (__eq__ x y)
+	0
+      -1))) ;; or +1
 
 (defmethod pyb::cmp-2 (x y)
   "Compare two objects, of which at least one is a user-defined-object. ~@
@@ -401,29 +428,84 @@
   ;; 
   ;; When Y supplied: make generator that calls and returns X() until
   ;; it's equal to Y.
-  
-  (if (not y)
-      ;; return iterator for X
-      (handler-case (__iter__ x)
-	(AttributeError () #1=(py-raise 'TypeError 
-					"Iteration over non-sequence (got: ~A)" x))
-	(:no-error (iterator)
-	  iterator))
-    
-    (if (eq (pyb:callable x) *True*)
-	(make-iterator-from-function (lambda () (py-call x))
-				     y)
-      #1#)))
+  (if (null y)
+      (make-py-iterator-for-object x)
+    (error "todo: iter with 2 args")))
+
+#+(or)(progn 
+	(if (not y)
+	    ;; return iterator for X
+	    (handler-case (__iter__ x)
+	      (AttributeError () #1=(py-raise 'TypeError 
+					      "Iteration over non-sequence (got: ~A)" x))
+	      (:no-error (iterator)
+		iterator))
+	  
+	  (if (eq (pyb:callable x) *True*)
+	      (make-iterator-from-function (lambda () (py-call x))
+					   y)
+	    #1#)))
 	    
 (defun pyb:len (x)
-  (__len__ x))
+  #+(or)(__len__ x)
+  (call-attribute-via-class x '__len__))
 
 (defun pyb:locals ()
   ;; return local variables
   (error "todo: locals()"))
 
+
 (defun pyb:map (func &rest sequences)
-  (apply #'mapcar func sequences))
+  
+  ;; Apply FUNC to every item of sequence, returning real list of
+  ;; values. With multiple sequences, traversal is in parallel and
+  ;; FUNC must take multiple args. Shorter sequences are extended with
+  ;; None. If function is None, use identity function (multiple
+  ;; sequences -> list of tuples).
+  
+  (cond ((and (eq func *None*) (null (cdr sequences)))  ;; identity of one sequence
+	 (make-py-list-from-list (py-iterate->lisp-list (car sequences))))
+	
+	((null (cdr sequences)) ;; func takes 1 arg
+	 
+	 ;; Apply func to each val yielded before yielding next val
+	 ;; might be more space-efficient for large sequences when
+	 ;; function "reduces" data.
+
+	 (make-py-list-from-list
+	  (mapcar (lambda (val)
+		    (py-call func (list val)))
+		  (py-iterate->lisp-list (car sequences)))))
+	
+	(t
+	 (let* ((vectors (mapcar (lambda (seq)
+				   (apply #'vector (py-iterate->lisp-list seq)))
+				 sequences)))
+	   
+	   (let ((num-active (loop for v in vectors
+				 when (> (length v) 0)
+				 count 1)))
+	     
+	     (make-py-list-from-list 
+	      (loop while (> num-active 0)
+		  for i from 0
+		  collect (let ((curr-items 
+				 (mapcar (lambda (vec)
+					   (let ((vec-length (1- (length vec))))
+					     (cond ((> vec-length i)
+						    (aref vec i))
+					      
+						   ((< vec-length i)
+						    *None*)
+					      
+						   ((= vec-length i) ;; last of this vec
+						    (decf num-active)
+						    (aref vec i)))))
+					 vectors)))
+			    (if (eq func *None*)
+				(make-tuple-from-list curr-items)
+			      (py-call func curr-items))))))))))
+
 
 (defun pyb:ord (s)
   (multiple-value-bind (string-des-p lisp-str)

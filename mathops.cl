@@ -107,6 +107,29 @@
 (generate-binary-methods)
 
 
+
+(defmethod py-in (x seq)
+  ;; either using __contains__, or using iterator
+  
+  (multiple-value-bind (res meth-found)
+      (call-attribute-via-class seq '__contains__ (list x))
+    (when meth-found
+      (return-from py-in res)))
+  
+  (loop with f = (get-py-iterate-fun seq)
+      with seq-item = (funcall f)
+      while seq-item do
+	(when (py-== x seq-item)
+	  (return-from py-in *True*))
+	(setf seq-item (funcall f))
+      finally (return *False*)))
+
+(push (cons 'in #'py-in)
+      *math-binary-op-assoc*)
+
+;; XXX todo: not-in, is, not-is
+
+
 ;; a**b (to-the-power) is a special case:
 ;;  - method __pow__ takes an optional third argument:
 ;;    that argument can be supplied using the built-in function POW but not

@@ -269,8 +269,8 @@
 	     ((binop-expr != binop-expr)  . ((list 'comparison $2 $1 $3)))
 	     ((binop-expr <> binop-expr)  . ((list 'comparison '!= $1 $3))) ;; <> is same as !=
 	     ((binop-expr == binop-expr)  . ((list 'comparison $2 $1 $3)))
-	     ((binop-expr in binop-expr)  . ((list 'comparison $2 $1 $3)))
-	     ((binop-expr is binop-expr)  . ((list 'comparison $2 $1 $3))))
+	     ((binop-expr in binop-expr)  . ((list 'binary $2 $1 $3)))
+	     ((binop-expr is binop-expr)  . ((list 'binary $2 $1 $3))))
  (binop-expr (binop2-expr) ($1) (:precedence or))
 
  (binop2-expr :or
@@ -293,8 +293,8 @@
 	      )
  
  ;; some with explicit precedences
- (binop2-expr (binop2-expr not in binop2-expr) ((list 'comparison 'not-in $1 $4)) (:precedence in))
- (binop2-expr (binop2-expr is not binop2-expr) ((list 'comparison 'not-in $1 $4)) (:precedence is))
+ (binop2-expr (binop2-expr not in binop2-expr) ((list 'binary 'not-in $1 $4)) (:precedence in))
+ (binop2-expr (binop2-expr is not binop2-expr) ((list 'binary 'is-not $1 $4)) (:precedence is))
  (binop2-expr (+ binop2-expr) ((list 'unary $1 $2)) (:precedence unary-plusmin))
  (binop2-expr (- binop2-expr) ((list 'unary $1 $2)) (:precedence unary-plusmin))
 

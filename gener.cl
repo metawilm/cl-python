@@ -56,7 +56,7 @@
 							 (go ,repeat-tag)
 						       (go ,after-tag))
 						    ,else-tag
-						    (:split ,(walk else-suite stack))
+						    (:split ,(when else-suite (walk else-suite stack)))
 						    ,after-tag)
 					   t)))))
 				 

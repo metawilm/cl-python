@@ -17,6 +17,7 @@
    and executing BODY.
    This works is OBJECT implements either __iter__ or __getitem__."
   ;; XX assumes OBJECT is a first-class object.
+
   (let ((iterator '#:iterator))
     `(block py-iterate
        (tagbody 
@@ -42,6 +43,10 @@
 	 (py-raise 'TypeError
 		   "Iteration over non-sequence (got: ~A)" ,object)))))
 	      
+
+(defun make-py-iterator-for-object (object)
+  (let ((f (get-py-iterate-fun object)))
+    (make-iterator-from-function f)))
 
 (defun get-py-iterate-fun (object)
   "Return a function that when called returns VAL, T, where VAL is the next value ~@
