@@ -63,8 +63,8 @@
 
 (defmethod print-object ((x python-object) stream)
   (print-unreadable-object (x stream :identity t :type t))
-  ;; it's not a good idea to fall back to __str__, because it gives
-  ;; infinite loops when debugging __str__ methods, for example
+  ;; it's not a good idea to fall back to __str__, because it could give
+  ;; infinite loops when debugging __str__ methods, for example.
   #+(or)(write-string (__str__ x) stream))
 
 (defmethod __str__ (x) 
@@ -86,7 +86,19 @@
 (defmethod __class__ ((x complex))       (find-class 'py-complex))
 (defmethod __class__ ((x symbol))        (find-class 'py-string))
 (defmethod __class__ ((x string))        (find-class 'py-string))
-(defmethod __class__ ((x python-object)) (class-of x))
+(defmethod __class__ ((x user-defined-class)) (find-class 'python-type)) ;; TODO metaclass
+
+(defmethod __class__ ((x python-object)) (class-of x)) ;; XXX check
+
+
+;; PYTHON-OBJECT is both an instance and a subclass of PYTHON-TYPE.
+(defmethod __class__ ((x (eql (find-class 'python-object)))) (find-class 'python-type))
+
+;; PYTHON-TYPE is it's own type.
+(defmethod __class__ ((x (eql (find-class 'python-type)))) x)
+
+
+
  
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -473,13 +485,8 @@
 				   (t nil))))
 	(t nil)))
 
-(defmethod print-object ((x py-bool) stream)
-  (format stream 
-	  (if (eq x *True*) "True" "False")))
-
 (defmethod __repr__ ((x py-bool))
-  (with-output-to-string (s)
-    (print-object x s)))
+  (if (eq x *True*) "True" "False"))
 
 ;;; Conversions to a Python boolean
 
@@ -560,14 +567,6 @@
     (maphash (lambda (k v) (push (cons k v) res))
 	     (slot-value x 'hash-table))
     res))
-
-(defmethod print-object ((x py-dict) stream)
-  (format stream "{")
-  (pprint-logical-block (stream nil)
-    (maphash (lambda (k v)
-	       (format stream "~A: ~A, ~_" k v))
-	     (slot-value x 'hash-table)))
-  (format stream "}"))
 
 #+(or) ;; todo
 (defmethod __new__ ((x py-dict)))
@@ -851,17 +850,19 @@
 (defmethod __getitem__ ((x namespace) key)
   (gethash key (slot-value x 'hash-table)))
 
-(defmethod print-object ((x namespace) stream)
-  (pprint-logical-block (stream nil)
-    (format stream "Namespace{")
-    (maphash (lambda (k v) 
-	       (declare (special *builtins*))
-	       (format stream "~S: ~S,~_ " k 
-		       (if (eq v *builtins*)
-			   '*builtins*
-			 v)))
-	     (slot-value x 'hash-table)))
-  (format stream "}"))
+(defmethod __repr__ ((x namespace))
+  (with-output-to-string (stream)
+    (pprint-logical-block (stream nil)
+      (format stream "{")
+      (maphash (lambda (k v) 
+		 (declare (special *builtins*))
+		 (format stream "~A: ~A,~_ "
+			 (__repr__ k)
+			 (if (eq v *builtins*)
+			     '*builtins*
+			   (__repr__ v))))
+	       (slot-value x 'hash-table)))
+    (format stream "}")))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Function
@@ -964,14 +965,25 @@
 (defun make-module (&rest options)
   (apply #'make-instance 'py-module options))
 
-(defmethod print-object ((x py-module) stream)
-  (print-unreadable-object (x stream :type t)
-    (format stream "~A" (slot-value x 'name))))
+(defmethod __repr__ ((x py-module))
+  (with-output-to-string (stream)
+    (print-unreadable-object (x stream :type t)
+      (with-slots (name namespace) x
+	(let ((file (namespace-lookup namespace '__file__))
+	      (name (namespace-lookup namespace '__name__)))
+	  (format stream "~A" (or name "?"))
+	  (when file
+	    (format stream "from file ~A" file)))))))
 
-#+(or)
-(defmethod __getattr__ ((x py-module) attrname)
-  (ensure-py-type attrname attribute-name "module getattr: invalid attr: ~A")
-  (namespace-lookup (slot-value x 'namespace) attrname))
+(defmethod module-dict ((x py-module))
+  (slot-value x 'namespace))
+
+(defmethod namespace-lookup ((x py-module) var)
+  (namespace-lookup (slot-value x 'namespace) var))
+
+(def-class-specific-methods
+    py-module
+    ((__dict__ (att . module-dict))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Methods: they come in `bound' and `unbound' flavors
@@ -1018,10 +1030,11 @@
 (defun unbound-method-p (m)
   (typep m 'py-unbound-method))
 
-(defmethod print-object ((x py-unbound-method) stream)
-  (print-unreadable-object (x stream :identity nil :type t)
-    (with-slots (class func) x
-      (format stream "~_:class ~S~_:func ~S" class func))))
+(defmethod __repr__ ((x py-unbound-method))
+  (with-output-to-string (stream)
+    (print-unreadable-object (x stream :identity nil :type t)
+      (with-slots (class func) x
+	(format stream "~_:class ~S~_:func ~S" class func)))))
 
 
 ;;;; Bound
@@ -1058,11 +1071,12 @@
 (defun bound-method-p (m)
   (typep m 'py-bound-method))
 
-(defmethod print-object ((x py-bound-method) stream)
-  (print-unreadable-object (x stream :identity nil :type t)
-    (with-slots (class func self) x
-      (format stream "~_:class ~S~_:func ~S~_:self ~S"
-	      class func self))))
+(defmethod __repr__ ((x py-bound-method))
+  (with-output-to-string (stream)
+    (print-unreadable-object (x stream :identity nil :type t)
+      (with-slots (class func self) x
+	(format stream "~_:class ~S~_:func ~S~_:self ~S"
+		class func self)))))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -1092,11 +1106,6 @@
 	 (return))
   (make-instance 'py-list :list lst))
   
-(defmethod print-object ((x py-list) stream)
-  (format stream "[~_~{~S~^, ~@_~}~_]" (slot-value x 'list))
-  #+(or)(print-unreadable-object (x stream)
-	  (format stream "list [~_~{~S~^, ~_~}~_]" (slot-value x 'list))))
-
 
 ;;;; magic methods
 
@@ -1470,10 +1479,6 @@
 
 (defun make-tuple-from-list (list)
   (make-instance 'py-tuple :list list))
-
-#+(or) ;; defer to __repr__
-(defmethod print-object ((x py-tuple) stream)
-  (format stream "(~{~_~S~^, ~})" (slot-value x 'list)))
 
 (defun tuple->lisp-list (tup)
   "internal use only"
@@ -2469,7 +2474,20 @@
 		index (- len 1)))
     
     (nth index list)))
-			    
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Type
+;; 
+;; The Python type from which all other types (classes) are derived.
+;; It is defined in classes.cl.
+
+(defmethod __call__ ((x (eql (find-class 'python-type))) &optional pos key)
+  (declare (ignorable pos key))
+  (break "__call__ on `type'"))
+  
+
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; General Python object stuff
 
@@ -2498,6 +2516,7 @@
 (defmethod python-object-designator-p ((x (eql (find-class 'builtin-instance)))) (values nil nil))
 
 (defmethod python-object-designator-p ((x python-object)) (values t x))
+(defmethod python-object-designator-p ((x (eql (find-class 'python-type)))) (values t x))
 (defmethod python-object-designator-p ((x number)) (values t (make-py-number x)))
 (defmethod python-object-designator-p ((x symbol)) (values t (make-py-string x)))
 (defmethod python-object-designator-p ((x string)) (values t (make-py-string x)))
