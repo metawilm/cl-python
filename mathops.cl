@@ -107,6 +107,7 @@
 (generate-binary-methods)
 
 
+;; in, not in, is, is not
 
 (defmethod py-in (x seq)
   ;; either using __contains__, or using iterator
@@ -124,10 +125,22 @@
 	(setf seq-item (funcall f))
       finally (return *False*)))
 
-(push (cons 'in #'py-in)
-      *math-binary-op-assoc*)
+(defmethod py-not-in (x seq)
+  (if (eq (py-in x seq) *True*)
+      *False*
+    *True*))
 
-;; XXX todo: not-in, is, not-is
+(defmethod py-is (x y)
+  (if (eq x y) *True* *False*))
+
+(defmethod py-is-not (x y)
+  (if (eq x y) *False* *True*))
+  
+(loop for (name func) in `((in ,#'py-in)
+			   (not-in ,#'py-not-in)
+			   (is ,#'py-is)
+			   (is-not ,#'py-is-not))
+    do (push (cons name func) *math-binary-op-assoc*))
 
 
 ;; a**b (to-the-power) is a special case:
@@ -233,3 +246,9 @@
 	  (setf *math-unary-op-assoc* (nreverse *math-unary-op-assoc*))))
 
 (make-unary-op-methods)
+
+
+(defmethod py-unary-not (x)
+  (if (py-val->lisp-bool x) *False* *True*))
+
+(push (cons 'not #'py-unary-not) *math-unary-op-assoc*)

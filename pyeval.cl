@@ -868,7 +868,8 @@
   "Does comparison, returns Python boolean"
   (let ((comp-fun (cdr (assoc operator *math-binary-cmp-assoc*))))
     (assert comp-fun () "No comparison function corresponding to ~
-                         comparison operator ~A?! ~A" operator *math-binary-cmp-assoc*)
+                         comparison operator ~A?! ~A"
+	    operator *math-binary-cmp-assoc*)
     (lisp-val->py-bool (funcall comp-fun (py-eval left) (py-eval right)))))
 
 (defun eval-unary (operator val)

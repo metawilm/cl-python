@@ -293,10 +293,10 @@
 	      )
  
  ;; some with explicit precedences
- (binop2-expr (binop2-expr not in binop2-expr) ((list 'binary 'not-in $1 $4)) (:precedence in))
- (binop2-expr (binop2-expr is not binop2-expr) ((list 'binary 'is-not $1 $4)) (:precedence is))
- (binop2-expr (+ binop2-expr) ((list 'unary $1 $2)) (:precedence unary-plusmin))
- (binop2-expr (- binop2-expr) ((list 'unary $1 $2)) (:precedence unary-plusmin))
+ (binop-expr (binop-expr not in binop-expr) ((list 'binary 'not-in $1 $4)) (:precedence in)) ;; was binop2
+ (binop-expr (binop-expr is not binop-expr) ((list 'binary 'is-not $1 $4)) (:precedence is)) ;; was binop2
+ (binop2-expr (+ binop2-expr) ((list 'unary $1 $2))   (:precedence unary-plusmin))
+ (binop2-expr (- binop2-expr) ((list 'unary $1 $2))   (:precedence unary-plusmin))
 
  (atom :or
        ((|(| comma? |)|) . ((list 'testlist nil (if $2 t nil))))
