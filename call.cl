@@ -125,11 +125,16 @@
     (return-from py-call (py-call-exception cls pos-args kwd-args)))
   
   ;; type(x) is a function returning type of x
-  (when (and (eq cls (find-class 'python-type))
+  (when (and (eq cls (load-time-value (find-class 'python-type)))
 	     (= (length pos-args) 1))
+    (warn "type(x) -> the type of x")
     (return-from py-call (py-type (car pos-args))))
 
   ;; <type>(..args..) creates an instance
+  (py-call-class cls pos-args kwd-args))
+
+
+(defmethod py-call-class ((cls class) pos-args kwd-args)
   (let ((cls-name (class-name cls)))
     (multiple-value-bind (__new__-meth found)
 	(internal-get-attribute cls '__new__)
@@ -142,12 +147,15 @@
 	  (declare (ignore res))
 	  (unless found
 	    (warn "Class ~S has no __init__ method" cls-name)))
-	(return-from py-call inst)))))
+	(return-from py-call-class inst)))))
 
+(defmethod py-call ((cls user-defined-class) &optional pos-args kwd-args)
+  (py-call-class cls pos-args kwd-args))
+		    
 
 (defmethod py-call ((x user-defined-object) &optional pos-args kwd-args)
   (if (typep x 'class)
-      (call-next-method) ;; regard as class
+      (error "py-call: need method for ~A" x)
     (py-call (getattr-of-class x '__call__) 
 	     (let ((args (cons x pos-args))) 
 	       (declare (dynamic-extent args))

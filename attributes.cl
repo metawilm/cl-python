@@ -344,7 +344,14 @@
 	 (cpl (mop:class-precedence-list (class-of x)))
 	 (cls (pop cpl)))
     
+    (declare (special *default-__getattribute__-running*)) ;; see builtin-classes.cl
+    
     (loop while (typep cls 'user-defined-class)
+		
+	unless *default-__getattribute__-running*
+	       ;; To avoid infinite recursion caused by the default
+	       ;; (built-in) __getattribute__ calling a user-defined
+	       ;; __getattribute__, set a flag stating this. XXX hackish
 	do (multiple-value-bind (val found)
 	       (getattr-of-class-nonrec cls '__getattribute__)
 	     (when found
@@ -667,6 +674,7 @@
   ;; value of the attribute itself if we come across it.
 
   (let ((attr-val nil))
+    (declare (special *default-__setattr__-running*))
    
     (loop for cls in (mop:class-precedence-list (__class__ x)) ;; XXX or class-of ?
 		     ;; until (eq cls (load-time-value (find-class 'python-type)))
@@ -678,7 +686,7 @@
 	do (setf is-udc (typep cls 'user-defined-class)
 		 is-bic (typep cls 'builtin-class))
 	     
-	when is-udc  ;; Only UDC can have__setattr__ hook
+	when (and is-udc (not *default-__setattr__-running*))  ;; Only UDC can have__setattr__ hook
 	do (multiple-value-bind (setattr found)
 	       (getattr-of-class-nonrec cls '__setattr__) ;; XXX bind?
 	     (when found

@@ -124,7 +124,7 @@
 
 (defmethod python-type-__new__ (metaclass &optional name bases dict)
   
-  (when (not (or name bases dict)) ;; "type(x) -> <type-of-x>"
+  #+(or)(when (not (or name bases dict)) ;; "type(x) -> <type-of-x>"
     (return-from python-type-__new__ (py-type metaclass)))
     
   (if (subtypep metaclass 'python-type)
@@ -192,13 +192,22 @@
 (defmethod __getattribute__ :around (x (attr string))
   (__getattribute__ x (intern attr #.*package*)))
 
+(defvar *default-__getattribute__-running* nil)
+
 (defmethod __getattribute__ (x attr)
-  (or (internal-get-attribute x attr)
+  (declare (special *default-__getattribute__-running*))
+  (or (let ((*default-__getattribute__-running* t)) ;; to avoid infinite recursion XXX hack
+	(internal-get-attribute x attr))
       (py-raise 'AttributeError "~A ~A" x attr)))
+	
 (register-bi-class-attr/meth (find-class 't) '__getattribute__ #'__getattribute__)
 
+
+(defvar *default-__setattr__-running* nil)
+
 (defgeneric __setattr__ (x attr val) (:documentation "Set attribute ATTR of X to VAL"))
-(defmethod __setattr__ (x attr val) (internal-set-attribute x attr val))
+(defmethod __setattr__ (x attr val) (let ((*default-__setattr__-running* t))
+				      (internal-set-attribute x attr val)))
 (register-bi-class-attr/meth (find-class 't) '__setattr__ #'__setattr__)
 
 (defgeneric __delattr__ (x attr) (:documentation "Delete attribute named ATTR of X"))
@@ -1728,7 +1737,7 @@
       (py-int-designator (extract-list-item-by-index list item))
       (py-slice          (make-py-list-from-list (extract-list-slice list item)))
       (t                 (py-raise 'TypeError
-				   "List indices must be integers (got: ~A)" item)))))
+				   "list.__getitem__: expected integer or slice (got: ~A)" item)))))
   
 (defun list-getitem-integer (list index)
   (ensure-py-type index integer
@@ -1949,67 +1958,6 @@
 		     (sort    ,#'list-sort))
     do (register-bi-class-attr/meth (find-class 'py-list) k v))
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Iterator
-;; 
-;; <http://www.python.org/peps/pep-0234.html>
-;; <<
-;; The two methods correspond to two distinct protocols:
-;;     1. An object can be iterated over with "for" if it implements
-;;        __iter__() or __getitem__().
-;;     2. An object can function as an iterator if it implements next().
-;; >>
-
-(defclass py-iterator (builtin-instance)
-  ()
-  (:metaclass builtin-class))
-
-(mop:finalize-inheritance (find-class 'py-iterator))
-
-(defmethod __iter__ ((x py-iterator))
-  "It's defined that an iterator is its own iterator, so people
-   can do:  for i in iter(iter(iter(iter(foo))))."
-  x)
-
-(register-bi-class-attr/meth (find-class 'py-iterator) '__iter__ #'__iter__)
-
-
-(defvar *StopIteration* '|stop-iteration|)
-
-(defclass py-func-iterator (py-iterator)
-  ((func :initarg :func :type function)
-   (stopped-yet :initform nil)
-   (end-value :initarg :end-value))
-  (:metaclass builtin-class))
-
-(mop:finalize-inheritance (find-class 'py-func-iterator))
-
-(defun make-iterator-from-function (f &optional (end-value nil))
-  "Create an iterator that calls f again and again. (F somehow has to keep ~@
-   its own state.) When F returns a value EQL to END-VALUE (default: nil), ~@
-   it is considered finished and will not be called any more times."
-  (check-type f function)
-  (make-instance 'py-func-iterator :func f :end-value end-value))
-
-(defmethod iterator-next ((f py-func-iterator))
-  "This is the only function that an iterator has to provide."
-  (flet ((err-finished ()
-	   (py-raise 'StopIteration "Iterator ~S has finished" f)))
-    (if (slot-value f 'stopped-yet)
-	(err-finished)
-      (let ((res (funcall (slot-value f 'func))))
-	(if (eql res (slot-value f 'end-value))
-	    (progn (setf (slot-value f 'stopped-yet) t)
-		   (err-finished))
-	  res)))))
-
-(register-bi-class-attr/meth (find-class 'py-iterator) 'next #'iterator-next)
-
-(defmethod __name__ ((x py-func-iterator))
-  (internal-get-attribute (slot-value x 'func) '__name__))
-
-(register-bi-class-attr/meth (find-class 'py-func-iterator) '__name__
-			     (make-bi-class-attribute #'__name__))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Tuple
@@ -2148,6 +2096,198 @@
 (loop for name in '(__add__ __cmp__ __contains__ __eq__ __getitem__ __init__
 		    __iter__ __len__ __mul__ __rmul__ __setitem__)
     do (register-bi-class-attr/meth (find-class 'py-tuple) name (symbol-function name)))
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; List : represented by adjustable vector
+
+(defclass py-list (builtin-instance)
+  ((vec :type vector :initarg :vec))
+  (:metaclass builtin-class))
+
+(mop:finalize-inheritance (find-class 'py-list))
+
+(defmethod make-py-list ((vec vector))
+  (make-instance 'py-list :vec vec))
+
+(defmethod make-empty-py-list ()
+  (make-instance 'py-list :vec (make-array 0 :adjustable t :fill-pointer 0)))
+
+;; constructor
+
+(defmethod __new__ ((cls class) &rest args)
+  (assert (subtypep cls 'py-list))
+  (make-instance cls))
+
+(defmethod __init__ ((x py-list) &optional iterable)
+  (let ((new-vec (make-array 10 :adjustable t :fill-pointer 0)))
+    (if iterable (loop with f = (get-py-iterate-fun iterable)
+		     with val = (funcall f)
+		     while val do (vector-push-extend new-vec val)
+				  (setf val (funcall f))))
+    (make-py-list new-vec)))
+
+;; regular magic methods
+
+(defmethod __add__ ((x py-list) (y py-list))
+  "Structure is not shared"
+  (with-slots ((x-vec vec)) x
+    (with-slots ((y-vec vec)) y
+      (make-py-list (let ((new-vec (make-array (+ (length x-vec) (length y-vec))
+					       :adjustable t :fill-pointer 0)))
+		      (loop for xi across x-vec do (vector-push xi new-vec))
+		      (loop for yi across y-vec do (vector-push yi new-vec))
+		      new-vec)))))
+
+(defmethod __cmp__ ((x py-list) (y py-list))
+  (seq-__cmp__ (slot-value x 'vec) (slot-value y 'vec)))
+
+(defmethod seq-__cmp__ ((x vector) (y vector))
+  "If all elements eq, longest wins, otherwise they are eq."
+  (let ((x-len (length x)) (y-len (length y)))
+    (cond ((= x-len y-len) (loop for xi across x 
+			       for yi across yi
+			       do (unless (eq xi yi)
+				    (let ((res (pyb:cmp xi yi)))
+				      (cond ((= res 0)) ;; continue...
+					    ((< res 0) (return-from __cmp__-vectors -1))
+					    ((> res 0) (return-from __cmp__-vectors 1)))))
+			       finally (return-from __cmp__-vectors 0)))
+	  ((< x-len y-len) -1)
+	  (t                1))))
+
+(defmethod __contains__ ((x py-list))
+  (if (member x (slot-value x 'vec) :test #'py-==) *True* *False*))
+
+(defmethod __delitem__ ((x py-list) item)
+  (etypecase item
+    (py-int-designator (list-delitem-integer x (py-int-designator-val item)))
+    (py-slice (list-delitem-slice x item))
+    (t (py-raise 'TypeError "list.__delitem__: expected integer of slice (got: ~A)" item))))
+
+(defun list-delitem-integer ((x py-list) (index integer))
+  (let* ((vec (slot-value x 'vec))
+	 (len (length vec)))
+    (when (< index 0) 
+      (incf index len))
+    (unless (<= 0 index (1- len))
+      (py-raise 'IndexError "List index out of range (got: ~A, len: ~A)" index len))
+    (loop for i from index below len
+	do (setf (aref vec i) (aref vec (1+ i))))
+    (decf (fill-pointer vec))))
+
+(defun list-delitem-slice ((x py-list) (slice py-slice))
+  (let ((vec (slot-value x 'vec)))
+    (multiple-value-bind (nonempty? start stop step) (slice-indices slice (length vec))
+      (when nonempty
+	(when (< step -1)
+	  (rotatef start stop)
+	  (assert (<= 0 start stop (1- (len vec))))
+	  (loop for old-i from stop below (length vec)
+	      for new-i from start
+	      do (setf (aref vec new-i) (aref vec old-i)))
+	  (setf (fill-pointer vec) (- (fill-pointer vec) (- stop start))))))))
+
+(defmethod __eq__ ((x py-list) (y py-list))
+  (with-slots ((x-vec vec)) x
+    (with-slots ((y-vec vec)) y
+      (if (= (length x-vec) (length y-vec))
+	  (loop for xi across x-vec
+	      for yi across y-vec
+	      unless (py-== xi yi)
+	      do (return-from __eq__ *False*)
+	      finally (return *True*))
+	*False*))))
+
+(defmethod __eq__ ((x py-list) y)
+  *False*)
+
+(defmethod __getitem__ ((x py-list) item)
+  (let ((vec (slot-value x 'vec)))
+    (etypecase item
+      (py-int-designator (let ((i (py-int-designator-val item)))
+			   (when (< i 0)
+			     (incf i (length vec)))
+			   (if (<= 0 i (1- (length vec)))
+			       (aref vec i)
+			     (py-raise 'IndexError "List index out of bounds (got: ~A, len: ~A)"
+				       i (length vec)))))
+      (py-slice (multiple-value-bind (nonempty? start stop step) (slice-indices item (length vec))
+		  (if nonempty?
+		      (let* ((slice-span (if (> step 0) (- stop start) (- start stop)))
+			     (slice-len (abs (/ slice-span step)))
+			     (new-vec (make-array slice-len :adjustable t :fill-pointer 0)))
+			(if (> step 0)
+			    (loop for i from start to stop by step
+				do (vector-push new-vec (aref vec i)))
+			  (loop for i from stop downto start by step
+			      do (vector-push new-vec (aref vec i))))
+			(make-py-list new-vec))
+		    (make-empty-py-list))))
+      (t (py-raise 'TypeError "list.__getitem__ expected integer or slice (got: ~A)" item)))))
+
+	       
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Iterator
+;; 
+;; <http://www.python.org/peps/pep-0234.html>
+;; <<
+;; The two methods correspond to two distinct protocols:
+;;     1. An object can be iterated over with "for" if it implements
+;;        __iter__() or __getitem__().
+;;     2. An object can function as an iterator if it implements next().
+;; >>
+
+(defclass py-iterator (builtin-instance)
+  ()
+  (:metaclass builtin-class))
+
+(mop:finalize-inheritance (find-class 'py-iterator))
+
+(defmethod __iter__ ((x py-iterator))
+  "It's defined that an iterator is its own iterator, so people
+   can do:  for i in iter(iter(iter(iter(foo))))."
+  x)
+
+(register-bi-class-attr/meth (find-class 'py-iterator) '__iter__ #'__iter__)
+
+
+(defvar *StopIteration* '|stop-iteration|)
+
+(defclass py-func-iterator (py-iterator)
+  ((func :initarg :func :type function)
+   (stopped-yet :initform nil)
+   (end-value :initarg :end-value))
+  (:metaclass builtin-class))
+
+(mop:finalize-inheritance (find-class 'py-func-iterator))
+
+(defun make-iterator-from-function (f &optional (end-value nil))
+  "Create an iterator that calls f again and again. (F somehow has to keep ~@
+   its own state.) When F returns a value EQL to END-VALUE (default: nil), ~@
+   it is considered finished and will not be called any more times."
+  (check-type f function)
+  (make-instance 'py-func-iterator :func f :end-value end-value))
+
+(defmethod iterator-next ((f py-func-iterator))
+  "This is the only function that an iterator has to provide."
+  (flet ((err-finished ()
+	   (py-raise 'StopIteration "Iterator ~S has finished" f)))
+    (if (slot-value f 'stopped-yet)
+	(err-finished)
+      (let ((res (funcall (slot-value f 'func))))
+	(if (eql res (slot-value f 'end-value))
+	    (progn (setf (slot-value f 'stopped-yet) t)
+		   (err-finished))
+	  res)))))
+
+(register-bi-class-attr/meth (find-class 'py-iterator) 'next #'iterator-next)
+
+(defmethod __name__ ((x py-func-iterator))
+  (internal-get-attribute (slot-value x 'func) '__name__))
+
+(register-bi-class-attr/meth (find-class 'py-func-iterator) '__name__
+			     (make-bi-class-attribute #'__name__))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;

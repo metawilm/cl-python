@@ -169,58 +169,64 @@
   ;; evaluated after an exception is thrown, not earlier; so long as
   ;; there is no exception thrown, it is not evaluated.
 
-  (handler-bind 
-      ;; Not handler-case: we don't want to unwind for uncatched exceptions
-      ((Exception (lambda (exc)
-		    (loop for ((cls/tuple parameter) handler-form) in except-clauses
-			do (cond ((and cls/tuple  ;; `except Something:'  where Something a class or tuple
-				      (let ((ecls/tuple (py-eval-1 cls/tuple)))
-					(typecase ecls/tuple
-					  (class    (typep exc ecls/tuple))
-					  (py-tuple (loop for cls in (tuple->lisp-list ecls/tuple)
-							when (typep exc cls)
-							do (return t)
-							finally (return nil)))
-					  (t (warn "Non-class as `except' specializer: ~S"
-						   ecls/tuple)
-					     nil))))
-				  (when parameter
-				    (assert (eq (first parameter) 'identifier))
-				    (namespace-bind *scope* (second parameter) exc)) ;; right scope??
-				  (py-eval-1 handler-form)
-				  (return-from eval-try-except nil))
-				 
-				 ((null cls/tuple) ;; a bare `except:' matches all exceptions
-				  (py-eval-1 handler-form)
-				  (return-from eval-try-except nil))
-				 
-				 (t (error "assumed unreachable")))))))
+  (let ((handler-scope *scope*))
     
-    ;; The `py-error-handlers' were already set in py-eval. Need to
-    ;; set them here again, because when one of the py-eval
-    ;; handler-bind handlers takes control, the handler above for
-    ;; Exception is not active anymore.
+    (handler-bind 
+	;; Not handler-case: we don't want to unwind for uncatched exceptions
+	((Exception (lambda (exc)
+		      (loop for ((cls/tuple parameter) handler-form) in except-clauses
+			  do (cond ((and cls/tuple  ;; `except Something:'  where Something a class or tuple
+					 (let ((ecls/tuple (py-eval-1 cls/tuple)))
+					   (typecase ecls/tuple
+					     (class    (typep exc ecls/tuple))
+					     (py-tuple (loop for cls in (tuple->lisp-list ecls/tuple)
+							   when (typep exc cls)
+							   do (return t)
+							   finally (return nil)))
+					     (t (warn "Non-class as `except' specializer: ~S"
+						      ecls/tuple)
+						nil))))
+				  
+				    (let ((*scope* handler-scope))
+				      (when parameter
+					(assert (eq (first parameter) 'identifier))
+					(namespace-bind handler-scope #+(or)*scope*
+							(second parameter) exc)) ;; right scope??
+				      (py-eval-1 handler-form))
+				      (return-from eval-try-except nil))
+				 
+				   ((null cls/tuple) ;; a bare `except:' matches all exceptions
+				    (let ((*scope* handler-scope))
+				      (py-eval-1 handler-form))
+				    (return-from eval-try-except nil))
+				 
+				   (t (error "assumed unreachable")))))))
     
-    #-py-exception-stack
-    (with-py-error-handlers
-	(py-eval-1 suite))
+      ;; The `py-error-handlers' were already set in py-eval. Need to
+      ;; set them here again, because when one of the py-eval
+      ;; handler-bind handlers takes control, the handler above for
+      ;; Exception is not active anymore.
+    
+      #-py-exception-stack
+      (with-py-error-handlers
+	  (py-eval-1 suite))
 
-    #+py-exception-stack
-    (loop with excepts = ()
-	for ((cls/tuple nil) nil) in except-clauses
-	do (if (null cls/tuple)
-	       (push (find-class 'Exception) excepts) ;; bare `except: ...'
-	     (let ((ecls/tuple (py-eval-1 cls/tuple)))
-	       (etypecase ecls/tuple
-		 (class (push ecls/tuple excepts))
-		 (py-tuple (dolist (cls (tuple->lisp-list ecls/tuple))
-			     (push cls excepts))))))
-	finally (let ((*active-excepts* (cons (nreverse excepts) *active-excepts*)))
-		  (with-py-error-handlers
-		      (py-eval-1 suite)))))
+      #+py-exception-stack
+      (loop with excepts = ()
+	  for ((cls/tuple nil) nil) in except-clauses
+	  do (if (null cls/tuple)
+		 (push (find-class 'Exception) excepts) ;; bare `except: ...'
+	       (let ((ecls/tuple (py-eval-1 cls/tuple)))
+		 (etypecase ecls/tuple
+		   (class (push ecls/tuple excepts))
+		   (py-tuple (dolist (cls (tuple->lisp-list ecls/tuple))
+			       (push cls excepts))))))
+	  finally (let ((*active-excepts* (cons (nreverse excepts) *active-excepts*)))
+		    (with-py-error-handlers
+			(py-eval-1 suite)))))
 		  
-  (when else-clause
-    (py-eval-1 else-clause)))
+    (when else-clause
+      (py-eval-1 else-clause))))
 
 
 (defun eval-raise (first second third) ;; exctype value traceback)
