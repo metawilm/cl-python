@@ -50,7 +50,7 @@
 		     (loop (restart-case
 			       (let ((ev-ast (py-eval ast)))
 				 #+(or)(warn "repl: ev-ast: ~A" ev-ast)
-				 (assert (eq (car ev-ast) :file-input))
+				 (assert (eq (car ev-ast) 'file-input))
 				 (when (> (length ev-ast) 1)
 				   (let ((ev (car (last ev-ast))))
 				     

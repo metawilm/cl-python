@@ -7,7 +7,9 @@
 
 (defun walk-py-form (ast f &key (walk-lists-only t))
   "Walk recursively through AST, calling F on each statement. ~@
-   F should return a form to walk through, derived from the form it's given. ~@
+   F should return a (possibly new) form to walk through, derived from ~@
+   the form it's given). ~@
+   The collected results are returned as a new AST. ~@
    When F returns two values and the second value is T, the form returned in ~@
    the first value is considered the final form and it is not walked into."
   
@@ -45,14 +47,19 @@
 	
 	(augassign-expr `(augassign-expr ,(second form) ,(third form)
 					 ,(do-walk (fourth form)))) 
+	
+	(backticks `(backticks ,(map-walk (second form))))
 	(binary `(binary ,(second form) 
 			 ,(do-walk (third form)) ,(do-walk (fourth form))))
 	(binary-lazy `(binary-lazy ,(second form)
 				   ,(do-walk (third form))
 				   ,(do-walk (fourth form))))
 	(break form)
+	
 	(call `(call ,(do-walk (second form))
-		     ,(third form))) ;; XXX todo
+		     ,(third form)))
+	;; XXX todo: pos arg values; key arg default values
+	
 	(classdef
 	 (destructuring-bind (cname inheritance suite) (cdr form)
 	   `(classdef ,cname ,(map-walk inheritance) ,(do-walk suite))))
@@ -88,7 +95,7 @@
 	(import-from form)
 	(lambda `(lambda ,(second form) ,(do-walk (third form))))
 	      
-	(list  `(list ,(do-walk (second form))))
+	(list  `(list ,(map-walk (second form))))
 	(list-compr `(list-compr
 		      ,(do-walk (second form))
 		      ,(loop for for/if in (third form)

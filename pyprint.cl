@@ -8,9 +8,7 @@
 ;;;
 ;;; TODO: 
 ;;;  - insert line ends for too long lines
-;;;  - remove unneeded brackets around unary and binary expressions
-;;;  - look at unifying testlist/exprlist, and parser not generating
-;;;    one-item testlist/exprlists
+;;;  - look at unifying testlist/exprlist
 
 (defvar *py-pprint-dispatch* (copy-pprint-dispatch nil))
 
@@ -18,6 +16,9 @@
   (let ((*print-pprint-dispatch* *py-pprint-dispatch*))
     (with-output-to-string (*standard-output*)
       (pprint ast))))
+
+(defun parse-and-print (str)
+  (write-string (ast->python-code (parse-python-string str))))
 
 (defgeneric py-pprint (stream ast)
   (:documentation "Print AST as Python source code to STREAM"))
@@ -111,6 +112,19 @@
       (write-char delim-quote stream)))) ;; closing quote
 
 
+(defvar *precedence-level* -1)
+
+;; XXX check prec levels
+(defvar *binary-op-precedence*
+    '((or . 0)(and . 1)(in . 3)(is . 4)
+      (< . 5)(<= . 5)(> . 5)(>= . 5)(!= . 5) (== . 5)
+      (|\|| . 6)(^ . 7)(& . 8)(<< . 9)(>> . 9)
+      (+ . 10)(- . 10) (* . 11)(/ . 11)(% . 11)(// . 11)
+      (** . 12)))
+
+(defvar *unary-op-precedence* ;; XXX check
+    '((+ . 10)(- . 10)(~ . 7)(not . 2)))
+
 (defmethod py-pprint (stream (x list))
   (case (car x)
     (assert (let ((data (cdr x)))
@@ -129,8 +143,20 @@
     
     (augassign-expr (format stream "~A ~A ~A" (second x) (third x) (fourth x)))
     (backticks   (format stream "`~{~A~^, ~}`" (second x)))
-    (binary      (format stream "(~A ~A ~A)" (third x) (second x) (fourth x)))
-    (binary-lazy (format stream "(~A ~A ~A)" (third x) (second x) (fourth x)))
+    
+    ((binary binary-lazy)
+     (let* ((lev (cdr (assoc (second x) *binary-op-precedence*)))
+	    (brackets? (< lev *precedence-level*)))
+       #+(or) ;; debug
+       (with-standard-io-syntax 
+	 (warn "brackets: ~A=~A, old=~A -> ~A"
+	       (second x) lev *precedence-level* brackets?))
+       (when brackets? (write-char #\( stream))
+       (let ((*precedence-level* lev))
+	 (format stream "~A ~A ~A"
+		 (third x) (second x) (fourth x)))
+       (when brackets? (write-char #\) stream))))
+    
     (break (format stream "~A" (first x)))
     
     (call (destructuring-bind (primary args) (cdr x)
@@ -302,14 +328,20 @@
 
     (suite (format stream "~&~<   ~@;~@{~A~^~&~}~:>~&" (second x)))
     
-    ((testlist exprlist) (destructuring-bind (data comma?)
+    ((testlist exprlist) #+(or) ;; old code, with comma
+			 (destructuring-bind (data comma?)
 			     (cdr x)
 			   (let ((brackets (or comma? (cdr data))))
 			     (when brackets (format stream "("))
 			     (format stream "~{~A~^, ~}" data)
 			     (when comma?
 			       (format stream ","))
-			     (when brackets (format stream ")")))))
+			     (when brackets (format stream ")"))))
+			 (let ((data (second x)))
+			   (format stream "(")
+			   (format stream "~{~A~^, ~}" data)
+			   (format stream ",")
+			   (format stream ")")))
 
     (try-except (destructuring-bind (try-suite except-suites else-suite)
 		    (cdr x)
@@ -331,7 +363,16 @@
     
     (tuple   (format stream "(~{~A~^, ~},)" (second x)))
     
-    (unary       (format stream "(~A ~A)" (second x) (third x)))
+    (unary (let* ((lev (cdr (assoc (second x) *unary-op-precedence*)))
+		  (brackets? (< lev *precedence-level*)))
+	     #+(or) ;; debug
+	     (with-standard-io-syntax 
+	       (warn "brackets: ~A=~A, old=~A -> ~A"
+		     (second x) lev *precedence-level* brackets?))     
+	     (when brackets? (write-char #\( stream))
+	     (let ((*precedence-level* lev))
+	       (format stream "~A ~A" (second x) (third x)))
+	     (when brackets? (write-char #\) stream))))
     
     (while (destructuring-bind (test suite else-suite) (cdr x)
 	     (format stream "while ~A: ~A" test suite)

@@ -165,7 +165,7 @@
 		      (let ((items (nreverse `(,$1 ,@(second $2)))))
 			`(assign-expr ,(car items) ,(cdr items))))
 		     ($2
-		      (warn "aug: ~S -- ~S" $1 $2)
+		      #+(or)(warn "aug: ~S -- ~S" $1 $2)
 		      (list 'augassign-expr $1 (car $2) (cdr $2)))
 		     (t
 		      #+(or)(break "expr-stmt: what is this??  ~A -- ~A" $1 $2)
@@ -327,7 +327,7 @@
 
  (atom :or
        ((|(| comma? |)|) . ((list 'testlist nil (if $2 t nil))))
-       ((|(| testlist-gexp |)|) . ((cons 'testlist $2)))
+       ((|(| testlist-gexp |)|) . ($2))
 
        ((|[| |]|) . ((list 'list nil)))
        ((|[| listmaker |]|) . ($2))
@@ -346,9 +346,13 @@
  (:comma--test*)
 
 
- (testlist-gexp (test gen-for) ((list $1 $2)))
- (testlist-gexp (test comma--test* comma?) ((list (cons $1 $2) (if $3 t nil))))
-
+ (testlist-gexp (test gen-for) ((list 'testlist $1 $2)))
+ (testlist-gexp (test comma--test* comma?) ((if (or $2 $3)
+						(list 'testlist
+						      (cons $1 $2)
+						      (if $3 t nil))
+					      $1)))
+ 
  (lambdef (lambda parameter-list5 |:| test) ((list $1 $2 $4)))
  (lambdef (lambda                 |:| test) ((list $1 '(nil nil nil) $3)))
 
@@ -386,12 +390,12 @@
 	    ((|,| expr exprlist2) . ((list $2 $3))))
 
  (testlist (test testlist2) (#+(or)(break "testlist: ~A -- ~A" $1 $2)
-			       (if $2
+			     (if $2
 				   `(testlist ,(cons $1 $2))
-				 $1)
-			       #+(or)(list 'testlist
-					   (cons $1 (butlast $2))
-					   (car (last $2)))))
+			       $1)
+			     #+(or)(list 'testlist
+					 (cons $1 (butlast $2))
+					 (car (last $2)))))
  (testlist2 :or
 	    (() . (nil))
 	    ((|,|) . ((list t)))

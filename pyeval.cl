@@ -148,9 +148,32 @@
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+(defun careful-py-eval (ast &optional namespace)
+  "Tries to evaluate AST. When the evaluation raises an exception, ~
+   NIL is returned; otherwise the value of AST is returned."
+  ;; Used to evaluate compile-time constants.
+  ;; TODO: are there computations that are considered constant but
+  ;; that might take very long to calculate?!
+  (when (and (listp ast)
+	     (eq (car ast) 'file-input)
+	     (= (length (second ast)) 1))
+    (setq ast (first (second ast))))
+  (handler-case (values (if namespace
+			    (py-eval ast)
+			  (user-py-eval ast)))
+    (Exception () nil)
+    (error (e) (progn
+		 (warn "Carefully evaluating ast ~A gave a Lisp error: ~A"
+		       ast e)
+		 nil))
+    (:no-error (val)
+      val)))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
 
 (defun eval-file-input (list-ast-items)
-  (cons :file-input (mapcar #'py-eval-1 (car list-ast-items))))
+  (cons 'file-input (mapcar #'py-eval-1 (car list-ast-items))))
 
 (defun eval-testlist (items-comma?)
   (let ((items (first items-comma?))
