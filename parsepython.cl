@@ -739,7 +739,7 @@
 			    ((digit-char-p second 10) 
 			     (read-int (digit-char-p second 10)))
 			    
-			    ((member second '(#\j #\J))  #(0 0))
+			    ((member second '(#\j #\J))  (complex 0 0))
 			    ((member second '(#\l #\L))  0)
 			    (t (unread-char second)
 			       0)))) ;; non-number, like `]' in `x[0]'

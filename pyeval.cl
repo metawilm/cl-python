@@ -748,12 +748,12 @@
   (if (generator-ast-p suite)
       
       (let* ((params (multiple-value-list (parse-function-parameter-list params)))
-	     (f (make-python-function-returning-generator fname params suite)))
+	     (f (make-python-function-returning-generator (symbol-name fname) params suite)))
 	(namespace-bind *scope* fname f))
   
     (let* ((params (multiple-value-list (parse-function-parameter-list params)))
 	   (f (make-user-defined-function 
-	       :name fname
+	       :name (symbol-name fname)
 	       :ast suite
 	       :namespace (make-namespace
 			   :name (format nil "ns for function ~A" fname)
@@ -770,6 +770,7 @@
   (let ((parsed-params (multiple-value-list (parse-function-parameter-list params))))
     #+(or)(break "lambda")
     (make-lambda-function
+     :name "lambda"
      :ast expr
      :namespace (make-namespace :name "lambda namespace"
 				:inside *scope*)

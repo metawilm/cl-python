@@ -41,7 +41,7 @@
    :__import__ :abs :apply :callable :chr :cmp :coerce
    :compile :delattr :dir :divmod :eval :execfile :filter
    :getattr :globals :hasattr :hash :hex :id :input :intern :isinstance
-   :issubclass :iter :len :locals :map :ord :pow :range
+   :issubclass :iter :len :locals :map :max :min :oct :ord :pow :range
    :raw_input :reduce :reload :repr :round :setattr :sorted
    :sum :super :type :unichr :vars :zip))
 

@@ -61,6 +61,13 @@
     (with-slots (func object) x
       (format stream ":func ~A ~_:object ~A" func object))))
 
+(defmethod __name__ ((x bound-method))
+  (internal-get-attribute (slot-value x 'func) '__name__))
+
+(register-bi-class-attr/meth (find-class 'bound-method) '__name__
+			     (make-bi-class-attribute #'__name__))
+			     
+
 (defmethod __repr__ ((x bound-method))
   (with-output-to-string (s)
     (print-unreadable-object (x s :identity t :type t)
@@ -96,6 +103,13 @@
 		  (call-attribute-via-class func '__repr__)
 		  (call-attribute-via-class class '__repr__)))))))
 
+(defmethod __name__ ((x unbound-method))
+  (internal-get-attribute (slot-value x 'func) '__name__))
+
+(register-bi-class-attr/meth (find-class 'unbound-method) '__name__
+			     (make-bi-class-attribute #'__name__))
+			     
+
 ;; static method
 
 (defclass static-method (builtin-instance)
@@ -118,6 +132,13 @@
 (register-bi-class-attr/meth (find-class 'static-method) '__new__
 			     (make-static-method #'static-method-__new__))
 
+(defmethod __name__ ((x static-method))
+  (internal-get-attribute (slot-value x 'func) '__name__))
+
+(register-bi-class-attr/meth (find-class 'static-method) '__name__
+			     (make-bi-class-attribute #'__name__))
+			     
+
 
 ;; class method
 
@@ -133,6 +154,12 @@
 			     (make-static-method #'class-method-__new__))
 
 
+(defmethod __name__ ((x class-method))
+  (internal-get-attribute (slot-value x 'func) '__name__))
+
+(register-bi-class-attr/meth (find-class 'class-method) '__name__
+			     (make-bi-class-attribute #'__name__))
+			     
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; A special kind of built-in function
@@ -143,3 +170,4 @@
 
 (defun make-bi-function-accepting-kw-args (func)
   (make-instance 'bi-function-accepting-kw-args :func func))
+

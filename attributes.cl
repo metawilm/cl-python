@@ -156,8 +156,11 @@
 	(t (call-next-method))))
 
 (defmethod internal-get-attribute (x attr)
-  (warn "Catch-all internal-get-attribute: ~S ~S" x attr)
-  (values nil nil))
+  (cond ((and (eq attr '__name__) (eq x #'iterator-next)) ;; XXX hack
+	 (values 'next' t))
+	(t
+	 (warn "Catch-all internal-get-attribute: ~S ~S" x attr)
+	 (values nil nil))))
 
 (defmethod internal-get-attribute ((x number) attr)
   (getattr-of-number x attr))
@@ -384,14 +387,7 @@
 
 (defmethod getattr-of-class-rec :around ((cls class) attr)
   (declare (ignore attr))
-  (call-next-method)
-  #+(or)(progn (declare (ignore attr))
-	       (let ((x (call-next-method)))
-		 (if (typep x 'unbound-method) ;; XXX hack
-		     (progn
-		       (setf (slot-value x 'class) cls)
-		       (values x t))
-		   (values x t)))))
+  (call-next-method))
   
 (defmethod getattr-of-class-rec ((cls builtin-class) attr)
   (loop for c in (mop:class-precedence-list cls)
@@ -480,8 +476,12 @@
 (defmethod getattr-of-class-rec (cls attr)
   (assert (or (member cls (list (find-class 'python-type)))
 	      (subtypep cls 'Exception)))
-  #+(or)(when (subtypep cls 'Exception)
-	  (break "exception attribute lookup ~A ~A" cls attr))
+  (when (and (subtypep cls 'Exception)
+	     (eq attr '__name__))
+    (return-from getattr-of-class-rec
+      (values (symbol-name (class-name cls))
+	      t)))
+  
   (let ((val (lookup-bi-class-attr/meth (find-class 't) attr)))
     (when val 
       (return-from getattr-of-class-rec

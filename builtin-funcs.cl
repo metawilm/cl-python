@@ -316,7 +316,7 @@
   (declare (ignore filename globals locals))
   (error "todo: execfile"))
 
-(defmethod pyb:filter (func list)
+(defmethod pyb:filter (func iterable)
   "Construct a list from those elements of LIST for which FUNC is true.
    LIST: a sequence, iterable object, iterator
          If list is a string or a tuple, the result also has that type,
@@ -324,8 +324,8 @@
    FUNC: if None, identity function is assumed"
   (when (eq func *None*)
     (setf func #'identity))
-  (make-py-list-from-list (loop for x in list
-			   when (py-val->lisp-bool (py-call func x))
+  (make-py-list-from-list (loop for x in (py-iterate->lisp-list iterable)
+			   when (py-val->lisp-bool (py-call func (list x)))
 			   collect x)))
 
 (defmethod pyb:getattr (x attr &optional (default nil default-p))
@@ -382,16 +382,17 @@
 ;; non-portable.
 
 #+allegro 
-(defmethod pyb:id (x)
-  (let ((ht (load-time-value (make-hash-table :test 'eq :weak-keys t)))
-	(counter 0))
+(let ((counter 0)
+      (ht (make-hash-table :test 'eq :weak-keys t)))
+  (defmethod pyb:id (x)
     (or (gethash x ht)
-	(setf (gethash x ht) (incf counter)))))
+	(progn (incf counter)
+	       (setf (gethash x ht) counter)
+	       counter))))
 
 #-allegro
 (defmethod pyb:id (x)
   (error "TODO: id() not implemented for this Lisp implementation"))
-
 
 (defmethod pyb:input (&rest args)
   (declare (ignore args))
@@ -401,19 +402,22 @@
   (declare (ignore x))
   (error "Function 'intern' is deprecated, and not implemented"))
 
+(defmethod pyb:isinstance (x cls)
+  (lisp-val->py-bool (pyb::isinstance-1 x cls)))
 
 (defmethod pyb::isinstance-1 (x cls)
   ;; CLS is either a class or a _tuple_ of classes (only tuple is
   ;; allowed, not other iterables).
   (if (typep cls 'py-tuple)
       (dolist (c (py-iterate->lisp-list cls)
-		(when (typep x c)
+		(when (subtypep (__class__ x) c)
 		  (return-from pyb::isinstance-1 t))))
-    (typep x cls)))
+    (subtypep (__class__ x) cls)))
 
-(defmethod pyb:isinstance (x cls)
-  (lisp-val->py-bool (pyb::isinstance-1 x cls)))
-
+(defmethod pyb:issubclass (x cls)
+  ;; SUPER is either a class, or a tuple of classes -- denoting
+  ;; Lisp-type (OR c1 c2 ..).
+  (lisp-val->py-bool (pyb::issubclass-1 x cls)))
 
 (defmethod pyb::issubclass-1 (x cls)
   (if (typep cls 'py-tuple)
@@ -421,11 +425,6 @@
 	(when (subtypep x c)
 	  (return-from pyb::issubclass-1 t)))
     (subtypep x cls)))
-
-(defmethod pyb:issubclass (x cls)
-  ;; SUPER is either a class, or a tuple of classes -- denoting
-  ;; Lisp-type (OR c1 c2 ..).
-  (lisp-val->py-bool (pyb::issubclass-1 x cls)))
 
 
 (defmethod pyb:iter (x &optional y)
@@ -511,6 +510,35 @@
 				(make-tuple-from-list curr-items)
 			      (py-call func curr-items))))))))))
 
+(defmethod pyb:max (item &rest items)
+  (let ((res nil))
+    (if (null items)
+	(map-over-py-object (lambda (k) (when (or (null res) (py-> k res))
+					  (setf res k)))
+			    item)
+      (progn (setf res item)
+	     (dolist (k items)
+	       (when (or (py-> k res))
+		 (setf res k)))))
+    res))
+
+(defmethod pyb:min (item &rest items)
+  (let ((res nil))
+    (if (null items)
+	(map-over-py-object (lambda (k) (when (or (null res) (py-< k res))
+					  (setf res k)))
+			    item)
+      (progn (setf res item)
+	     (dolist (k items)
+	       (when (or (py-< k res))
+		 (setf res k)))))
+    res))
+
+(defmethod pyb:oct (n)
+  (setf n (py-int-designator-val n))
+  (if (= n 0)
+      "0"
+    (format nil "0~O" n)))
 
 (defmethod pyb:ord (s)
   (multiple-value-bind (string-des-p lisp-str)
@@ -577,25 +605,18 @@
   (error "todo: raw_input")) ;; XXX hmm no "prompt" CL function?
 
 (defmethod pyb:reduce (func seq &optional initial)
-  (let (res)
+  (let ((res nil))
     (if initial
 	
 	(progn (setf res initial)
-	       (map-over-py-object
-		(lambda (x) (setf res (py-call func res x)))
-		seq)
-	       res)
+	       (map-over-py-object (lambda (x) (setf res (py-call func (list res x))))
+				   seq))
       
-      (let ((need-first t))
-	(map-over-py-object
-	 (lambda (x) (if need-first
-			 (setf res x
-			       need-first nil)
-		       (setf res (py-call func res x))))
-	 seq)
-	(if need-first
-	    (py-raise 'TypeError "reduce() of empty sequence with no initial value")
-	  res)))))
+      (map-over-py-object (lambda (x) (cond ((null res) (setf res x))
+					    (t (setf res (py-call func (list res x))))))
+			  seq))
+    (or res
+	(py-raise 'TypeError "reduce() of empty sequence with no initial value"))))
 
 (defmethod pyb:reload ((m py-module))
   (with-slots (module namespace) m

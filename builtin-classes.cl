@@ -339,8 +339,6 @@
     (format stream ":val ~A" (slot-value x 'val))))
 
 
-
-
 (defmethod number-__new__ ((cls class) &rest args)
   (break "number-__new__ accessible, apparently?!") ;; I think not accessible by user code
   (assert (subtypep cls 'py-number))
@@ -370,6 +368,8 @@
     (py-number (values t (slot-value x 'val)))
     (t nil)))
 
+(defmethod py-number-designator-val ((x number)) x)
+(defmethod py-number-designator-val ((x py-number)) (slot-value x 'val))
 
 (defmethod make-py-number ((val number))
   "Make a PY-NUMBER instance for Lisp number VAL"
@@ -561,25 +561,40 @@
 (defun make-complex (&optional (val #C(0 0)))
   (make-instance 'py-complex :val (coerce val 'complex)))
 
-
 (def-unary-meths
     py-complex complex (slot-value x 'val)
     ((__hash__ (if (= (imagpart x) 0)
 		   (__hash__ (realpart x))
 		 (sxhash x)))
-     (__repr__ (if (= (complex-imag x) 0)
-		   (__repr__ (complex-real x))
-		 (if (>= (imagpart x) 0)
-		     (format nil "(~A + ~Aj)" (realpart x) (imagpart x))
-		   (format nil "(~A - ~Aj)" (realpart x) (* -1 (imagpart x))))))
-     (complex-real (realpart x))
-     (complex-imag (imagpart x))
-     (complex-conjugate (conjugate x))))
+     (__repr__ (cond ((= (complex-imag x) 0) (format nil "~A" (complex-real x)))
+		     ((= (complex-real x) 0) (format nil "~Aj" (complex-imag x)))
+		     (t (if (>= (imagpart x) 0)
+			    (format nil "(~A+~Aj)" (complex-real x) (complex-imag x))
+			  (format nil "(~A-~Aj)" (complex-real x) (* -1 (complex-imag x)))))))
+     #+(or)((complex-real (realpart x))
+	    (complex-imag (imagpart x))
+	    (complex-conjugate (conjugate x)))))
+
+
+;; Slight difference between Python and Lisp regarding types of real
+;; and imaginary components of complex number:
+;; 
+;; Lisp: (imagpart #C(3.0 0)) == 3
+;; Python: it's 0
+
+(defmethod complex-real ((x number)) (let ((r (realpart x)))
+				       (if (= r 0) 0 r)))
+(defmethod complex-imag ((x number)) (let ((i (imagpart x)))
+				       (if (= i 0) 0 i)))
+(defmethod complex-conjugate ((x number)) (conjugate x))
 
 (loop for (meth . func) in `((real . ,(make-bi-class-attribute #'complex-real))
 			     (imag . ,(make-bi-class-attribute #'complex-imag))
 			     (conjugate . ,(make-bi-class-attribute #'complex-conjugate)))
-    do (register-bi-class-attr/meth (find-class 'complex) meth func))
+    do (register-bi-class-attr/meth (find-class 'py-number) meth func) 
+       (register-bi-class-attr/meth (find-class 'number) meth func))
+
+
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -621,7 +636,7 @@
 ;; integer types anywhere, as CPython doesn't do that often, either.
 #+(or)(progn (defconstant *sys-pos-maxint* 2147483647)
 	     (defconstant *sys-neg-maxint* -2147483648))
-    
+
 (defclass py-int (py-real)
   ((val :type integer :initarg :val :initform 0))
   (:metaclass builtin-class))
@@ -629,16 +644,42 @@
 (mop:finalize-inheritance (find-class 'py-int))
 
 
-(defmethod py-int-__new__ ((cls class) &rest args)
+(defmethod py-int-__new__ ((cls class) &rest pos-args)
+  ;; takes an optional `base' arg
   (assert (subtypep cls (find-class 'py-int)))
-  (when (cdr args)
-    (py-raise 'ValueError "int.__new__ max arg (got: ~A)" args))
-  (let ((inst (make-instance cls)))
-    (setf (slot-value inst 'val)
-      (if args
-	  (truncate (convert-to-number (car args) 'real)) ;; CPython truncates
-	0))
-    inst))
+  (cond ((py-string-designator-p (car pos-args))
+	 (destructuring-bind (str &optional base) pos-args
+	   (setf str (py-string-designator-val str)
+		 base (cond ((null base) (return-from py-int-__new__
+					   (with-input-from-string (*standard-input* str)
+					     (read-number))))
+			    ((py-int-designator-p base)
+			     (let ((b (py-int-designator-val base)))
+			       (cond ((<= 2 b 36) b)
+				     ((= 0 b) (return-from py-int-__new__
+						(with-input-from-string (*standard-input* str)
+						  (read-number))))
+				     (t (py-raise 'ValueError "int(): invalid base: ~A" b)))))
+			    (t (py-raise 'ValueError "int(): invalid base: ~S" base))))
+	   (let ((int-val (loop with res = 0
+			      for x across str
+			      when (digit-char-p x base)
+			      do (setf res (+ (* base res) (digit-char-p x base)))
+			      else do (py-raise 'ValueError
+						"int(): non-digit found (got: ~S, base: ~A)" x base)
+			      finally (return res))))
+	     (if (eq cls (find-class 'py-int))
+		 int-val
+	       (let ((inst (make-instance cls)))
+		 (setf (slot-value inst 'val) int-val)
+		 inst)))))
+	((py-number-designator-p (car pos-args))
+	 (let ((int-val (truncate (py-number-designator-val (car pos-args))))) ;; CPython truncates
+	   (if (eq cls (find-class 'py-int))
+	       int-val
+	     (let ((inst (make-instance cls)))
+	       (setf (slot-value inst 'val) int-val)
+	       inst))))))
 
 (register-bi-class-attr/meth (find-class 'py-int) '__new__
 			     (make-static-method #'py-int-__new__))
@@ -1343,10 +1384,17 @@
 	            :type namespace
    	            :documentation "The namespace in which the function code is ~
                                     executed (the lexical scope -- this is not ~
-                                    func.__dict__)"))
+                                    func.__dict__)")
+   (name :initarg :name :initform "<no name>"))
   (:metaclass builtin-class))
 
 (mop:finalize-inheritance (find-class 'python-function))
+
+(defmethod py-function-name ((x python-function))
+  (slot-value x 'name))
+
+(register-bi-class-attr/meth (find-class 'python-function) '__name__
+			     (make-bi-class-attribute #'py-function-name))
 
 ;; TODO: __new__, __init__
 
@@ -1378,7 +1426,7 @@
 ;; Regular function
 
 (defclass user-defined-function (python-function)
-  ((name :initarg :name :type string))
+  ()
   (:metaclass builtin-class))
 
 (mop:finalize-inheritance (find-class 'user-defined-function))
@@ -1402,17 +1450,19 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Function returning a generator
 
-;;;XX should subclass from function
+;;; XXX should subclass from function or something
 
 (defclass python-function-returning-generator (builtin-instance)
   ((call-rewriter :initarg :call-rewriter)
-   (generator-creator :initarg :generator-creator))
+   (generator-creator :initarg :generator-creator)
+   (name :initarg :name))
   (:metaclass builtin-class))
 
 (mop:finalize-inheritance (find-class 'python-function-returning-generator))
 
 (defun make-python-function-returning-generator (fname params ast)
   (make-instance 'python-function-returning-generator
+    :name fname
     :call-rewriter (apply #'make-call-rewriter fname params)
     :generator-creator (eval (create-generator-function ast))))
 
@@ -1424,6 +1474,11 @@
 (register-bi-class-attr/meth (find-class 'python-function-returning-generator)
 			     '__get__ #'__get__)
 
+(defmethod __name__ ((x python-function-returning-generator))
+  (slot-value x 'name))
+
+(register-bi-class-attr/meth (find-class 'python-function-returning-generator)
+			     '__name__ (make-bi-class-attribute #'__name__))
  
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Package/Module
@@ -1504,8 +1559,9 @@
 
 (defmethod __get__ ((x bi-class-attribute) inst class)
   ;; It's an attribute of the instance, not a method of the class.
-  (assert (eq inst *None*))
-  (py-call (slot-value x 'func) (list class)))
+  (when (eq class *None*)
+    (error "Attribute is only for instances of class ~A, not the class itself" class))
+  (py-call (slot-value x 'func) (list inst)))
 
 
 (register-bi-class-attr/meth (find-class 'bi-class-attribute) '__get__ #'__get__)
@@ -1560,7 +1616,6 @@
 	((car args) (setf (slot-value x 'list) ;; override, not extend
 		      (py-iterate->lisp-list (car args))))
 	(t          (setf (slot-value x 'list) nil))))
-
 
   
 ;;;; magic methods
@@ -1944,6 +1999,11 @@
 
 (register-bi-class-attr/meth (find-class 'py-iterator) 'next #'iterator-next)
 
+(defmethod __name__ ((x py-func-iterator))
+  (internal-get-attribute (slot-value x 'func) '__name__))
+
+(register-bi-class-attr/meth (find-class 'py-func-iterator) '__name__
+			     (make-bi-class-attribute #'__name__))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Tuple
@@ -2033,7 +2093,7 @@
 
 (defmethod __hash__ ((x py-tuple))
   ;; Try to avoid  hash( (x,(x,y)) ) = hash( (y) )
-  ;; so being a bit creative here...
+  ;; so being a bit creative here... XXX
   (let ((hash-values #(1274 9898982 1377773 -115151511))
 	(res 23277775)
 	(pos 0))
@@ -2106,7 +2166,13 @@
   (cond ((typep s 'string) (values t s))
 	((typep s 'py-string) (values t (slot-value s 'string)))
 	(t nil)))
-  
+
+(defmethod py-string-designator-val ((s string))
+  s)
+
+(defmethod py-string-designator-val ((s py-string))
+  (slot-value s 'string))
+
 (defun make-py-string (&optional (s ""))
   (check-type s string "A Lisp string")
   (make-instance 'py-string :string s))
@@ -2320,7 +2386,8 @@
 				    ,body))))))
 
 (def-unary-string-meths 
-    ((__getitem__ (x index) (progn (ensure-py-type index integer "String indices must be integer (slices: todo)")
+    ((__getitem__ (x index) (progn (ensure-py-type index integer
+						   "String indices must be integer (slices: todo)")
 				   (when (< index 0) ;; XXX slice support
 				     (incf index (length x)))
 				   (string (char x index))))
@@ -2355,7 +2422,50 @@
      (string-isspace (x)  (string-isspace-1 x))
      (string-istitle (x)  (string-istitle-1 x))
      (string-isupper (x)  (string-isupper-1 x))
-     (string-join    (x seq) (string-join-1 x seq))))
+     (string-join    (x seq) (string-join-1 x seq))
+     (string-ljust (x width &optional (fillchar " "))
+		   (progn (ensure-py-type width integer
+					  "string.ljust(): integer width expected (got: ~A)")
+			  (setf filchar (py-string-designator-val fillchar))
+			  (let ((res (copy-seq x)))
+			    (loop while (< (length res) width)
+				do (setf res (concatenate 'string fillchar res))
+				finally (return res)))))
+     (string-lower (x) (string-downcase x))
+     (string-lstrip (x &optional chars)
+		    (progn (setf chars (py-string-designator-val chars))
+			   (let ((res (copy-seq x)))
+			     (loop while (and res (member (aref res 0) '( #\Tab #\Space #\Newline )))
+				 do (setf res (subseq res 1))
+				 finally (return res)))))
+     (string-replace (x old new &optional count)
+		     (progn (setf old (py-string-designator-val old)
+				  new (py-string-designator-val new)
+				  count (when count (py-int-designator-val count)))
+			    (substitute new old x :count count)))
+     (string-rfind (x sub &optional start end)
+		   (error "string.rfind(): todo"))
+     (string-rindex (x sub &optional start end)
+		    (error "string.rdindex(): todo"))
+     (string-rjust (x width &optional (fillchar " "))
+		   (reverse (string-ljust (reverse x) width fillchar)))
+     (string-rsplit (x sep &optional maxsplit)
+		    (error "string.rsplit(): todo"))
+     (string-split (x sep &optional maxsplit)
+		   (error "string.split(): todo"))
+     (string-splitlines (x &optional keepends)
+			(error "string.splitlines(): todo"))
+     (string-startswith (x prefix &optional start end)
+			(error "string.startswith(): todo"))
+     (string-strip (x &optional chars)
+		   (error "string.strip(): todo"))
+     (string-swapcase (x) (error "string.swapcase(): todo"))
+     (string-title (x) (error "string.title(): todo"))
+     (string-translate (x table &optional deletechars)
+		       (error "string.translate(): todo"))
+     (string-upper (x) (string-upcase x))
+     (string-zfill (x width) (error "string.zfill(): todo"))))
+
 
 (def-binary-string-meths
     ((__add__      (x y)  (concatenate 'string x y))
@@ -2392,6 +2502,24 @@
 		   (istitle  ,#'string-istitle-1)
 		   (isupper  ,#'string-isupper-1)
 		   (join     ,#'string-join-1)
+		   
+		   (ljust ,#'string-ljust)
+		   (lower ,#'string-lower)
+		   (lstrip ,#'string-lstrip)
+		   (replace ,#'string-replace)
+		   (rfind ,#'string-rfind)
+		   (rindex ,#'string-rindex)
+		   (rjust ,#'string-rjust)
+		   (rsplit ,#'string-rsplit)
+		   (split ,#'string-split)
+		   (splitlines ,#'string-splitlines)
+		   (startswith ,#'string-startswith)
+		   (strip ,#'string-strip)
+		   (swapcase ,#'string-swapcase)
+		   (title ,#'string-title)
+		   (translate ,#'string-translate)
+		   (upper ,#'string-upper)
+		   (zfill ,#'string-zfill)
 		   
 		   (count    ,#'string-count) ;; these are binary
 		   (endswith ,#'string-endswith)
@@ -2689,10 +2817,16 @@
 
 (mop:finalize-inheritance (find-class 'py-enumerate))
 
-(defun make-enumerate (iterable)
-  (make-instance 'py-enumerate
-    :index 0
-    :generator (__iter__ iterable)))
+(defmethod py-enumerate-__new__ ((cls class) iterable)
+  (assert (subtypep cls 'py-enumerate)) 
+  (let ((x (make-instance cls)))
+    (with-slots (generator index) x
+      (setf generator (get-py-iterate-fun iterable)
+	    index 0))
+    x))
+
+(register-bi-class-attr/meth (find-class 'py-enumerate) '__new__
+			     (make-static-method #'py-enumerate-__new__))
 
 (defmethod __iter__ ((x py-enumerate))
   x)
@@ -2700,10 +2834,14 @@
 (defmethod next ((x py-enumerate))
   ;; Will raise StopIteration as soon as (next generator) does that.
   (with-slots (index generator) x
-    (prog1
-	(make-tuple index (next generator))
-      (incf index))))
+    (let ((res (funcall generator)))
+      (if res
+	  (prog1 (make-tuple index res)
+	    (incf index))
+	(py-raise 'StopIteration "Finished")))))
     
+(register-bi-class-attr/meth (find-class 'py-enumerate) 'next #'next)
+(register-bi-class-attr/meth (find-class 'py-enumerate) '__iter__ #'__iter__)
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; XRange object
@@ -3010,13 +3148,13 @@
   (declare (ignore x))
   (let ((res (call-next-method)))
     
-    (when (and (eq cls 'complex) ;; XXX check if correct
-	       (not (typep res 'complex)))
-      (setf res (complex res 0)))
-    
-    (unless (typep res cls)
-      (py-raise 'TypeError "Expected a ~A, got (perhaps after conversion) ~A" cls res))
-    res))
+    (cond ((and (eq cls 'complex) (typep res 'number))
+	   res)
+	  ((typep res cls)
+	   res)
+	  (t
+	   (py-raise 'TypeError "Expected a ~A, got (perhaps after conversion) ~A" cls res)
+	   res))))
      
 (defmethod convert-to-number ((x string) cls)
   ;; Check that string is harmless; then call READ on it.
