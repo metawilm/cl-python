@@ -1580,10 +1580,13 @@
 
 
 ;;; list-specific methods
-  
-(defmethod list-append ((x py-list) item)
-  (setf (cdr (last (slot-value x 'list))) (cons item nil))
-  x)
+
+(defmethod list-append ((x py-list) y)
+  (with-slots (list) x
+    (if list
+	(setf (cdr (last list)) (cons y nil))
+      (setf list (list y))))
+  *None*)
 
 (defmethod list-count ((x py-list) item)
   (loop for i in (slot-value x 'list)
