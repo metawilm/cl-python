@@ -8,10 +8,7 @@
   (:documentation "Call X with given arguments. Call arg rewriting must take ~@
                    place _before_ calling PY-CALL")) ;; or in py-call :AROUND ?
 
-
-(defvar *traced-objects* (make-hash-table :test 'eq))
-(defvar *trace-print-level* 0)
-
+#+(or) ;; replace by fwrapping trace functionality
 (defmethod py-call :around (x &optional pos-args kwd-args)
   (if (gethash x *traced-objects*)
       (progn
@@ -37,9 +34,11 @@
 	      (format t "TR: ... unwound (perhaps caused by exception)~%")))))
     (call-next-method)))
 
+#+(or) ;; old
 (defmethod py-trace (x)
   (setf (gethash x *traced-objects*) t))
 
+#+(or) ;; old
 (defmethod py-untrace (x)
   (remhash x *traced-objects*))
 

@@ -75,23 +75,11 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; `clpy' module: various useful tricks
 
-#+(or) ;; :around doesn't work: no call-next-method
-(defmethod clpy.trace (f)
-  (let ((meth (make-instance 'standard-method
-		:specializers (list (mop:intern-eql-specializer f))
-		:lambda-list '(x &optional pos-args kwd-args)
-		:qualifiers '(:around)
-		:function (lambda (x &optional pos-args kwd-args)
-			    (let ((res (call-next-method x pos-args kwd-args)))
-			      (format nil ";;  ~A (~A ~A) -> ~A"
-				      (py-str x)
-				      (mapcar #'py-str pos-args)
-				      (loop for (k . v) in kwd-args 
-					  collect `(,k . ,(py-str v)))
-				      res)
-			      res)))))
-    (add-method (ensure-generic-function 'py-call) meth)
-    (format t ";; ~A is now traced~%" (py-str f))))
+(defmethod clpy.trace (x)
+  (py-trace x))
+
+(defmethod clpy.untrace (x)
+  (py-untrace x))
 
 (defmethod py-time (x)
   (time (py-call x))
@@ -142,8 +130,8 @@
 (defun make-clpy-module ()
   (make-std-module clpy
 		   ((brk  (lambda () (break))) ;; `break' is a reserved word
-		    (trace #'py-trace)
-		    (untrace #'py-untrace)
+		    (trace #'clpy.trace)
+		    (untrace #'clpy.untrace)
 		    (time #'py-time)
 		    (prof_c #'py-profile-count)
 		    (prof_t #'py-profile-time)

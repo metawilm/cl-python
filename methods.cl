@@ -83,6 +83,7 @@
 
 
 ;; unbound method
+;; XXX remove unbound methods, just as CPython did 20050117
 
 (defclass unbound-method (builtin-instance)
   ((func   :initarg :func)

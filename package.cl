@@ -26,7 +26,7 @@
 		 "methods" "magicmeths" "builtin-classes" "formatstring"
 		 "call" "builtin-funcs" "builtin-types" "mathops"
 		 "descriptors" "attributes" "modules" "pyeval"
-		 "parsepython" "walk" "gener" "repl"
+		 "parsepython" "walk" "gener" "repl" "trace"
 		 "bi-modules"))
       #+allegro(excl::compile-file-if-needed f)
       #-allegro(compile-file (concatenate 'string f ".cl"))
