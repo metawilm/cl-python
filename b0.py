@@ -3,11 +3,17 @@ def check(a, b):
         raise AssertionError("%.30r != %.30r" % (a, b))
 
 def proto___new__(cls, name):
+    print "proto__new__ start"
     if name in cls.name2num:
+        print "aap"
         return cls.name2num[name]
+    print "noot"
     cls.name2num[name] = obj = int.__new__(cls, cls.next)
+    print "mies"
     cls.num2name[obj] = name
+    print "wim"
     cls.next += 1
+    print "proto__new__ end"
     return obj
 
 def proto___repr__(self):
@@ -15,15 +21,16 @@ def proto___repr__(self):
 
 class MetaToken(type):
     def __new__(metacls, name, bases, vars):
-        # print "MetaToken.__new__( %s, %s, %s, %s)" % (metacls, name, bases, vars)
+        # print "MetaToken.__new__( %s, %s, %s, %s)" % (metacls, name, bases, vars) ## WB
         cls = type.__new__(metacls, name, bases, vars)
-        # print "cls = %s" % cls
+        # print "cls = %s" % cls ## WB
         cls.__new__ = staticmethod(proto___new__)
         cls.__repr__ = cls.__str__ = proto___repr__
         cls.next = 0
         cls.name2num = {}
         cls.num2name = {}
         return cls
+    __new__ = staticmethod(__new__) ## WB
 
 Token = MetaToken('Token', (int,), {})
 

@@ -506,6 +506,8 @@
       (reverse items)
     (if targets
 	(let ((eval (py-eval val))) ;; real assignment statement
+	  (unless eval
+	    (error "PY-EVAL returned NIL for value to be assigned: ~A" val))
 	  (dolist (tar targets)
 	    (eval-real-assign-expr tar eval)))
       (py-eval val)))) ;; just variable reference
@@ -819,10 +821,9 @@
 	 (supers (mapcar
 		  (lambda (x)
 		    (let ((c (py-eval x)))
-		      (if (typep c 'class)
-			  (class-name c)
-			(py-raise 'TypeError
-				  "Cannot have non-classes in superclass list (got: ~A)" c))))
+		      (etypecase c
+			(symbol (find-class c))
+			(class c))))
 		  inheritance)))
     
     ;; Evaluate SUITE now, in the new namespace inside the class:
@@ -878,25 +879,29 @@
       res)))
 
 (defun make-module-object (module-name)
-  (let* ((file-name (concatenate 'string (string module-name) ".py"))
-	 (file-contents (read-file file-name)))
-      
-    ;; In CPython, when the toplevel of modules is executed, the
-    ;; name of the module is not yet bound to the module object
-      
-    (let* ((module-ns (make-namespace
-		       :name (format nil "namespace for module ~A" module-name)
-		       :builtins t))
-	   (module-ast (parse-python-string file-contents)))
+  (let* ((file-name (concatenate 'string (string module-name) ".py")))
+    
+    (loop
+      (with-simple-restart (continue "Reload, retry import")
 	
-      (let ((*scope* module-ns))
-	(declare (special *scope*))
-	(namespace-bind module-ns '__name__ (string module-name))
-	(namespace-bind module-ns '__file__ file-name)
-	(py-eval module-ast))
+	;; In CPython, when the toplevel of modules is executed, the
+	;; name of the module is not yet bound to the module object
 	
-      ;; Now bind module name to the object in the enclosing namespace
-      (make-py-module :namespace module-ns))))
+	(let* ((module-ns (make-namespace
+			   :name (format nil "namespace for module ~A" module-name)
+			   :builtins t))
+	       (file-contents (read-file file-name))
+	       (module-ast (parse-python-string file-contents)))
+	  
+	  (let ((*scope* module-ns))
+	    (declare (special *scope*))
+	    (namespace-bind module-ns '__name__ (string module-name))
+	    (namespace-bind module-ns '__file__ file-name)
+	    (py-eval module-ast))
+
+	  ;; Now bind module name to the object in the enclosing namespace
+	  (return-from make-module-object
+	    (make-py-module :namespace module-ns)))))))
 
 (defun path-directory-p (path)
   #+allegro
@@ -953,47 +958,52 @@
 	       ;; evaluation of the content is started, a magic
 	       ;; variable __path__ is inserted in the file's
 	       ;; namespace.
-		 
-	       (let ((mod-ast (parse-python-string (read-file mod/__init__.py-path)))
-		     (ns (make-namespace :builtins t)))
+
+	       (loop
+		 (with-simple-restart (continue "Reload, retry import")
+
+		   (let ((mod-ast (parse-python-string (read-file mod/__init__.py-path)))
+			 (ns (make-namespace :builtins t)))
 		   
-		 (loop for (k v) in
-		       `((__path__ ,(make-py-list-from-list (list mod-name-str)))
-			 (__file__ ,(concatenate 'string  ;; relative to a path
-				      mod-name-str "/__init__.py"))
-			 (__name__ ,mod-name-str))
-		     do (namespace-bind ns k v))
+		     (loop for (k v) in
+			   `((__path__ ,(make-py-list-from-list (list mod-name-str)))
+			     (__file__ ,(concatenate 'string  ;; relative to a path
+					  mod-name-str "/__init__.py"))
+			     (__name__ ,mod-name-str))
+			 do (namespace-bind ns k v))
 		   
-		 (let ((*scope* ns))
-		   (py-eval mod-ast))
-		   
-		 (return-from load-py-source-file
-		   (make-py-package :namespace ns
-				    :init-file (truename mod/__init__.py-path)
-				    :directory (truename mod-path) ))))
-		
+		     (let ((*scope* ns))
+		       (py-eval mod-ast))
+		     
+		     (return-from load-py-source-file
+		       (make-py-package :namespace ns
+					:init-file (truename mod/__init__.py-path)
+					:directory (truename mod-path) ))))))
 		
 	      ((and module-ok
 		    (path-file-p mod.py-path))
 		 
 	       ;; Create a module.
 	       ;; Packages have __path__ attribute ; modules don't.
-		 
-	       (let ((mod-ast (parse-python-string (read-file mod.py-path)))
-		     (ns (make-namespace :builtins t)))
-		   
-		 (loop for (k v) in
-		       `((__file__ ,(concatenate 'string  ;; relative to a path
-				      mod-name-str ".py"))
-			 (__name__ ,mod-name-str))
-		     do (namespace-bind ns k v))
-		   
-		 (let ((*scope* ns))
-		   (py-eval mod-ast))
-		   
-		 (return-from load-py-source-file
-		   (make-py-module :namespace ns
-				   :module (truename mod.py-path) )))))))))
+	       
+	       (loop
+		 (with-simple-restart (continue "Reload, retry import")
+
+		   (let ((mod-ast (parse-python-string (read-file mod.py-path)))
+			 (ns (make-namespace :builtins t)))
+		     
+		     (loop for (k v) in
+			   `((__file__ ,(concatenate 'string  ;; relative to a path
+					  mod-name-str ".py"))
+			     (__name__ ,mod-name-str))
+			 do (namespace-bind ns k v))
+		     
+		     (let ((*scope* ns))
+		       (py-eval mod-ast))
+		     
+		     (return-from load-py-source-file
+		       (make-py-module :namespace ns
+				       :module (truename mod.py-path) )))))))))))
 
 
 (defun eval-import (items)

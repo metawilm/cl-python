@@ -46,6 +46,8 @@
 ;;
 ;; Normal methods; classmethods; staticmethods.
 
+;; bound method
+
 (defclass bound-method (builtin-instance)
   ((func   :initarg :func)
    (object :initarg :object))
@@ -64,6 +66,8 @@
 		  (call-attribute-via-class object '__repr__)))))))
 
 
+;; unbound method
+
 (defclass unbound-method (builtin-instance)
   ((func   :initarg :func)
    (class  :initarg :class))
@@ -71,6 +75,12 @@
 
 (defun make-unbound-method (&key func class)
   (make-instance 'unbound-method :func func :class class))
+
+(defmethod print-object ((x unbound-method) stream)
+  (print-unreadable-object (x stream :type t :identity t)
+    (pprint-logical-block (stream nil)
+      (with-slots (func class) x
+	(format stream ":func ~A ~_:class ~A" func class)))))
 
 (defmethod __repr__ ((x unbound-method))
   (with-output-to-string (s)
@@ -81,10 +91,7 @@
 		  (call-attribute-via-class func '__repr__)
 		  (call-attribute-via-class class '__repr__)))))))
 
-(defclass class-method (builtin-instance)
-  ((func :initarg :func))
-  (:metaclass builtin-class))
-
+;; static method
 
 (defclass static-method (builtin-instance)
   ((func :initarg :func))
@@ -92,6 +99,34 @@
 
 (defun make-static-method (func)
   (make-instance 'static-method :func func))
+
+(defmethod print-object ((x static-method) stream)
+  (print-unreadable-object (x stream :type t :identity t)
+    (pprint-logical-block (stream nil)
+      (with-slots (func) x
+	(format stream ":func ~A" func)))))
+
+(defmethod static-method-__new__ ((cls class) func)
+  (assert (subtypep cls 'static-method))
+  (make-instance cls :func func))
+
+(register-bi-class-attr/meth (find-class 'static-method) '__new__
+			     (make-static-method #'static-method-__new__))
+
+
+;; class method
+
+(defclass class-method (builtin-instance)
+  ((func :initarg :func))
+  (:metaclass builtin-class))
+
+(defmethod class-method-__new__ ((cls class) func)
+  (assert (subtypep cls 'class-method))
+  (make-instance cls :func func))
+
+(register-bi-class-attr/meth (find-class 'class-method) '__new__
+			     (make-static-method #'class-method-__new__))
+
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;

@@ -106,6 +106,12 @@
 
 ;; lisp strings
 
+(defmethod pyb:cmp ((x symbol) y)
+  (pyb:cmp (symbol-name x) y))
+
+(defmethod pyb:cmp (x (y symbol))
+  (pyb:cmp x (symbol-name y)))
+  
 (defmethod pyb:cmp ((x string) (y string))
   (__cmp__ x y))
 
@@ -586,9 +592,20 @@
 			      first nil)
 		      (setf res (py-call func res x))))))))
 
-(defun pyb:reload (module)
-  (declare (ignore module))
-  (error "todo: reload"))
+(defmethod pyb:reload ((m py-module))
+  (with-slots (module namespace) m
+    (let ((mod-ast (parse-python-string (read-file module)))
+	  (__name__ (namespace-lookup namespace '__name__))
+	  (__file__(namespace-lookup namespace '__file__))
+	  (new-ns (make-namespace :builtins t)))
+      (namespace-bind new-ns '__name__ __name__)
+      (namespace-bind new-ns '__file__ __file__)
+      (let ((*scope* new-ns))
+	(declare (special *scope*))
+	(py-eval mod-ast))
+      (setf namespace new-ns)))
+  m)
+    
 
 (defun pyb:repr (x)
   (__repr__ x))

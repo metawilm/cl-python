@@ -52,7 +52,7 @@
 	       (fname params suite) (cdr form)
 	     `(funcdef ,fname ,params ,(do-walk suite))))
     
-	  (classdef
+	  (class
 	   (destructuring-bind
 	       (cname inheritance suite) (cdr form)
 	     `(classdef ,cname ,inheritance ,(do-walk suite))))
@@ -76,6 +76,7 @@
     
 	  ((inline-lisp raise assert del list testlist identifier return yield dict
 	    attributeref subscription slice call assign-expr import import-from
-	    comparison unary binary tuple slice print print>> lambda
-	    continue break pass augassign-expr global) 
+	    comparison unary binary tuple slice print print->> lambda
+	    continue break pass augassign-expr global try-finally class) 
+	   
 	   form))))))

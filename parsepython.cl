@@ -1020,7 +1020,8 @@
   (let ((c (read-char-nil)))
     (loop while (and c (char/= c #\Newline))
 	do (setf c (read-char-nil)))
-    (unread-char c)))
+    (when c
+      (unread-char c))))
 
 #+(or)
 (defun test-prog ()

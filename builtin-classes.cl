@@ -35,7 +35,10 @@
 (defmethod __class__ ((x real))          (find-class 'py-float))
 (defmethod __class__ ((x complex))       (find-class 'py-complex))
 (defmethod __class__ ((x string))        (find-class 'py-string))
-(defmethod __class__ ((x user-defined-class))   (find-class 'python-type)) ;; TODO metaclass
+(defmethod __class__ ((x user-defined-class))   (let ((k (class-of x)))
+						  (if (typep k 'user-defined-class)
+						      k  ;; udc k is metaclass of udc x
+						    (find-class 'python-type))))
 (defmethod __class__ ((x builtin-class)) (find-class 'python-type))
 (defmethod __class__ ((x function))      (find-class 'python-type)) ;; XXX show function name
 (defmethod __class__ ((x python-object)) (class-of x)) ;; XXX check
@@ -59,7 +62,8 @@
 (defmethod py-class-mro ((x class))
   (loop for cls in (mop:class-precedence-list x)
       if (or (typep cls 'user-defined-class)
-	     (typep cls 'builtin-class))
+	     (typep cls 'builtin-class)
+	     (eq cls (find-class 'python-type)))
       collect cls))
    
 (defmethod __mro__ ((c class))
@@ -110,22 +114,29 @@
 			     (make-static-method #'__new__))
 
 
-(defmethod python-type-__new__ (metaclass name bases dict)
-  (assert (subtypep metaclass 'python-type))
-  (ensure-py-type name string "class name must be string (got: ~A)")
-  
-  (multiple-value-bind (slots has-slots)
-      (let ((s (py-dict-gethash dict '__slots__)))
-	(if s 
-	    (values (py-iterate->lisp-list s) t)
-	  (values nil nil)))
-
-    (make-python-class :name (intern name #.*package*)
-		       :supers (if bases (py-iterate->lisp-list bases) nil)
-		       :slots slots
-		       :has-slots has-slots
-		       :namespace dict
-		       :metaclass metaclass)))
+(defmethod python-type-__new__ (metaclass &optional name bases dict)
+  (if (subtypep metaclass 'python-type)
+      
+      ;; Create a class with this as metaclass
+      (progn (ensure-py-type name string "class name must be string (got: ~A)")
+	     (multiple-value-bind (slots has-slots)
+		 (let ((s (py-dict-gethash dict '__slots__)))
+		   (if s 
+		       (values (py-iterate->lisp-list s) t)
+		     (values nil nil)))
+      
+	       (return-from python-type-__new__
+		 (make-python-class :name (intern name #.*package*)
+				    :supers (if bases (py-iterate->lisp-list bases) nil)
+				    :slots slots
+				    :has-slots has-slots
+				    :namespace dict
+				    :metaclass metaclass))))
+    (progn (when (or name bases dict)
+	     (warn "type.__new__ ignoring arguments: ~A ~A ~A" name bases dict))
+	   (return-from python-type-__new__
+	     (make-instance metaclass)))))
+    
 
 (register-bi-class-attr/meth (find-class 't) '__new__
 			     (make-static-method #'python-type-__new__))
@@ -290,7 +301,7 @@
 			    
 			      (defmethod __repr__ ((c ,class-name))
 				,object-repr)
-			      
+			      			      
 			      (defmethod __hash__ ((c ,class-name))
 				,object-hash)))))))
 
@@ -1012,11 +1023,11 @@
 
 (defmethod dict-fromkeys (seq &optional (val *None*))
   (let* ((d (make-dict))
-	(ht (slot-value d 'hash-table)))
+	 (ht (slot-value d 'hash-table)))
     (py-iterate (key seq)
 		(setf (gethash key ht) val))
     d))
-    
+
 (defmethod dict-get ((d py-dict) key &optional (defval *None*))
   "Lookup KEY and return its val, otherwise return DEFVAL"
   (multiple-value-bind (val found-p)
@@ -1128,7 +1139,7 @@
 
 (loop for (k v) in `((clear      ,#'dict-clear)
 		     (copy       ,#'dict-copy)
-		     (fromkeys   ,#'dict-fromkeys)
+		     (fromkeys   ,(make-static-method #'dict-fromkeys))
 		     (get        ,#'dict-get)
 		     (has_key    ,#'dict-has-key)
 		     (items      ,#'dict-items)

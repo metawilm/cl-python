@@ -183,7 +183,11 @@
 			       (namespace nil) (metaclass nil)
 			       (documentation nil))
   (assert (symbolp name))
-
+  (assert (every (lambda (x) (typep x 'class)) supers))
+  
+  (when (eq metaclass (find-class 'python-type))
+    (setf metaclass nil))
+  
   (cond (metaclass (assert (typep metaclass 'class))
 		   (unless (subtypep metaclass 'python-type)
 		     (py-raise 'TypeError
@@ -196,7 +200,9 @@
 		   (return-from make-python-class
 		     (make-u-d-class-with-given-metaclass name metaclass
 							  :namespace namespace
-							  :module module)))
+							  :module module
+							  :supers supers)))
+	
 	
 	((some (lambda (cls) (subtypep cls 'python-type))
 	       supers)
@@ -212,7 +218,8 @@
   
   (setf supers
     (loop for s in supers
-	unless (eq (find-class s) (find-class 'python-object))
+	do (assert (typep s 'class))
+	unless (eq s (find-class 'python-object))
 	collect s))
 
   ;; Determine the slots the instances of this class are supposed to have.
@@ -238,7 +245,7 @@
 			      finally (return lst)))
 	 (inst-have-other-slots the-other-slots)
 	 
-	 (supers-cls (mapcar #'find-class supers)))
+	 (supers-cls supers)) ;; XXX clean up
 
     ;; Determine the appropriate mix-in class. This can't be more
     ;; restricted than any of the UDC superclasses.
@@ -331,9 +338,12 @@
 
 (defmethod make-u-d-class-derived-from-type ((name symbol) (supers list)
 					     &key module namespace)
-  (let ((klass (mop:ensure-class name
-				 :direct-superclasses (or supers '(user-defined-class))
-				 :metaclass 'user-defined-class)))
+  (let* ((real-supers (remove (find-class 'user-defined-class)
+			      (remove (find-class 'python-type)
+				      supers)))
+	 (klass (mop:ensure-class name
+				  :direct-superclasses `(,@real-supers user-defined-class)
+				  :metaclass 'user-defined-class)))
     (mop:finalize-inheritance klass)
     (setf (slot-value klass '__dict__) namespace
 	  (slot-value klass '__name__) (symbol-name name)
@@ -342,10 +352,28 @@
     
 
 (defmethod make-u-d-class-with-given-metaclass ((name symbol) (metaclass class) 
-						&key module namespace)
-  (let ((klass (mop:ensure-class name :metaclass metaclass)))
+						&key supers module namespace)
+  (let ((klass (mop:ensure-class name
+				 :direct-superclasses `(,@supers python-object)
+				 :metaclass #+(or)metaclass
+				 (metaclass-for-udc-with-ud-metaclass metaclass)
+				 )))
     (mop:finalize-inheritance klass)
     (setf (slot-value klass '__dict__) namespace
 	  (slot-value klass '__name__) name
 	  (slot-value klass '__module__) module)
-    klass))
+    klass)) ;; XXX user-defined-object mixin?
+
+
+(defclass udc-with-ud-metaclass (user-defined-class udc-instance-w/dict)
+  ()) ;; metatype?
+
+(mop:finalize-inheritance (find-class 'udc-with-ud-metaclass))
+		  
+
+(defmethod metaclass-for-udc-with-ud-metaclass ((mc class))
+  (let* ((name (intern (format nil "udc-ud-mc+~A" (class-name mc)) #.*package*))
+	 (k (mop:ensure-class name
+			      :direct-superclasses (list mc 'udc-with-ud-metaclass))))
+    (mop:finalize-inheritance k)
+    k))		    

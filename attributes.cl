@@ -150,26 +150,17 @@
 
 (defmethod internal-get-attribute :around (x attr)
   (assert (symbolp attr))
-  (if (eq attr '__class__)
-      (values (pyb:type x) t)
-    (call-next-method)))
+  (cond ((eq attr '__class__) (values (pyb:type x) t))   ;; a bit hackish
+	((and (eq attr '__mro__)
+	      (typep x 'class)) (values (__mro__ x) t))
+	(t (call-next-method))))
+
+(defmethod internal-get-attribute (x attr)
+  (warn "Catch-all internal-get-attribute: ~A ~A" x attr)
+  (values nil nil))
 
 (defmethod internal-get-attribute ((x number) attr)
   (getattr-of-number x attr))
-
-(defmethod getattr-of-number ((x number) attr)
-  (dolist (num-cls (list (find-class 'number) ;; XXX hack
-			 (find-class 'real)
-			 (find-class 'integer)
-			 (find-class 'complex)))
-    (when (typep x num-cls)
-      (let ((meth (lookup-bi-class-attr/meth num-cls attr)))
-	(when meth
-	  (return-from getattr-of-number 
-	    (values (maybe-bind meth x (__class__ x))
-		    t))))))
-  (values nil nil))
-
 
 (defmethod internal-get-attribute ((x builtin-instance) attr)
   (getattr-of-instance-rec x attr))
@@ -190,6 +181,47 @@
 (defmethod internal-get-attribute ((x py-module) attr)
   (getattr-of-module x attr))
 
+(defmethod internal-get-attribute ((x udc-with-ud-metaclass) attr)
+  #+(or)(break "banaan")
+  ;; situation:
+  ;;   class M(type): pass
+  ;;   class C: __metaclass__ = M
+  ;;  Now, C is of type udc-with-ud-metaclass
+  
+  (let ((dict (slot-value x '__dict__)))
+    #+(or)(break "appel")
+    (multiple-value-bind (res found)
+	(py-dict-gethash dict attr)
+      (if found
+	  (progn #+(or)(break "citroen")
+		 #+(or)(break "iga uwu: ~A is ~A before binding; binding needed??" attr res)
+		 (values (maybe-bind res x (class-of x))
+			 t))
+	(progn
+	  #+(or)(break "kers")
+	  (multiple-value-bind (res found)
+	      (getattr-of-class-rec x attr)
+	    (if found
+		(progn (warn "iga uwu 2: ~A -> ~A, no more binding" attr res)
+		       (values res
+			       ;; already bound!
+			       #+(or)(maybe-bind res *None* x)
+			       
+			       t))
+	      (values nil nil))))))))
+
+(defmethod getattr-of-number ((x number) attr)
+  (dolist (num-cls (list (find-class 'number) ;; XXX hack
+			 (find-class 'real)
+			 (find-class 'integer)
+			 (find-class 'complex)))
+    (when (typep x num-cls)
+      (let ((meth (lookup-bi-class-attr/meth num-cls attr)))
+	(when meth
+	  (return-from getattr-of-number 
+	    (values (maybe-bind meth x (__class__ x))
+		    t))))))
+  (values nil nil))
 
 (defmethod getattr-of-module ((x py-module) attr)
   ;; XXX for now...
@@ -320,8 +352,9 @@
 		t)))))
 
 (defmethod getattr-of-class-nonrec ((cls user-defined-class) attr)
+  ;; (break "g-a of class nonrec: ~A, ~A" cls attr)
   (multiple-value-bind (val found)
-      (__getitem__ (slot-value cls '__dict__) attr) ;; inlined for now
+      (py-dict-gethash (slot-value cls '__dict__) attr) ;; XXX
     (when found
       (return-from getattr-of-class-nonrec
 	(values val #+(or)(maybe-bind val *None* cls)
@@ -377,15 +410,15 @@
       (values (slot-value cls attr)
 	      t)
     (call-next-method)))
-	
+
 (defmethod getattr-of-class-rec ((cls user-defined-class) attr)
   ;; All udc's have a <py-dict> instance in slot named
   ;; __dict__; that dict contains class attribs and
   ;; methods are stored. TODO: metaclasses
-  		    
+  ;;(break)
   (let* ((cpl (mop:class-precedence-list cls))
 	 (c (pop cpl)))
-      
+    #+(or)(warn "cpl of ~A: ~A" (class-name cls) cpl)
     (loop while (typep c 'user-defined-class)
 	do (multiple-value-bind (val found)
 	       (getattr-of-class-nonrec c attr)

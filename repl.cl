@@ -8,11 +8,28 @@
   (let ((r (find-restart 'return-python-toplevel)))
     (if r
 	(invoke-restart r)
-      (warn "No return-python-toplevel restart available"))))
+      (warn "There is no Python REPL running."))))
 
 (setf (top-level:alias "ptl")
   #'goto-python-top-level)
 
+(defvar @) ;; local Python variable value, in the REPL debugger 
+
+(defun show-python-locals (&optional name)
+  (unless *scope*
+    (warn "No Python REPL running")
+    (return-from show-python-locals))
+  (let ((alist (dict->alist *scope*)))
+    (if name
+	(loop for (k . v) in alist
+	    when (string= (symbol-name k) (symbol-name name))
+	    do (format t "~A~%" v)
+	       (setf @ v))
+      (loop for (k . v) in alist 
+	  do (format t "~S~8T~S~%" k v)))))
+
+(setf (top-level:alias "ploc")
+  #'show-python-locals)
 
 (defun repl ()
   (declare (special *scope* *sys.modules* *initial-sys.modules* *None*))
@@ -65,14 +82,18 @@
 				    (":q" "quit")
 				    ("_" "Python variable `_' is bound to the value of the last expression")))
 		      (format t "~%In the Lisp debugger:~%")
-		      (print-cmds '((":ptl" "back to Python top level")))
+		      (print-cmds '((":ploc" "Python local variables")
+				    (":ploc VAR" "Value of local variable VAR, bound to @")
+				    (":ptl" "back to Python top level")))
 		      (format t "~%")))
 		 
 		   ((string= x ":acc")         (format t "~S" acc))
 		   ((string= x ":q")           (return-from repl 'Bye))
 		   ((string= x ":show-ast")    (setf *show-ast* t))
 		   ((string= x ":no-show-ast") (setf *show-ast* nil))
-		   ((string= x ":ns")          (format t "~&REPL namespace:~%~S~&" (dict->alist *scope*)))
+		   ((string= x ":ns")          (format t "~&REPL namespace:~%~S~&"
+						       (dict->alist *scope*)))
+		   ((string= x ":d") (describe *last-val*))
 
 		   ((and (>= (length x) 5)
 			 (string= (subseq x 0 5) ":lisp"))

@@ -15,13 +15,13 @@
 (defconstant pyt:tuple   (find-class 'py-tuple))
 (defconstant pyt:type    (find-class 'python-type))
 (defconstant pyt:xrange  (find-class 'py-xrange))
+(defconstant pyt:classmethod  (find-class 'class-method))
+(defconstant pyt:staticmethod (find-class 'static-method))
 
 
 #+(or) ;; todo
 (progn 
   (defconstant pyt:basestring   xxx) ;; abstract type basestring has subtypes str and unicode
-  (defconstant pyt:classmethod  (find-class 'py-classmethod))
-  (defconstant pyt:staticmethod (find-class 'py-staticmethod))
   (defconstant pyt:property     (find-class 'py-property))
 
   (defconstant pyy:unicode (find-class ???)))
