@@ -241,8 +241,9 @@
     
 (defun eval-testlist (items comma?)
   (unless (or items comma?)
-    (py-raise 'SyntaxError
-	      "Empty tuple is invalid -- use this instead: (,)"))
+    (return-from eval-testlist (make-tuple)) ;; XXX see if this gives problems
+    #+(or)(py-raise 'SyntaxError
+		    "Empty tuple is invalid -- use this instead: (,)"))
   (let ((make-tuple (or comma?
 			(>= (length items) 2))))
     (if make-tuple
