@@ -618,18 +618,15 @@
 		 
 ;;; willem __add__ etc(?)
 
-(defmethod __str__ ((d py-dict))
+(defmethod __repr__ ((d py-dict))
   (with-output-to-string (s)
     (format s "{")
     (pprint-logical-block (s nil)
       (maphash (lambda (k v)
-		 (format s "~A: ~A, ~_" k v))
+		 (format s "~A: ~A, ~_"
+			 (__repr__ k) (__repr__ v)))
 	       (slot-value d 'hash-table)))
     (format s "}")))
-
-(defmethod __repr__ ((d py-dict))
-  (__str__ d))
-
 
 (defmethod __len__ ((d py-dict))
   (hash-table-count (slot-value d 'hash-table)))
@@ -645,10 +642,14 @@
   (values))
 
 (defmethod dict-copy ((d py-dict))
-  "Create and return copy of dict. Keys and values themselves are not copied."
-  (let ((m (make-dict)))
-    (setf (slot-value m 'hash-table) (slot-value d 'hash-table))
-    m))
+  "Create and return copy of dict. Keys and values themselves are shared, ~@
+   but the underlying hash-table is different."
+  (let* ((new (make-dict))
+	 (new-ht (slot-value new 'hash-table)))
+    (maphash (lambda (k v)
+	       (setf (gethash k new-ht) v))
+	     (slot-value d 'hash-table))
+    new))
 
 (defmethod dict-fromkeys (seq &optional (val *None*))
   (let* ((d (make-dict))
@@ -670,7 +671,7 @@
   (multiple-value-bind (val found-p)
       (gethash key (slot-value d 'hash-table))
     (declare (ignore val))
-    found-p))
+    (make-bool found-p)))
 
 (defmethod dict-items ((d py-dict))
   "Return list of (k,v) tuples"
@@ -725,7 +726,7 @@
 	     h)
     (make-py-list-from-list res)))
 
-(defmethod dict-pop ((d py-dict) key &optional default)
+(defmethod dict-pop ((d py-dict) key &optional (default nil default-p))
   "Remove KEY from D, returning its value. If KEY absent, DEFAULT ~
    is returned or KeyError is raised."
   (with-slots (hash-table) d
@@ -733,23 +734,23 @@
 	(gethash key hash-table)
       (cond (found (remhash key hash-table)
 		   val)
-	    (default)
+	    (default-p default)
 	    (t (py-raise 'KeyError "No key ~A in dict" key))))))
 
 (defmethod dict-popitem ((d py-dict))
   (with-slots (hash-table) d
-    (with-hash-table-iterator (it hash-table)
+    (with-hash-table-iterator (iter hash-table)
       (multiple-value-bind (entry? key val)
-	  (it)
+	  (iter)
 	(if entry?
 	    (progn
 	      (remhash key hash-table)
 	      (make-tuple key val))
 	  (py-raise 'KeyError "popitem: dictionary is empty"))))))
 
-(defmethod dict-setdefault ((d py-dict) key defval)
+(defmethod dict-setdefault ((d py-dict) key &optional (defval *None*))
   "Lookup KEY and return its val;
-   if KEY doesn't exist, add it and set its val to DEFVAL, then return DEFVAL"
+   If KEY doesn't exist, add it and set its val to DEFVAL, then return DEFVAL"
   (multiple-value-bind (val found-p)
       (gethash key (slot-value d 'hash-table))
     (if found-p
@@ -1541,8 +1542,11 @@
   (__mul__ x n))
 
 (defmethod __repr__ ((x py-tuple))
-  (with-output-to-string (s)
-    (format s "(~{~A,~^ ~})" (mapcar #'__repr__ (slot-value x 'list)))))
+  (let ((list (slot-value x 'list)))
+    (if list
+	(with-output-to-string (s)
+	  (format s "(~{~A,~^ ~})" (mapcar #'__repr__ list)))
+      "(,)")))
 
 ;; __reversed__ ?
 
@@ -1672,14 +1676,14 @@
 (def-binary-string-meths
     ((__add__      (x y) (concatenate 'string x y))
      (__radd__     (x y) (__add__ y x))
-     (__contains__ (x y) (search y x)) ;; SEARCH returns an int or NIL, i.e. generalized bools
+     (__contains__ (x y) (make-bool (search y x)))
      (__cmp__ (x y)      (cond ((string< x y) -1)
 			       ((string= x y) 0)
 			       (t 1)))
      (__eq__ (x y)       (string= x y))
      
      (string-count (x y) (string-count-1 x y))
-     (string-endswith (x y &optional start end) (string-endswith-1 x y start end))
+     (string-endswith (x y &optional start end) (make-bool (string-endswith-1 x y start end)))
      (string-find (x y &optional start end) (string-find-1 x y start end))
      (string-index (x y &optional start end) (string-index-1 x y (or start 0) (or end 0)))
     ))
@@ -1801,7 +1805,9 @@
     (if (= res -1)
 	(py-raise 'ValueError "Substring not found")
       res)))
-   
+
+;; predicates
+
 (defmethod string-isalnum-1 ((x string))
   (make-bool (every #'alphanumericp x)))
 
@@ -1914,10 +1920,265 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; File
 
-;;; XXX not very important for now
+;; XXX all this file object stuff is untested!
+
+(defclass py-file (builtin-instance)
+  ((stream :type file-stream)
+   (newlines :initform ()) ;; list possibly containing 'n, 'r, 'rn
+   ))
+
+(defmethod file-check-open ((f py-file) &optional direction)
+  (with-slots (stream) f
+    (let ((open (and (open-stream-p stream)
+		     (ecase direction
+		       (nil t)
+		       (:input (input-stream-p stream))
+		       (:output (output-stream-p stream))))))
+      (unless open
+	(py-raise 'ValueError "I/O operation on closed file")))))
+
+(defmethod file-close ((f py-file))
+  ;; Calling CLOSE more than once is allowed in Python. No return value.
+  (with-slots (closed stream) f
+    (unless closed
+      (close stream)))
+  (values))
+
+(defmethod file-flush ((f py-file))
+  ;; Flush internal buffer.
+  (file-check-open f)
+  (with-slots (stream) f
+    (when (and (open-stream-p stream)
+	       (output-stream-p stream))
+      (finish-output stream))
+    (when (and (open-stream-p stream)
+	       (input-stream-p stream))
+      ;; call CLEAR-INPUT ?
+      ))
+  (values))
+
+(defmethod file-fileno ((f py-file))
+  (py-raise 'NotImplementedError
+	    "Sorry, method `fileno' of file objects not implemented"))
+
+(defmethod file-isatty ((f py-file))
+  (py-raise 'NotImplementedError
+	    "Sorry, method `isatty' of file objects not implemented"))
+
+(defmethod __iter__ ((f py-file))
+  ;; The PY-FILE itself implements NEXT.
+  (file-check-open f :input)
+  (file-readline f))
+
+(defmethod next ((f py-file))
+  (file-readline f))
+
+(defmethod file-read ((f py-file) &optional (size nil size-p))
+  (when size-p
+    (ensure-py-type size integer
+		    "Argument SIZE to file.read() must be ~@
+                     positive integer (got: ~A)")
+    (unless (>= size 0)
+      (py-raise 'ValueError
+		"Argument SIZEHINT to file.read() must be ~@
+                 positive integer (got: ~A)" size)))
+  
+  (with-slots (stream newlines) f
+    (let ((count 0)
+	  (res (make-array 1000
+			   :element-type 'character
+			   :adjustable t
+			   :fill-pointer 0)))
+      (loop
+	(when (and size-p
+		   (= size count))
+	  (return-from file-read res))
+	(let ((ch (read-char stream nil nil)))
+	  (if ch
+	      (vector-push-extend ch res)
+	    (return-from file-read res)))))))
 
 
-;; __iter__: read all lines of file sequentially
+(defmethod file-readline ((f py-file) &optional (maxsize nil maxsize-p))
+  ;; Returns LINE, NUM-READ
+  ;; Because Lisp doesn't treat "\r" as newline, we have to do this
+  ;; ourselves (?).
+  
+  (file-check-open f :input)
+  
+  (when maxsize-p
+    (ensure-py-type maxsize integer
+		    "Argument SIZEHINT to file.readline() must be ~@
+                     positive integer (got: ~A)")
+    (unless (>= maxsize 0)
+      (py-raise 'ValueError
+		"Argument SIZEHINT to file.readline() must be ~@
+                 positive integer (got: ~A)" maxsize)))
+  (with-slots (stream newlines) f
+    (let ((res (make-array 100
+			   :element-type 'character
+			   :adjustable t
+			   :fill-pointer 0))
+	  (num-read 0))
+      (loop
+	
+	(when (and maxsize-p
+		   (= num-read maxsize))
+	  (return-from file-readline (values res num-read)))
+	
+	(let ((ch (read-char stream nil :eof)))
+	  (case ch
+	    (:eof	     (return-from file-readline (values res num-read)))
+	    (#\Newline       (vector-push-extend ch res) ; '\n\
+			     (pushnew 'n newlines)
+			     (return-from file-readline (values res num-read)))
+	    (#\Return        (vector-push-extend ch res) ; '\r' or '\r\n'
+			     (let ((ch2 (peek-char nil stream nil :eof)))
+			       (case ch2
+				 (:eof            (pushnew 'r newlines)
+						  (return-from file-readline (values res num-read)))
+				 (#\Newline       (vector-push-extend ch2 res)
+						  (pushnew 'rn newlines)
+						  (return-from file-readline (values res num-read)))
+				 (t               (return-from file-readline (values res num-read))))))))))))
+
+
+(defmethod file-readlines ((f py-file) &optional (sizehint nil sizehint-p))
+  (when sizehint-p
+    (ensure-py-type sizehint integer
+		    "Argument SIZEHINT to file.readlines() must be ~@
+                     positive integer (got: ~A)")
+    (unless (>= sizehint 0)
+      (py-raise 'ValueError
+		"Argument SIZEHINT to file.readlines() must be ~@
+                 positive integer (got: ~A)" sizehint)))
+  
+  (let ((res ())
+	(num-read 0))
+    (loop
+      (multiple-value-bind (line n)
+	  (file-readline f)
+	(push line res)
+	(when sizehint-p
+	  (incf num-read n)
+	  (when (<= sizehint num-read)
+	    (return)))))
+    (make-py-list-from-list (nreverse res))))
+
+
+(defmethod file-xreadlines ((f py-file))
+  (__iter__ f))
+
+
+(defmethod file-seek ((f py-file) offset &optional (whence nil whence-p))
+  ;; Set FILE position.
+  ;; Whence: 0 = absolute; 1 = relative to current; 2 = relative to end
+  ;; There is no return value, but an IOError is raised for invalid arguments.
+  
+  (ensure-py-type offset integer
+		  "file.seek() OFFSET argument must be integer (got: ~A)")
+  (let ((reference
+	 (if whence-p
+	     (progn (ensure-py-type whence integer
+				    "file.seek() WHENCE argument must be integer (got: ~A)")
+		    (case whence
+		      (0 :absolute)
+		      (1 :current)
+		      (2 :end)
+		      (t (py-raise 'ValueError
+				   "file.seek() WHENCE argument not in 0..2 (got: ~A)" whence))))
+	   :absolute)))
+    
+    (file-check-open f)
+    (with-slots (stream) f      
+      (ecase reference
+	    
+	(:absolute
+	 (cond ((>= offset 0) (unless (file-position stream offset)
+				(py-raise 'IOError
+					  "File seek failed (absolute; offset: ~A)"
+					  offset))) ;; catch more?
+	       ((< offset 0) (py-raise 'IOError
+				       "Negative offset invalid for absolute file.seek() (got: ~A)"
+				       offset))))
+	     
+	(:end   ;; XX check off-by-one for conditions
+	 (cond ((<= offset 0) (unless (file-position stream (+ (file-length stream) offset))
+				(py-raise 'IOError
+					  "File seek failed (from-end; offset: ~A)"
+					  offset)))
+	       ((> offset 0) (py-raise 'IOError
+				       "Positive offset invalid for file.seek() from end (got: ~A)"
+				       offset))))
+	(:relative
+	 (unless (unless (file-position stream (+ (file-position stream) offset))
+		   (py-raise 'IOError
+			     "File seek failed (relative; offset: ~A)"
+			     offset))))))))
+	      
+(defmethod file-tell ((f py-file))
+  (with-slots (stream) f
+    (file-position stream)))
+
+(defmethod file-truncate ((f py-file) &optional (size nil size-p))
+  (file-check-open f) ;; or not needed?
+  (with-slots (stream) f
+    (if size-p
+	(progn
+	  (ensure-py-type size integer
+			  "file.truncate() expects non-negative integer arg (got: ~A)")
+	  (when (< size 0)
+	    (py-raise 'ValueError
+		      "File.truncate() expects non-negative integer (got :~A)" size)))
+      (setf size (file-position stream)))
+    #+:allegro (handler-case (excl.osi::os-ftruncate f size)
+		 (excl.osi:syscall-error ()
+		   (py-raise 'IOError "Truncate failed (syscall-error)")))))
+		 
+(defmethod file-write ((f py-file) str)
+  (ensure-py-type str string "file.write() takes string as arg (got: ~A)")
+  (file-check-open f :output)
+  (with-slots (stream) f
+    (write-string str stream)))
+   
+(defmethod file-writelines ((f py-file) seq)
+  (py-iterate (str seq)
+	      (ensure-py-type str string
+			      "file.writelines() requires sequence of strings (got element: ~A)")
+	      (file-write f str)))
+
+(defmethod file-closed ((f py-file))
+  (with-slots (stream) f
+    (not (open-stream-p stream))))
+
+(defmethod file-encoding ((f py-file))
+  (py-raise 'NotImplementedError
+	    "Sorry, method `fileno' of file objects not implemented"))
+
+(defmethod file-mode ((f py-file))
+  ;; easy to add
+  (py-raise 'NotImplementedError
+	    "Sorry, method `fileno' of file objects not implemented"))
+
+(defmethod file-name ((f py-file))
+  ;; easy to add
+  (py-raise 'NotImplementedError
+	    "Sorry, method `fileno' of file objects not implemented"))
+  
+(defmethod file-newlines ((f py-file))
+  ;; Return a tuple with the encountered newlines as strings.
+  (with-slots (newlines) f
+    (make-tuple-from-list (mapcar (lambda (nl)
+				    (ecase nl
+				      (r (string #\Return))
+				      (n (string #\Newline))
+				      (rn (format nil "~A~A" #\Return #\Newline))))
+				  newlines))))
+
+#+(or) ;; should we implement this, or is it a CPython implementation detail?!
+(defmethod file-softspace ((f py-file))
+  )
+
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Enumerate

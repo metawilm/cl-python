@@ -57,7 +57,8 @@
       (number (return-from py-eval ast)) ;; Lisp objects (for efficiency)
       (string (return-from py-eval ast))
       ((and symbol
-	(not (eql nil))) (return-from py-eval ast)) ;; string designator
+	(not (eql nil)))
+       (return-from py-eval ast)) ;; string designator
       ((eql nil) (error "PY-EVAL of NIL")))
   
     (case (car ast)
@@ -204,6 +205,9 @@
     (make-py-list-from-list (map-into data #'py-eval data))))
     
 (defun eval-testlist (items comma?)
+  (unless (or items comma?)
+    (py-raise 'SyntaxError
+	      "Empty tuple is invalid -- use this instead: (,)"))
   (let ((make-tuple (or comma?
 			(>= (length items) 2))))
     (if make-tuple
