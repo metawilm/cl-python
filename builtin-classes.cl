@@ -2,25 +2,12 @@
 
 ;;; Built-in classes and their methods
 
-
-;; There is a special method __new__ that accepts as first argument
-;; classes instead of instances. Need to special-case them in
-;; __call__, therefore keep track of them in a hash-table.
-
-(defparameter *__new__-methods* (make-hash-table :test #'eq))
-
-(defmethod register-as-__new__method ((f function))
-  (setf (gethash f *__new__-methods*) t))
-
-(defmethod is-a-__new__-method ((f function))
-  (gethash f *__new__-methods*))
-
-
-;; Class-specific non-magic methods, like the `clear' methods of
-;; dicts, and the `append' method of lists, are stored in a hashtable,
-;; where the key is the method name as a symbol, and the value is an
-;; alist where the class is the key, and the method for that class and
-;; its type are in the cons that is the value.
+;; Class-specific methods, both magic and non-magic, like the `clear'
+;; methods of dicts, and the `append' method of lists, and the
+;; `__repr__' method of all objects, are stored in a hashtable, where
+;; the key is the method name as a symbol, and the value is an alist
+;; where the class is the key, and the method for that class and its
+;; type are in the cons that is the value.
 
 (defparameter *builtin-class-attr/meths* (make-hash-table :test #'eq))
 
@@ -44,15 +31,194 @@
 
 (defmacro def-class-specific-methods (class data)
   `(progn ,@(loop for (attname func kind) in data
-		collect `(register-bi-class-attr/meth (find-class ',class) ',attname ,func ,kind))))
+		collect `(register-bi-class-attr/meth
+			  (find-class ',class) ',attname ,func ,kind))))
 
 
+;; There is a special method __new__ that accepts as first argument
+;; classes instead of instances. Need to special-case them in
+;; __call__, therefore keep track of them in a hash-table.
 
-;; TODO:
-;;  - __mro__ attribute of classes
-;;  - need for __eq__ when __cmp__ is already defined?
+(defparameter *__new__-methods* (make-hash-table :test #'eq))
 
-;; These macros ease GF method definition
+(defmethod register-as-__new__method ((f function))
+  (setf (gethash f *__new__-methods*) t))
+
+(defmethod is-a-__new__-method ((f function))
+  (gethash f *__new__-methods*))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;; Now, we defined the `magic methods' shared by all objects.
+;;; 
+;;; Those not shared by all objects (like `__len__', `__eq__') are
+;;; defined as Generic Function in magicmeths.cl.
+;;; 
+;;; The methods shared by all standard objects are:
+;;; 
+;;; __class__, __delattr__, __doc__, __getattribute__, __hash__,
+;;; __init__, __new__, __reduce__, __reduce_ex__, __repr__,
+;;; __setattr__, __str__
+;;; 
+;;; Using metaclasses, classes can be created that might not have
+;;; these methods. XXX todo figure that out
+
+(defgeneric __class__ (x) (:documentation "The class of X"))
+
+(defmethod __class__ ((x integer))       (find-class 'py-int))
+(defmethod __class__ ((x real))          (find-class 'py-float))
+(defmethod __class__ ((x complex))       (find-class 'py-complex))
+(defmethod __class__ ((x string))        (find-class 'py-string))
+(defmethod __class__ ((x user-defined-class))   (find-class 'python-type)) ;; TODO metaclass
+(defmethod __class__ ((x builtin-class)) (find-class 'python-type))
+(defmethod __class__ ((x function))      (find-class 'python-type)) ;; XXX doesn't show function name
+(defmethod __class__ ((x python-object)) (class-of x)) ;; XXX check
+
+;; PYTHON-OBJECT is both an instance and a subclass of PYTHON-TYPE.
+(defmethod __class__ ((x (eql (find-class 'python-object)))) (find-class 'python-type))
+
+;; PYTHON-TYPE is it's own type.
+(defmethod __class__ ((x (eql (find-class 'python-type)))) x)
+
+(register-bi-class-attr/meth (find-class 't) '__class__ #'__class__ :attr)
+
+
+;;; Classes have a `__mro__' attribute, which is the "Method
+;;; Reslution Order" or Class Precedence List.
+
+(defgeneric __mro__ (cls)
+  (:documentation "Method resolution order (as tuple, including itself)"))
+
+(defmethod __mro__ ((c class))
+  (make-tuple-from-list (loop for cls in (mop:class-precedence-list c)
+			    if (or (typep cls 'user-defined-class)
+				   (typep cls 'builtin-class))
+			    collect cls)))
+
+(register-bi-class-attr/meth (find-class t) '__mro__ #'__mro__ :attr)
+
+
+;;; Classes have a `__bases__' attribute, indicating the direct superclasses
+
+(defgeneric __bases__ (cls) (:documentation "Direct bases classes"))
+
+(defmethod __bases__ ((c class))
+  ;; XXX check if semantics of modifying this attribute are defined
+  (make-tuple-from-list (loop for cls in (mop:class-direct-superclasses c)
+			    if (or (typep cls 'user-defined-class)
+				   (typep cls 'builtin-class))
+			    collect cls)))
+
+(register-bi-class-attr/meth (find-class 't) '__bases__ #'__bases__ :attr)
+
+;;; Object creation: __new__ and __init__
+;;; 
+;;; __new__ is an exceptional special-cased method takes a class as
+;;; first argument, not an instance. Its purpose is allocating an instance.
+;;; 
+;;; __init__ initializes the allocated object.
+;;; 
+;;; Both are called with any parameters supplied:  x = ClassName(1,2, key=42) 
+
+(defgeneric __new__ (cls &optional pos-arg key-arg)
+  (:documentation "Create a new instance of class CLS"))
+(defmethod __new__ ((cls class) &optional pos-arg key-arg)
+    (when (or pos-arg key-arg)
+      (warn (format nil "Default __new__ ignoring args: ~A ~A" pos-arg key-arg)))
+  (make-instance cls))
+(register-bi-class-attr/meth (find-class 't) '__new__ #'__new__ :meth)
+(register-as-__new__method #'__new__)
+
+(defgeneric __init__ (x &optional pos-arg key-arg)
+  (:documentation "Object initialization"))
+(defmethod __init_ (x &optional pos-arg key-arg)
+  (declare (ignore x pos-arg key-arg)
+	   (special *None*))
+  *None*)
+
+
+;;; String representation of Python objects:
+;;;    __str__       is a representation targeted to humans
+;;;    __repr__      if possible,  eval(__repr__(x)) should be equal to x
+;;; 
+;;;  __str__ defaults to __repr__
+;;;  __repr__ defaults to print-unreadable-object
+
+(defgeneric __str__ (x) (:documentation "String representation of X, intended for humans"))
+(defmethod __str__ (x) (call-attribute-via-class x '__repr__)) ;; defaults to __repr__
+(register-bi-class-attr/meth (find-class 't) '__str__ #'__str__ :meth)
+
+(defgeneric __repr__ (x) (:documentation "String representation of X, preferably eval-able"))
+(defmethod __repr__ (x) (with-output-to-string (s) 
+		 (print-unreadable-object (x s :identity t :type t))))
+(register-bi-class-attr/meth (find-class 't) '__repr__ #'__repr__ :meth)
+
+
+;;; Attribute setting, getting, deleting
+
+
+(defgeneric __getattribute__ (x attr) (:documentation "Intercepts all attribute lookups"))
+(defmethod __getattribute__ (x attr)
+  (or (internal-get-attribute x attr)
+      (py-raise 'AttributeError "~A ~A" x attr)))
+(register-bi-class-attr/meth (find-class 't) '__getattribute__ #'__getattribute__ :meth)
+
+(defgeneric __setattr__ (x attr val) (:documentation "Set attribute ATTR of X to VAL"))
+(defmethod __setattr__ (x attr val) (internal-set-attribute x attr val))
+(register-bi-class-attr/meth (find-class 't) '__setattr__ #'__setattr__ :meth)
+
+(defgeneric __delattr__ (x attr) (:documentation "Delete attribute named ATTR of X"))
+(defmethod __delattr__ (x attr) (internal-del-attribute x attr))
+(register-bi-class-attr/meth (find-class 't) '__delattr__ #'__delattr__ :meth)
+
+
+;;; Documentation string
+;;; 
+;;; Functions, classes and modules (ore?) can have a `docstring'. By
+;;; default, it's None (not AttributeError).
+
+(defparameter *doc-strings* (make-hash-table :test #'eq))
+
+(defun register-doc-string (x string)
+  (setf (gethash x *doc-strings*) string))
+
+(defun lookup-doc-string (x)
+  (gethash x *doc-strings*))
+
+(defgeneric __doc__ (x)
+  (:documentation "Documentation for X"))
+
+(defmethod __doc__ (x)
+  (declare (special *None*))
+  (or (lookup-doc-string x)
+      *None*))
+
+(register-bi-class-attr/meth (find-class 't) '__doc__ #'__doc__ :attr)
+
+;;; XXX todo: register docstrings of all builtin-functions and builtin-classes
+
+
+;;; An object can have a hash code, used for storing them in a
+;;; dictionary. Some mutable objects (lists, tuples) are not hashable
+;;; (but they can be subclassed, and for the subclass hashing acn be
+;;; defined) because equality for those object is defined recursively
+;;; as equality of the items they contain.
+;;; 
+;;; Modules are mutable yet hashable, because the equality between two
+;;; modules doesn't change when a module is changed.
+
+(defgeneric __hash__ (x) (:documentation "Hash value (integer)"))
+(defmethod __hash__ (x) (pyb:id x)) ;; hash defaults to id, the (fake) pointer value
+(register-bi-class-attr/meth (find-class 't) '__hash__ #'__hash__ :meth)
+
+
+;; XXX __reduce__ ?   they have something to do with pickling
+;; XXX __reduce_ex__ ?
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;; The built-in Python object types
+
+;;; These macros ease GF method definition
 
 (defmacro def-unary-meths (py-type cl-type py->cl-form meths)
   `(progn ,@(loop for (methname result) in meths
@@ -79,128 +245,6 @@
 				  ,result)))))
 
 
-
-
-;;; A few methods shared by all standard objects:
-;;; 
-;;; __class__, __delattr__, __doc__, __getattribute__, __hash__,
-;;; __init__, __new__, __reduce__, __reduce_ex__, __repr__,
-;;; __setattr__, __str__
-;;; 
-;;; Using metaclasses, classes can be created that might not have
-;;; these methods.
-
-(defmethod __class__ ((x integer))       (find-class 'py-int))
-(defmethod __class__ ((x real))          (find-class 'py-float))
-(defmethod __class__ ((x complex))       (find-class 'py-complex))
-(defmethod __class__ ((x string))        (find-class 'py-string))
-(defmethod __class__ ((x user-defined-class)) (find-class 'python-type)) ;; TODO metaclass
-(defmethod __class__ ((x function))      (find-class 'python-type)) ;; XXX doesn't show function name
-(defmethod __class__ ((x python-object)) (class-of x)) ;; XXX check
-
-;; PYTHON-OBJECT is both an instance and a subclass of PYTHON-TYPE.
-(defmethod __class__ ((x (eql (find-class 'python-object)))) (find-class 'python-type))
-
-;; PYTHON-TYPE is it's own type.
-(defmethod __class__ ((x (eql (find-class 'python-type)))) x)
-
-
-#+(or)(progn (defgeneric __delattr__ (x attr) (:documentation "Delete attribute named ATTR of X"))
-	     (defmethod  __delattr__ (x attr)  (internal-del-attribute x attr))
-	     (register-bi-class-attr/meth (find-class 'python-object) '__delattr__ #'__delattr__ :meth))
-
-#+(or)(progn (defgeneric __doc__ (x) (:documentation "documentation"))
-	     (defmethod  __doc__ (x) (multiple-value-bind (val found)
-					 (internal-get-attribute x '__doc__)
-				       (if found
-					   val
-					 *None*)))
-	     (register-bi-class-attr/meth (find-class 'python-object) '__doc__ #'__doc__ :attr))
-
-#+(or)(progn (defgeneric __getattribute__ (x attr))
-	     (defmethod  __getattribute__ (x attr)
-	       (or (internal-get-attribute x attr)
-		   (py-raise 'AttributeError "object ~A no attribute ~A" x attr)))
-	     (register-bi-class-attr/meth (find-class 'python-object) '__getattribute__ #'__getattribute__ :meth))
-
-#+(or)(progn (defgeneric __hash__ (x))
-	     (defmethod  __hash__ (x) (pyb:id x))) ;; hash defaults to id
-
-#+(or)((defgeneric __init__ (x &rest arguments))
-       (defmethod  __init__ (x &rest arguments)
-	 (declare (ignore arguments))
-	 *None*))
-
-#+(or)((defgeneric __new__ (cls &rest arguments))
-       (defmethod __new__ (cls &rest arguments)
-	 (declare (ignore arguments))
-	 (make-instance cls)))
-
-#+(or) ;; don't for now...
-(progn (defgeneric __reduce__ ---)"; "helper for pickle"
-       (defmethod ---))a
-
-#+(or) ;; don't for now...
-(progn (defgeneric __reduce_eq__ ---)"; "helper for pickle"
-       (defmethod ---))
-
-
-;; Regarding string representation of Python objects:
-;;    __str__       is a representation targeted to humans
-;;    __repr__      if possible,  eval(__repr__(x)) should be equal to x
-;; 
-;; To reduce duplication:
-;;    print-object  falls back to writing __str__
-;;    __str__       falls back to returning __repr__
-;;    __repr__      returns by default the print-unreadable-object representation
-
-(defmethod print-object ((x python-object) stream)
-  ;; it's not a good idea to fall back to __str__, because it could give
-  ;; infinite loops when debugging __str__ methods, for example.
-  (print-unreadable-object (x stream :identity t :type t)))
-
-#+(or)(defmethod __str__ (x) 
-	;; This method is not only for X of type python-object, but also for
-	;; regular numbers, for example.
-	(__repr__ x))
-
-#+(or)(defmethod __repr__ (x)
-	;; Also for all X, not just Python objects.
-	(with-output-to-string (s)
-	  (print-unreadable-object (x s :identity t :type t))))
-
-#+(or)((defgeneric __setattr__ (x attr val))
-       (defmethod  __setattr__ (x attr val)
-	 (internal-set-attribute x attr val)))
-
-#+(or) ;; XXX
-(def-class-specific-methods
-    python-type
-    ((__new__  #'py-type-__new__  :meth)
-     (__init__ #'py-type-__init__ :meth)))
-;; etc...
-
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Some default methods (XXX or just regular functions?)
-
-;; XXX todo...
-
-#+(or)((defun py-type-__new__ (cls &rest options)
-	 (declare (ignore options))
-	 (make-instance cls))
-       
-       (defmethod py-type-__init__((x python-object) &optional pos-args kw-args)
-	 (declare (ignore pos-args kw-args)))
-       
-       (def-class-specific-methods
-	   python-type
-	   ((__new__  #'py-type-__new__  :meth)
-	    (__init__ #'py-type-__init__ :meth)))
-
-       (register-as-__new__method #'py-type-__new__))
- 
-
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Some special singleton classes: None, Ellipsis, NotImplemented
 
@@ -218,16 +262,11 @@
 			    
 			    ;; CPython disallows creating instances of these.
 			    
-			    (defmethod make-instance
-				((c (eql (find-class ',class-name))) &rest initargs)
-			      (declare (ignore initargs))
-			      #1=(py-raise 'TypeError
-					   "Cannot create '~A' instances" ',class-name))
-			    
-			    (defmethod make-instance
-				((c (eql ',class-name)) &rest initargs)
-			      (declare (ignore initargs))
-			      #1#)
+			    (defmethod __new__ ((x (eql (find-class ',class-name))) 
+						&optional pos-arg kwd-arg)
+			      (declare (ignore pos-arg kwd-arg))
+			      (py-raise 'TypeError
+					"Cannot create '~A' instances" ',class-name))
 			    
 			    (defmethod __repr__ ((c ,class-name))
 			      ,object-repr)
@@ -263,6 +302,11 @@
 
 (mop:finalize-inheritance (find-class 'py-number))
 
+
+(defmethod __new__ ((x (eql (find-class 'py-number))) &optional pos-arg key-arg)
+  (when (or key-arg (cdr pos-arg))
+    (py-raise 'ValueError "__new__ for py-number takes max 1 pos arg (got: ~A ~A) pos-arg key-arg"))
+  (or (car pos-arg) 0))
 
 (deftype py-number-designator ()
   `(or number py-number))

@@ -1,72 +1,13 @@
 (in-package :python)
 
-;;; Python's `magic' methods: those starting and ending with two
-;;; underscores, like `__len__', `__add__'.
+;;; Python's `magic methods' not shared by all objects.
 ;;; 
-;;; They are part of "protocols". For example, "a + b" roughly
-;;; translates into a.__add__(b) (but it's a bit more complex than
-;;; that).
+;;; (Those shared by all objects are defined in builtin-classes.cl).
 
 
-;;; Methods every object has:
-
-(defgeneric __class__ (x)
-  (:documentation "The class of X"))
-
-(defgeneric __delattr__ (x attr)
-  (:documentation "Delete attribute named ATTR of X")
-  (:method (x attr) (internal-del-attribute x attr)))
-
-(defgeneric __doc__ (x)
-  (:documentation "Documentation for X")
-  (:method (x) (locally (declare (ignore x)
-				 (special *None*))
-		 *None*))) ;; defaults to None
-
-(defgeneric __getattribute__ (x attr)
-  (:documentation "Intercepts all attribute lookups")
-  (:method (x attr) (or (internal-get-attribute x attr)
-			(py-raise 'AttributeError "~A ~A" x attr))))
-
-(defgeneric __hash__ (x)
-  (:documentation "Hash value (integer)")
-  (:method (x) (pyb:id x))) ;; hash defaults to id, the pointer value
-
-(defgeneric __init__ (x &optional pos-arg key-arg)
-  (:documentation "Object initialization")
-  (:method (x &optional pos-arg key-arg) (locally (declare (ignore x pos-arg key-arg)
-							   (special *None*))
-					   *None*)))
-
-(defgeneric __new__ (cls &optional pos-arg key-arg)
-  (:documentation "Create a new instance of class CLS")
-  (:method ((cls class) &optional pos-arg key-arg) (progn (when (or pos-arg key-arg)
-							    (warn "__new__ ignoring args: ~A ~A" pos-arg key-arg))
-							  (make-instance cls))))
-
-;; (defgeneric __reduce__ ...)
-;; (defgeneric __reduce_ex__ ...)
-
-(defgeneric __repr__ (x)
-  (:documentation "String representation of X, preferably eval-able")
-  (:method (x)
-	   (with-output-to-string (s)
-	     (print-unreadable-object (x s :identity t :type t)))))
-
-(defgeneric __setattr__ (x attr val)
-  (:documentation "Set attribute ATTR of X to VAL")
-  (:method (x attr val) (internal-set-attribute x attr val)))
-
-(defgeneric __str__ (x)
-  (:documentation "String representation of X, intended for humans")
-  (:method (x) (call-attribute-via-class x '__repr__)))
-
-
-
-;;; Methods not present for all objects
-
-;; Not all CPython objects have the following methods, so only define
-;; the generic function here, not a method specialized on types T.
+;; As not all Python objects have the following methods, so only
+;; define the generic function here, not a method (specialized on
+;; types T).
 
 (defgeneric __eq__ (x y) (:documentation "x == y"))
 (defgeneric __ne__ (x y) (:documentation "x != y"))
@@ -78,8 +19,7 @@
 (defgeneric __cmp__ (x y) (:documentation "cmp(x,y) -- rich comparison"))
 (defgeneric __nonzero__ (x) (:documentation "truth value testing"))
  
-#+(or) ;; TODO
-(__unicode__ (x) "unicode")
+;; TODO: __unicode__
  
 ;;; Descriptor methods
 (defgeneric __get__ (self instance owner-class) (:documentation "Get property attribute value of INSTANCE of OWNER-CLASS"))

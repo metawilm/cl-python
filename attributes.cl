@@ -146,34 +146,6 @@
     raised in user-defined methods called in the process."))
 
 
-(defmethod internal-get-attribute :around ((x class) attr)
-
-  ;; Intercepts a few special attributes, then does a regular lookup.
-  ;; TODO: remove these special cases (make them GF method on Python-object)
-  
-  (ensure-py-type attr attribute-name "Not a valid attribute name: ~S")
-  
-  (cond ((eq attr '__class__) (values (__class__ x) t))
-	((eq attr '__bases__) (values (make-py-list-from-list
-				       ;; filter?
-				       (copy-list (mop:class-direct-superclasses x)))  ;; copy for safety
-				      t))
-	((eq attr '__mro__)
-	 ;; "Method Resoltion Order"
-	 ;; Implementation-specific classes are hidden from this list
-	 (values (make-py-list-from-list 
-		  (loop for cls in (mop:class-precedence-list x)
-		      if (python-object-designator-p cls) collect cls))
-		 t))
-	    
-	;; for debugging
-	((eq attr 'cpl) (format t "~%~A~%" (mop:class-precedence-list x)) 
-			(values 42 t))
-	
-	(t
-	 (call-next-method x attr))))
-
-
 (defmethod internal-get-attribute :around (x attr)
   (ensure-py-type attr attribute-name "Not a valid attribute name: ~S")
   (call-next-method x attr))
@@ -332,6 +304,21 @@
                    If INSTANCE is supplied, result is wrapped when appropriate. ~@
                    Returns VAL, FOUND"))
 
+(defmethod getattr-class-nonrec (cls attr &optional instance)
+  (multiple-value-bind (func type)
+      (lookup-bi-class-attr/meth cls attr)
+    (cond ((null func) (values nil nil))
+	  ((eq type :meth)
+	   (if instance
+	       (values (make-unbound-method :func func :class cls) t)
+	     (values (make-bound-method :self instance :func func :class cls) t)))
+	  ((eq type :attr)
+	   (if instance
+	       (values (py-call func (list instance)) t)
+	     (values nil nil))))))
+    
+    
+#+(or) ;; replaced by above, using lookup-bi-class-attr/meth
 (defmethod getattr-class-nonrec (x attr &optional instance)   ;; default method
   ;; (declare (ignore x attr instance))
   (let ((res (get attr x)))
@@ -372,6 +359,10 @@
 ;;(defmethod getattr-class-nonrec ((x user-defined-object)
 
 (defmethod search-generic-function-attr ((x class) attr &optional instance)
+  (declare (ignore attr instance))
+  (values nil nil))
+
+#+(or)(
   "Is there a GF specialized on (a superclas of) class X? ~
    Returns VAL, FOUND-P.
    If FOUND-P, then VAL is a bound method if INSTANCE is supplied,
