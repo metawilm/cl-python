@@ -93,15 +93,16 @@
    "Return N values from iterable Python object in the form of a Lisp vector.
    If ERROR, than when there are more values in the object, an error of type
    TypeError is raised; if not ERROR, NIL is returned in that situation."))
-  
-(defmethod py-iterate-n-values ((x py-list/tuple) (n fixnum) &key (error t))
-  (assert (> n 0))
-  (with-slots (vec) x
-    (if (= (length vec) n)
-	vec
-      (when error
-	(py-raise 'TypeError "Wanted ~A values from iterable ~A, but got ~A"
-		  n x (length vec))))))
+
+(eval-when (:execute) ;; TODO: change source code loading order and remove EVAL-WHEN
+  (defmethod py-iterate-n-values ((x py-list/tuple) (n fixnum) &key (error t))
+    (assert (> n 0))
+    (with-slots (vec) x
+      (if (= (length vec) n)
+	  vec
+	(when error
+	  (py-raise 'TypeError "Wanted ~A values from iterable ~A, but got ~A"
+		    n x (length vec)))))))
 
 (defmethod py-iterate-n-values (x (n fixnum) &key (error t))
   (assert (> n 0))
@@ -183,17 +184,19 @@
 	  (py-raise 'TypeError
 		    "Iteration over non-sequence (got: ~A)" object))))))
 
-
-(defun py-iterate->lisp-list (object)
-  "Returns a Lisp list, that may not be modified destructively."
-
-  (when (member (class-name (class-of object)) '(py-tuple py-list))
-    (return-from py-iterate->lisp-list (loop for x across (slot-value object 'vec)
-					   collect x)))
+(eval-when (:execute) ;; py-tuple/list
+  (defun py-iterate->lisp-list (object)
+    "Returns a Lisp list, that may not be modified destructively."
+    
+    (when (member (class-of object)
+		  (list (load-time-value (find-class 'py-tuple)) (load-time-value (find-class 'py-list))
+			:test 'eq))
+      (return-from py-iterate->lisp-list (loop for x across (slot-value object 'vec)
+					     collect x)))
   
-  (let ((res ()))
-    (map-over-py-object (lambda (x) (push x res)) object)
-    (nreverse res)))
+    (let ((res ()))
+      (map-over-py-object (lambda (x) (push x res)) object)
+      (nreverse res))))
 
 (defmethod map-over-py-object (fun object)
   "Iterate over OBJECT, calling Lisp function FUN on each value. Returns nothing."
@@ -203,11 +206,11 @@
 		   (setf val (funcall f)))
   (values))
 
-#+(or)
-(defmethod map-over-py-object (fun (x py-list/tuple))
-  (loop for elm across (slot-value x 'vec)
-      do (funcall fun elm))
-  (values))
+(eval-when (:execute) ;; TODO: change load order, remove EVAL-WHEN
+  (defmethod map-over-py-object (fun (x py-list/tuple))
+    (loop for elm across (slot-value x 'vec)
+	do (funcall fun elm))
+    (values)))
 
 
 (defmacro ensure-py-type (vars cl-type err-str)

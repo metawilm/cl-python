@@ -95,7 +95,7 @@
 
 (defmethod py-call ((x unbound-method) &optional pos-args kwd-args)
   "X must be of right class, then call class method with given args."
-
+  (error "unbound method found")
   (with-slots ((um-class class) (um-func func)) x
     (let ((inst (car pos-args)))
       (cond ((null pos-args) (py-raise 'ValueError
@@ -116,8 +116,6 @@
 ;;    (py-call func pos-args kwd-args)))
 
 
-;;;; Calling a class that is a subclass of `python-object' creates an instance.
-;;; Calling a class that is a subclass of `python-type' creates a class.
 
 (defmethod py-call ((cls class) &optional pos-args kwd-args)
   
@@ -133,8 +131,28 @@
   ;; <type>(..args..) creates an instance
   (py-call-class cls pos-args kwd-args))
 
+#+(or)
+(defmethod py-call ((cls user-defined-class) &optional pos-args kwd-args)
+  (py-call-class cls pos-args kwd-args))
+		    
+(defmethod py-call ((x user-defined-object) &optional pos-args kwd-args)
+  (if (typep x 'class)
+      (progn (warn "py-call udo -> py-call-class ~A" x)
+	     (py-call-class x pos-args kwd-args))
+    (py-call (getattr-of-class x '__call__) 
+	     (let ((args (cons x pos-args))) 
+	       (declare (dynamic-extent args))
+	       args)
+	     kwd-args)))
 
+
+(defmethod py-call-class ((cls udc-with-ud-metaclass) pos-args kwd-args)
+  (or (call-attribute-via-class cls '__call__ pos-args kwd-args)
+      (error "cls of ~A, (p: ~A, l: ~A), has no __call__ method?" cls (__class__ cls) (class-of cls))))
+  
+#+(or)
 (defmethod py-call-class ((cls class) pos-args kwd-args)
+  (break "py-call-class")
   (let ((cls-name (class-name cls)))
     (multiple-value-bind (__new__-meth found)
 	(internal-get-attribute cls '__new__)
@@ -149,18 +167,7 @@
 	    (warn "Class ~S has no __init__ method" cls-name)))
 	(return-from py-call-class inst)))))
 
-(defmethod py-call ((cls user-defined-class) &optional pos-args kwd-args)
-  (py-call-class cls pos-args kwd-args))
-		    
 
-(defmethod py-call ((x user-defined-object) &optional pos-args kwd-args)
-  (if (typep x 'class)
-      (error "py-call: need method for ~A" x)
-    (py-call (getattr-of-class x '__call__) 
-	     (let ((args (cons x pos-args))) 
-	       (declare (dynamic-extent args))
-	       args)
-	     kwd-args)))
 
 
 (defmethod py-call-exception ((cls class) &optional pos-args kwd-args)

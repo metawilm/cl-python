@@ -67,7 +67,7 @@
 	(let ((*py-eval-handler-set* t))
 	  (py-eval-1 ast)))))
 
-;; make it a method, for speed!
+
 (defmethod py-eval-1 ((x python-object)) x)
 (defmethod py-eval-1 ((x python-type))   x)
 (defmethod py-eval-1 ((x number))        x)
@@ -77,25 +77,9 @@
   x)  ;; string designator
 (defmethod py-eval-1 ((x class)) x)
 
-#+(or)
+
 (defmethod py-eval-1 ((ast list))
-  (declare (optimize (speed 3) (safety 0) (debug 0)))
-  (py-eval-2 (car ast) ast))
-
-#+(or)
-(defmethod py-eval-2 ((x symbol) ast)
-  (let ((f (symbol-function (intern (format nil "eval-~A" (car ast))))))
-    (setf (car ast) f)
-    (funcall f (cdr ast))))
-
-#+(or)
-(defmethod py-eval-2 ((x function) ast)
-  (declare (optimize (speed 3) (safety 0) (debug 0)))
-  (funcall x (cdr ast)))
-
-(defmethod py-eval-1 ((ast list)) ;; uses FUNCALL for all!
-  (declare (dynamic-extent ast)
-	   (optimize (speed 3) (safety 0) (debug 0)))
+  (declare (optimize (speed 3) (safety 1) (debug 0)))
   
   (case (car ast)
     
@@ -160,98 +144,25 @@
     (t (error "uncatched in py-eval: ~S~%" ast))))
 
 
-#+(or) ;; old
-(defun py-eval-1 (ast)
-  "Evaluate AST. Assumes *scope* and error handlers are set."
-  (typecase ast
-    (python-object (return-from py-eval-1 ast)) ;; already evaluated
-    (python-type (return-from py-eval-1 ast))
-    (number (return-from py-eval-1 ast)) ;; Lisp objects (for efficiency)
-    (string (return-from py-eval-1 ast))
-    ((and symbol
-      (not (eql nil)))
-     (return-from py-eval-1 ast)) ;; string designator
-    ((eql nil) (error "PY-EVAL of NIL")))
-    
-  (when (eq ast (load-time-value (find-class 'python-type)))
-    (return-from py-eval-1 ast))
-  
-  ;; This allows all kinds of Lisp values to be used directly in Python,
-  ;; e.g. using `clpy(...)' -- experimental
-  (unless (listp ast)
-    (return-from py-eval-1 ast))
-  
-  (case (car ast)
-    (inline-lisp (eval-inline-lisp (second ast)))
-    (file-input (apply #'eval-file-input (cdr ast)))
-    (testlist (apply #'eval-testlist (cdr ast)))
-    
-    ;; special hook for inserting Lisp code directly in AST
-    ;; (implicit PROGN)
-    #+(or)(lisp (eval `(progn ,@(cdr ast))))
-    
-    ;; these bind names and create new scope:
-    (module (apply #'eval-module "mod_name_here" (cdr ast)))
-    (funcdef (apply #'eval-funcdef (cdr ast)))
-    (class (apply #'eval-classdef (cdr ast)))
-    
-    (import (apply #'eval-import (cdr ast)))
-    (import-from (apply #'eval-import-from (cdr ast)))
-    
-    (assign-expr (apply #'eval-perhaps-assign-expr (cdr ast)))
-    (augassign-expr (apply #'eval-augassign-expr (cdr ast)))
-    (del (eval-del (second ast)))
-    (global (eval-global (second ast)))
+;; This was an attempt to speed up interpreting the AST by putting
+;; functions in the AST in place of the first list term and funcalling
+;; the function. It turned out this does not make a difference w.r.t speed.
 
-    (try-except (apply #'eval-try-except (cdr ast)))
-    (raise (apply #'eval-raise (cdr ast)))
-    
-    ;; expressions:
-    (identifier (eval-identifier (second ast)))
-    (string (make-py-string (cdr ast)))
-    (number (check-type (cdr ast) number)
-	    (make-py-number (cdr ast)))
-    
-    (list (apply #'eval-list (cdr ast)))
-    (tuple (make-tuple-from-list (mapcar #'py-eval-1 (cdr ast))))
-    (dict (eval-dict (second ast)))
-    (backticks (eval-backticks (second ast)))
-    
-    (call (apply #'eval-call (cdr ast)))
-    
-    (comparison (apply #'eval-comparison (cdr ast)))
-    (unary (apply #'eval-unary (cdr ast)))
-    (binary (apply #'eval-binary (cdr ast)))
-    (binary-lazy (apply #'eval-binary-lazy (cdr ast)))
-    
-    (attributeref (apply #'eval-attributeref (cdr ast)))
-    (subscription (apply #'eval-subscription (cdr ast)))
-    
-    ;;(simple-slice (apply #'eval-simple-slice (cdr ast)))
-    ;;(extended-slice (apply #'eval-extended-slice (cdr ast)))
-    (slice (eval-slice (cdr ast)))
-    
-    (lambda (apply #'eval-lambda (cdr ast)))
-    
-    (print (apply #'eval-print (cdr ast)))
-    (print>> (apply #'eval-print>> (cdr ast)))
-    
-    (ellipsis *Ellipsis*)
+#+(or)
+(defmethod py-eval-1 ((ast list))
+  (declare (optimize (speed 3) (safety 0) (debug 0)))
+  (py-eval-2 (car ast) ast))
 
-    ;; statements
-    (pass) ;; nothing
-    (suite (eval-suite (second ast)))
-      
-    (for-in (apply #'eval-for-in (cdr ast)))
-    (while (apply #'eval-while (cdr ast)))
-    (break (eval-break))
-    (continue (eval-continue))
-    (if (apply #'eval-if (cdr ast)))
-            
-    (return (eval-return (cadr ast)))
-    (assert (apply #'eval-assert (cdr ast)))
-    
-    (t (error "uncatched in py-eval: ~S~%" ast))))
+#+(or)
+(defmethod py-eval-2 ((x symbol) ast)
+  (let ((f (symbol-function (intern (format nil "eval-~A" (car ast)) #.*package*))))
+    (setf (car ast) f)
+    (funcall f (cdr ast))))
+
+#+(or)
+(defmethod py-eval-2 ((x function) ast)
+  (declare (optimize (speed 3) (safety 0) (debug 0)))
+  (funcall x (cdr ast)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -342,6 +253,67 @@
 	else collect x into pos-args
 	finally (return (values pos-args kw-args *-par **-par)))))
 
+
+(defun eval-classdef (cname-inheritance-suite)
+  (destructuring-bind (cname inheritance suite) cname-inheritance-suite
+    
+    ;; The inheritance list will be evaluated, but MAKE-PYTHON-CLASS
+    ;; expects a list of *names*, therefore after each of the items is
+    ;; evaluated and has a class object as value, CLASS-NAME must be
+    ;; called.
+  
+    (let* ((ns (make-namespace :name (format nil "<ns for class ~A>" cname)
+			       :inside *scope*))
+	   (supers (mapcar
+		    (lambda (x)
+		      (let ((c (py-eval-1 x)))
+			(etypecase c
+			  (symbol (find-class c))
+			  (class c))))
+		    inheritance)))
+    
+      ;; Evaluate SUITE now, in the new namespace inside the class:
+      ;; methods and class attributes are defined in it, plus there may
+      ;; be other side effects.
+      ;; 
+      ;; Need to do this now, in order for __slots__ to possible be
+      ;; bound, usedin the next step. (XXX Check order ok)
+    
+      (when suite
+	(let ((*scope* ns))
+	  (py-eval-1 suite)))
+    
+      (multiple-value-bind (slots has-slots)
+	  (multiple-value-bind (val found)
+	      (namespace-lookup ns '__slots__)
+	    (if found
+		(values (mapcar (lambda (name) (intern (typecase name
+							 (string name)
+							 (py-string (slot-value name 'string)))
+						       #.*package*))
+				(py-iterate->lisp-list val))
+			t)
+	      (values nil nil)))
+    
+	(let* ((doc (or (namespace-lookup ns '__doc__) *None*))
+	       (metaclass (or (namespace-lookup ns '__metaclass__)
+			      (load-time-value (find-class 'python-type))))
+	       (c (call-attribute-via-class metaclass '__new__ (list cname supers ns)))
+	  
+	       #+(or)(c (make-python-class :name cname :module "ModuleName" :supers supers
+					   :slots slots :has-slots has-slots :namespace ns
+					   :metaclass metaclass :documentation doc)))
+	  
+	  ;; In the current namespace, the name of the class that is defined
+	  ;; now becomes bound to the class object that results from
+	  ;; evaluating the classdef.
+	  (namespace-bind *scope* cname c)
+    
+	  ;; Finally, return the class (purely for debuggin: classdef has no
+	  ;; return value, as it is a stmt, not an expr.
+	  c)))))
+
+#+(or)
 (defun eval-classdef (cname-inheritance-suite)
   (destructuring-bind (cname inheritance suite) cname-inheritance-suite
     
@@ -1382,7 +1354,7 @@
   (let* ((file-name (concatenate 'string (string module-name) ".py")))
     
     (loop
-      (with-simple-restart (continue "Reload, retry import")
+      (with-simple-restart (continue "Reload '~A' and retry import" module-name)
 	
 	;; In CPython, when the toplevel of modules is executed, the
 	;; name of the module is not yet bound to the module object
@@ -1460,7 +1432,7 @@
 	       ;; namespace.
 
 	       (loop
-		 (with-simple-restart (continue "Reload, retry import")
+		 (with-simple-restart (continue "Reload '~A' and retry import" mod-name-str)
 
 		   (let ((mod-ast (parse-python-string (read-file mod/__init__.py-path)))
 			 (ns (make-namespace :builtins t)))
@@ -1487,7 +1459,7 @@
 	       ;; Packages have __path__ attribute ; modules don't.
 	       
 	       (loop
-		 (with-simple-restart (continue "Reload, retry import")
+		 (with-simple-restart (continue "Reload '~A' and retry import" mod-name-str)
 
 		   (let ((mod-ast (parse-python-string (read-file mod.py-path)))
 			 (ns (make-namespace :builtins t)))
