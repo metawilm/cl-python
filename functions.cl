@@ -26,6 +26,7 @@
                                     executed (the lexical scope -- this is not ~
                                     func.__dict__)")
    (name :initarg :name :initform "<no name>")
+   (call-handler :initarg :call-handler)
    
    ;; update internal data structure that keeps track of function calling
    #+(or)(id :initform (new-python-function-defined)))

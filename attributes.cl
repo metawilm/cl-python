@@ -1,6 +1,6 @@
 (in-package :python)
 
-;; (declaim (optimize (debug 3)))
+(declaim (optimize (debug 3)))
 
 ;; Attribute getting and setting
 ;; =============================

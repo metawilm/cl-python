@@ -2,6 +2,60 @@
 
 ;;; Registering methods and attributes of built-in classes
 
+;; 2-dimensional table, implemented as nested assoc lists (EQ)
+
+#+(or)
+(defun make-table ()
+  nil)
+
+#+(or)
+(defun table-get (tab entry key) ;; -> val
+  (declare (optimize (speed 3) (safety 0) (debug 0)))
+  (cdr (assoc key (cdr (assoc entry tab)) :test 'eq)))
+
+#+(or)
+(defun table-set (tab entry key val) ;; -> table
+  (declare (optimize (speed 3) (safety 0) (debug 0)))
+  (let ((entry-kons (or (assoc entry tab :test 'eq)
+			(let ((c (cons entry nil)))
+			  (setf tab (cons c tab))
+			  c))))
+    (let ((key-kons (or (assoc key (cdr entry-kons) :test 'eq)
+			(let ((c (cons key nil)))
+			  (push c (cdr entry-kons))
+			  c))))
+      (setf (cdr key-kons) val)))
+  tab)
+
+
+;; vector table
+
+(defun make-table ()
+  (make-array 0 :adjustable t :fill-pointer 0))
+
+(defun table-get (tab entry key) ;; -> val
+  (declare (optimize (speed 3) (safety 1) (debug 0)))
+  (loop for x across tab
+      when (eq (car x) entry) 
+      do (loop for k across (cdr x)
+	     when (eq (car k) key) do (return-from table-get (cdr k))
+	     finally (return nil))
+      finally (return nil)))
+
+(defun table-set (tab entry key val) ;; -> table
+  (loop for x across tab
+      when (eq (car x) entry) 
+      do (loop for k across (cdr x)
+	     when (eq (car k) key) do (setf (cdr k) val)
+				      (return tab)
+	     finally (vector-push-extend (cons key val) (cdr x))
+		     (return-from table-set tab))
+      finally (let ((entry-vec (make-array 1 :adjustable t :fill-pointer 1)))
+		(setf (aref entry-vec 0) (cons key val))
+		(vector-push-extend (cons entry entry-vec) tab)
+		(return-from table-set tab))))
+
+
 
 ;; Class-specific methods, both magic and non-magic, like the `clear'
 ;; methods of dicts, and the `append' method of lists, and the
@@ -9,28 +63,60 @@
 ;; the key is the method name as a symbol, and the value is an alist
 ;; where the class is the key, and the method for that class is the value.
 
+#+(or)
 (defparameter *builtin-class-attr/meths* (make-hash-table :test #'eq))
 
-(defmethod register-bi-class-attr/meth ((class class) (meth-name symbol) attr-value)
-  "Puts the method in the hash table. TYPE is either :ATTR or :METH."
-  (when (eq attr-value '__and__)
-    (warn "Registering __and__"))
+#+(or)
+(defmethod register-bi-class-attr/meth
+    ((class class) (meth-name symbol) attr-value)
+  "Puts the method in the hash table."
+  #+(or)(when (eq attr-value '__and__)
+	  (warn "Registering __and__"))
   (let* ((alist (gethash meth-name *builtin-class-attr/meths*))
 	 (kons  (cons class attr-value))
 	 (assval (assoc class alist)))
     (when assval
-      (warn "builtin-class-methods already had a func for method ~A of class ~A; ~
-             it will be replaced"
+      (warn "builtin-class-methods already had a func for method ~
+             ~A of class ~A; it will be replaced"
 	    meth-name class))
     (push kons alist)
     (setf (gethash meth-name *builtin-class-attr/meths*) alist)))
 
+#+(or)
 (defmethod lookup-bi-class-attr/meth ((class class) (meth-name symbol))
-  "Returns METHOD, TYPE. Both are NIL if not found."
+  "Returns METHOD."
   (cdr (assoc class (gethash meth-name *builtin-class-attr/meths*))))
 
+#+(or)
 (defmethod view-register ((meth-name symbol))
   (gethash meth-name *builtin-class-attr/meths*))
+
+
+;; -- new --
+
+(defvar *builtin-class-attr/meths-table* (make-table))
+
+(defmethod register-bi-class-attr/meth
+    ((class class) (meth-name symbol) attr-value)
+  "Puts the method in the alist."
+  
+  (let ((old-val (table-get
+		  *builtin-class-attr/meths-table* class meth-name)))
+    (when (and old-val
+	       (not (eq old-val attr-value)))
+      (warn "Method ~A of class ~A was ~A, replaced by ~A"
+	    attr-value class old-val attr-value)))
+  (setf *builtin-class-attr/meths-table*
+    (table-set *builtin-class-attr/meths-table* class meth-name attr-value)))
+
+(defmethod lookup-bi-class-attr/meth ((class class) (meth-name symbol))
+  "Returns METHOD."
+  (declare (optimize (speed 3) (safety 0) (debug 0)))
+  (table-get *builtin-class-attr/meths-table* class meth-name))
+
+
+   
+	
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Attributes of instances (not methods)

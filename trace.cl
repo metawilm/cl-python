@@ -64,6 +64,24 @@
 
 #+allegro
 (defmethod py-trace ((x user-defined-function))
-  (declare (ignorable x))
-  (error "todo: py-trace udf"))
+  (py-trace (slot-value x 'call-handler)))
 
+#+allegro
+(defmethod py-untrace ((x user-defined-function))
+  (py-untrace (slot-value x 'call-handler)))
+
+#+allegro
+(defmethod py-trace ((x py-func-iterator))
+  (py-trace (slot-value x 'func)))
+
+#+allegro
+(defmethod py-untrace ((x py-func-iterator))
+  (py-untrace (slot-value x 'func)))
+
+#+allegro
+(defmethod py-untrace ((x python-function-returning-generator))
+  (py-untrace (slot-value x 'generator-creator)))
+
+#+allegro
+(defmethod py-trace ((x python-function-returning-generator))
+  (py-trace (slot-value x 'generator-creator)))

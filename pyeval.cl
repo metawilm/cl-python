@@ -1,20 +1,22 @@
 (in-package :python)
 
 (defparameter *scope* nil "Current execution namespace")
-(defparameter *__debug__* 1) ;; CPython readonly variable `__debug__' (see EVAL-ASSERT)
+(defparameter *__debug__* 1
+  "CPython readonly variable `__debug__' (see EVAL-ASSERT)")
 (defparameter *__future__.division* nil)
 
 #+(or) ;; namespace re-use optimization?
-(defparameter *namespace-cache* (make-array 100 :fill-pointer 0 :adjustable nil))
+(defparameter *namespace-cache*
+    (make-array 100 :fill-pointer 0 :adjustable nil))
 
-#+py-exception-stack
+;; #+py-exception-stack
 (defparameter *active-excepts* nil)
 
 ;;; Evaluation
 
 (defun user-py-eval (ast &optional namespace)
   "Evaluate some Python code. This is the function to be called for ~
-   evaluating user-supplied code in the form of an AST, and
+   evaluating user-supplied code in the form of an AST, and ~
    optionally a namespace."
   
   (let ((*scope* (or namespace 
@@ -26,9 +28,9 @@
 
 (defvar *py-eval-handler-set* nil)
 
-;; During evaluation of Python code, a some Lisp errors may
-;; occur. Some of them are catched and converted to the
-;; corresponding Python exception.
+;; During evaluation of Python code, some Lisp errors may occur. Some
+;; of them are catched and converted to the corresponding Python
+;; exception.
 
 (defmacro with-py-error-handlers (&body body)
   `(handler-bind
@@ -40,9 +42,9 @@
 	#+allegro
 	(excl:synchronous-operating-system-signal
 	 (lambda (c)
-	   (if (string= (slot-value c 'excl::format-control)
-			"~1@<Stack overflow (signal 1000)~:@>")
-	       (py-raise 'RuntimeError "Stack overflow"))))
+	   (when (string= (slot-value c 'excl::format-control)
+			  "~1@<Stack overflow (signal 1000)~:@>")
+	     (py-raise 'RuntimeError "Stack overflow"))))
 	
 	#+allegro
 	(excl:interrupt-signal
@@ -75,73 +77,52 @@
 (defmethod py-eval-1 ((x function))      x)
 (defmethod py-eval-1 ((x symbol))
   (unless x (warn "py-eval of NIL"))  ;; TODO check NIL as identifier
-  x)  ;; string designator
+  x)  ;; string designator  XXX ?
 (defmethod py-eval-1 ((x class)) x)
 
 
 (defmethod py-eval-1 ((ast list))
-  (declare (optimize (speed 3) (safety 1) (debug 0)))
-  
   (case (car ast)
-    
-    (file-input (funcall #'eval-file-input (cdr ast)))
-    (testlist (funcall #'eval-testlist (cdr ast)))
-    
-    ;; these bind names and create new scope:
-    (funcdef (funcall #'eval-funcdef (cdr ast)))
-    (classdef (funcall #'eval-classdef (cdr ast)))
-    
-    (import (funcall #'eval-import (cdr ast)))
-    (import-from (funcall #'eval-import-from (cdr ast)))
-    
+    (assert (funcall #'eval-assert (cdr ast)))
     (assign-expr (funcall #'eval-assign-expr (cdr ast)))
+    (attributeref (funcall #'eval-attributeref (cdr ast)))
     (augassign-expr (funcall #'eval-augassign-expr (cdr ast)))
-    (del (funcall #'eval-del (cdr ast)))
-    (global (funcall #'eval-global (cdr ast)))
-
-    (try-except (funcall #'eval-try-except (cdr ast)))
-    (raise (funcall #'eval-raise (cdr ast)))
-    
-    ;; expressions:
-    (identifier (funcall #'eval-identifier (cdr ast)))
-        
-    (list (funcall #'eval-list (cdr ast)))
-    (tuple (funcall #'eval-tuple (cdr ast)))
-    (dict (funcall #'eval-dict (cdr ast)))
     (backticks (funcall #'eval-backticks (cdr ast)))
-    
-    (call (funcall #'eval-call (cdr ast)))
-    
-    (comparison (funcall #'eval-comparison (cdr ast)))
-    (unary (funcall #'eval-unary (cdr ast)))
     (binary (funcall #'eval-binary (cdr ast)))
     (binary-lazy (funcall #'eval-binary-lazy (cdr ast)))
-    
-    (attributeref (funcall #'eval-attributeref (cdr ast)))
-    (subscription (funcall #'eval-subscription (cdr ast)))
-    
-    (slice (funcall #'eval-slice (cdr ast)))
-    
-    (lambda (funcall #'eval-lambda (cdr ast)))
-    
-    (print (funcall #'eval-print (cdr ast)))
-    (print>> (funcall #'eval-print>> (cdr ast)))
-    
-    (ellipsis (funcall #'eval-ellipsis (cdr ast)))
-
-    ;; statements
-    (pass (funcall #'eval-pass (cdr ast))) ;; nothing
-    (suite (funcall #'eval-suite (cdr ast)))
-      
-    (for-in (funcall #'eval-for-in (cdr ast)))
-    (while (funcall #'eval-while (cdr ast)))
     (break (funcall #'eval-break (cdr ast)))
+    (call (funcall #'eval-call (cdr ast)))
+    (classdef (funcall #'eval-classdef (cdr ast)))
+    (comparison (funcall #'eval-comparison (cdr ast)))
     (continue (funcall #'eval-continue (cdr ast)))
+    (del (funcall #'eval-del (cdr ast)))
+    (dict (funcall #'eval-dict (cdr ast)))
+    (ellipsis (funcall #'eval-ellipsis (cdr ast)))
+    (file-input (funcall #'eval-file-input (cdr ast)))
+    (for-in (funcall #'eval-for-in (cdr ast)))
+    (funcdef (funcall #'eval-funcdef (cdr ast)))
+    (global (funcall #'eval-global (cdr ast)))
+    (identifier (funcall #'eval-identifier (cdr ast)))
     (if (funcall #'eval-if (cdr ast)))
-            
+    (import (funcall #'eval-import (cdr ast)))
+    (import-from (funcall #'eval-import-from (cdr ast)))
+    (lambda (funcall #'eval-lambda (cdr ast)))
+    (list (funcall #'eval-list (cdr ast)))
+    (list-compr (funcall #'eval-list-compr (cdr ast)))
+    (pass (funcall #'eval-pass (cdr ast)))
+    (print (funcall #'eval-print (cdr ast)))
+    (print->> (funcall #'eval-print->> (cdr ast)))
+    (raise (funcall #'eval-raise (cdr ast)))
     (return (funcall #'eval-return (cdr ast)))
-    (assert (funcall #'eval-assert (cdr ast)))
-    
+    (slice (funcall #'eval-slice (cdr ast)))
+    (subscription (funcall #'eval-subscription (cdr ast)))
+    (suite (funcall #'eval-suite (cdr ast)))
+    (testlist (funcall #'eval-testlist (cdr ast)))
+    (try-except (funcall #'eval-try-except (cdr ast)))
+    (try-finally (funcall #'eval-try-finally (cdr ast)))
+    (unary (funcall #'eval-unary (cdr ast)))
+    (while (funcall #'eval-while (cdr ast)))
+    ;; YIELD can't occur: rewritten
     (t (error "uncatched in py-eval: ~S~%" ast))))
 
 
@@ -175,9 +156,8 @@
   (let ((items (first items-comma?))
 	(comma? (second items-comma?)))
     (unless (or items comma?)
-      (return-from eval-testlist (make-tuple)) ;; XXX see if this gives problems
-      #+(or)(py-raise 'SyntaxError
-		      "Empty tuple is invalid -- use this instead: (,)"))
+      (return-from eval-testlist (make-tuple)))
+    
     (let ((make-tuple (or comma?
 			  (>= (length items) 2))))
       (if make-tuple
@@ -194,29 +174,45 @@
   ;; Note that 'yield' inside "exec" or "eval" is not allowed, so it
   ;; can be statically checked whether the function returns a
   ;; generator or not.
-  
+
   (destructuring-bind (fname params suite) fname-params-suite
     
     (if (generator-ast-p suite)
-      
-	(let* ((params (multiple-value-list (parse-function-parameter-list params)))
-	       (f (make-python-function-returning-generator (symbol-name fname) params suite)))
+	
+	(let* ((params
+		(multiple-value-list (parse-function-parameter-list params)))
+	       (f (make-python-function-returning-generator
+		   (symbol-name fname) params suite)))
 	  (namespace-bind *scope* fname f))
   
-      (let* ((params (multiple-value-list (parse-function-parameter-list params)))
+      (let* ((params 
+	      (multiple-value-list (parse-function-parameter-list params)))
+	     (namespace (make-namespace
+			 :name (format nil "ns for function ~A" fname)
+			 :inside *scope*))
+	     (call-rewriter (apply #'make-call-rewriter fname params))
+	     (ast (add-return-None-to-suite suite))
 	     (f (make-user-defined-function 
 		 :name (symbol-name fname)
-		 :ast (add-return-None-to-suite suite)
-		 :namespace (make-namespace
-			     :name (format nil "ns for function ~A" fname)
-			     :inside *scope*)
+		 :ast ast
+		 :namespace namespace
 		 :params params
-		 :call-rewriter (apply #'make-call-rewriter fname params))))
+		 :call-rewriter call-rewriter
+		 :call-handler
+		 (lambda (pos-args key-args)
+		   (let ((actual-args 
+			  (funcall call-rewriter pos-args key-args))
+			 (namespace-to-use (namespace-copy namespace)))
+		     (loop for (arg . val) in actual-args
+			 do (namespace-bind namespace-to-use arg val))
+		     (let ((*scope* namespace-to-use))
+		       (declare (special *scope*))
+		       (catch 'function-block
+			 (py-eval-1 ast))))))))
 	
 	;; Content of function is not evaluated yet; only when called.
 	;; Bind function name to function object in current namespace:
-	(namespace-bind *scope* fname f))))
-  *None*)
+	(namespace-bind *scope* fname f)))))
 
 (defun add-return-None-to-suite (suite)
   (assert (eq (car suite) 'suite))
@@ -235,22 +231,20 @@
     ;; The grammar doesn't restrict that, so check it here.
     
     (let ((found-kw nil))
-      (mapc (lambda (x)
-	      (cond ((consp x)
-		     (setf found-kw x))
-		    ((and found-kw (symbolp x))
-		     (py-raise 'SyntaxError
-			       "Non-default argument '~A' follows default argument '~A'"
-			       x (car found-kw)))
-		    (t)))
-	    pos-kw-params))
+      (dolist (x pos-kw-params)
+	(cond ((consp x)
+	       (setf found-kw (car x)))
+	      ((and found-kw (symbolp x))
+	       (py-raise 'SyntaxError
+			 "Non-default argument '~A' follows default ~
+                          argument '~A'" x found-kw))
+	      (t ))))
     
     (loop for x in pos-kw-params
 	if (consp x) 
 	collect (progn (setf (cdr x) (py-eval-1 (cdr x)))
 		       x)
 	into kw-args
-	     
 	else collect x into pos-args
 	finally (return (values pos-args kw-args *-par **-par)))))
 
@@ -295,12 +289,12 @@
 				(py-iterate->lisp-list val))
 			t)
 	      (values nil nil)))
+	(declare (ignore slots has-slots))
     
-	(let* ((doc (or (namespace-lookup ns '__doc__) *None*))
+	(let* (#+(or)(doc (or (namespace-lookup ns '__doc__) *None*))
 	       (metaclass (or (namespace-lookup ns '__metaclass__)
 			      (load-time-value (find-class 'python-type))))
 	       (c (call-attribute-via-class metaclass '__new__ (list cname supers ns))))
-	  
 	  (call-attribute-via-class c '__init__ (list cname supers ns)) ;; ignore result
 	  
 	  #+(or)(c (make-python-class :name cname :module "ModuleName" :supers supers
@@ -539,16 +533,13 @@
 			       (namespace-bind *scope* name-here obj)))))))))))
 
 (defun eval-assign-expr (items)
-  (setf items (car items))
-  (destructuring-bind (val &rest targets)
-      (reverse items)
-    (if targets
-	(let ((eval (py-eval-1 val))) ;; real assignment statement
-	  (unless eval
-	    (error "PY-EVAL returned NIL for value to be assigned: ~A" val))
-	  (dolist (tar targets)
-	    (eval-real-assign-expr tar eval)))
-      (py-eval-1 val))))
+  ;;(setf items (car items))
+  (destructuring-bind (val targets) items
+    (let ((eval (py-eval-1 val))) ;; real assignment statement
+      (unless eval
+	(error "PY-EVAL returned NIL for value to be assigned: ~A" val))
+      (dolist (tar targets)
+	(eval-real-assign-expr tar eval)))))
 
 (defun eval-augassign-expr (target-operator-expr)
   (destructuring-bind (target operator expr) target-operator-expr
@@ -596,86 +587,17 @@
 (defun eval-real-assign-expr (targets evalue)
   "Assign EVALUE to TARGETS.
    Assumes EVALUE already evaluated."
-  
-  
-  ;;(warn "eval-real-assign-expr: ~A ~A" targets evalue)
-  
-  ;; Special-case common uses:
-  
-  ;; a = ..
-  ;; b,a = ..
-  ;; ...
-  ;; but not:  a.b = ..
-  ;;           a[b] = ..
-  
-  (block special-cases ;; XXX compiler macro, later on 
-    (locally (declare (optimize (speed 3) (safety 0) (debug 0)))
-      (when (and (member (first targets) '(exprlist testlist))
-		 (null (third targets))
-		 (eq (caaadr targets) 'identifier))
-	
-	(if (null (cdadr targets))
-	    
-	    (return-from eval-real-assign-expr
-	      (namespace-bind *scope* (second (caadr targets)) evalue))
-    
-	  (let ((i 0))
-	    (dolist (tg (cadr targets))
-	      (unless (eq (car tg) 'identifier)
-		(return-from special-cases nil))
-	      (incf i))
-	    (let ((vals-vec (py-iterate-n-values evalue i)))
-	      (declare (dynamic-extent vals-vec))
-	      (loop for tg in (cadr targets)
-		  for val across vals-vec
-		  do (namespace-bind *scope* (second tg) val))
-	      (return-from eval-real-assign-expr nil)))))))
-  
-  ;; a,b = 3,4:  (testlist ((identifier d) (identifier d1)) nil)  #<py-tuple>
-  ;;(when (and (eq (first targets) 'testlist)
-    
-  (assert (member (car targets) '(testlist exprlist) :test 'eq))
-  (let* ((etargets (eval-assignment-targets (second targets)))
-	 (num-targets (length etargets))
-	 
-	 (comma? (third targets)) ;; both testlist and exprlist have 
-	 (target-is-list (or (> num-targets 1) ;; comma? as third list element
-			     comma?)))
-    
-    ;; (format t "eval-ass-targets: ~S~%" etargets)
-    (cond
-     ((= num-targets 0)
-      (error "no assignment targets?! ~W ~W" etargets evalue))
-     
-     ((and (= num-targets 1)
-	   (not target-is-list))
-      (eval-assign-one (car etargets) evalue))
-       
-     ((or (>= num-targets 2)
-	  target-is-list)
-      (let ((i 0)
-	    (acc ()))
-	(map-over-py-object
-	 (lambda (x) 
-	   (incf i)
-	   (when (> i num-targets)
-	     (py-raise 'ValueError "Too many values to unpack (needed exactly ~A ~@
-                        values), got already one more than that." num-targets))
-	   (push x acc))
-	 evalue)
-	
-	(when (< i num-targets)
-	  (py-raise 'ValueError
-		    "Too few values to unpack (needed exactly ~A values, but got only ~A)."
-		    num-targets i))
-	  
-	;; arriving here means we got exactly enough values.
-	(setf acc (nreverse acc))
-	(loop for val in acc
+  (declare (optimize (speed 3) (safety 0) (debug 0)))
+  (if (member (car targets) '(testlist exprlist) :test 'eq)
+      
+      (let* ((etargets (eval-assignment-targets (second targets)))
+	     (num-tg (length (second targets)))
+	     (val-vec (py-iterate-n-values evalue num-tg)))
+	(loop for val across val-vec
 	    for tar in etargets
-	    do (eval-assign-one tar val))))
-     
-     (t (error "shouldn't come here")))))
+	    do (eval-assign-one tar val)))
+    
+    (eval-assign-one (eval-one-assignment-target targets) evalue)))
        
 (defun eval-assign-one (target val)
   "TARGET is evaluated as far as possible, but it still contains ~@
@@ -803,23 +725,27 @@
                        to be evaluated." tg)
      (py-eval-1 tg))))
 
-(defun eval-del (exprlist)
-  (setf exprlist (car exprlist))
-  (assert (eq (car exprlist) 'exprlist))
-  (dolist (place (second exprlist))
+(defun eval-del (item)
+  (setf item (car item))
+  (dolist (place (if (eq (car item) 'exprlist)
+		     (second item)
+		   (list item)))
     (let ((place2 (eval-one-assignment-target place)))
-      #+(or)(warn "place to del: ~A" place2)
       (ecase (car place2)
 	
-	(identifier   (namespace-delete *scope* (second place2)))
+	(identifier   (or (namespace-delete *scope* (second place2))
+			  (py-raise 'ValueError
+				    "Can't delete variable ~A: it's not bound"
+				    (second place2))))
 	(subscription (call-attribute-via-class (second place2) '__delitem__
 						(cddr place2)))
-	(attributeref (warn "deletion of attribute: buggy")
+	(attributeref (warn "deletion of attribute: a bit buggy")
 		      (destructuring-bind (obj (identifier? att-name))
 			  (cdr place2)
 			(assert (and (eq identifier? 'identifier)))
 			;; XXX call __delattr__ always?
-			(call-attribute-via-class obj '__delattr__ (list att-name))))))))
+			(call-attribute-via-class obj '__delattr__
+						  (list att-name))))))))
 
 (defun eval-global (varlist)
   (setf varlist (car varlist))
@@ -839,54 +765,60 @@
   ;; `except:' clause. Instead, we want to get into the debugger to
   ;; analyze and perhaps resume executions.
   
-  (destructuring-bind (suite except-clauses else-clause) suite--except-clauses--else-clause
+  (destructuring-bind
+      (suite except-clauses else-clause) suite--except-clauses--else-clause
     (let ((handler-scope *scope*))
     
       (handler-bind 
-	
-	  ((Exception (lambda (exc)
-			(loop for ((cls/tuple parameter) handler-form) in except-clauses
-			    do (cond 
-				
-				;; `except Something:'  where Something a class or tuple
-				((and cls/tuple  
-				      (let ((ecls/tuple (let ((*scope* handler-scope))
-							  (py-eval-1 cls/tuple))))
-					(typecase ecls/tuple
-					  (class    (typep exc ecls/tuple))
-					  (py-tuple (loop for cls in (tuple->lisp-list ecls/tuple)
-							when (typep exc cls)
-							do (return t)
-							finally (return nil)))
-					  (t (warn "Non-class as `except' specializer (ignored): ~S"
-						   ecls/tuple)
-					     nil))))
+	  
+	  ((Exception
+	    (lambda (exc)
+	      (loop for ((cls/tuple parameter) handler-form) in except-clauses
+		  do (cond 
+		      
+		      ;; `except Something:'  where Something a class or tuple
+		      ((and cls/tuple  
+			    (let ((ecls/tuple (let ((*scope* handler-scope))
+						(py-eval-1 cls/tuple))))
+			      (typecase ecls/tuple
+				(class    (typep exc ecls/tuple))
+				(py-tuple (loop for cls in
+						(tuple->lisp-list ecls/tuple)
+					      when (typep exc cls)
+					      do (return t)
+					      finally (return nil)))
+				(t (warn "Non-class as `except' specializer ~
+                                          (ignored): ~S" ecls/tuple)
+				   nil))))
 				 
 				 (let ((*scope* handler-scope))
 				   (when parameter
-				     (assert (eq (first parameter) 'identifier))
-				     (namespace-bind handler-scope #+(or)*scope*
-						     (second parameter) exc)) ;; right scope??
+				     (assert (eq (first parameter)
+						 'identifier))
+				     (namespace-bind
+				      handler-scope
+				      (second parameter) exc))
 				   (py-eval-1 handler-form))
 				 (return-from eval-try-except nil))
 				
-				((null cls/tuple) ;; a bare `except:' matches all exceptions
-				 (let ((*scope* handler-scope))
-				   (py-eval-1 handler-form))
-				 (return-from eval-try-except nil))
-				
-				(t (error "assumed unreachable")))))))
+		      ((null cls/tuple)
+		       ;; a bare `except:' matches all exceptions
+		       (let ((*scope* handler-scope))
+			 (py-eval-1 handler-form))
+		       (return-from eval-try-except nil))
+		      
+		      (t ;; error not catched by this exception
+		       ))))))
 	
 	;; The `py-error-handlers' we re already set in py-eval. Need to
 	;; set them here again, because when one of the py-eval
 	;; handler-bind handlers takes control, the handler above for
 	;; Exception is not active anymore.
     
-	#-py-exception-stack
-	(with-py-error-handlers
-	    (py-eval-1 suite))
+	#+(or)(with-py-error-handlers
+		  (py-eval-1 suite))
 
-	#+py-exception-stack
+	;; #+py-exception-stack
 	(loop with excepts = ()
 	    for ((cls/tuple nil) nil) in except-clauses
 	    do (if (null cls/tuple)
@@ -903,6 +835,14 @@
       (assert (eq *scope* handler-scope))
       (when else-clause
 	(py-eval-1 else-clause)))))
+
+(defun eval-try-finally (suite--suite)
+  (destructuring-bind (try-suite finally-suite) suite--suite
+    ;; not IGNORE-ERRORS, as we don't want to catch Lisp errors here
+    (handler-case (values (py-eval-1 try-suite))
+      (Exception ())
+      (:no-error ()))
+    (py-eval-1 finally-suite)))
 
 (defun eval-raise (first-second-third) ;; exctype value traceback)
   ;; Complicated interpretation of parameters. See Python Reference Manual, par 6.9
@@ -952,7 +892,11 @@
 		    (error cond)))
 		 (t
 		  (error "shouldn't come here"))))
-	       
+
+	  ((py-string-designator-p first)
+	   (let ((str (py-string-designator-val first)))
+	     (py-raise 'Exception str)))
+	  
 	  (t
 	   ;; "If the first object is an instance, the type of the
 	   ;; exception is the class of the instance, the instance itself
@@ -977,20 +921,13 @@
 	(py-raise 'NameError "Name ~A is not defined" name))))
 
 (defun eval-list (data)
-  (setf data (car data))
-  ;; either normal list or list comprehension
-  (if (and (second data)
-	   (listp (second data))
-	   (listp (car (second data)))
-	   (eq (car (car (second data))) 'list-for-in)) ;; hack
-      
-      ;; list compr.
-      (let ((expr (car data))
-	    (for-ifs (cadr data)))
-	;;(format t "expr=~A~%for-ifs=~A~%" expr for-ifs)
-	(eval-listcompr expr for-ifs))
+  (make-py-list-from-list (mapcar #'py-eval-1 (car data))))
+  
+(defun eval-list-compr (data)
+  (destructuring-bind (expr for/ifs) data
+    #+(or)(format t "expr=~A~%for-ifs=~A~%" expr for/ifs)
+    (eval-listcompr expr for/ifs)))
 
-    (make-py-list-from-list (mapcar #'py-eval-1 data))))
 
 (defvar *eval-listcompr-nesting* 0)
 
@@ -1063,17 +1000,12 @@
       (process-for/ifs list-for-ifs)
       (make-py-list-from-list (nreverse acc)))))
 
-(defun eval-tuple (data)
-  (setf data (car data))
-  (make-tuple-from-list (mapcar #'py-eval-1 data)))
-
 (defun eval-dict (data)
-  (setf data (car data))
   ;; eval keys and values in this order: key1, val1, key2, val2, ...
-  (mapc (lambda (kv) (setf (car kv) (py-eval-1 (car kv))
-			   (cdr kv) (py-eval-1 (cdr kv))))
-	data)
-  (make-dict data))
+  (make-dict
+   (mapcar (lambda (kv) (cons (py-eval-1 (car kv))
+			      (py-eval-1 (cdr kv))))
+	   (car data))))
 
 (defun eval-backticks (lst)
   (setf lst (car lst))
@@ -1243,25 +1175,36 @@
   (destructuring-bind (objs comma?) objs-comma?
     (eval-print-stream t objs comma?)))
 
-(defun eval-print>> (stream-objs-comma?)
+(defun eval-print->> (stream-objs-comma?)
   "Print OBJS to STREAM ~@
    If STREAM is None, then use STDOUT.
    Trailing comma means no newline at the end."
   (destructuring-bind (stream objs comma?) stream-objs-comma?
-    (eval-print-stream (if (eq stream *None*) t stream)
+    (eval-print-stream (if (eq stream *None*) t (py-eval-1 stream))
 		       objs
 		       comma?)))
 
-(defun eval-print-stream (stream objs comma?)
+(defun eval-print-stream (output objs comma?)
   "The Python PRINT statement (a rough approximation)"
-  
-  (dolist (x objs)
-    (let* ((ex (py-eval-1 x))
-	   (str (call-attribute-via-class ex '__str__)))
-      (format stream "~A " str)))
-  
-  (unless comma?
-    (terpri)))
+
+  (let ((do-write (if (eq output 't)
+		      (lambda (str) (format t "~A" str))
+		    (let* ((e-output (py-eval-1 output))
+			   (write-meth
+			    (or (internal-get-attribute e-output 'write)
+				(py-raise 'AttributeError
+					  "Can't print to object ~A: no `write' method"
+					  e-output))))
+		      (lambda (str)
+			(py-call write-meth (list str)))))))
+    (dolist (x objs)
+      (let* ((ex (py-eval-1 x))
+	     (str (py-str ex)))
+	(funcall do-write str)
+	(funcall do-write (string #\Space))))
+	    
+    (unless comma?
+      (funcall do-write (string #\Newline)))))
 
 (defun eval-ellipsis (data)
   (declare (ignore data))

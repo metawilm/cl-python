@@ -117,12 +117,12 @@
 		  (with-simple-restart (continue "Resume execution")
 		    (error (if (typep exc 'class) (make-instance exc) exc)))))
 		    
-      #+py-exception-stack
+      ;; #+py-exception-stack
       (active_excepts ,(lambda ()  ;; list of tuples of active `except' clauses
 			 (make-py-list-from-list
 			  (mapcar #'make-tuple-from-list *active-excepts*))))
 		    
-      #+py-exception-stack
+      ;; #+py-exception-stack
       (catcher ,(lambda (exc)
 		  (block catcher
 		    (loop for x in *active-excepts*
@@ -147,14 +147,10 @@
 	       __setslice__ __sub__ __truediv__ __xoe__
 	       abs and_ attrgetter concat and-more----)))
 
-		     
+	     
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Keep a copy of the initial modules; to let REPL restart fresh.
 
 (defparameter *initial-sys.modules* (dict-copy *sys.modules*))
-
-
-
-
 

@@ -196,7 +196,7 @@
 				     "Metaclass for class ~A is ~A, which is not a subtype of `type'."
 				     name (class-name metaclass)))
 		   (when has-slots
-		     (warn "Class ~A has __metaclass__ specified. Therefore, the value for ~@
+		     #+(or)(warn "Class ~A has __metaclass__ specified. Therefore, the value for ~@
                             __slots__ is ignored (value of __slots__: ~A)"
 			   name (call-attribute-via-class slots '__repr__)))
 		   (return-from make-python-class
@@ -311,7 +311,7 @@
 	     (the-supers `(,@supers ,the-mixin ,@(when has-a-builtin-super
 						   '(builtin-instance builtin-object))))
 	     
-	     (dummy (warn "Creating ~A: supers = ~A  meta = ~A" name the-supers the-metaclass))
+	     (dummy #+(or)(warn "Creating ~A: supers = ~A  meta = ~A" name the-supers the-metaclass))
 	     
 	     ;; Finally, create the class
 	     (k (mop:ensure-class
@@ -319,19 +319,24 @@
 		 :direct-superclasses the-supers
 		 :metaclass the-metaclass
 		 :documentation documentation
-		 :direct-slots `( ,@(mapcar (lambda (slot-name) (if (eq slot-name '__dict__)
-								    `(:name ,slot-name :iniform '(make-namespace))
-								  `(:name ,slot-name)))
-					    the-other-slots) ))))
+		 :direct-slots
+		 `( ,@(mapcar
+		       (lambda (slot-name)
+			 (if (eq slot-name '__dict__)
+			     `(:name ,slot-name :iniform '(make-namespace))
+			   `(:name ,slot-name)))
+		       the-other-slots) ))))
+	(declare (ignore dummy))
 	
 	(mop:finalize-inheritance k) ;; Not sure if this is needed?
 
 	;; Some bookkeeping
 	
-	(let ((namespace (or namespace
-			     (make-namespace :name (format nil
-							   "ns for class ~A, created by default"
-							   (string name))))))
+	(let ((namespace
+	       (or namespace
+		   (make-namespace
+		    :name (format nil "ns for class ~A, created by default"
+				  (string name))))))
 
 	  (setf (slot-value k '__name__) (string name)
 		(slot-value k '__module__) module
@@ -342,29 +347,38 @@
 	  
 	  k)))))
 
+(defclass udc-derived-from-type ()
+  ())
+(mop:finalize-inheritance (find-class 'udc-derived-from-type))
+
 (defmethod make-u-d-class-derived-from-type ((name symbol) (supers list)
 					     &key module namespace)
   (let* ((real-supers (remove (find-class 'user-defined-class)
 			      (remove (find-class 'python-type)
 				      supers)))
-	 (klass (mop:ensure-class name
-				  :direct-superclasses `(,@real-supers user-defined-class)
-				  :metaclass 'user-defined-class)))
+	 (klass (mop:ensure-class
+		 name
+		 :direct-superclasses `(,@real-supers
+					user-defined-class
+					udc-derived-from-type)
+		 :metaclass 'user-defined-class)))
     (mop:finalize-inheritance klass)
     (setf (slot-value klass '__dict__) namespace
 	  (slot-value klass '__name__) (symbol-name name)
 	  (slot-value klass '__module__) module)
     klass))
 
-(defmethod make-u-d-class-with-given-metaclass ((name symbol) (metaclass class) 
-						&key supers module namespace)
-  (let ((klass (mop:ensure-class name
-				 :direct-superclasses `(,@(remove (find-class 'python-object) supers)
-							  #+(or)user-defined-class
-							  udc-instance-w/dict python-object) ;; udc?
-				 :metaclass #+(or)metaclass (metaclass-for-udc-with-ud-metaclass metaclass)
-				 :direct-slots '((:name __dict__))
-				 )))
+(defmethod make-u-d-class-with-given-metaclass
+    ((name symbol) (metaclass class) &key supers module namespace)
+  (let ((klass
+	 (mop:ensure-class
+	  name
+	  :direct-superclasses `(,@(remove (find-class 'python-object) supers)
+				   #+(or)user-defined-class
+				   udc-instance-w/dict python-object) ;; udc?
+	  :metaclass #+(or)metaclass
+	  (metaclass-for-udc-with-ud-metaclass metaclass)
+	  :direct-slots '((:name __dict__)))))
     (mop:finalize-inheritance klass)
     (setf (slot-value klass '__dict__) namespace
 	  (slot-value klass '__name__) name
@@ -379,8 +393,11 @@
 		  
 
 (defmethod metaclass-for-udc-with-ud-metaclass ((mc class))
-  (let* ((name (intern (format nil "udc-ud-mc+~A" (class-name mc)) #.*package*))
-	 (k (mop:ensure-class name
-			      :direct-superclasses (list mc 'udc-with-ud-metaclass))))
+  (let* ((name (intern
+		(format nil "udc-ud-mc+~A" (class-name mc)) #.*package*))
+	 (k (mop:ensure-class
+	     name
+	     :direct-superclasses (list mc 'udc-with-ud-metaclass 
+					#+(or)'standard-class))))
     (mop:finalize-inheritance k)
-    k))		    
+    k))

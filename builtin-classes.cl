@@ -103,10 +103,12 @@
       
     inst))
 	
-(register-bi-class-attr/meth (find-class 'python-type) '__call__ #'python-type-__call__) ;; check which one
-(register-bi-class-attr/meth (find-class 't) '__call__ #'python-type-__call__)
-(register-bi-class-attr/meth (find-class 'class) '__call__ #'python-type-__call__)
-
+(register-bi-class-attr/meth (find-class 'python-type) '__call__
+			     #'python-type-__call__) ;; check which one
+(register-bi-class-attr/meth (find-class 't) '__call__ 
+			     #'python-type-__call__)
+(register-bi-class-attr/meth (find-class 'class) '__call__ 
+			     #'python-type-__call__)
 
 
 (defmethod python-type-__new__ (pos-args kwd-args)
@@ -117,41 +119,56 @@
 	((and (eq (car pos-args) (find-class 'python-type))
 	      (not (cdr pos-args))
 	      (not kwd-args))
-	 (warn "type(x) -> y")
+	 #+(or)(warn "type(x) -> y")
 	 (return-from python-type-__new__ (py-type (car pos-args))))
 	  
-	((eq (car pos-args) (find-class 'python-type))
-	 (warn "type.__new__(): creating a new clas")
+	((or (eq (car pos-args) (find-class 'python-type))
+	     (subtypep (car pos-args) (find-class 'udc-derived-from-type)))
+	 #+(or)(warn "type.__new__(): creating a new class")
 	 (destructuring-bind (metaclass name bases dict) pos-args
-	   (warn "metaclass, name, bases, dict = ~A, ~A, ~A, ~A" metaclass name bases dict)
+	   #+(or)(warn "metaclass, name, bases, dict = ~A, ~A, ~A, ~A"
+		 metaclass name bases dict)
 	   (unless (symbolp name)
 	     (ensure-py-type name string "class name must be string (got: ~A)")
 	     (setf name (intern name #.*package*)))
+	   
 	   (multiple-value-bind (slots has-slots)
 	       (values nil nil) ;; for now
+	     
 	     #+(or)(let ((s (namespace-lookup dict '__slots__)))
-		     (if s 
+		     (if s
 			 (values (py-iterate->lisp-list s) t)
 		       (values nil nil)))
+	     
 	     (return-from python-type-__new__
-	       (make-python-class :name name
-				  :supers (cond ((null bases) ())
-						((consp bases) bases)
-						(t (py-iterate->lisp-list bases)))
-				  :slots slots
-				  :has-slots has-slots
-				  :namespace dict
-				  :metaclass metaclass)))))
+	       (if (eq metaclass (find-class 'python-type))
+
+		   (make-python-class
+		    :name name
+		    :supers (cond ((null bases) ())
+				  ((consp bases) bases)
+				  (t (py-iterate->lisp-list bases)))
+		    :slots slots
+		    :has-slots has-slots
+		    :namespace dict
+		    :metaclass metaclass)
+		 
+		 (make-u-d-class-with-given-metaclass
+		  name metaclass :supers bases :module :namespace))))))
 	  
 	(t (let ((cls (car pos-args)))
-	     (warn "type.__new__(): creating instance of class ~A" cls)
-	     (let ((inst (make-instance cls)))
-	       (warn "instance of cls ~A:  ~A" cls inst)
-	       (when (and (slot-exists-p inst '__dict__)
-			  (not (slot-boundp inst '__dict__)))
-		 (setf (slot-value inst '__dict__) (make-namespace)))
-	       (return-from python-type-__new__ inst))))))
-
+	     
+	     (progn
+	       #+(or)(warn "type.__new__(): creating instance of class ~A" cls)
+	       (let ((inst (make-instance cls)))
+		 #+(or)(warn "instance of cls ~A:  ~A" cls inst)
+	       
+		 (when (and (slot-exists-p inst '__dict__)
+			    (not (slot-boundp inst '__dict__)))
+		   (setf (slot-value inst '__dict__) (make-namespace)))
+		 (return-from python-type-__new__ inst)))))))     
+		      
+	     
 (let* ((m (make-static-method-accepting-kwd-args #'python-type-__new__)))
   (register-bi-class-attr/meth (find-class 't) '__new__ m)
   (register-bi-class-attr/meth (find-class 'class) '__new__ m)
@@ -771,7 +788,8 @@
     py-int integer (slot-value x 'val) (slot-value y 'val)
     
     ;; division is floor division (unless "from __future__ import division")
-    ((__div__ (values (floor x y)))
+    ((__div__ (if (= y 0) (py-raise 'ZeroDivisionError "Division by zero")
+		(values (floor x y))))
      
      ;; bit operations -> lisp integer
      (__and__ (logand x y))
@@ -1662,6 +1680,9 @@
   (setf (al-namespace-alist ns) nil
 	(al-namespace-global-ns ns) nil))
 
+(defun al-namespace->alist (ns)
+  (loop for (k . v) in (al-namespace-alist ns)
+      collect (cons (symbol-name k) v)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Namespace-proxy
@@ -1712,6 +1733,11 @@
   (with-slots (namespace) x
     (al-namespace-clear namespace)))
 
+
+(defmethod dict->alist ((x namespace-proxy))
+  (with-slots (namespace) x
+    (al-namespace->alist namespace)))
+
 ;; __{get,set,del}item__ : these raise errors when not found
 
 (defmethod __getitem__ ((x namespace-proxy) (key symbol))
@@ -1741,6 +1767,14 @@
 
 (register-bi-class-attr/meth (find-class 'namespace-proxy) '__delitem__ #'__delitem__)
 
+
+(defmethod dict-items ((x namespace-proxy))
+  (make-py-list-from-list
+   (loop for (k . v) in (dict->alist x)
+       collect (make-tuple-from-list (list k v)))))
+
+(register-bi-class-attr/meth (find-class 'namespace-proxy) 'items
+			     #'dict-items)
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Function
@@ -1815,12 +1849,15 @@
 
 ;; Python-function-returning-generator
 
+(defvar *show-generator-lambda* nil)
+
 (defun make-python-function-returning-generator (fname params ast)
   (make-instance 'python-function-returning-generator
     :name fname
     :call-rewriter (apply #'make-call-rewriter fname params)
     :generator-creator (let ((lambda-lst (create-generator-function ast)))
-			 #+(or)(break "lambda-lst ~A" lambda-lst)
+			 (when *show-generator-lambda*
+			   (break "lambda-lst ~A" lambda-lst))
 			 (check-type lambda-lst list)
 			 (compile nil lambda-lst))))
 
@@ -2117,7 +2154,7 @@
 		 
 		   ((and (> step 0) (< start stop))
 		    (let* ((start (max start 0))
-			   (stop  (min stop (1- length)))
+			   (stop  (min (1- stop) (1- length)))
 			   (num-increments (floor (- stop start) step))
 			   (real-stop (+ start (* step num-increments))))
 		      (unless (<= 0 start real-stop stop (1- length))
@@ -2348,8 +2385,8 @@
     :vec (make-array (length list) :initial-contents list)))
 
 (defun tuple->lisp-list (tup)
-  (declare (ignore tup))
-  (error "outdated"))
+  ;; outdated...
+  (py-iterate->lisp-list tup))
 
 ;;;; magic methods
 
@@ -2632,8 +2669,8 @@
 	   (incf i len))
 	 (if (<= 0 i (1- len))
 	     (setf (aref vec i) new-item)
-	   (py-raise 'ValueError "list.__setitem__: index out of range (got: ~A; len: ~A)"
-		     item len))))
+	   (py-raise 'ValueError "list.__setitem__: index out of range ~
+                                  (got: ~A; len: ~A)" item len))))
       
       (py-slice
        (let* ((source-vec (if (typep new-item 'py-list)
@@ -2681,22 +2718,24 @@
 								 :stop (1- len))
 						 just-before))
 			 
-			 (:nonempty-slice (let* ((first-i p1)
-						 (last-i p2)
-						 (old-slice-len (1+ (- last-i first-i)))
-						 (delta-len (- source-len old-slice-len))
-						 (new-vec-len (+ len delta-len)))
-					    (resize-vec-to new-vec-len)
-					    (move-vec-items vec delta-len
-							    :start (1+ last-i)
-							    :stop (1- len))
-					    first-i)))))
+			 (:nonempty-slice
+			  (let* ((first-i p1)
+				 (last-i p2)
+				 (old-slice-len (1+ (- last-i first-i)))
+				 (delta-len (- source-len old-slice-len))
+				 (new-vec-len (+ len delta-len)))
+			    (resize-vec-to new-vec-len)
+			    (when (<= (1+ last-i) (1- len))
+			      (move-vec-items vec delta-len
+					      :start (1+ last-i)
+					      :stop (1- len)))
+			    first-i)))))
 		  #+(or)(warn "for insertion: ins-ind=~A, source-vec=~A, vec=~A"
 			      insertion-index source-vec vec)
 		  (loop for i from insertion-index
 		      for x across source-vec
 		      do (setf (aref vec i) x)))))
-	      
+	     
 	     (:nonempty-stepped-slice
 	      (let* ((first-i p1)
 		     (last-i  p2)
@@ -2876,8 +2915,8 @@
 
 (defmethod iterator-next ((f py-func-iterator))
   "This is the only function that an iterator has to provide."
-  (flet ((err-finished ()
-	   (py-raise 'StopIteration "Iterator ~S has finished" f)))
+  (macrolet ((err-finished ()
+	       `(py-raise 'StopIteration "Iterator ~S has finished" f)))
     (if (slot-value f 'stopped-yet)
 	(err-finished)
       (let ((res (funcall (slot-value f 'func))))

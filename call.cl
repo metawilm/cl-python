@@ -11,7 +11,7 @@
 
 (defmethod py-call ((x function) &optional pos-args kwd-args)
   (when kwd-args
-    (warn "py-call on regular Lisp Function ~A got keyword args?! ~@
+    #+(or)(warn "py-call on regular Lisp Function ~A got keyword args?! ~@
            (pos-args: ~A; kwd-args: ~A - ignored)"
 	  x pos-args kwd-args))
   (apply x pos-args))
@@ -20,7 +20,10 @@
 (defmethod py-call ((x lisp-function-accepting-kw-args) &optional pos-arg kwd-arg)
   (funcall (slot-value x 'func) pos-arg kwd-arg))
 
-    
+
+(defmethod py-call ((x user-defined-function) &optional pos-args key-args)
+  (funcall (slot-value x 'call-handler) pos-args key-args))
+
 (defmethod py-call ((x python-function) &optional pos-args key-args) ;; was: user-defined-function
   "Evaluate function body in function definition namespace."
   
@@ -93,7 +96,8 @@
 	    (py-eval-1 ast)))))
 
 
-(defmethod py-call ((x python-function-returning-generator) &optional pos-args key-args)
+(defmethod py-call ((x python-function-returning-generator)
+		    &optional pos-args key-args)
   (with-slots (call-rewriter generator-creator) x
     (declare (special *scope*))
     (let ((ns (make-namespace :name "generator namespace"
@@ -150,7 +154,7 @@
   ;; type(x) is a function returning type of x
   (when (and (eq cls (load-time-value (find-class 'python-type)))
 	     (= (length pos-args) 1))
-    (warn "type(x) -> the type of x")
+    #+(or)(warn "type(x) -> the type of x")
     (return-from py-call (py-type (car pos-args))))
 
   ;; <type>(..args..) creates an instance
@@ -325,10 +329,11 @@
 		(if f**
 		    (push kw for-f**)
 		  (error "~A: Got unexpected keyword argument: ~A" fname key)))))
-	 
 	  (when f**
+	    (loop for kons in for-f**
+		do (setf (car kons) (symbol-name (car kons))))
 	    (push (cons f** (make-dict for-f**)) result)))
-		     
+	
 	;; Collect all formal arguments except f*, f**
 	(loop for i from 0 below farg-len
 	    do (let ((val (aref argvalues-v i)))

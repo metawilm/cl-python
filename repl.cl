@@ -49,11 +49,12 @@
 		   (eval-print-ast (ast)
 		     (loop (restart-case
 			       (let ((ev-ast (py-eval ast)))
+				 #+(or)(warn "repl: ev-ast: ~A" ev-ast)
 				 (assert (eq (car ev-ast) :file-input))
 				 (when (> (length ev-ast) 1)
 				   (let ((ev (car (last ev-ast))))
 				     
-					
+				     
 				     ;; don't print value if it's None
 				     (unless (member ev (list *None* nil) :test 'eq)
 				       (format t "~A~%" (call-attribute-via-class ev '__repr__))
@@ -68,7 +69,7 @@
 			    ">>> "))
 		(let ((x (read-line)))
 		  (cond
-		 
+		   
 		   ((string= x ":help")
 		    (flet ((print-cmds (cmds)
 			     (loop for (cmd expl) in cmds
@@ -129,12 +130,15 @@
 		    (let* ((total (apply #'concatenate 'string (reverse acc)))
 			   (ast (ignore-errors (parse-python-string total))))
 		      (when ast
+			#+(or)(warn "repl: assert eq first 'file-input ~A" ast)
 			(assert (eq (first ast) 'file-input))
-			(when (and (= (length ast) 2)
-				   #+(or)(member (caar (second ast))
-						 '(testlist assign-expr import del) :test 'eq)
-				   (not (member (caar (second ast))
-						'(try-except for-in funcdef classdef if while))))
-			  (show-ast ast)
-			  (eval-print-ast ast)
-			  (setf acc nil)))))))))))))))
+			#+(or)(when (and (= (length ast) 2)
+					 (or (not (listp ast))
+					     (not (member (caar (second ast))
+							  '(try-except try-finally
+							    for-in funcdef classdef
+							    if while))))))
+			(show-ast ast)
+			(eval-print-ast ast)
+			(setf acc nil))))))))))))))
+

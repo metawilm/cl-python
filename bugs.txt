@@ -20,3 +20,13 @@ http://groups.google.com/groups?hl=en&lr=&c2coff=1&threadm=mailman.981282736.252
 #<user-defined-function f @ #x71d9ad1a>
 >>> for i in range(3):
 ...   f()
+
+
+class d(dict):
+   def __setitem__(self, key, val):
+     dict.__setitem__(self, key.lower(), val)
+   def __getitem__(self, key):
+     dict.__getitem__(self, key.lower())
+
+x = d(a=3, b=5)
+# ignores keyword args, but should use them in __init__

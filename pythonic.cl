@@ -104,7 +104,7 @@
       (if (= (length vec) n)
 	  vec
 	(when error
-	  (py-raise 'TypeError "Wanted ~A values from iterable ~A, but got ~A"
+	  (py-raise 'ValueError "Wanted ~A values from iterable ~A, but got ~A"
 		    n x (length vec)))))))
 
 (defmethod py-iterate-n-values (x (n fixnum) &key (error t))
@@ -118,14 +118,14 @@
 	       (setf (aref vec i) val
 		     val (funcall f))
 	     (if error
-		 (py-raise 'TypeError
+		 (py-raise 'ValueError
 			   "Wanted ~A values from iterable, but got less: ~A"
 			   n i)
 	       (return-from py-iterate-n-values nil)))
 	finally
 	  (let ((v (funcall f)))
 	    (when v
-	      (py-raise 'TypeError
+	      (py-raise 'ValueError
 			"Wanted ~A values from iterable ~A, but got 1 more already: ~A"
 			n x v)))
 	  (return vec))))

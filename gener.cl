@@ -5,9 +5,10 @@
   (catch 'is-generator
     (walk-py-form ast 
 		  (lambda (x)
-		    (when (eq (car x) 'yield)
-		      (throw 'is-generator t))
-		    x))
+		    (case (car x)
+		      (yield (throw 'is-generator t))
+		      (funcdef (values t t)) ;; don't look for 'yield' in inner functions
+		      (t x))))
     nil))
 
 (defun strings->symbol (&rest strings)
@@ -16,7 +17,8 @@
 
 
 (defun create-generator-function (ast)
-  (let ((counters (copy-tree '((:yield . 0) (:if . 0) (:for . 0) (:while . 0) (:iterator . 0))))
+  (let ((counters (copy-tree '((:yield . 0) (:if . 0) (:for . 0)
+			       (:while . 0) (:iterator . 0))))
 	(vars ()))
         
     (labels ((new-tag (kind) (let ((res (assoc kind counters)))
@@ -27,7 +29,8 @@
 		   (let ((g '#:tag))
 		     `(let* ((,g ,tag)
 			     ,@(loop for (var string) in var-strings
-				   collect `(,var (strings->symbol ,g ,string))))
+				   collect `(,var
+					     (strings->symbol ,g ,string))))
 			,@body))))
 	
 	(labels
@@ -38,29 +41,38 @@
 		(lambda (form)
 		  (case (car form)
 		     
-		    (yield (let ((tag (new-tag :yield)))
-			     (values `(:split (ret (py-eval-1 ',(second form)) ,tag)
-					      ,tag)
-				     t)))
-
-		    (while (destructuring-bind
-			       (test suite else-suite) (cdr form)
-			     (let ((tag (new-strtag :while)))
-			       (with-derived-tags
-				   tag ((repeat-tag "-repeat")(else-tag "-else")(after-tag "-end/break-target"))
-				   (values `(:split (unless (py-val->lisp-bool (py-eval-1 ',test))
-						      (go ,else-tag))
-						    ,repeat-tag
-						    (:split ,(walk suite (cons (cons repeat-tag after-tag) stack)))
-						    (if (py-val->lisp-bool (py-eval-1 ',test))
-							 (go ,repeat-tag)
-						       (go ,after-tag))
-						    ,else-tag
-						    ,@(when else-suite
-							`((:split ,(walk else-suite stack))))
-						    ,after-tag)
-					   t)))))
-				 
+		    (yield
+		     (let ((tag (new-tag :yield)))
+		       (values `(:split (ret (py-eval-1 ',(second form)) ,tag)
+					,tag)
+			       t)))
+		    (while
+			(destructuring-bind
+			    (test suite else-suite) (cdr form)
+			  (let ((tag (new-strtag :while)))
+			    (with-derived-tags
+				tag ((repeat-tag "-repeat")
+				     (else-tag "-else")
+				     (after-tag "-end/break-target"))
+				(values
+				 `(:split
+				   (unless (py-val->lisp-bool
+					    (py-eval-1 ',test))
+				     (go ,else-tag))
+				   ,repeat-tag
+				   (:split
+				    ,(walk suite
+					   (cons (cons repeat-tag after-tag)
+						 stack)))
+				   (if (py-val->lisp-bool (py-eval-1 ',test))
+				       (go ,repeat-tag)
+				     (go ,after-tag))
+				   ,else-tag
+				   ,@(when else-suite
+				       `((:split ,(walk else-suite stack))))
+				   ,after-tag)
+				 t)))))
+		    
 		    (if (destructuring-bind 
 			    (clauses else-suite) (cdr form)
 			  (let ((tag (new-strtag :if)))
@@ -89,32 +101,40 @@
 						     ,after-tag)
 					    t)))))))
 				     
-		    (for-in (destructuring-bind
-				(targets sources suite else-suite) (cdr form)
-			      (with-derived-tags (new-strtag :for)
-				((repeat-tag "-repeat") (else-tag "-else") (end-tag "-end/break-target")
-							(continue-tag "-continue-target") (generator "-generator")
-							(loop-var "-loop-var"))
-	
-				(let ((stack2 (cons (cons continue-tag end-tag) stack)))
-				  (push loop-var vars)
-				  (push generator vars)
-				  (values `(:split (setf ,generator (get-py-iterate-fun (py-eval-1 ',sources))
-							 ,loop-var (funcall ,generator))
-						   (unless ,loop-var (go ,else-tag))
-						   ,repeat-tag
-						   (eval-real-assign-expr ',targets ,loop-var)
-						   (:split ,(walk suite stack2))
-						   ,continue-tag
-						   (setf ,loop-var (funcall ,generator))
-						   (if ,loop-var (go ,repeat-tag) (go ,end-tag))
-						   ,else-tag
-						   ,@(when else-suite
-						       `((:split ,(walk else-suite stack2))))
-						   ,end-tag
-						   (setf ,loop-var nil  ;; enable garbage collection
-							 ,generator nil))
-					  t)))))
+		    (for-in
+		     (destructuring-bind
+			 (targets sources suite else-suite) (cdr form)
+		       (with-derived-tags (new-strtag :for)
+			 ((repeat-tag "-repeat")
+			  (else-tag "-else")
+			  (end-tag "-end/break-target")
+			  (continue-tag "-continue-target")
+			  (generator "-generator")
+			  (loop-var "-loop-var"))
+			 
+			 (let ((stack2 (cons (cons continue-tag end-tag)
+					     stack)))
+			   (push loop-var vars)
+			   (push generator vars)
+			   (values
+			    `(:split 
+			      (setf ,generator
+				(get-py-iterate-fun (py-eval-1 ',sources))
+				,loop-var (funcall ,generator))
+			      (unless ,loop-var (go ,else-tag))
+			      ,repeat-tag
+			      (eval-real-assign-expr ',targets ,loop-var)
+			      (:split ,(walk suite stack2))
+			      ,continue-tag
+			      (setf ,loop-var (funcall ,generator))
+			      (if ,loop-var (go ,repeat-tag) (go ,end-tag))
+			      ,else-tag
+			      ,@(when else-suite
+				  `((:split ,(walk else-suite stack2))))
+			      ,end-tag
+			      (setf ,loop-var nil  ;; enable garbage collection
+				    ,generator nil))
+			    t)))))
 		    (break
 		     (unless stack
 		       (error "BREAK outside loop"))
@@ -129,19 +149,25 @@
 		    
 		    (return
 		      (when (second form)
-			(error "Inside generator, RETURN may nothave an argument (got: ~A)" form))
-		      (let ((tag (new-tag :yield))) ;; from now on, we will always return to this state
-			(values `(:split ,tag
-					 (py-raise 'StopIteration "Generator has called RETURN"))
+			(error "Inside generator, RETURN may not have ~
+                                an argument (got: ~A)" form))
+		      
+		      (let ((tag (new-tag :yield)))
+			;; from now on, we will always return to this state
+			(values `(:split
+				  ,tag
+				  (py-raise 'StopIteration
+					    "Generator has called RETURN"))
 				t)))
 
 		    (suite
 		     (values `(:split ,@(loop for stmt in (second form)
 					    collect (walk stmt stack)))
 			     t))
-
+		    
 		    (try-except (destructuring-bind
-				    (suite except-clauses else-clause) (cdr form)
+				    (suite except-clauses else-clause)
+				    (cdr form)
 				  (if (or (generator-ast-p suite)
 					  (loop for ((nil nil) handler-form) in except-clauses
 					      when (generator-ast-p handler-form) do (return t)
@@ -157,7 +183,8 @@
 		    (t (values `(py-eval-1 ',form)
 			       t)))))))
 	  
-	  (let ((walked-as-list (multiple-value-list (apply-splits (walk ast ()))))
+	  (let ((walked-as-list (multiple-value-list 
+				 (apply-splits (walk ast ()))))
 		(final-tag (new-tag :yield)))
 	    
 	    `(lambda ()  ;; This is the function that returns a generator
@@ -165,7 +192,8 @@
 		     ,@(nreverse vars))
 		 
 		 (lambda ()
-		   ;; This is the function that will repeatedly be called to return the values
+		   ;; This is the function that will repeatedly be
+		   ;; called to return the values
 		   
 		   (block inside
 		     (macrolet ((ret (val new-state)
@@ -173,13 +201,15 @@
 					  (return-from inside ,val))))
 		       (tagbody
 			 (case state
-			   ,@(loop for i from 0 to (cdr (assoc :yield counters))
+			   ,@(loop for i from 0 to 
+				   (cdr (assoc :yield counters))
 				 collect `(,i (go ,i))))
 			0
 			 ,@walked-as-list
 			 (setf state ,final-tag)
 			 ,final-tag
-			 (py-raise 'StopIteration "The generator has finished.")))))))))))))
+			 (py-raise 'StopIteration
+				   "The generator has finished.")))))))))))))
 
 (defun apply-splits (form)
   (cond ((atom form)
@@ -280,3 +310,14 @@ if $continue-try$:
 if $do-else$:
   -d-
 |#
+
+
+
+
+
+
+
+
+
+
+

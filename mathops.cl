@@ -213,9 +213,9 @@
   (if (eq x y) *False* *True*))
   
 (loop for (name func) in `((in ,#'py-in)
-			   (not-in ,#'py-not-in)
+			   (|not in| ,#'py-not-in)
 			   (is ,#'py-is)
-			   (is-not ,#'py-is-not))
+			   (|is not| ,#'py-is-not))
     do (push (cons name func) *math-binary-op-assoc*))
 
 
