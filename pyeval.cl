@@ -609,20 +609,36 @@
 (defun eval-funcdef (fname params suite)
   "In the current namespace, FNAME becomes bound to a function object ~@
    with given formal parameters and function body."
-  (let* ((params (multiple-value-list (parse-function-parameter-list params)))
-	 (f (make-user-defined-function 
-	     :name fname
-	     :ast suite
-	     :namespace (make-namespace
-			 :name (format nil "ns for function ~A" fname)
-			 :inside *scope*)
-	     :params params
-	     :call-rewriter (apply #'make-call-rewriter params))))
+  
+  ;; Special-case: the function, when called, will return a
+  ;; generator. If this is the case, treat it a bit special.
+  ;; 
+  ;; Note that 'yield' inside "exec" or "eval" is not allowed, so it
+  ;; can be statically checked whether the function returns a
+  ;; generator or not.
+  
+  (if (generator-ast-p suite)
+      
+      (let* ((params (parse-function-parameter-list params))
+	     (f (make-python-function-returning-generator params suite)))
+	(namespace-bind *scope* fname f)
+	f)
+      
+  
+    (let* ((params (multiple-value-list (parse-function-parameter-list params)))
+	   (f (make-user-defined-function 
+	       :name fname
+	       :ast suite
+	       :namespace (make-namespace
+			   :name (format nil "ns for function ~A" fname)
+			   :inside *scope*)
+	       :params params
+	       :call-rewriter (apply #'make-call-rewriter params))))
 	
-    ;; Content of function is not evaluated yet; only when called.
-    ;; Bind function name to function object in current namespace:
-    (namespace-bind *scope* fname f)
-    f))
+      ;; Content of function is not evaluated yet; only when called.
+      ;; Bind function name to function object in current namespace:
+      (namespace-bind *scope* fname f)
+      f)))
 
 (defun eval-lambda (params expr)
   (let ((params (multiple-value-list (parse-function-parameter-list params))))
@@ -631,7 +647,7 @@
      :namespace (make-namespace :name "lambda namespace"
 				:inside *scope*)
      :params params
-     :call-rewriter (apply #'make-call-rewriter params))))
+     :call-rewriter (apply #'make-call-rewriter (parse-function-parameter-list params)))))
 
 (defun parse-function-parameter-list (params)
   "Returns POS-PARAMS, KW-PARAMS, *-PAR, **-PAR as multiple values"

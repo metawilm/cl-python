@@ -5,7 +5,7 @@
 ;;; Determining whether a function is a generator is determined by
 ;;; walking it's AST,looking for a YIELD node.
 
-(defun walk (ast f)
+(defun walk-py-form (ast f)
   "Walk recursively through AST, calling F on each statement. ~@
    F should return the form to walk through, derived from the form it's given. ~@
    When F returns two values and the second value is T, the form returned in ~@
@@ -16,13 +16,13 @@
       (form final-p) (funcall f ast)
     (if final-p
 	
-	(return-from walk form)
+	(return-from walk-py-form form)
       
       (macrolet ((do-walk (form)
-		   `(walk ,form f))
+		   `(walk-py-form ,form f))
 		 (map-walk (forms)
 		   `(loop for form in ,forms
-			collect (walk form f))))
+			collect (walk-py-form form f))))
    
 	(ccase (car form)
     
@@ -79,13 +79,3 @@
 	    comparison unary binary tuple slice print print>> lambda
 	    continue break pass) 
 	   form))))))
-
-
-
-(defun ast-generator-p (ast)
-  (catch 'is-generator
-    (walk ast 
-	  (lambda (x)
-	    (when (eq (car x) 'yield)
-	      (throw 'is-generator t))
-	    x))))
