@@ -107,7 +107,7 @@
 
 	    (let ((index 0))
 	      (labels ((get-next-val-fun ()
-			 (handler-case (__call__ getitem-meth index)
+			 (handler-case (__call__ getitem-meth (list object index))
 			   (IndexError () (values nil nil))  ;; even ok if index = 0 (empty sequence)
 			   (:no-error (val)
 			     (incf index)
@@ -143,6 +143,14 @@
 				 (setf ,var ,val)
 			       (py-raise 'TypeError ,err-str ,var)))))))
 
+(defun convert-to-py-object (x)
+  "Return PYTHON-OBJECT, CONVERTED-P"
+  (typecase x
+    (python-object (values x nil))
+    (number        (values (make-py-number x) t))
+    (string        (values (make-py-string x) t))
+    ((eql (find-class 'python-type)) (values x nil))
+    (t (error "Not a recognized Python object: ~A" x))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; Bridging the gap: making Lisp functions callable from within Python
