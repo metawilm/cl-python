@@ -90,8 +90,6 @@
 
 (defun map-over-py-object (fun object)
   "Iterate over OBJECT, calling Lisp function FUN on each value."
-  (declare (optimize (speed 3)(debug 0)(safety 0))
-	   (:explain :calls))
   (loop with f = (get-py-iterate-fun object)
       with val = (funcall f)
       when val collect (funcall fun val)
