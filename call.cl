@@ -110,25 +110,42 @@
 ;;;; Calling a class creates an instance
 
 (defmethod py-call ((cls python-type) &optional pos-args kwd-args)
-  ;; <cls>.__new__(<cls>, ..) creates and returns a new instance
-  ;; <cls>.__init__(<cls instance>, ..) initializes it but doesn't return anything useful
   
-  (multiple-value-bind (meth found)
+  ;; When CLS is a subtype of PYTHON-TYPE (`type'), calling it either
+  ;;  - create a new class K, where the metaclass of K is CLS (when there are 3 args)
+  ;;  - or return the type of CLS (when there is 1 arg)
+  
+  (when (subtypep cls 'python-type)
+    (when kwd-args
+      (warn "While calling class ~A, which is subtype of `type': ignored ~@
+             keyword arguments ~A" (class-name cls) kwd-args))
+    (return-from py-call
+      (case (length pos-args)
+	(1 (pyb:type cls))
+	(3 (call-attribute-via-class cls '__new__ pos-args))
+	(t (py-raise 'TypeError "Calling class that is subtype of built-in class: ~@
+                               expecting 1 or 3 args (got: ~A)" (length pos-args))))))
+  
+  
+  ;; When CLS is a regular class, calling it creates an instance of it.
+  ;;  <cls>.( ..args.. ) --> cls-instance = <cls>.__new__(<cls>, ..)              : allocation
+  ;;                         <class-of cls-instance>.__init__(<cls-instance>, ..) : initialization
+  
+  (multiple-value-bind (__new__-meth found)
       (internal-get-attribute cls '__new__)
-    (if found
-		
-	(progn #+(or)(warn "__new__ method found for class ~A: ~A" cls meth)
-	       (let ((inst (py-call meth (cons cls pos-args) kwd-args))) ;; call with class as first arg
-		 #+(or)(warn "result of calling __new__: ~A" inst)
-		 (multiple-value-bind (res found)
-		     (call-attribute-via-class inst '__init__ pos-args kwd-args)
-		   (declare (ignore res))
-		   (unless found
-		     (warn "Class ~S has no method __init__" cls)))
-		 inst))
+    
+    (unless found 
+      (error "Class ~S has no method __new__" (class-name cls))) ;; not sure when this happens?
+    
+    (let ((instance (py-call __new__-meth (cons cls pos-args) kwd-args))) ;; CLS is first pos arg
       
-      (error "Class ~S has no method __new__" cls))))
-
+      (multiple-value-bind (res found)
+	  (call-attribute-via-class instance '__init__ pos-args kwd-args)
+	(declare (ignore res))
+	(unless found
+	  (warn "Class ~S has no method __init__" (class-name cls))))
+      
+      instance)))
 
 
 #+(or)

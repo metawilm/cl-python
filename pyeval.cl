@@ -819,8 +819,10 @@
 	 (supers (mapcar
 		  (lambda (x)
 		    (let ((c (py-eval x)))
-		      (if (typep c 'class) (class-name c)
-			(py-raise 'TypeError "Cannot have non-classes in superclass list (got: ~A)" c))))
+		      (if (typep c 'class)
+			  (class-name c)
+			(py-raise 'TypeError
+				  "Cannot have non-classes in superclass list (got: ~A)" c))))
 		  inheritance)))
     
     ;; Evaluate SUITE now, in the new namespace inside the class:
@@ -847,8 +849,10 @@
 	    (values nil nil)))
     
       (let* ((doc (or (namespace-lookup ns '__doc__) *None*))
+	     (metaclass (or (namespace-lookup ns '__metaclass__) nil))
 	     (c (make-python-class :name cname :module "ModuleName" :supers supers
-				  :slots slots :has-slots has-slots :namespace ns :documentation doc)))
+				   :slots slots :has-slots has-slots :namespace ns
+				   :metaclass metaclass :documentation doc)))
       
 	;; In the current namespace, the name of the class that is defined
 	;; now becomes bound to the class object that results from

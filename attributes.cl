@@ -147,11 +147,12 @@
     Does not raise AttributeError itself, but any Python exception could be
     raised in methods called in the process."))
 
+
 (defmethod internal-get-attribute :around (x attr)
-  (declare (ignore x))
   (assert (symbolp attr))
-  (call-next-method))
-    
+  (if (eq attr '__class__)
+      (values (pyb:type x) t)
+    (call-next-method)))
 
 (defmethod internal-get-attribute ((x number) attr)
   (getattr-of-number x attr))
@@ -180,6 +181,10 @@
   (getattr-of-class-rec x attr))
 
 (defmethod internal-get-attribute ((x user-defined-class) attr)
+  (getattr-of-class-rec x attr))
+
+(defmethod internal-get-attribute ((x class) attr)
+  ;; XXX 
   (getattr-of-class-rec x attr))
 
 (defmethod internal-get-attribute ((x py-module) attr)
@@ -390,7 +395,14 @@
 			 t))))
 	   (setf c (pop cpl)))
     
-    (assert (or (member c (list (find-class 'udc-instance-w/dict)
+    (assert (or (member c (list
+			   (find-class 'user-defined-class) ;; <- when it's an instance of
+			   ;; a user-defined metaclass
+			   
+			   (find-class 'python-type) ;; subclass of type, at the moment an instance of the subclass is created
+			   
+			   
+				(find-class 'udc-instance-w/dict)
 				(find-class 'udc-instance-w/slots)
 				(find-class 'udc-instance-w/dict+slots)))
 		(typep c 'builtin-class)))

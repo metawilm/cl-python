@@ -96,22 +96,41 @@
 (defgeneric __new__ (cls &rest args)
   (:documentation "Create a new instance of class CLS"))
 
+#+(or)
 (defmethod __new__ ((cls class) &rest args)
   ;; (break "__new__ class: correct?")
   #+(or)(when args
     (warn (format nil "Default __new__ ignoring args: ~A" args)))
   (make-instance cls))
 
-(register-bi-class-attr/meth (find-class 'class) '__new__
-			     (make-static-method #'__new__))
 
 #+(or)
+(register-bi-class-attr/meth (find-class 'class)
+			     '__new__
+			     (make-static-method #'__new__))
+
+
 (defmethod python-type-__new__ (metaclass name bases dict)
   (assert (subtypep metaclass 'python-type))
-  TODO)
+  (ensure-py-type name string "class name must be string (got: ~A)")
   
+  (multiple-value-bind (slots has-slots)
+      (let ((s (py-dict-gethash dict '__slots__)))
+	(if s 
+	    (values (py-iterate->lisp-list s) t)
+	  (values nil nil)))
 
+    (make-python-class :name (intern name #.*package*)
+		       :supers (if bases (py-iterate->lisp-list bases) nil)
+		       :slots slots
+		       :has-slots has-slots
+		       :namespace dict
+		       :metaclass metaclass)))
 
+(register-bi-class-attr/meth (find-class 't) '__new__
+			     (make-static-method #'python-type-__new__))
+(register-bi-class-attr/meth (find-class 'class) '__new__
+			     (make-static-method #'python-type-__new__))
 
 (defgeneric __init__ (x &rest args)
   (:documentation "Object initialization"))
@@ -524,6 +543,8 @@
 
 (register-bi-class-attr/meth (find-class 'py-complex) '__new__ 
 			     (make-static-method #'py-complex-__new__))
+(register-bi-class-attr/meth (find-class 'complex) '__new__ 
+			     (make-static-method #'py-complex-__new__))
 
 (defun make-complex (&optional (val #C(0 0)))
   (make-instance 'py-complex :val (coerce val 'complex)))
@@ -566,6 +587,8 @@
 
 (register-bi-class-attr/meth (find-class 'py-float) '__new__ 
 			     (make-static-method #'py-float-__new__))
+(register-bi-class-attr/meth (find-class 'float) '__new__ 
+			     (make-static-method #'py-float-__new__))
 
 (defun make-float (&optional (val 0d0))
   (make-instance 'py-float :val val))
@@ -606,6 +629,8 @@
     inst))
 
 (register-bi-class-attr/meth (find-class 'py-int) '__new__
+			     (make-static-method #'py-int-__new__))
+(register-bi-class-attr/meth (find-class 'integer) '__new__
 			     (make-static-method #'py-int-__new__))
 
 ;; noop __init__

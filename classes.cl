@@ -180,8 +180,30 @@
 
 (defun make-python-class (&key name (module "ModuleName")
 			       (supers nil) (slots nil) (has-slots nil)
-			       (documentation nil) (namespace nil))
+			       (namespace nil) (metaclass nil)
+			       (documentation nil))
+  (assert (symbolp name))
 
+  (cond (metaclass (assert (typep metaclass 'class))
+		   (unless (subtypep metaclass 'python-type)
+		     (py-raise 'TypeError
+			       "Metaclass for class ~A is ~A, which is not a subtype of `type'."
+			       name (class-name metaclass)))
+		   (when has-slots
+		     (warn "Class ~A has __metaclass__ specified. Therefore, the value for ~@
+                            __slots__ is ignored (value of __slots__: ~A)"
+			   name (call-attribute-via-class slots '__repr__)))
+		   (return-from make-python-class
+		     (make-u-d-class-with-given-metaclass name metaclass
+							  :namespace namespace
+							  :module module)))
+	
+	((some (lambda (cls) (subtypep cls 'python-type))
+	       supers)
+	 (return-from make-python-class
+	   (make-u-d-class-derived-from-type name supers :namespace namespace :module module))))
+  
+  
   ;; All classes that are accessible from within Python
   ;; inherit from python-object, so throw it away when it is
   ;; explicitly mentioned.
@@ -236,10 +258,12 @@
 			   (inst-have-dict 'udc-instance-w/dict)
 			   (inst-have-other-slots 'udc-instance-w/slots)
 			   (t 'udc-instance)))
-	  (the-metaclass (if inst-have-other-slots
-			     'user-defined-class-w/slots
-			   'user-defined-class)))
-      
+	  
+	  (the-metaclass (progn (assert (not metaclass)) ;; no __metaclas__ given by user
+				(if inst-have-other-slots 
+				    'user-defined-class-w/slots
+				  'user-defined-class))))
+	     
       ;; Now determine the superclasses. 
       ;; 
       ;; The order of superclasses is:
@@ -305,3 +329,23 @@
 	  
 	  k)))))
 
+(defmethod make-u-d-class-derived-from-type ((name symbol) (supers list)
+					     &key module namespace)
+  (let ((klass (mop:ensure-class name
+				 :direct-superclasses (or supers '(user-defined-class))
+				 :metaclass 'user-defined-class)))
+    (mop:finalize-inheritance klass)
+    (setf (slot-value klass '__dict__) namespace
+	  (slot-value klass '__name__) (symbol-name name)
+	  (slot-value klass '__module__) module)
+    klass))
+    
+
+(defmethod make-u-d-class-with-given-metaclass ((name symbol) (metaclass class) 
+						&key module namespace)
+  (let ((klass (mop:ensure-class name :metaclass metaclass)))
+    (mop:finalize-inheritance klass)
+    (setf (slot-value klass '__dict__) namespace
+	  (slot-value klass '__name__) name
+	  (slot-value klass '__module__) module)
+    klass))
