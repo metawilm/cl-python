@@ -14,6 +14,7 @@
 (defconstant pyt:str     (find-class 'py-string))
 (defconstant pyt:tuple   (find-class 'py-tuple))
 (defconstant pyt:type    (find-class 'python-type))
+(defconstant pyt:unicode (find-class 'py-string))
 (defconstant pyt:xrange  (find-class 'py-xrange))
 (defconstant pyt:classmethod  (find-class 'class-method))
 (defconstant pyt:staticmethod (find-class 'static-method))
@@ -23,8 +24,7 @@
 (progn 
   (defconstant pyt:basestring   xxx) ;; abstract type basestring has subtypes str and unicode
   (defconstant pyt:property     (find-class 'py-property))
-
-  (defconstant pyy:unicode (find-class ???)))
+  )
 
 
 ;; XXX TODO: "type(name, bases, dict)" creates a new type

@@ -349,12 +349,12 @@
 	  (slot-value klass '__name__) (symbol-name name)
 	  (slot-value klass '__module__) module)
     klass))
-    
 
 (defmethod make-u-d-class-with-given-metaclass ((name symbol) (metaclass class) 
 						&key supers module namespace)
   (let ((klass (mop:ensure-class name
-				 :direct-superclasses `(,@supers python-object)
+				 :direct-superclasses `(,@(remove (find-class 'python-object) supers)
+							  user-defined-class python-object) ;; udc?
 				 :metaclass #+(or)metaclass
 				 (metaclass-for-udc-with-ud-metaclass metaclass)
 				 )))

@@ -36,13 +36,17 @@
 (defmethod __class__ ((x complex))       (find-class 'py-complex))
 (defmethod __class__ ((x string))        (find-class 'py-string))
 (defmethod __class__ ((x user-defined-class))   (let ((k (class-of x)))
-						  (if (typep k 'user-defined-class)
-						      k  ;; udc k is metaclass of udc x
+						  (if (subtypep k 'udc-with-ud-metaclass)
+						      (loop for cls in (mop:class-precedence-list k)
+							  when (typep cls 'user-defined-class)
+							  do (return cls)
+							  finally (error "no udc for metaclass?"))
 						    (find-class 'python-type))))
 (defmethod __class__ ((x builtin-class)) (find-class 'python-type))
 (defmethod __class__ ((x function))      (find-class 'python-type)) ;; XXX show function name
 (defmethod __class__ ((x python-object)) (class-of x)) ;; XXX check
 (defmethod __class__ ((x symbol))        (find-class 'py-string))
+
 
 ;; PYTHON-OBJECT is both an instance and a subclass of PYTHON-TYPE.
 (defmethod __class__ ((x (eql (find-class 'python-object)))) (find-class 'python-type))
@@ -375,7 +379,7 @@
   "Make a PY-NUMBER instance for Lisp number VAL"
   (etypecase val
     (integer (make-int val))
-    (real (make-float (coerce val 'double-float)))
+    (real (make-float (coerce val 'long-float)))
     (complex (make-complex val))))
 
   
@@ -388,13 +392,17 @@
     (
      ;; CPython prints *sys-neg-maxint* <= x <= *sys-pos-maxint* as X,
      ;; outside that range as XL:  3 vs 3L. Let's not bother.
-     (__repr__     (format nil "~A" x))
+     (__repr__     (format nil "~A" (coerce x 'single-float)))
+			    ;; do floats like `3.1d0' don't print `d', etc
      
      (__nonzero__  (lisp-val->py-bool (/= x 0)))
      (__neg__      (- x))
      (__pos__      x)
      (__abs__      (abs x))
      (__complex__  (make-complex x))))
+
+(defmethod __repr__ ((x integer))
+  (format nil "~A" x))
 
 (loop for name in `(__nonzero__ __neg__ __pos__ __abs__ __complex__)
     do (loop for cls in `(,(find-class 'number) ,(find-class 'py-number))
@@ -566,11 +574,15 @@
     ((__hash__ (if (= (imagpart x) 0)
 		   (__hash__ (realpart x))
 		 (sxhash x)))
-     (__repr__ (cond ((= (complex-imag x) 0) (format nil "~A" (complex-real x)))
-		     ((= (complex-real x) 0) (format nil "~Aj" (complex-imag x)))
+     (__repr__ (cond ((= (complex-imag x) 0) (__repr__  (complex-real x)))
+		     ((= (complex-real x) 0) (format nil "~Aj" (__repr__ (complex-imag x))))
 		     (t (if (>= (imagpart x) 0)
-			    (format nil "(~A+~Aj)" (complex-real x) (complex-imag x))
-			  (format nil "(~A-~Aj)" (complex-real x) (* -1 (complex-imag x)))))))
+			    (format nil "(~A+~Aj)"
+				    (__repr__ (complex-real x))
+				    (__repr__ (complex-imag x)))
+			  (format nil "(~A-~Aj)"
+				  (__repr__ (complex-real x))
+				  (__repr__ (* -1 (complex-imag x))))))))
      #+(or)((complex-real (realpart x))
 	    (complex-imag (imagpart x))
 	    (complex-conjugate (conjugate x)))))
@@ -598,10 +610,10 @@
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Float (corresponding to Lisp type `double-float')
+;; Float (corresponding to Lisp type `long-float')
 
 (defclass py-float (py-real)
-  ((val :type double-float :initform 0d0))
+  ((val :type long-float :initform 0L0))
   (:metaclass builtin-class))
 
 (mop:finalize-inheritance (find-class 'py-float))
@@ -621,7 +633,6 @@
   (make-instance 'py-float :val val))
 
 (defmethod __hash__ ((x float))
-  ;; general `float', not `double-float' as type!
   (multiple-value-bind (int-part float-part)
       (truncate x)
     (if (= float-part 0)
@@ -757,7 +768,7 @@
      (__complex__ (coerce x 'complex))
      (__int__     (make-int (truncate x)))
      (__long__    (make-int (truncate x)))
-     (__float__   (coerce x 'double-float))
+     (__float__   (coerce x 'long-float))
      
      ;; string representations
      (__oct__  (format nil "0~O" x))
@@ -1033,10 +1044,12 @@
 (defmethod __repr__ ((d py-dict))
   (with-output-to-string (s)
     (format s "{")
-    (pprint-logical-block (s nil)
-      (maphash (lambda (k v)
-		 (format s "~A: ~A, ~_"
-			 (__repr__ k) (__repr__ v)))
+    (let ((is-first t))
+      (maphash (lambda (key val)
+		 (unless is-first
+		   (write-string ", " s))
+		 (format s "~A: ~A" (py-repr key) (py-repr val))
+		 (setf is-first nil))
 	       (slot-value d 'hash-table)))
     (format s "}")))
 
@@ -1389,6 +1402,8 @@
   (:metaclass builtin-class))
 
 (mop:finalize-inheritance (find-class 'python-function))
+
+(defmethod __class__ ((x python-function)) (find-class 'python-function))
 
 (defmethod py-function-name ((x python-function))
   (slot-value x 'name))
@@ -1759,11 +1774,8 @@
   (lisp-val->py-bool (/= 0 (length (slot-value x 'list)))))
 
 (defmethod __repr__ ((x py-list))
-  (with-output-to-string (s)
-    (format s "[")
-    (dolist (item (slot-value x 'list))
-      (format s "~A, " (call-attribute-via-class item '__repr__)))
-    (format s "]")))
+  (with-slots (list) x
+    (format nil "[~{~/python:format-py-repr/~^, ~}]" list)))
 
 ;; to ease debugging, for now the in-place operations return the
 ;; (modified) list they work on
@@ -2123,14 +2135,10 @@
   (__mul__ x n))
 
 (defmethod __repr__ ((x py-tuple))
-  (let ((list (slot-value x 'list)))
-    (if list
-	(with-output-to-string (s)
-	  (format s "(")
-	  (dolist (item (slot-value x 'list))
-	    (format s "~A, " (call-attribute-via-class item '__repr__)))
-	  (format s ")"))
-      "()")))
+  (with-slots (list) x
+    (cond ((null list) "()")
+	  ((cdr list) (format nil "(~{~/python:format-py-repr/~^, ~})" list))
+	  (t (format nil "(~A,)" (py-repr (car list)))))))
 
 ;; __reversed__ ?
 
@@ -2210,6 +2218,123 @@
     (loop for i from 1 to n
 	do (setf s (concatenate 'string s x))
 	finally (return s))))
+
+(defmethod unicode-string-p ((x string))
+  (loop for ch across x
+      when (> (char-code ch) 255)
+      do (return t)
+      finally (return nil)))
+
+(defmethod unicode-char-p ((x character))
+  (> (char-code x) 255))
+
+(defmethod string-__repr__ ((x string))
+    (let* ((single-quotes 0) ;; minimize number of escaped quotes in the returned string
+	   (double-quotes 0)
+	   (unicode nil)
+	   (data (with-output-to-string (s)
+		   (loop for ch across x
+		       do (cond ((unicode-char-p ch)
+				 (setf unicode t)
+				 (let ((num (char-code ch)))
+				   (cond ((<= num #XFFFF) (format s "\\u~X" num))
+					 ((<= num #XFFFFFFFF) (format s "\\U~X" num))
+					 (t (error "Unicode code for char too large: ~S" ch)))))
+				
+				;; XXX make these a vector lookup
+				((char= ch #\') (incf single-quotes) (write-char ch s))
+				((char= ch #\") (incf double-quotes) (write-char ch s))
+				((char= ch #\Bell)      (write-string "\\b" s))
+				((char= ch #\Backspace) (write-string "\\b" s))
+				((char= ch #\Page)      (write-string "\\f" s))
+				((char= ch #\Newline)   (write-string "\\n" s))
+				((char= ch #\Return)    (write-string "\\r" s))
+				((char= ch #\Tab)       (write-string "\\t" s))
+				((char= ch #\VT)        (write-string "\\v" s))
+				((char= ch #\\)         (write-string "\\\\" s))
+				(t (write-char ch s))))))
+	   (delimit-quote (if (<= single-quotes double-quotes) #\' #\")))
+      
+      (with-output-to-string (s)
+	(when unicode
+	  (write-char #\u s))
+	(write-char delimit-quote s)
+	(loop for ch across data
+	    when (char= ch delimit-quote)
+	    do (write-char #\\ s)
+	       (write-char ch s)
+	    else do (write-char ch s))
+	(write-char delimit-quote s))))
+			  
+      
+(defmethod string-__str__ ((x string))
+  (if (unicode-string-p x)
+      (py-raise 'UnicodeEncodeError
+		"string.__str__(): String contains Unicode character (got: ~S)" x)
+    (with-output-to-string (s)
+      (loop for ch across x
+	  do (write-char ch s)))))
+#+allegro
+(defmethod py-unicode-external-format->lisp-external-format (name)
+  ;; Returns NAME, MAX-CHAR-CODE
+  
+  ;; Based on:
+  ;;  http://meta.kabel.utwente.nl/specs/Python-Docs-2.3.3/lib/node127.html
+  ;;  http://www.franz.com/support/documentation/7.0/doc/iacl.htm#external-formats-1
+  ;; For now only ASCII and UTF-8 are supported.
+  
+  (setf name (string-lower (py-string-designator-val name)))
+  (cond 
+   ((member name '("ascii" "646") :test 'string=) 
+    (values :latin1 128))
+   
+   ((member name '("latin" "latin1") :test 'string=) 
+    (values :latin1 255))
+   
+   ((member name '("utf8" "utf_8" "utf" "u8") :test 'string=)
+    (values :utf8 #16x0010FFFF))
+   
+   (t (py-raise 'UnicodeError "Unrecognized Unicode external format: ~A" name))))
+
+
+#+allegro
+(defmethod py-encode-unicode ((string string) external-format)
+  
+  ;; EXCL:OCTETS-TO-STRING replaces characters out of range of
+  ;; external format with question marks #\?, but we want to get
+  ;; an error instead.
+  ;; 
+  ;; The result is a string (containing characters), not a vector of
+  ;; octets, because Python doesn't have vectors. Python could use
+  ;; regular lists, but strings are immutable so more efficient.
+  
+  (multiple-value-bind (ex-format max-code)
+      (py-unicode-external-format->lisp-external-format external-format)
+    (loop for ch across string
+	do (let ((code (char-code ch)))
+	     (when (> (the integer code) (the integer max-code))
+	       (py-raise 'UnicodeEncodeError
+			 "Character code out of allowed range (got character code: ~A; ~@
+                          external format: ~A; max code allowed: ~A)"
+			 code external-format max-code))))
+    (let* ((octets (excl:string-to-octets string :external-format ex-format :null-terminate nil))
+	   (res-string (make-array (length octets) :element-type 'character)))
+      (map-into res-string #'code-char octets)
+      res-string)))
+
+
+#+allegro
+(defmethod py-decode-unicode ((string string) external-format)
+
+  ;; Python has no separate data type for the returned vector of
+  ;; octets, so that' also a string.
+
+  (let* ((ex-format (py-unicode-external-format->lisp-external-format external-format))
+	 (vec (make-array (length string)
+			  :element-type '(unsigned-byte 8))))
+    (declare (dynamic-extent vec))
+    (map-into vec #'char-code string)
+    (excl:octets-to-string vec :external-format ex-format)))
 
 
 ;;; string-specific methods
@@ -2407,8 +2532,8 @@
      
      ;; __repr__ : with quotes (todo: if string contains ', use " as quote etc)
      ;; __str__  : without surrounding quotes
-     (__repr__ (x) (format nil "~S" x))
-     (__str__  (x) (format nil "~A" x))
+     (__repr__ (x) (string-__repr__ x))
+     (__str__  (x) (string-__str__ x))
      
      (py-string-capitalize (x) (string-capitalize x)) ;; Lisp function
      (string-center (x width)                     (string-center-1 x width))
@@ -2426,7 +2551,7 @@
      (string-ljust (x width &optional (fillchar " "))
 		   (progn (ensure-py-type width integer
 					  "string.ljust(): integer width expected (got: ~A)")
-			  (setf filchar (py-string-designator-val fillchar))
+			  (setf fillchar (py-string-designator-val fillchar))
 			  (let ((res (copy-seq x)))
 			    (loop while (< (length res) width)
 				do (setf res (concatenate 'string fillchar res))
@@ -2444,27 +2569,38 @@
 				  count (when count (py-int-designator-val count)))
 			    (substitute new old x :count count)))
      (string-rfind (x sub &optional start end)
+		   (declare (ignorable x sub start end))
 		   (error "string.rfind(): todo"))
      (string-rindex (x sub &optional start end)
+		    (declare (ignorable x sub start end))
 		    (error "string.rdindex(): todo"))
      (string-rjust (x width &optional (fillchar " "))
 		   (reverse (string-ljust (reverse x) width fillchar)))
      (string-rsplit (x sep &optional maxsplit)
+		    (declare (ignorable x sep maxsplit))
 		    (error "string.rsplit(): todo"))
      (string-split (x sep &optional maxsplit)
+		   (declare (ignorable x sep maxsplit))
 		   (error "string.split(): todo"))
      (string-splitlines (x &optional keepends)
+			(declare (ignorable x keepends))
 			(error "string.splitlines(): todo"))
      (string-startswith (x prefix &optional start end)
+			(declare (ignorable x prefix start end))
 			(error "string.startswith(): todo"))
      (string-strip (x &optional chars)
+		   (declare (ignorable x chars))
 		   (error "string.strip(): todo"))
-     (string-swapcase (x) (error "string.swapcase(): todo"))
-     (string-title (x) (error "string.title(): todo"))
+     (string-swapcase (x) (declare (ignorable x))
+		      (error "string.swapcase(): todo"))
+     (string-title (x) (declare (ignorable x))
+		   (error "string.title(): todo"))
      (string-translate (x table &optional deletechars)
+		       (declare (ignorable x table deletechars))
 		       (error "string.translate(): todo"))
      (string-upper (x) (string-upcase x))
-     (string-zfill (x width) (error "string.zfill(): todo"))))
+     (string-zfill (x width) (declare (ignorable x width))
+		   (error "string.zfill(): todo"))))
 
 
 (def-binary-string-meths
@@ -3231,3 +3367,25 @@
 
 (defmethod builtin-object-designator-p ((x user-defined-object))
   nil)
+
+
+;;; useful shortcuts
+
+(defmethod py-str (x)
+  (call-attribute-via-class x '__str__))
+
+(defmethod format-py-str (stream argument colon? at?)
+  (declare (ignore colon? at?))
+  (let ((s (py-str argument)))
+    (setf s (py-string-designator-val s)) ;; as S may be py-string subclass instance
+    (write-string s stream)))
+
+
+(defmethod py-repr (x)
+  (call-attribute-via-class x '__repr__))
+
+(defmethod format-py-repr (stream argument colon? at?)
+  (declare (ignore colon? at?))
+  (let ((s (py-repr argument)))
+    (setf s (py-string-designator-val s)) ;; as S may be py-string subclass instance
+    (write-string s stream)))

@@ -333,7 +333,7 @@
  (testlist-gexp (test comma--test* comma?) ((list (cons $1 $2) (if $3 t nil))))
 
  (lambdef (lambda parameter-list5 |:| test) ((list $1 $2 $4)))
- (lambdef (lambda                 |:| test) ((list $1 nil $3)))
+ (lambdef (lambda                 |:| test) ((list $1 '(nil nil nil) $3)))
 
  (trailer+ :or
 	   ((|(| arglist? |)|) . ((list (list 'call $2))))
@@ -584,7 +584,7 @@
 	      (#\t (vector-push-extend #\Tab res))
 	      (#\v (vector-push-extend #\VT  res))
 		
-	      ((#\N)
+	      (#\N
 	       (if unicode  ;; unicode char by name: u"\N{latin capital letter l with stroke}"
 		   
 		   (let ((ch2 (read-char-error))) 
@@ -619,13 +619,13 @@
 			   
 			   (progn (warn "Unicode escape \\~A... found in non-unicode string" c)
 				  (vector-push-extend #\\ res)
-				  (vector-push-extend #\N res))))
+				  (vector-push-extend c res))))
 	        
 	      ((#\0 #\1 #\2 #\3 #\4 #\5 #\6 #\7)  ;; char code: up to three octal digits
-	       (loop with code = (digit-char-p c 8)
+	       (loop with code = 0
 		   with x = c
 		   for num from 1
-		   while (and (<= num 2) (digit-char-p x 8))
+		   while (and (<= num 3) (digit-char-p x 8))
 		   do (setf code (+ (* code 8) (digit-char-p x 8))
 			    x (read-char-error))
 		   finally (unread-char x)
@@ -762,11 +762,13 @@
 			    do (push ch lst)
 			       (setf ch (read-char-nil))
 			       
-			    finally (setf lst (nreverse lst))
+			    finally (push #\L lst) ;; use `long-float' (CPython uses 32-bit C `long')
+				    (push #\0 lst)
+				    (setf lst (nreverse lst))
 				    (push #\. lst)
 				    (push #\0 lst)
 				    (unread-char ch)
-				    (return (read-from-string
+				    (return (read-from-string 
 					     (make-array (length lst)
 							 :initial-contents lst
 							 :element-type 'character))))))

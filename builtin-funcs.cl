@@ -134,6 +134,16 @@
 	0
       -1))) ;; or +1
 
+(defmethod pyb:cmp ((x (eql (find-class 'python-type))) y)
+  (if (eq y (find-class 'python-type))
+      0
+    -1)) ;; whatever
+
+(defmethod pyb:cmp (x (y (eql (find-class 'python-type))))
+  (if (eq x (find-class 'python-type))
+      0
+    -1))
+  
 (defmethod pyb::cmp-2 (x y)
   "Compare two objects, of which at least one is a user-defined-object. ~@
    Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y"
@@ -158,12 +168,19 @@
     (let ((x-class (__class__ x))
 	  (y-class (__class__ y)))
       
+      (when (member (find-class 'python-type) (list x-class y-class))
+	(return-from pyb::cmp-2
+	  (if (eq x-class y-class)
+	      0
+	    -1)))
+      
       ;; If X, Y are instances of the same class, it must be a
       ;; user-defined class, otherwise we wouldn't be in this
       ;; method.
       
       (when (eq x-class y-class)
 	(assert (typep x-class 'user-defined-class)))
+
       
       ;; If the class is equal and it defines __cmp__, use that.
       
