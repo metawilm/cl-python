@@ -1209,14 +1209,16 @@
 			     (retry-py-eval ()
 				 :report "Retry (py-eval AST)" ())))))
 	      (loop
-		(format t ">>> ")
+		(format t (if acc
+			      "... "
+			    ">>> "))
 		(let ((x (read-line)))
 		  (cond
 		 
 		   ((string= x ":help")
 		    (flet ((print-cmds (cmds)
 			     (loop for (cmd expl) in cmds
-				 do (format t "  ~6A: ~A~%" cmd expl))))
+				 do (format t "  ~13A: ~A~%" cmd expl))))
 		      (format t "~%In the Python interpreter:~%")
 		      (print-cmds '((":help" "print (this) help")
 				    (":lisp EXPR" "evaluate a Lisp expression")
@@ -1224,8 +1226,7 @@
 				    (":show-ast" "print the AST of inputted Python code")
 				    (":no-show-ast" "don't print the AST")
 				    (":q" "quit")
-				    ("_" "Python variable `_' is bound to the ~
-                                        value of the last expression")))
+				    ("_" "Python variable `_' is bound to the value of the last expression")))
 		      (format t "~%In the Lisp debugger:~%")
 		      (print-cmds '((":ptl" "back to Python top level")))
 		      (format t "~%")))
