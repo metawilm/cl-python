@@ -1,5 +1,7 @@
 (in-package :python)
 
+(declaim (optimize (debug 3)))
+
 ;;; Calling objects
 
 (defgeneric py-call (x &optional pos-args kwds-args)
