@@ -26,7 +26,7 @@
 ;;   action is taken:
 ;;    
 ;;     If the value is a "data descriptor" and it has a __get__ method
-;;    (i.e. it has both __get__ and __set__ methods):
+;;     (i.e. it has both __get__ and __set__ methods):
 ;;       
 ;;       The __get__ method of the data descriptor is invoked. The
 ;;       arguments to __get__ (besides the implied `self') are either
@@ -145,28 +145,39 @@
     Does not raise AttributeError itself, but any Python exception could be
     raised in user-defined methods."))
 
-(defmethod internal-get-attribute :around (x attr)
-  ;; (format t "internal-get-attribute: ~S ~S~%" x attr)
+
+(defmethod internal-get-attribute :around ((x class) attr)
+
+  ;; Intercepts a few special attributes, then does a regular lookup.
+  ;; TODO: remove these special cases (make them GF method on Python-object)
+  
   (ensure-py-type attr attribute-name "Not a valid attribute name: ~S")
-  (cond ((eq attr '__class__)
-	 (values (__class__ x) t))
-	
-	((and (typep x 'class)
-	      (eq attr '__bases__))
-	 (values (make-py-list-from-list
-		  (copy-list (mop:class-direct-superclasses x)))
-		 t)) ;; copy for safety
-	
-	((and (typep x 'class)
-	      (eq attr '__mro__))
+  
+  (cond ((eq attr '__class__) (values (__class__ x) t))
+	((eq attr '__bases__) (values (make-py-list-from-list
+				       ;; filter?
+				       (copy-list (mop:class-direct-superclasses x)))  ;; copy for safety
+				      t))
+	((eq attr '__mro__)
 	 ;; "Method Resoltion Order"
 	 ;; Implementation-specific classes are hidden from this list
 	 (values (make-py-list-from-list 
 		  (loop for cls in (mop:class-precedence-list x)
 		      if (python-object-designator-p cls) collect cls))
 		 t))
+	    
+	;; for debugging
+	((eq attr 'cpl) (format t "~%~A~%" (mop:class-precedence-list x)) 
+			(values 42 t))
+	
 	(t
 	 (call-next-method x attr))))
+
+
+(defmethod internal-get-attribute :around (x attr)
+  (ensure-py-type attr attribute-name "Not a valid attribute name: ~S")
+  (call-next-method x attr))
+
 
 (defmethod internal-get-attribute ((x udc-instance) attr)
   (let ((__getattr__ nil)
@@ -249,6 +260,13 @@
 		"Object ~A has no attribute ~A" x attr))))
 
 
+(defmethod internal-get-attribute ((x (eql (find-class 'builtin-class))) attr)
+  ;; builtin-class is a subtype of python-type, so ...
+  (internal-get-attribute (find-class 'python-type) attr))
+
+(defmethod internal-get-attribute ((x (eql (find-class 'python-type))) attr)
+  (search-generic-function-attr x attr))
+
 (defmethod internal-get-attribute ((x user-defined-class) attr)
   (loop for cls in (mop:class-precedence-list x)
 		   ;; until (eq cls (load-time-value (find-class 'python-type)))
@@ -267,11 +285,19 @@
 
 
 (defmethod internal-get-attribute ((x py-module) attr)
-  (namespace-lookup (slot-value x 'namespace) attr))
+  ;; XXX are module __dict__ attributes overridable?
+  (let ((ns (slot-value x 'namespace)))
+    (cond ((eq attr '__dict__) (values ns t))
+	  (t                   (values (namespace-lookup ns attr) t)))))
+
+(defmethod internal-get-attribute ((x builtin-instance) attr)
+  (search-generic-function-attr (class-of x) attr x))
+
 
 (defmethod internal-get-attribute (x attr)
-  ;; XXX called when??
-  (assert (typep x '(or builtin-object symbol string number)) ()
+  ;; Called when X is a Python object designator.
+  
+  (assert (typep x '(or symbol string number)) ()
     "Object ~A is not (a designator for) a builtin-object." x)
   
   (loop for cls in (mop:class-precedence-list (__class__ x)) ;; not CLASS-OF because of designators
@@ -285,9 +311,6 @@
 	       (values val t)))))
   (values nil nil))
 
-
-
-
 (defmethod internal-get-attribute ((x builtin-class) attr)
   (loop for cls in (mop:class-precedence-list x)
 		   ;; until (eq cls (load-time-value (find-class 'python-type)))
@@ -298,14 +321,14 @@
 	       (values val found)))))
   (values nil nil))
 
+
 (defgeneric getattr-class-nonrec (class attr &optional instance)
   (:documentation "Non-recursive attribute lookup in class. ~@
                    If INSTANCE is supplied, result is wrapped when appropriate. ~@
                    Returns VAL, FOUND"))
 
-(defmethod getattr-class-nonrec (x attr &optional instance)
+(defmethod getattr-class-nonrec (x attr &optional instance)   ;; default method
   (declare (ignore x attr instance))
-  ;; default method
   (values nil nil))
 
 (defmethod getattr-class-nonrec ((x user-defined-class) attr &optional instance)
@@ -324,24 +347,38 @@
 		t))))
   (values nil nil))
 
+;;(defmethod getattr-class-nonrec ((x user-defined-object)
+
+(defmethod search-generic-function-attr ((x class) attr &optional instance)
+  "Is there a GF specialized on (a superclas of) class X? ~
+   Returns VAL, FOUND-P.
+   If FOUND-P, then VAL is a bound method if INSTANCE is supplied,
+   and an unbound method if not."
+  (when (fboundp attr)
+    (let ((gf (symbol-function attr)))
+      (if (typep gf 'generic-function)
+	  
+	  (if (some (lambda (meth)
+		      (and (null (method-qualifiers meth)) ;; ignore the ':around' ones (XXX make this sensible)
+			   (subtypep x (car (mop:method-specializers meth)))))
+		    (mop:generic-function-methods gf))
+	      (return-from search-generic-function-attr
+		(values (if instance
+			    (make-bound-method :func gf :self instance)
+			  (make-unbound-method :func gf :class x))
+			t))))))
+  (values nil nil))
+
 
 (defmethod getattr-class-nonrec ((x builtin-class) attr &optional instance)
 
   ;; magic methods `__xxx__' -> (un)bound methods for Generic Function
-  (when (fboundp attr)
-    (let ((gf (symbol-function attr)))
-      (if (typep gf 'generic-function)
-
-	(if (some (lambda (meth) 
-		    (and (null (method-qualifiers meth)) ;; ignore the ':around' catch-all one
-			 (subtypep x (car (mop:method-specializers meth)))))
-		  (mop:generic-function-methods gf))
-	    (return-from getattr-class-nonrec
-	      (values (if instance
-			  (make-bound-method :func gf :self instance)
-			(make-unbound-method :func gf :class x))
-		      t))))))
-
+  (multiple-value-bind (val found)
+      (search-generic-function-attr x attr instance)
+    (when found
+      (return-from getattr-class-nonrec
+	(values val found))))
+  
   ;; attribute: `<complex>.real -> value
   ;; 
   ;; ATTR is a symbol. Non-magic methods of built-in classes are
@@ -363,20 +400,20 @@
   (let ((res (get attr x)))
     (when res
       (case (car res)
-	('meth (return-from getattr-class-nonrec
-		 (values (if instance
-			     (make-bound-method :self instance :func (cdr res))
-			   (make-unbound-method :class x :func (cdr res)))
-			 t)))
+	(meth (return-from getattr-class-nonrec
+		(values (if instance
+			    (make-bound-method :self instance :func (cdr res))
+			  (make-unbound-method :class x :func (cdr res)))
+			t)))
 	       
 	;; An attribute is only ok when we are here for looking up
 	;; an instance attribute. Otherwise, we're acting like the
 	;; attribute is not found.
 		       
-	('att (if instance
-		  (return-from getattr-class-nonrec
-		    (values (funcall (cdr res) instance)
-			    t)))))))
+	(att (when instance
+	       (return-from getattr-class-nonrec
+		 (values (funcall (cdr res) instance)
+			 t)))))))
   (values nil nil))
 
 
@@ -402,6 +439,27 @@
 	(__getitem__ (slot-value x '__dict__) attr)
       (KeyError ()
 	(values nil nil)))))
+
+
+
+;; shortcut
+
+(defun call-attribute-via-class (x attr &optional pos-args key-args)
+  "Lookup ATTR of the class of X, and call it for instance X.
+   Returns RES, FOUND-P where RES is the result of calling ATTR and FOUND-P
+   is T or NIL.
+   Example use: `print' calls the class' __str__ method, not the __str__
+   attribute of the instance (assuming it exists)"
+
+  (multiple-value-bind (val found)
+      (internal-get-attribute (__class__ x) attr)
+    (if found
+	(progn
+	  (unless (typep val 'py-unbound-method)
+	    (break "call-attr-via-class: expected unbound method, got: ~A" val))
+	  (values (__call__ val (cons x pos-args) key-args)
+		  t))
+      (values nil nil))))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -594,3 +652,7 @@
   (py-raise 'AttributeError
 	    "Cannot delete attribute ~A of object ~A: the slot exists but it is unbound."
 	    x attr))
+
+;; for debugging
+(defun trace-attr ()
+  (trace internal-get-attribute getattr-class-nonrec ud-instance-only call-attribute-via-class))
