@@ -848,6 +848,16 @@
       (py-raise 'NameError
 		"No variable with name ~A" var))))
 
+(defmethod namespace-copy ((x namespace))
+  (with-slots (name enclosing-ns hash-table) x
+    (let* ((x-copy (make-namespace :inside enclosing-ns
+				   :name name))
+	   (ht-copy (slot-value x-copy 'hash-table)))
+      (clrhash ht-copy)
+      (maphash (lambda (k v) (setf (gethash k ht-copy) v))
+	       hash-table)
+      x-copy)))
+
 (defmethod __getitem__ ((x namespace) key)
   (gethash key (slot-value x 'hash-table)))
 
@@ -855,13 +865,7 @@
   (with-output-to-string (stream)
     (pprint-logical-block (stream nil)
       (format stream "{")
-      (maphash (lambda (k v) 
-		 (declare (special *builtins*))
-		 (format stream "~A: ~A,~_ "
-			 (__repr__ k)
-			 (if (eq v *builtins*)
-			     '*builtins*
-			   (__repr__ v))))
+      (maphash (lambda (k v) (format stream "~A: ~A,~_ " (__repr__ k) (__repr__ v)))
 	       (slot-value x 'hash-table)))
     (format stream "}")))
 

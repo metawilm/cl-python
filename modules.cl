@@ -21,32 +21,45 @@
 
 ;; XXX check that this is evaluated at the right time 
 
-(let ((sys-path-list (make-py-list-from-list '("")))) ;; "" is current dir
-  (make-std-module sys
-		   ((path    sys-path-list)
-		    (modules *sys.modules*)))
-  (setf *sys.path* sys-path-list))
+(defun make-sys-module ()
+  (let ((sys-path-list (make-py-list-from-list '("")))) ;; "" is current dir
+    (make-std-module sys
+		     ((path    sys-path-list)
+		      (modules *sys.modules*)))
+    (setf *sys.path* sys-path-list)))
+
+(make-sys-module)
 
 
 ;; The `__builtin__' module: built-in functions, types and some special variables
 
-(multiple-value-bind (mod ns)
-    (make-std-module __builtin__)
+(defun make-bi-module ()
+  (multiple-value-bind (mod ns)
+      (make-std-module __builtin__)
 
-  (setf *__builtin__-module* mod
-	*__builtin__-module-namespace* ns)
+    (setf *__builtin__-module* mod
+	  *__builtin__-module-namespace* ns)
     
-  (do-external-symbols (s 'python-builtin-functions)
-    (namespace-bind ns (symbol-name s) (symbol-function s)))
+    (do-external-symbols (s 'python-builtin-functions)
+      (namespace-bind ns (symbol-name s) (symbol-function s)))
   
-  (do-external-symbols (s 'python-builtin-types)
-    (if (boundp s) ;; check needed, as some symbols are TODO
-	(namespace-bind ns (symbol-name s) (symbol-value s))))
+    (do-external-symbols (s 'python-builtin-types)
+      (if (boundp s) ;; check needed, as some symbols are TODO
+	  (namespace-bind ns (symbol-name s) (symbol-value s))))
   
-  (loop for (key val) in
-	`((None ,*None*)(Ellipsis ,*Ellipsis*)(NotImpemented ,*NotImplemented*)(True ,*True*)(False ,*False*))
-      do (namespace-bind ns key val))
+    (loop for (key val) in
+	  `((None ,*None*)(Ellipsis ,*Ellipsis*)(NotImpemented ,*NotImplemented*)(True ,*True*)(False ,*False*))
+	do (namespace-bind ns key val))
   
-  (loop for (name . exc) in *python-exceptions*
-      do (namespace-bind ns name exc)))
+    (loop for (name . exc) in *python-exceptions*
+	do (namespace-bind ns name exc))))
+
+(make-bi-module)
+
+
+;; Keep a copy of the initial modules, for use in the REPL
+
+
+;; (eval-when (:load-toplevel :execute) required??
+(defparameter *initial-sys.modules* (namespace-copy *sys.modules*))
 

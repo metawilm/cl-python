@@ -17,7 +17,7 @@
 (defun repl ()
   (format t "[CLPython -- type `:q' to quit, `:help' for help]~%")
   (locally (declare (special *sys.modules*))
-    (dict-clear *sys.modules*))
+    (setf *sys.modules* (namespace-copy *initial-sys.modules*)))  ;; or LET ?
   (loop
     (let ((*scope* (make-namespace :name "repl ns" :builtins t)))
       (declare (special *scope*))
