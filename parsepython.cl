@@ -386,7 +386,7 @@
  (comma--test--\:--test (|,| test |:| test) ((cons $2 $4)))
  
  (classdef (class identifier OB--testlist--CB? |:| suite)
-	   ((list $1 $2 $3 $5)))
+	   (`(class ,$2 ,(when $3 (second $3)) ,$5)))
  (:OB--testlist--CB?)
  (OB--testlist--CB (|(| testlist |)|) ($2))
 

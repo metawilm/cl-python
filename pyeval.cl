@@ -796,28 +796,32 @@
 	finally (return (values pos-args kw-args *-par **-par)))))
 
 
+#+(or)
 (defun eval-classdef (cname inheritance suite)
-  (unless inheritance
-    (setf inheritance `(testlist () nil)))
+  
+  ;; cls = Metaclass.__new__(Metaclass, name, basis, dict
+  ;; assert cls.__class__ == Metaclass
+  ;; M.__init__(cls, name, bases, dict)
+  
+  )
+
+  
+(defun eval-classdef (cname inheritance suite)
   
   ;; The inheritance list will be evaluated, but MAKE-PYTHON-CLASS
   ;; expects a list of *names*, therefore after each of the items is
   ;; evaluated and has a class object as value, CLASS-NAME must be
   ;; called.
   
-  (assert (eq (car inheritance) 'testlist))
-  
   (let* ((ns (make-namespace :name (format nil "<ns for class ~A>" cname)
 			     :inside *scope*))
 	 
-	 (supers (mapcar (lambda (x)
-			   (let ((c (py-eval x)))
-			     (if (typep c 'class)
-				 (class-name c)
-			       (py-raise 'TypeError
-					 "Cannot have non-classes in ~
-                                          superclass list (got: ~A)" c))))
-			 (second inheritance))))
+	 (supers (mapcar
+		  (lambda (x)
+		    (let ((c (py-eval x)))
+		      (if (typep c 'class) (class-name c)
+			(py-raise 'TypeError "Cannot have non-classes in superclass list (got: ~A)" c))))
+		  inheritance)))
     
     ;; Evaluate SUITE now, in the new namespace inside the class:
     ;; methods and class attributes are defined in it, plus there may
