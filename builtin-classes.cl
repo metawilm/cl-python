@@ -2176,16 +2176,20 @@
 
 
 (defmethod extract-list-item-by-index ((list cons) (index integer))
+  ;; todo: support subclassed integers
   (ensure-py-type index integer
 		  "internal error: ~A")
   (let ((len (length list)))
+    
     (when (< index 0)
       (incf index len))
+    
     (when (or (< index 0)
 	      (> index (1- len)))
       (py-raise 'IndexError
-		"List index out of range (got: ~A, len: ~A)"
-		index len))
+		"List index out of range (got: ~A, valid range: 0..~A)"
+		index (- len 1)))
+    
     (nth index list)))
 			    
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;

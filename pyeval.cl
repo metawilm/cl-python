@@ -116,10 +116,11 @@
       (suite (eval-suite (second ast)))
       (for-in (apply #'eval-for-in (cdr ast)))
       (if (apply #'eval-if (cdr ast)))
+      (assert (apply #'eval-assert (cdr ast)))
     
       (pass) ;; nothing
     
-      (t (error "uncatched in py-eval: ~W~%" ast))
+      (t (error "uncatched in py-eval: ~S~%" ast))
       )))
 
 
@@ -174,9 +175,12 @@
 	 `(:no-error (&rest $args$)
 		     (declare (ignore $args$))
 		     (py-eval ',else-clause)))))
-			      
-		     
 		    
+(defun eval-assert (test expr)
+  (unless (py-val->lisp-bool (py-eval test))
+    ;; first evaluate expr, as that might lead to another exception
+    (let ((str (py-eval expr)))
+      (py-raise 'AssertionError str))))
 
 (defun eval-del (exprlist)
   (assert (eq (car exprlist) 'exprlist))

@@ -306,7 +306,7 @@
  (exec-stmt (exec expr) ((list $1 $2)))
  (exec-stmt (exec expr in test) ((list $1 $2 $4)))
  (exec-stmt (exec expr in test |,| test) ((list $1 $2 $4 $6)))
- (assert-stmt (assert test comma--test?) ((list $1 $2)))
+ (assert-stmt (assert test comma--test?) ((list $1 $2 $3)))
  (:comma--test?)
  (comma--test (|,| test) ($2))
 
@@ -529,9 +529,9 @@
  (subscript :or
 	    |...|
 	    test
-	    ((test? |:| test? sliceop?) . (`(slice ,$1 ,$3 . ,$4))))
+	    ((test? |:| test? sliceop?) . (`(slice ,$1 ,$3 ,$4))))
  (:sliceop?)
- (sliceop (|:| test?))
+ (sliceop (|:| test?) ($2))
  (:test?)
 
  ;; old:
