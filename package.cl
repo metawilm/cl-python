@@ -25,7 +25,7 @@
     (dolist (f '("classes" "exceptions" "pythonic" "magicmeths" "builtin-classes"
 		 "call" "builtin-funcs" "builtin-types" "mathops"
 		 "descriptors" "attributes" "pyeval"
-		 #+(or)"gener" "parsepython"))
+		 #+(or)"gener" "parsepython" "repl"))
       (excl::compile-file-if-needed f)
       (load f)))
   'done)
@@ -40,7 +40,7 @@
    :getattr :globals :hasattr :hash :hex :id :input :intern :isinstance
    :issubclass :iter :len :locals :map :ord :pow :range
    :raw_input :reduce :reload :repr :round :setattr :sorted
-   :sum :type :unichr :vars :zip))
+   :sum #+(or):type :unichr :vars :zip))
 
 (defpackage :python-builtin-types
   (:nicknames :pyt)
