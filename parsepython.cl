@@ -156,12 +156,14 @@
  (small-stmt :or expr-stmt print-stmt del-stmt pass-stmt flow-stmt
 	     import-stmt global-stmt exec-stmt assert-stmt)
 
- (expr-stmt (testlist expr-stmt2) ((cond ((and $2 (eq (car $2) '=)) 
-					  `(assign-expr (,$1 ,@(second $2))))
-					 ($2
-					  (list 'augassign-expr (car $2) (car $1) (cdr $2)))
-					 (t
-					  $1))))
+ (expr-stmt (testlist expr-stmt2)
+	    ((cond ((and $2 (eq (car $2) '=)) 
+		    `(assign-expr (,$1 ,@(second $2))))
+		   ($2
+		    #+(or)(warn "aug: ~S ~S" $1 $2)
+		    (list 'augassign-expr $1 (car $2) (cdr $2)))
+		   (t
+		    $1))))
 
  (expr-stmt2 (augassign testlist) ((cons $1 $2)))
  (expr-stmt2 (=--testlist*) ((list '= $1)))

@@ -82,7 +82,8 @@
 	     (import (apply #'eval-import (cdr ast)))
 	     (import-from (apply #'eval-import-from (cdr ast)))
 		   
-	     (assign-expr (apply #'eval-assign-expr (cdr ast)))
+	     (assign-expr (apply #'eval-perhaps-assign-expr (cdr ast)))
+	     (augassign-expr (apply #'eval-augassign-expr (cdr ast)))
 	     (del (eval-del (second ast)))
 	     (global (eval-global (second ast)))
 
@@ -348,7 +349,7 @@
 		 (declare (ignore _list-for-in))
 		 (let ((esource (py-eval source)))
 		   (py-iterate ($dummy$ esource)
-			       (eval-assign-expr-1 exprlist $dummy$)
+			       (eval-real-assign-expr exprlist $dummy$)
 			       (process-for/ifs rest)))))
 	     
 	     (process-if (for-ifs)
@@ -473,7 +474,7 @@
     (catch 'break
       (py-iterate ($dummy$ esource)
 		  (setf take-else nil)
-		  (eval-assign-expr-1 targets $dummy$)
+		  (eval-real-assign-expr targets $dummy$)
 		  (catch 'continue
 		    (py-eval suite))))
     (when (and take-else
@@ -491,37 +492,33 @@
 ;;  -> a = [1,2]
 ;;     b = 1, c = 2
 
-(defun eval-assign-expr (items)
+(defun eval-perhaps-assign-expr (items)
   (destructuring-bind (val &rest targets)
       (reverse items)
     (if targets
-
-	;; real assignment statement
-	(let ((eval (py-eval val)))
+	(let ((eval (py-eval val))) ;; real assignment statement
 	  (dolist (tar targets)
-	    (eval-assign-expr-1 tar eval)))
-      
-      ;; just variable reference
-      (py-eval val))))
-    
+	    (eval-real-assign-expr tar eval)))
+      (py-eval val)))) ;; just variable reference
 
-(defun eval-assign-expr-1 (targets evalue)
+ 
+(defun eval-real-assign-expr (targets evalue)
   "Assign EVALUE to TARGETS.
    Assumes EVALUE already evaluated."
+  
   (assert (member (car targets) '(testlist exprlist) :test 'eq))
   (let* ((etargets (eval-assignment-targets (second targets)))
 	 (num-targets (length etargets))
 	 
-	 ;; both testlist and exprlist have comma? as third list element
-	 (comma? (third targets))
-	 (target-is-list (or (> num-targets 1)
+	 (comma? (third targets)) ;; both testlist and exprlist have 
+	 (target-is-list (or (> num-targets 1) ;; comma? as third list element
 			     comma?)))
     
     ;; (format t "eval-ass-targets: ~S~%" etargets)
     (cond
      ((= num-targets 0)
       (error "no assignment targets?! ~W ~W" etargets evalue))
-       
+     
      ((and (= num-targets 1)
 	   (not target-is-list))
       (eval-assign-one (car etargets) evalue))
@@ -557,11 +554,11 @@
    identifier, subscription, attributeref. VAL is the fully evaluated ~@
    value to be assigned."
   
-  (cond ((eq (car target) 'identifier)
+  (cond ((eq (car target) 'identifier)   ;; x = 5
 	 ;; (identifier name)
 	 (namespace-bind *scope* (second target) val))
 	
-	((eq (car target) 'attributeref)
+	((eq (car target) 'attributeref)  ;; x.y = 5
 	 ;; (attributeref <primary> (identifier attr-name))
 	 (destructuring-bind (primary (identifier attr-name))
 	     (cdr target)
@@ -569,7 +566,7 @@
 	   ;;(assert (eq (car attr-name) 'identifier))
 	   (internal-set-attribute primary attr-name val)))
 	
-  	((eq (car target) 'subscription)
+  	((eq (car target) 'subscription)  ;; x[y] = 5
 	 ;; (subscription <primary> <subs>)
 	 (destructuring-bind (primary subs)
 	     (cdr target)
@@ -627,6 +624,11 @@
 
 
 (defun eval-assignment-targets (targets)
+  ;; x     ->  `(identifier x)
+  ;; x[y]  ->  `(subscription ,x ,y)
+  ;; x.y   ->  `(attributeref ,x y)
+  ;; [x,y] ->  `(list x y)  -- x,y recursive
+  
   (labels ((do-eval (tg)
 	     (when (atom tg)
 	       (py-raise 'SyntaxError
@@ -673,6 +675,10 @@
     
     (loop for tg in targets
 	collect (do-eval tg)))) ;; local function: can't do direct mapcar
+
+
+(defun eval-augassign-expr (object operator expr)
+  (break "e-a-e  ~A    ~A   ~A" object operator expr))
 
 (defun eval-funcdef (fname params suite)
   "In the current namespace, FNAME becomes bound to a function object ~@
