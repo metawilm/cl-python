@@ -142,50 +142,6 @@
 			     (if ,des-p
 				 (setf ,var ,val)
 			       (py-raise 'TypeError ,err-str ,var)))))))
-;;; if, while
-
-(defmacro py-if (test &optional then else)
-  `(if (py-val->lisp-bool ,test)
-       ,then
-     ,else))
-
-(defmacro py-while (test &body body)
-  `(loop
-     (if (not (py-val->lisp-bool ,test))
-	 (return))
-     ,@body))
-
-#+(or) ;; test
-(let ((i (make-int 3)))
-  (py-while i
-	    (format t "i = ~A~%" i)
-	    (setf i (__sub__ i 1))))
-
-
-;;; Standard logical operators: OR, AND, NOT
-;;;
-;;; XXX They expand into nested binary operations.
-;;; (there's no *-ary OR/.. in Python)
-
-(defmacro py-or (&rest clauses)
-  "Returns generalized Lisp boolean"
-  (if clauses
-      `(or (py-val->lisp-bool ,(car clauses))
-	   (py-or ,@(cdr clauses)))
-    nil))
-	   
-(defmacro py-and (&rest clauses)
-  "Returns generalized Lisp boolean"
-  (if clauses
-      `(and (py-val->lisp-bool ,(car clauses))
-	    (py-and ,@(cdr clauses)))
-    t))
-
-(defmacro py-not (x)
-  "Returns generalized Lisp boolean"
-  `(not (py-val->lisp-bool ,x)))
-
-
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
