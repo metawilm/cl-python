@@ -287,7 +287,7 @@
 ;; string designators
 (progn (assert (= (__hash__ 'as)
 		  (__hash__ "as")
-		  (__hash__ (make-string "as"))))
+		  (__hash__ (make-py-string "as"))))
        'ok)
 
 ;; attributes of built-in classes

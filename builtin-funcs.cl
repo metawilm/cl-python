@@ -84,7 +84,7 @@
       (py-int-designator-p i)
     (if (and int-des-p
 	     (<= 0 lisp-int 255))
-	(make-string (code-char lisp-int))
+	(make-py-string (code-char lisp-int))
       (py-raise 'TypeError
 		 "Function chr() should be given an integer in range 0..255 ~
                  (got: ~A)" lisp-int))))

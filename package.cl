@@ -16,7 +16,7 @@
 	   :set-attribute :get-attribute
 	   :def-class-method :call :dir :dir2
 	   :test)
-  (:shadow :make-list :make-string))
+  (:shadow ))
 
 (in-package :python)
 

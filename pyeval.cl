@@ -79,7 +79,7 @@
     
       ;; expressions:
       (identifier (eval-identifier (second ast)))
-      (string (make-string (cdr ast)))
+      (string (make-py-string (cdr ast)))
       (number (check-type (cdr ast) number)
 	      (make-py-number (cdr ast)))
     
@@ -765,7 +765,7 @@
   (declare (special *math-op-mapping*)) ;; defined in mathops.cl
   (let ((func (gethash operator *math-op-mapping*)))
     (assert func ()
-      "Operator ~A has no corresponding py-~A function?! ~A PYEVAL:EVAL-BINARY"
+      "Operator ~A has no corresponding py-~A function?! ~A"
       operator operator (gethash operator *math-op-mapping*))
     (funcall func (py-eval left) (py-eval right))))
 

@@ -1566,7 +1566,7 @@
 	((symbolp s) (values t (symbol-name s)))
 	(t nil)))
   
-(defun make-string (&optional (s ""))
+(defun make-py-string (&optional (s ""))
   (check-type s (or symbol string character) "A Lisp symbol, string or character")
   (make-instance 'py-string :string (typecase s
 				      (string s)
@@ -1657,7 +1657,7 @@
 
 
 (def-binary-string-meths
-    ((__add__      (x y) (make-string (concatenate 'string x y)))
+    ((__add__      (x y) (concatenate 'string x y))
      (__radd__     (x y) (__add__ y x))
      (__contains__ (x y) (search y x)) ;; SEARCH returns an int or NIL, i.e. generalized bools
      (__cmp__ (x y)      (cond ((string< x y) -1)
@@ -1833,22 +1833,14 @@
   (make-bool (every #'upper-case-p x)))
 
 (defmethod string-join-1 ((x string) sequences)
-  ;; XXX inefficient?
-  (let ((v (make-array 100 :adjustable t :fill-pointer 0 :element-type 'character))
-	(first t))
-    (py-iterate (seq sequences)
-		(ensure-py-type seq string
-				"string.join needs a sequence of normal strings (got: ~A)")
-		(if first
-		    (setf first nil)
-		  (progn
-		    (loop for c in x
-			do (vector-push-extend c v))
-		    (setf first nil)))
-		
-		(loop for c across seq
-		    do (vector-push-extend c v)))
-    v))
+  "Join a number of strings"
+  (let ((acc ()))
+    (py-iterate (str sequences)
+		(format t "str: ~S~%" str)
+		(ensure-py-type str string
+				"string.join() can only handle real strings (got: ~A)")
+		(push str acc))
+    (apply #'concatenate 'string x (nreverse acc))))
 
 (def-class-specific-methods
     py-string
@@ -1881,7 +1873,7 @@
 (defmethod unintern-string ((s symbol))
   ;; used in mathops.cl for when method of user-defined-object may be called.
   ;; XXX check if still used
-  (make-string (symbol-name s)))
+  (symbol-name s))
 
 (defvar *interned-strings* 
     (make-hash-table :test 'eq))
@@ -2230,8 +2222,8 @@
 
 (defmethod python-object-designator-p ((x python-object)) (values t x))
 (defmethod python-object-designator-p ((x number)) (values t (make-py-number x)))
-(defmethod python-object-designator-p ((x symbol)) (values t (make-string x)))
-(defmethod python-object-designator-p ((x string)) (values t (make-string x)))
+(defmethod python-object-designator-p ((x symbol)) (values t (make-py-string x)))
+(defmethod python-object-designator-p ((x string)) (values t (make-py-string x)))
 (defmethod python-object-designator-p (x) (declare (ignore x)) nil)
 
 
