@@ -179,7 +179,8 @@
 	  do (multiple-value-bind (val found)
 		 (getattr-class-nonrec cls '__getattribute__)
 	       (when found (return-from internal-get-attribute
-			     (values (__call__ val x attr) t))))
+			     (values (__call__ val (list x attr))
+				     t))))
 	     
 	  when (and (not attr-val) (or is-udc is-bic))
 	  do (multiple-value-bind (val found)
@@ -202,7 +203,8 @@
 	      (internal-get-attribute attr-val '__get__)
 	    (if found
 		(return-from internal-get-attribute
-		  (values (__call__ get-meth x (class-of x))))
+		  (values (__call__ get-meth (list x (class-of x)))
+			  t))
 	      (setf attr-val-try-__get__ nil))))
 	
 	;; Look in instance dict
@@ -220,7 +222,7 @@
 		(return-from internal-get-attribute
 		  (values
 		   (if found
-		       (__call__ get-meth x (class-of x))
+		       (__call__ get-meth (list x (class-of x)))
 		     attr-val)
 		   t)))
 	    (return-from internal-get-attribute
@@ -229,7 +231,8 @@
       ;; __getattr__ hook
       (when __getattr__
 	(return-from internal-get-attribute
-	  (values (__call__ __getattr__ x attr) t)))
+	  (values (__call__ __getattr__ (list x attr))
+		  t)))
 
       ;; give up
       (py-raise 'AttributeError
@@ -247,7 +250,8 @@
 		 (internal-get-attribute val '__get__)
 	       (return-from internal-get-attribute
 		 (if get-found
-		     (values (__call__ get-meth *None* x) t)
+		     (values (__call__ get-meth (list *None* x))
+			     t)
 		   (values val t)))))))
   (values nil nil))
 
@@ -458,7 +462,7 @@
 	    (internal-get-attribute attr-val '__set__)
 	  (when found
 	    (return-from internal-set-attribute
-	      (__call__ __set__-meth x val)))))
+	      (__call__ __set__-meth (list x val))))))
   
       ;; Set attribute in the instance __dict__/slot
       (setattr-udi x attr val))))
