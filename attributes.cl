@@ -272,7 +272,8 @@
   (error "TODO: i-g-a python-type: ~A" x))
 
 (defmethod internal-get-attribute ((x user-defined-class) attr)
-  (loop for cls in (mop:class-precedence-list x)
+  (loop for cls in #+(or)(mop:class-precedence-list x)
+		   (mop:class-precedence-list (class-of x))
 		   ;; until (eq cls (load-time-value (find-class 'python-type)))
 		   
       do (multiple-value-bind (val found)
@@ -332,8 +333,25 @@
                    Returns VAL, FOUND"))
 
 (defmethod getattr-class-nonrec (x attr &optional instance)   ;; default method
-  (declare (ignore x attr instance))
-  (values nil nil))
+  ;; (declare (ignore x attr instance))
+  (let ((res (get attr x)))
+    (when res
+      (case (car res)
+	(meth (return-from getattr-class-nonrec
+		(values (if instance
+			    (make-bound-method :self instance :func (cdr res))
+			  (make-unbound-method :class x :func (cdr res)))
+			t)))
+	       
+	;; An attribute is only ok when we are here for looking up
+	;; an instance attribute. Otherwise, we're acting like the
+	;; attribute is not found.
+		       
+	(att (when instance
+	       (return-from getattr-class-nonrec
+		 (values (funcall (cdr res) instance)
+			 t)))))))
+  (values nil nil 'default-case))
 
 (defmethod getattr-class-nonrec ((x user-defined-class) attr &optional instance)
   ;; All udc's have a <py-dict> instance in slot named

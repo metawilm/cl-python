@@ -402,7 +402,7 @@
  #+(or) ;; kw = val: kw must be identifier
  (argument (test = test) ((list 'key $1 $3)))
  
- (argument (identifier = test) ((list $2 $1 $3)))
+ (argument (identifier = test) ((list 'key $1 $3)))
  (argument (test gen-for) ((list 'gen-for $1 $2)))
 
  (list-iter :or list-for list-if)

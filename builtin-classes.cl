@@ -15,6 +15,12 @@
   (gethash f *__new__-methods*))
 
 
+(defmacro def-class-specific-methods (class data)
+  `(progn ,@(loop for (attname (kind . val)) in data
+		collect `(setf (get ',attname (find-class ',class))
+			   (cons ',kind #',val)))))
+
+
 ;; TODO:
 ;;  - __mro__ attribute of classes
 ;;  - need for __eq__ when __cmp__ is already defined?
@@ -111,7 +117,24 @@
 (defmethod __class__ ((x (eql (find-class 'python-type)))) x)
 
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Some default methods (XXX or just regular functions?)
 
+(defun py-type-__new__ (cls &rest options)
+  (declare (ignore options))
+  (make-instance cls))
+
+(defmethod __init__((x python-object) &optional pos-args kw-args)
+  (declare (ignore pos-args kw-args))
+  ;; nothing
+  )
+			    
+(def-class-specific-methods
+    python-type
+    ((__new__ (meth . py-type-__new__))
+     #+(or)(__init__ (meth . py-type-__init__))))
+
+(register-as-__new__method #'py-type-__new__)
  
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -346,10 +369,6 @@
      (complex-conjugate (conjugate x))))
 
 
-(defmacro def-class-specific-methods (class data)
-  `(progn ,@(loop for (attname (kind . val)) in data
-		collect `(setf (get ',attname (find-class ',class))
-			   (cons ',kind #',val)))))
 
 (def-class-specific-methods
     py-complex

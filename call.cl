@@ -12,8 +12,9 @@
 
 (defmethod __call__ ((x generic-function) &optional pos-args kwd-args)
   (when kwd-args
-    (py-raise 'ValueError "built-in function ~S does not take keyword arguments (got: ~A)"
-	      x kwd-args))
+    (warn "supplying keyword args to generic function ~A (kw: ~S)" x kwd-args))
+  #+(or)(py-raise 'ValueError "built-in function ~S does not take keyword arguments (got: ~A)"
+		  x kwd-args)
   (apply x pos-args))
 
 (defmethod __call__ ((x function) &optional pos-args kwd-args)
