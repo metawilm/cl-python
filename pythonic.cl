@@ -9,6 +9,9 @@
   `(error ,exc-type :args (format nil ,string ,@format-args)))
 
 
+;; XXX All uses of PY-ITERATE should be changed to use GET-PY-ITERATE-FUN instead.
+;; There's no need for this macro, and this macro is even incorrect in that it calls __iter__.
+
 (defmacro py-iterate ((val object) &body body)
   "Iterate over OBJECT, successively binding VAL to the new value
    and executing BODY.
@@ -59,10 +62,12 @@
       
       ;; Fall-back: __getitem__ with successive integers, starting from 0.
       ;; 
-      ;; XXX There is the possibility that the object's class changes
-      ;; while we do this. By storing the __getitem__ method we just
-      ;; found, we don't take that into account. Might be semantically
-      ;; wrong, but looking __getitem__ up again all the time is wasteful.
+      ;; XXX There is the theoretical possibility that the object's
+      ;; class, or just the __getitem__ method, changes while we do
+      ;; this. By storing the __getitem__ method we just found, we
+      ;; don't take that into account. Might be semantically wrong,
+      ;; but changing __getitem__ while iterating over the object is
+      ;; insane.
       
       (multiple-value-bind (getitem-meth found)
 	  (getattr-of-class object '__getitem__)
@@ -79,6 +84,18 @@
 	  
 	  (py-raise 'TypeError
 		    "Iteration over non-sequence (got: ~A)" object))))))
+
+(defun py-iterate->lisp-list (object)
+  (map-over-py-object #'identity object))
+
+(defun map-over-py-object (fun object)
+  "Iterate over OBJECT, calling Lisp function FUN on each value."
+  (declare (optimize (speed 3)(debug 0)(safety 0))
+	   (:explain :calls))
+  (loop with f = (get-py-iterate-fun object)
+      with val = (funcall f)
+      when val collect (funcall fun val)
+      while val do (setf val (funcall f))))
 
 
 (defmacro ensure-py-type (vars cl-type err-str)
@@ -114,12 +131,14 @@
     (python-object (values x nil))
     (number        (values (make-py-number x) t))
     (string        (values (make-py-string x) t))
+    (symbol        (values (make-py-string (string x)) t))
     ((eql (find-class 'python-type)) (values x nil))
     (t (error "Not a recognized Python object: ~A" x))))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;;; Bridging the gap: making Lisp functions callable from within Python
+;;; Bridging the gap: making Lisp functions callable from within
+;;; Python
 
 (defmacro def-pyfun (name (&rest args) &body body)
   "Define a Lisp function that is callable from within Python. ~@
