@@ -1137,27 +1137,27 @@
 			       finally (return namespace))))
     
     (if (eq module-namespace x)
-	(warn "Bogus top-level 'global' declaration for variable ~A" var-name))
+	(warn "Bogus top-level 'global' declaration for variable ~A" var-name)
     
-    (let ((lookup-meth (make-instance 'standard-method
-			 :specializers (list (mop:intern-eql-specializer x)
-					     (mop:intern-eql-specializer var-name))
-			 :lambda-list '(x var)
-			 :function (lambda (x var)
-				     (declare (ignore var x))
-				     (namespace-lookup module-namespace var-name))))
+      (let ((lookup-meth (make-instance 'standard-method
+			   :specializers (list (mop:intern-eql-specializer x)
+					       (mop:intern-eql-specializer var-name))
+			   :lambda-list '(x var)
+			   :function (lambda (x var)
+				       (declare (ignore var x))
+				       (namespace-lookup module-namespace var-name))))
 	 
-	  (bind-meth (make-instance 'standard-method
-		       :specializers (list (mop:intern-eql-specializer x)
-					   (mop:intern-eql-specializer var-name)
-					   (find-class 't))
-		       :lambda-list '(x var val)
-		       :function (lambda (x var val)
-				   (declare (ignore x var))
-				   (namespace-bind module-namespace var-name val)))))
+	    (bind-meth (make-instance 'standard-method
+			 :specializers (list (mop:intern-eql-specializer x)
+					     (mop:intern-eql-specializer var-name)
+					     (find-class 't))
+			 :lambda-list '(x var val)
+			 :function (lambda (x var val)
+				     (declare (ignore x var))
+				     (namespace-bind module-namespace var-name val)))))
 			 
-      (add-method (ensure-generic-function 'namespace-lookup) lookup-meth)
-      (add-method (ensure-generic-function 'namespace-bind)   bind-meth))))
+	(add-method (ensure-generic-function 'namespace-lookup) lookup-meth)
+	(add-method (ensure-generic-function 'namespace-bind)   bind-meth)))))
   
 (defmethod namespace-copy ((x namespace))
   (check-only-symbol-keys x)
