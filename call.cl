@@ -94,6 +94,10 @@
                           class ~%~A ~%as first argument (got as first pos arg: ~S)"
 			 x um-class inst))))))
 
+(defmethod py-call ((x static-method) &optional pos-args kwd-args)
+  (break "py-call static-method"))
+;;  (with-slots (func) x
+;;    (py-call func pos-args kwd-args)))
 
 
 ;;;; Calling a class creates an instance
@@ -104,10 +108,12 @@
   
   (multiple-value-bind (meth found)
       (internal-get-attribute cls '__new__)
+    (break)
     (if found
 		
-	(progn (warn "__new__ method found for class ~A" cls)
+	(progn (warn "__new__ method found for class ~A: ~A" cls meth)
 	       (let ((inst (py-call meth (cons cls pos-args) kwd-args))) ;; call with class as first arg
+		 (warn "result of calling __new__: ~A" inst)
 		 (multiple-value-bind (res found)
 		     (call-attribute-via-class inst '__init__ pos-args kwd-args)
 		   (declare (ignore res))

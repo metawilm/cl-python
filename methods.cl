@@ -19,15 +19,15 @@
     (when assval
       (warn "builtin-class-methods already had a func for method ~A of class ~A"
 	    meth-name class))
-    (if alist
-	(push kons alist)
-      (setf (gethash meth-name *builtin-class-attr/meths*) (list kons)))))
+    (push kons alist)
+    (setf (gethash meth-name *builtin-class-attr/meths*) alist)))
 
 (defmethod lookup-bi-class-attr/meth ((class class) (meth-name symbol))
   "Returns METHOD, TYPE. Both are NIL if not found."
   (cdr (assoc class (gethash meth-name *builtin-class-attr/meths*))))
 
-
+(defmethod view-register ((meth-name symbol))
+  (gethash meth-name *builtin-class-attr/meths*))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Attributes of instances (not methods)
@@ -57,6 +57,11 @@
    (class  :initarg :class))
   (:metaclass builtin-class))
 
+(defmethod print-object ((x unbound-method) stream)
+  (print-unreadable-object (x stream :type t :identity t)
+    (with-slots (func class) x
+      (format stream ":func ~A  :class ~A" func class))))
+  
 (defun make-unbound-method (&key func class)
   (make-instance 'unbound-method :func func :class class))
 

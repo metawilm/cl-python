@@ -1,5 +1,7 @@
 (in-package :python)
 
+(declaim (optimize (debug 3)))
+
 ;; Attribute getting and setting
 ;; =============================
 ;; 
@@ -432,23 +434,38 @@
 	      "Object ~A has no attribute ~A" x attr)))
 
 
-(defmethod getattr-of-class-nonrec ((cls builtin-class) attr)
+(defmethod getattr-of-class-nonrec ((cls class) attr) ;; was: builtin-class
   (let ((val (lookup-bi-class-attr/meth cls attr)))
     (when val 
-      (return-from getattr-of-class-nonrec (values val t)))))
+      (return-from getattr-of-class-nonrec
+	(values (maybe-bind val *None* cls)
+		t)))))
 
 (defmethod getattr-of-class-nonrec ((cls user-defined-class) attr)
   (multiple-value-bind (val found)
       (__getitem__ (slot-value cls '__dict__) attr)
     (when found
-      (return-from getattr-of-class-nonrec (values val t)))))
+      (return-from getattr-of-class-nonrec
+	(values (maybe-bind val *None* cls)
+		t)))))
 
 (defmethod getattr-of-class-nonrec ((cls (eql (find-class 't))) attr)
   (let ((val (lookup-bi-class-attr/meth cls attr)))
     (when val 
-      (return-from getattr-of-class-nonrec (values val t)))))
+      (return-from getattr-of-class-nonrec
+	(values (maybe-bind val *None* cls)
+		t)))))
   
 
+(defmethod getattr-of-class-rec :around ((cls class) attr)
+  (declare (ignore attr))
+  (let ((x (call-next-method)))
+    (if (typep x 'unbound-method) ;; XXX hack
+	(progn
+	  (setf (slot-value x 'class) cls)
+	  (values x t))
+      (values x t))))
+  
 (defmethod getattr-of-class-rec ((cls builtin-class) attr)
   (loop for c in (mop:class-precedence-list cls)
       while (typep c 'builtin-class)
@@ -456,7 +473,11 @@
 	   (when val
 	     (return-from getattr-of-class-rec (values val t)))))
   
-  ;; fallback: methods specialized on class 't
+  ;; fallback: methods specialized on class 'class or class 't
+  (let ((val (getattr-of-class-nonrec (find-class 'class) attr)))
+    (when val
+      (return-from getattr-of-class-rec (values val t))))
+
   (let ((val (getattr-of-class-nonrec (find-class 't) attr)))
     (when val
       (return-from getattr-of-class-rec (values val t))))
@@ -491,7 +512,11 @@
 	       (return-from getattr-of-class-rec (values val t))))
 	   (setf c (pop cpl))))
   
-  ;; fallback: methods specialized on class 't
+  ;; fallback: methods specialized on class 'class and class 't
+  (let ((val (getattr-of-class-nonrec (find-class 'class) attr)))
+    (when val
+      (return-from getattr-of-class-rec (values val t))))
+
   (let ((val (getattr-of-class-nonrec (find-class 't) attr)))
     (when val
       (return-from getattr-of-class-rec (values val t))))
@@ -677,27 +702,26 @@
   "Lookup ATTR attribute of X's class"
   (internal-get-attribute (__class__ x) attr))
 
-(defun call-attribute-via-class (x attr &optional pos-args key-args)
+(defmethod call-attribute-via-class ((x builtin-instance) (attr (eql '__get__))
+				     &optional pos-args key-args)
+  (assert (null key-args))
+  (values (py-call #'__get__ (cons x pos-args)) t))
+   
+(defmethod call-attribute-via-class (x attr &optional pos-args key-args)
   "Lookup ATTR of the class of X, and call it for instance X. ~@
    Returns RES, FOUND-P: RES is the result of calling ATTR; ~@
    FOUND-P is T or NIL. ~
    Example use: `print' calls the class' __str__ method, not the ~@
    __str__ attribute of the instance."
-
-  (multiple-value-bind (val found)
-      (getattr-of-class-rec (__class__ x) attr)
-    (if found
-	
-	(multiple-value-bind (bound-val found)
-	    (call-attribute-via-class val '__get__ (list x (__class__ x)))
-	  (if found
-	      (values (py-call bound-val pos-args key-args)
-		      t)
-	    (values (py-call val (cons x pos-args) key-args)
-		    t)))
-            
-      (values nil nil))))
-
+  (let ((klass (__class__ x)))
+    (multiple-value-bind (val found)
+	(getattr-of-class-rec klass attr)
+      #+(or)(break)
+      (cond ((not found)          (values nil nil))
+	    ((eq val #'__get__)   (values (apply val x pos-args) t)) ;; XXX experimental
+	    (t  (let ((bound-val (maybe-bind val *None* klass)))
+		  (values (py-call bound-val (cons x pos-args) key-args)
+			  t)))))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; SET attribute

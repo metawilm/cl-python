@@ -90,7 +90,7 @@
 (defgeneric __init__ (x &optional pos-arg key-arg)
   (:documentation "Object initialization"))
 
-(defmethod __init_ (x &optional pos-arg key-arg)
+(defmethod __init__ (x &optional pos-arg key-arg)
   (declare (ignore x pos-arg key-arg)
 	   (special *None*))
   *None*)
@@ -174,6 +174,18 @@
 
 ;; XXX __reduce__ ?   they have something to do with pickling, but are not documented?
 ;; XXX __reduce_ex__ ?
+
+
+
+;; experiment: give all object __get__ method
+(defmethod __get__ (x inst cls)
+  (declare (ignore inst cls))
+  x)
+
+(register-bi-class-attr/meth (find-class 't) '__get__ #'__get__)
+
+
+
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -1000,6 +1012,13 @@
 ;; USER-DEFINED-FUNCTION is used for representing all functions
 ;; defined while running Python.
 
+(defmethod __get__ ((x function) inst class)
+  (if (eq inst *None*)
+      (make-unbound-method :func x :class class) ;; <Class>.meth
+    (make-bound-method :func x :object inst))) ;; <instance>.meth
+
+(register-bi-class-attr/meth (find-class 'function) '__get__ #'__get__)
+
 (defclass python-function (builtin-instance)
   ((ast             :initarg :ast   
 		    :documentation "AST of the function code")
@@ -1020,6 +1039,8 @@
   (if (eq inst *None*) ;; Hmm what if class of None were subclassable?!
       (make-unbound-method :func x :class class) ;; <Class>.meth
     (make-bound-method :func x :object inst))) ;; <instance>.meth
+
+(register-bi-class-attr/meth (find-class 'python-function) '__get__ #'__get__)
 
 ;; Lambda
 
@@ -1138,6 +1159,8 @@
   ;; whether looked up via class or instance, underlying value is returned unbound
   (declare (ignore inst class))
   (slot-value x 'func))
+
+(register-bi-class-attr/meth (find-class 'static-method) '__get__ #'__get__)
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; List
