@@ -1,5 +1,7 @@
 (in-package :python)
 
+(declaim (optimize (debug 3)))
+
 ;;; Built-in classes and their methods
 
 
@@ -28,6 +30,7 @@
 (defmethod __class__ ((x builtin-class)) (find-class 'python-type))
 (defmethod __class__ ((x function))      (find-class 'python-type)) ;; XXX doesn't show function name
 (defmethod __class__ ((x python-object)) (class-of x)) ;; XXX check
+(defmethod __class__ ((x symbol))        (find-class 'py-string))
 
 ;; PYTHON-OBJECT is both an instance and a subclass of PYTHON-TYPE.
 (defmethod __class__ ((x (eql (find-class 'python-object)))) (find-class 'python-type))
