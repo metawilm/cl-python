@@ -246,47 +246,41 @@
   (make-dict data))
 
 
-(defun eval-listcompr (expression list-fors-ifs)
-  ;; Also, just as CPython, we do leak (the final values of) the `for'
-  ;; variables to the environment in which this is executed -- that's
-  ;; something that Python is said to solve in the future.
-  
-  ;; this is what I want:
-  #+(or)(eval-listcompr-m expression list-fors list-ifs)
-  
-  ;; this is how it does work:
-  (let ((s `(eval-listcompr-m ,expression
-				,list-fors-ifs)))
-    (make-py-list-from-list (eval s))))
+(defun eval-listcompr (expr list-for-ifs)
+  (let ((acc ()))
+    (labels ((process-for/ifs (for-ifs)
+	       (let ((clause (car for-ifs)))
+		 (cond ((null for-ifs)                 (collect-expr))
+		       ((eq (car clause) 'list-for-in) (process-for for-ifs))
+		       ((eq (car clause) 'list-if)     (process-if for-ifs)))))
+	     
+	     (collect-expr () (push (py-eval expr) acc))
+	     
+	     (process-for (for-ifs)
+	       ;; copied from eval-for-in - maybe should refactor this code
+	       (destructuring-bind
+		   ((_list-for-in (_exprlist targets comma?) source) &rest rest)
+		   for-ifs
+		 (declare (ignore _list-for-in _exprlist))
+		 (let ((target (if (or comma?
+				       (> (length targets) 1))
+				   `(list ,@targets)
+				 (car targets)))
+		       (esource (py-eval source)))
+		   (py-iterate ($dummy$ esource)
+			       (eval-assign-one target $dummy$)
+			       (process-for/ifs rest)))))
+	     
+	     (process-if (for-ifs)
+	       (destructuring-bind ((_list-if condition) &rest rest)
+		   for-ifs
+		 (declare (ignore _list-if))
+		 (when (py-val->lisp-bool (py-eval condition))
+		   (process-for/ifs rest)))))
+      
+      (process-for/ifs list-for-ifs)
+      (make-py-list-from-list (nreverse acc)))))
 
-(defmacro eval-listcompr-m (expr list-fors-ifs)
-  ;; Idea: start with EXPR, wrap all IFs around it, then wrap all FORs
-  ;; around that.
-  
-  (let* ((acc '#:acc)
-	 (collect-step `(push (py-eval ',expr) ,acc))
-	 (res collect-step))
-    
-    (dolist (clause (reverse list-fors-ifs)) ;; treat clauses from inner to outer
-      (ecase (car clause)
-	
-	(list-for-in
-	 (destructuring-bind (exprlist source)
-	     (cdr clause)
-	   (let ((dummy (gensym "dummy")))
-	     (setf res
-	       `(py-iterate (,dummy (py-eval ',source))
-			    (eval-assign-one ',(caadr exprlist) ,dummy) ;; XXX cadr hack
-			    ,res)))))
-	(list-if
-	 (let ((test (second clause)))
-	   (setf res
-	     `(py-if (py-eval ',test)
-		     ,res))))))
-    
-    `(let ((,acc nil))
-       ,res
-       (nreverse ,acc))))
   
 #+(or)
 (defun eval-string-conv (tuple)
