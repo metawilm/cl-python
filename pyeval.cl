@@ -6,29 +6,8 @@
 ;;   by introducing `anonymous' variable name for first argument.
 ;;  http://mail.python.org/pipermail/python-dev/2003-October/038915.html
 
-(defparameter *scope* nil)
-(defparameter *py-eval-warn* nil)
+(defparameter *scope* nil "Current execution namespace")
 
-#+(or)
-(defun make-builtins-namespace ()
-  ;; Fill a new namespace with all built-in names. Because there are
-  ;; no name conflicts, the order of filling with functions and types
-  ;; doesn't matter.
-  (let ((ns (make-namespace :name "builtins-namespace")))
-    (do-external-symbols (s 'python-builtin-functions)
-      (namespace-bind ns (symbol-name s) (symbol-function s)))
-    (do-external-symbols (s 'python-builtin-types)
-      (if (boundp s) ;; check needed, as some symbols are TODO
-	  (namespace-bind ns (symbol-name s) (symbol-value s))))
-    (loop for (key . val) in `((None . ,*None*)
-			       (Ellipsis . ,*Ellipsis*)
-			       (NotImpemented . ,*NotImplemented*)
-			       (True . ,*True*)
-			       (False . ,*False*))
-	do (namespace-bind ns key val))
-    (loop for (name . exc) in *python-exceptions*
-	do (namespace-bind ns name exc))
-    ns))
 
 (defun make-builtins-module ()
   
@@ -53,27 +32,29 @@
     (make-module :name "__builtin__"
 		 :namespace ns)))
 
-#+(or)
-(defparameter *builtins* (make-builtins-namespace))
-
 (defparameter *builtins* (make-builtins-module))
 
-;;; evaluation
+
+;;; Evaluation
 
 (defun user-py-eval (ast &optional namespace)
   "Evaluate some Python code. This is the function to be called for ~
-   evaluating user-supplied code in the form of an AST, and optionally a namespace."
+   evaluating user-supplied code in the form of an AST, and
+   optionally a namespace."
+  
   (let ((*scope* (or namespace 
 		     (make-namespace :name "<new user-py-eval ns>"
 				     :builtins t))))
     (py-eval ast)))
 
-(defun py-eval (ast)
-  "Evaluate AST. Assumes *scope* is set to something."
 
+(defun py-eval (ast)
+  "Evaluate AST. Assumes *scope* is set appropriately."
+
+  ;; During evaluation, Lisp errors may be signaled. They are
+  ;; converted to the corresponding Python exception, where
+  ;; appripriate.
   (handler-bind 
-      
-      ;; XXX how to get at operands? (slot-value doesn't work)
       ((division-by-zero (lambda (c) (declare (ignore c))
 				 (py-raise 'ZeroDivisionError
 					   "Division or modulo by zero"))))
@@ -89,7 +70,6 @@
     
     (when (eql ast (find-class 'python-type))
       (return-from py-eval ast))
-	
     
     (case (car ast)
       (file-input (eval-file-input (cdr ast)))

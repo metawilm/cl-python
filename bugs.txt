@@ -5,4 +5,8 @@
 - generator functions not handled yet
 - exceptions must be recast as python exceptions as much as possible (what about tracebacks?)
 - lexer should allow newlines inside lists, tuples, dicts
+- support   def f((a,b), c): print b
+            f((1,2),3) -> "2"
+  by introducing `anonymous' variable name for first argument.
+  http://mail.python.org/pipermail/python-dev/2003-October/038915.html
 
