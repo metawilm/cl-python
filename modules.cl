@@ -40,12 +40,16 @@
     (setf *__builtin__-module* mod
 	  *__builtin__-module-namespace* ns)
     
-    (do-external-symbols (s 'python-builtin-functions)
-      (namespace-bind ns (symbol-name s) (symbol-function s)))
-  
     (do-external-symbols (s 'python-builtin-types)
       (if (boundp s) ;; check needed, as some symbols are TODO
 	  (namespace-bind ns (symbol-name s) (symbol-value s))))
+
+    ;; Because function `type' should override the class (yes, this is
+    ;; ugly, but so is Python), functions are now bound, right after
+    ;; the types.
+    
+    (do-external-symbols (s 'python-builtin-functions)
+      (namespace-bind ns (symbol-name s) (symbol-function s)))
   
     (loop for (key val) in
 	  `((None ,*None*)(Ellipsis ,*Ellipsis*)(NotImpemented ,*NotImplemented*)(True ,*True*)(False ,*False*))

@@ -1,34 +1,8 @@
 (in-package :python)
 
 (defparameter *scope* nil "Current execution namespace")
-
-#+(or)
-(defun make-builtins-module ()
-  
-  ;; Fill a new namespace with all built-in names, and create a module
-  ;; for it. Because there are no name conflicts, the order of filling
-  ;; with functions and types doesn't matter.
-  
-  (let ((ns (make-namespace :name "builtins-namespace")))
-    (do-external-symbols (s 'python-builtin-functions)
-      (namespace-bind ns (symbol-name s) (symbol-function s)))
-    (do-external-symbols (s 'python-builtin-types)
-      (if (boundp s) ;; check needed, as some symbols are TODO
-	  (namespace-bind ns (symbol-name s) (symbol-value s))))
-    (loop for (key . val) in `((None . ,*None*)
-			       (Ellipsis . ,*Ellipsis*)
-			       (NotImpemented . ,*NotImplemented*)
-			       (True . ,*True*)
-			       (False . ,*False*))
-	do (namespace-bind ns key val))
-    (loop for (name . exc) in *python-exceptions*
-	do (namespace-bind ns name exc))
-    (make-module :name "__builtin__"
-		 :namespace ns)))
-
 (defparameter *__debug__* 1) ;; CPython readonly variable `__debug__' (see EVAL-ASSERT)
 
-#+(or)(defparameter *sys.modules* (make-namespace) "Registry of all modules")
 
 ;;; Evaluation
 
