@@ -609,17 +609,6 @@
     (loop for tg in targets
 	collect (do-eval tg)))) ;; local function: can't do direct mapcar
 
-#+(or) ;; unused
-(defun find-in-lists (item list)
-  "Find ITEM in LISTS. LISTS consists of lists and atoms"
-  (if (atom list)
-      (eq list item)
-    (loop for x in list
-	if (find-in-lists item x)
-	do (return t)
-	finally (return nil))))
-
-
 (defun eval-funcdef (fname params suite)
   "In the current namespace, FNAME becomes bound to a function object ~@
    with given formal parameters and function body."
@@ -653,13 +642,13 @@
   *None*)
 
 (defun eval-lambda (params expr)
-  (let ((params (multiple-value-list (parse-function-parameter-list params))))
+  (let ((parsed-params (multiple-value-list (parse-function-parameter-list params))))
     (make-lambda-function
      :ast expr
      :namespace (make-namespace :name "lambda namespace"
 				:inside *scope*)
-     :params params
-     :call-rewriter (apply #'make-call-rewriter (parse-function-parameter-list params)))))
+     :params parsed-params
+     :call-rewriter (apply #'make-call-rewriter parsed-params))))
 
 (defun parse-function-parameter-list (params)
   "Returns POS-PARAMS, KW-PARAMS, *-PAR, **-PAR as multiple values"
@@ -734,34 +723,6 @@
     ;; return value, as it is a stmt, not an expr.
     c))
 
-(defun new-eval-classdef (cname inheritance suite)
-  ;; XXX for easy testing only!
-  (when (null inheritance)
-    (setf inheritance '(tuple)))
-  (assert (eq (car inheritance) 'tuple) ()
-    "Expected TUPLE inheritance list, but got ~S" inheritance)
-  (let* ((ns (make-namespace :name (format nil "<ns for class ~A>" cname)
-			     :inside *scope*))
-	 (c (make-python-class :name cname
-			       :module "ModuleName"
-			       :supers (mapcar #'py-eval (cdr inheritance))
-			       :namespace ns)))
-    
-    ;; In the current namespace, the name of the class that is defined
-    ;; now beceoms bound to the class object that results from
-    ;; evaluating the classdef.
-    #+(or)(namespace-bind *scope* cname c)
-    
-    ;; Evaluate SUITE now, in the new namespace inside the class:
-    ;; methods and class attributes are defined in it, plus there may
-    ;; be other side effects.
-    (when suite
-      (let ((*scope* ns))
-	(py-eval suite)))
-    
-    ;; Finally, return the class (purely for debuggin: classdef has no
-    ;; return value, as it is a stmt, not an expr.
-    c))
 
 (defun read-file (filename)
   (with-open-file (stream filename :direction :input)
@@ -913,11 +874,6 @@
 (defun get-slice (obj start end &optional (step nil))
   (declare (ignore obj start end step))
   'todo)
-
-#+(or) ;; unused
-(defun get-item (obj item)
-  ;;declare (ignore obj item))
-  (__getitem__ obj item))
 
 
 ;; XXX print todo: lookup sys.stdout instead of blindly using `t' as
