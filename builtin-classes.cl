@@ -97,8 +97,8 @@
   (:documentation "Create a new instance of class CLS"))
 
 (defmethod __new__ ((cls class) &rest args)
-  (break "__new__ class: correct?")
-  (when args
+  ;; (break "__new__ class: correct?")
+  #+(or)(when args
     (warn (format nil "Default __new__ ignoring args: ~A" args)))
   (make-instance cls))
 
@@ -2253,8 +2253,9 @@
 				    (prog1 (string (aref x i))
 				      (incf i)))))))
      (__len__  (x) (length x))
-     (__mod__  (x args) (locally (declare (ignore x args))
-			  (error "todo: string mod")))
+     (__mod__  (x args) (progn (warn "string modulo not supported yet")
+			       (warn "    s: ~S" x)
+			       (warn " args: ~S" (call-attribute-via-class args '__repr__))))
      ;; rmod, rmul
      (__mul__  (x n) (__mul-1__ x n))
      
@@ -2293,7 +2294,7 @@
      (string-index    (x y &optional start end)  (string-index-1 x y (or start 0) (or end 0)))))
 
 
-(loop for name in '(__getitem__ __iter__ __len__ __mul__)
+(loop for name in '(__getitem__ __iter__ __len__ __mod__ __mul__)
     do (register-bi-class-attr/meth (find-class 'py-string) name (symbol-function name)))
 				    
 (loop for (k v) in `((capitalize ,#'string-capitalize)

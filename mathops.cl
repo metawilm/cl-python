@@ -263,6 +263,24 @@
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Binary logical operations
+
+(defmethod py-or (x y)
+  (if (py-val->lisp-bool x)
+      x
+    y))
+
+(push (cons 'or #'py-or) *math-binary-op-assoc*)
+
+(defmethod py-and (x y)
+  (if (py-val->lisp-bool x)
+      y
+    x))
+
+(push (cons 'and #'py-and) *math-binary-op-assoc*)
+      
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Unary operators
 ;; 
 ;; abs() , __abs__ is handled in function py-abs in builtin-funcs.cl

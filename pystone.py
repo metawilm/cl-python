@@ -32,7 +32,7 @@ Version History:
 
 """
 
-LOOPS = 50000
+LOOPS = 500
 
 from time import clock
 
@@ -87,9 +87,14 @@ def Proc0(loops=LOOPS):
     global PtrGlbNext
 
     starttime = clock()
+    print "starttime", starttime
+
     for i in range(loops):
         pass
-    nulltime = clock() - starttime
+    tmp = clock()
+    print "tmp", tmp
+    nulltime = tmp - starttime
+    print "nulltime", nulltime
 
     PtrGlbNext = Record()
     PtrGlb = Record()
@@ -102,6 +107,7 @@ def Proc0(loops=LOOPS):
     Array2Glob[8][7] = 10
 
     starttime = clock()
+    print "starttime", starttime
 
     for i in range(loops):
         Proc5()
@@ -127,8 +133,11 @@ def Proc0(loops=LOOPS):
         IntLoc2 = 7 * (IntLoc3 - IntLoc2) - IntLoc1
         IntLoc1 = Proc2(IntLoc1)
 
-    benchtime = clock() - starttime - nulltime
-    return benchtime, (loops / benchtime)
+    endtime = clock()
+    print "endtime", endtime
+    benchtime = endtime - starttime - nulltime
+    print "benchtime", benchtime
+    return benchtime, (1.0*loops / benchtime)
 
 def Proc1(PtrParIn):
     PtrParIn.PtrComp = NextRecord = PtrGlb.copy()

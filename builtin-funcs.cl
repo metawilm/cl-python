@@ -81,12 +81,12 @@
    This is the inverse of pyb:ord."
   (let ((i (py-int-designator-val x)))
     (if (<= 0 i 255)
-	(make-py-string (code-char i))
-      (py-raise 'TypeError "Function chr() should be given an integer in range 0..255 (got: ~A)" i))))
+	(string (code-char i))
+      (py-raise 'TypeError
+		"Function chr() should be given an integer in range 0..255 (got: ~A)" i))))
 
 
-
-;; numbers
+;; compare numbers 
 
 (defmethod pyb:cmp ((x number) (y number))
   ;; This special case is not needed, because this case is already

@@ -15,12 +15,12 @@
 
 
 (defun repl ()
+  (declare (special *scope* *sys.modules* *initial-sys.modules* *None*))
+  
   (format t "[CLPython -- type `:q' to quit, `:help' for help]~%")
-  (locally (declare (special *sys.modules*))
-    (setf *sys.modules* (namespace-copy *initial-sys.modules*)))  ;; or LET ?
+  (setf *sys.modules* (dict-copy *initial-sys.modules*))  ;; or LET ?
   (loop
     (let ((*scope* (make-namespace :name "repl ns" :builtins t)))
-      (declare (special *scope*))
       (namespace-bind *scope* '__name__ "__main__")
       (loop
 	(with-simple-restart (return-python-toplevel "Return to Python top level [:ptl]")
@@ -35,13 +35,13 @@
 				 (assert (eq (car ev-ast) :file-input))
 				 (when (> (length ev-ast) 1)
 				   (let ((ev (car (last ev-ast))))
-				     (locally (declare (special *None*))
+				     
 					
-				       ;; don't print value if it's None
-				       (unless (member ev (list *None* nil) :test 'eq)
-					 (format t "~A~%" (call-attribute-via-class ev '__repr__))
-					 (namespace-bind *scope* '_ ev)
-					 (setf *last-val* ev)))))
+				     ;; don't print value if it's None
+				     (unless (member ev (list *None* nil) :test 'eq)
+				       (format t "~A~%" (call-attribute-via-class ev '__repr__))
+				       (namespace-bind *scope* '_ ev)
+				       (setf *last-val* ev))))
 				 (return-from eval-print-ast))
 			     (retry-py-eval ()
 				 :report "Retry (py-eval AST)" ())))))
