@@ -408,10 +408,12 @@
 ;; New design of user-defined classes
 
 (defclass py-udc ()
-  ((metaclass :initarg :metaclass :initform nil)
+  ((name :initarg :name)
+   (metaclass :initarg :metaclass :initform nil)
    (baseclasses :initarg :baseclasses :initform nil)
    (subclasses :initarg :subclasses :initform nil)
    (slots :initarg :slots :initform nil)
+   (has-slots :initarg :has-slots)
    (namespace :initarg :namespace)
    (mro :initarg :mro)
    (subtype-of-type :initarg :subtype-of-type :initform nil)))
