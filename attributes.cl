@@ -146,12 +146,12 @@
     raised in methods called in the process."))
 
 
-(defmethod internal-get-attribute :around (x attr)
+#+(or)(defmethod internal-get-attribute :around (x attr)
   (ensure-py-type attr attribute-name "Not a valid attribute name: ~S")
   (call-next-method x attr))
 
 
-(defmethod internal-get-attribute ((x udc-instance) attr)
+#+(or)(defmethod internal-get-attribute ((x udc-instance) attr)
   (let ((__getattr__ nil)
 	(attr-val    nil))
     
@@ -235,21 +235,21 @@
 		"Object ~A has no attribute ~A" x attr))))
 
 
-(defmethod internal-get-attribute ((x (eql (find-class 'builtin-class))) attr)
+#+(or)(defmethod internal-get-attribute ((x (eql (find-class 'builtin-class))) attr)
   ;; builtin-class is a subtype of python-type, so ...
   ;; XXX used where?
   (break "eql builtin-class")
   (internal-get-attribute (find-class 'python-type) attr))
 
-(defmethod internal-get-attribute ((x (eql (find-class 'python-type))) attr)
+#+(or)(defmethod internal-get-attribute ((x (eql (find-class 'python-type))) attr)
   #+(or)(search-generic-function-attr x attr)
   (break "eql python-type"))
 
-(defmethod internal-get-attribute ((x python-type) attr)
+#+(or)(defmethod internal-get-attribute ((x python-type) attr)
   (declare (ignore attr))
   (error "TODO: i-g-a python-type: ~A" x))
 
-(defmethod internal-get-attribute ((x user-defined-class) attr)
+#+(or)(defmethod internal-get-attribute ((x user-defined-class) attr)
   (loop for cls in #+(or)(mop:class-precedence-list x)
 		   (mop:class-precedence-list (class-of x))
 		   ;; until (eq cls (load-time-value (find-class 'python-type)))
@@ -267,17 +267,17 @@
   (values nil nil))
 
 
-(defmethod internal-get-attribute ((x py-module) attr)
+#+(or)(defmethod internal-get-attribute ((x py-module) attr)
   ;; XXX are module __dict__ attributes overridable?
   (let ((ns (slot-value x 'namespace)))
     (cond ((eq attr '__dict__) (values ns t))
 	  (t                   (namespace-lookup ns attr)))))
 
-(defmethod internal-get-attribute ((x builtin-instance) attr)
+#+(or)(defmethod internal-get-attribute ((x builtin-instance) attr)
   (search-generic-function-attr (class-of x) attr x))
 
 
-(defmethod internal-get-attribute (x attr)
+#+(or)(defmethod internal-get-attribute (x attr)
   ;; Called when X is a Python object designator.
   
   (assert (typep x '(or symbol string number)) ()
@@ -294,7 +294,7 @@
 	       (values val t)))))
   (values nil nil))
 
-(defmethod internal-get-attribute ((x builtin-class) attr)
+#+(or)(defmethod internal-get-attribute ((x builtin-class) attr)
   (loop for cls in (mop:class-precedence-list x)
 		   ;; until (eq cls (load-time-value (find-class 'python-type)))
       do (multiple-value-bind (val found)
@@ -306,6 +306,39 @@
 
 
 ;;; NEW
+
+(defmethod internal-get-attribute ((x builtin-instance) attr)
+  (getattr-of-instance-rec x attr))
+
+(defmethod internal-get-attribute ((x udc-instance) attr)
+  (getattr-of-instance-rec x attr))
+
+(defmethod internal-get-attribute ((x builtin-class) attr)
+  (getattr-of-class-rec x attr))
+
+(defmethod internal-get-attribute ((x user-defined-class) attr)
+  (getattr-of-class-rec x attr))
+
+
+
+(defun maybe-bind (object instance class)
+  (multiple-value-bind (bound-val get-found)
+      (call-attribute-via-class object '__get__ (list instance class))
+    (if get-found
+	bound-val
+      object)))
+
+
+(defmethod getattr-of-instance-rec ((x builtin-instance) attr)
+  (loop for cls in (mop:class-precedence-list (class-of x))
+      while (typep cls 'builtin-class)
+      do (let ((meth (lookup-bi-class-attr/meth x attr)))
+	   (when meth
+	       (return-from getattr-of-instance-rec
+		 (values (maybe-bind meth x (class-of x))
+			 t)))))
+  (values nil nil))
+
 
 (defmethod getattr-of-instance-rec ((x udc-instance) attr)
 
@@ -325,12 +358,10 @@
     (loop while (typep cls 'user-defined-class)
 	do (multiple-value-bind (val found)
 	       (getattr-of-class-nonrec cls '__getattribute__)
-	     (when found (multiple-value-bind (bound-val get-found)
-			     (call-attribute-via-class val '__get__ (list x (class-of x)))
-			   (return-from getattr-of-instance-rec
-			     (values (if get-found
-					 (py-call bound-val (list attr))
-				       (py-call val (list x attr))))))))
+	     (when found
+	       (return-from getattr-of-instance-rec
+		 (values (py-call (maybe-bind val x (class-of x)) (list x attr))
+			 t))))
 	   
 	when (not attr-val)
 	do (multiple-value-bind (val found)
@@ -355,11 +386,9 @@
       (loop while (typep cls 'builtin-class)
 	  do (let ((val (lookup-bi-class-attr/meth cls attr)))
 	       (when val
-		 (multiple-value-bind (bound-val get-found)
-		     (call-attribute-via-class val '__get__ (list x (class-of x)))
-		   (return-from getattr-of-instance-rec
-		     (values (if get-found bound-val val)
-			     t)))))
+		 (return-from getattr-of-instance-rec
+		   (values (maybe-bind val x (class-of x))
+			   t))))
 	     (setf cls (pop cpl))))
 
     ;; Arriving here means: no regular attribute value, no
@@ -372,47 +401,35 @@
     (when (and attr-val (data-descriptor-p attr-val))
 
       ;; Try __get__-able data descriptor
-      
-      (multiple-value-bind (bound-val get-found)
-	  (call-attribute-via-class attr-val '__get__ (list x (class-of x)))
-	    
-	(return-from getattr-of-instance-rec
-	  (values (if get-found bound-val attr-val)
-		  t))))
+      (return-from getattr-of-instance-rec
+	(values (maybe-bind attr-val x (class-of x))
+		t)))
     
-    ;; Look in instance dict and slots.
+    ;; Look in instance dict and slots. These are returned unbound.
     
     (multiple-value-bind (val found)
-	(getattr-ud-instance-only x attr)
+	(getattr-of-ud-instance-nonrec x attr)
       (when found (return-from getattr-of-instance-rec
-		    (values val t))))
+		    (values val
+			    t))))
     
-    ;; Fall back to a class attribute that is not a data descriptor.
+    ;; Fall back to a class attribute that is not a `data descriptor'.
 
     (when attr-val
-      (multiple-value-bind (bound-val get-found)
-	  (call-attribute-via-class attr-val '__get__ (list x (class-of x)))
-	    
-	(return-from getattr-of-instance-rec
-	  (values (if get-found bound-val attr-val)
-		  t))))
+      (return-from getattr-of-instance-rec
+	(values (maybe-bind attr-val x (class-of x))
+		t)))
     
     ;; Fall back to the __getattr__ hook.
     
     (when __getattr__
-      (multiple-value-bind (bound-val get-found) 	 ;; binding needed?
-	  (call-attribute-via-class __getattr__ '__get__ (list x (class-of x)))
-	(return-from getattr-of-instance-rec
-	  (values (if get-found
-		      (py-call bound-val (list attr))
-		    (py-call __getattr__ (list x attr)))
-		  t))))
+      (return-from getattr-of-instance-rec
+	(values (py-call (maybe-bind __getattr__ x (class-of x)) (list attr))
+		t)))
 
     ;; Finally, give up.
     (py-raise 'AttributeError
 	      "Object ~A has no attribute ~A" x attr)))
-    
-    
 
 
 (defmethod getattr-of-class-nonrec ((cls builtin-class) attr)
@@ -481,19 +498,46 @@
 
   (values nil nil))
 
-(defmethod getattr-of-class-rec (cls attr)
+(defmethod  getattr-of-class-rec (cls attr)
   (assert (member cls (list (find-class 'python-type))))
   (let ((val (lookup-bi-class-attr/meth (find-class 't) attr)))
     (when val 
       (return-from getattr-of-class-rec (values val t)))))
 
+
+(defmethod getattr-of-ud-instance-nonrec ((x udc-instance-w/dict+slots) attr)
+  (if (and (slot-exists-p x attr)
+	   (slot-boundp x attr))  ;; also if attr is `__dict__' or `__slots__'
+      (values (slot-value x attr) t)
+    (__getitem__ (slot-value x '__dict__) attr)))
+
+(defmethod getattr-of-ud-instance-nonrec ((x udc-instance-w/slots) attr)
+  (cond ((eq attr '__slots__)
+	 (values (slot-value (class-of x) '__slots__) t))
+	
+	((and (slot-exists-p x attr) (slot-boundp x attr))
+	 (values (slot-value x attr) t))
+	
+	(t (values nil nil))))
+
+(defmethod getattr-of-ud-instance-nonrec ((x udc-instance-w/dict) attr)
+  (if (eq attr '__dict__)
+      (values (slot-value x '__dict__) t)
+    (handler-case 
+	(__getitem__ (slot-value x '__dict__) attr)
+      (KeyError ()
+	(values nil nil)))))
+
+
 ;; OLD
 
+#+(or)
 (defgeneric getattr-class-nonrec (class attr &optional instance)
   (:documentation "Non-recursive attribute lookup in class. ~@
                    If INSTANCE is supplied, result is wrapped when appropriate. ~@
                    Returns VAL, FOUND"))
 
+#+(or)
 (defmethod getattr-class-nonrec (cls attr &optional instance)
   (multiple-value-bind (func type)
       (lookup-bi-class-attr/meth cls attr)
@@ -507,6 +551,7 @@
 	       (values (py-call func (list instance)) t)
 	     (values nil nil))))))
    
+#+(or)
 (defmethod getattr-class-nonrec ((x user-defined-class) attr &optional instance)
   ;; All udc's have a <py-dict> instance in slot named
   ;; __dict__; that dict contains class attribs and
@@ -524,6 +569,7 @@
   (values nil nil))
 
 
+#+(or)
 (defmethod search-generic-function-attr ((x class) attr &optional instance)
   (declare (ignore attr instance))
   (values nil nil))
@@ -549,6 +595,7 @@
   (values nil nil))
 
 
+#+(or)
 (defmethod getattr-class-nonrec ((x builtin-class) attr &optional instance)
 
   ;; magic methods `__xxx__' -> (un)bound methods for Generic Function
@@ -596,12 +643,14 @@
   (values nil nil))
 
 
+#+(or)
 (defmethod ud-instance-only ((x udc-instance-w/dict+slots) attr)
   (if (and (slot-exists-p x attr)
 	   (slot-boundp x attr)) ;; also for attr=__dict__/__slots__ !
       (values (slot-value x attr) t)
     (__getitem__ (slot-value x '__dict__) attr)))
 
+#+(or)
 (defmethod ud-instance-only ((x udc-instance-w/slots) attr)
   (cond ((eq attr '__slots__)
 	 (values (slot-value (class-of x) '__slots__) t))
@@ -611,6 +660,7 @@
 	
 	(t (values nil nil))))
 
+#+(or)
 (defmethod ud-instance-only ((x udc-instance-w/dict) attr)
   (if (eq attr '__dict__)
       (values (slot-value x '__dict__) t)
