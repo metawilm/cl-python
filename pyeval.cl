@@ -619,11 +619,9 @@
   
   (if (generator-ast-p suite)
       
-      (let* ((params (parse-function-parameter-list params))
+      (let* ((params (multiple-value-list (parse-function-parameter-list params)))
 	     (f (make-python-function-returning-generator params suite)))
-	(namespace-bind *scope* fname f)
-	f)
-      
+	(namespace-bind *scope* fname f))
   
     (let* ((params (multiple-value-list (parse-function-parameter-list params)))
 	   (f (make-user-defined-function 
@@ -637,8 +635,8 @@
 	
       ;; Content of function is not evaluated yet; only when called.
       ;; Bind function name to function object in current namespace:
-      (namespace-bind *scope* fname f)
-      f)))
+      (namespace-bind *scope* fname f)))
+  *None*)
 
 (defun eval-lambda (params expr)
   (let ((params (multiple-value-list (parse-function-parameter-list params))))

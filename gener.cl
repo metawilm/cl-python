@@ -43,6 +43,23 @@
 					      ,tag)
 				     t)))
 
+		    (while (destructuring-bind
+			       (test suite else-suite) (cdr form)
+			     (let ((tag (new-strtag :while)))
+			       (with-derived-tags
+				   tag ((repeat-tag "-repeat")(else-tag "-else")(after-tag "-end/break-target"))
+				   (values `(:split (unless (py-val->lisp-bool (py-eval ',test))
+						      (go ,else-tag))
+						    ,repeat-tag
+						    (:split ,(walk suite (cons (cons repeat-tag after-tag) stack)))
+						    (if (py-val->lisp-bool (py-eval ',test))
+							 (go ,repeat-tag)
+						       (go ,after-tag))
+						    ,else-tag
+						    (:split ,(walk else-suite stack))
+						    ,after-tag)
+					   t)))))
+				 
 		    (if (destructuring-bind 
 			    (clauses else-suite) (cdr form)
 			  (let ((tag (new-strtag :if)))
@@ -51,7 +68,7 @@
 				(let ((indexed-clauses
 				       (loop for (expr suite) in clauses
 					   for i from 1
-					   collect `((strings->symbol tag "-then" (string i))
+					   collect `(,(strings->symbol tag "-then" (format nil "~A" i))
 						     ,expr ,suite))))
 			  
 				  (multiple-value-bind (tests suites)
@@ -64,7 +81,7 @@
 					  finally (return (values tests suites)))
 			    
 				    (values `(:split (cond ,@tests (t (go ,else-tag)))
-						     ,suites
+						     (:split ,@suites)
 						     ,else-tag
 						     (:split ,(when else-suite (walk else-suite stack)))
 						     ,after-tag)
@@ -76,7 +93,7 @@
 				((repeat-tag "-repeat") (else-tag "-else") (end-tag "-end/break-target")
 							(continue-tag "-continue-target") (generator "-generator")
 							(loop-var "-loop-var"))
-				#+(or)(break "wdt")
+	
 				(let ((stack2 (cons (cons continue-tag end-tag) stack)))
 				  (push loop-var vars)
 				  (push generator vars)
@@ -98,13 +115,13 @@
 		    (break
 		     (unless stack
 		       (error "BREAK outside loop"))
-		     (values `(go ,(cdr stack))
+		     (values `(go ,(cdr (car stack)))
 			     t))
 		    
 		    (continue
 		     (unless stack
 		       (error "CONTINUE outside loop"))
-		     (values `(go ,(car stack))
+		     (values `(go ,(car (car stack)))
 			     t))
 		    
 		    (return
