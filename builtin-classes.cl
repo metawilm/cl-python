@@ -932,6 +932,23 @@
   (typep f 'user-defined-function))
 
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Function returning a generator
+
+;;;XX should subclass from function
+
+(defclass python-function-returning-generator (builtin-instance)
+  ((call-rewriter :initarg :call-rewriter)
+   (generator-creator :initarg :generator-creator))
+  (:metaclass builtin-class))
+
+(mop:finalize-inheritance (find-class 'python-function-returning-generator))
+
+(defun make-python-function-returning-generator (params ast)
+  (make-instance 'python-function-returning-generator
+    :call-rewriter (apply #'make-call-rewriter params)
+    :generator-creator (eval (create-generator-function ast))))
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Module
 
