@@ -286,3 +286,6 @@ http://mail.python.org/pipermail/python-dev/2002-May/024346.html
       (lambda (self x) (set-attribute self 'x x)))
     (let ((i (call foo 5)))
       (get-attribute i 'x))))		; 5 t
+
+Descriptor explanation (incl. {object,type,super}.__getattribute__)
+http://users.rcn.com/python/download/Descriptor.htm

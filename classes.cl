@@ -401,3 +401,28 @@
 					#+(or)'standard-class))))
     (mop:finalize-inheritance k)
     k))
+
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; New design of user-defined classes
+
+(defclass py-udc ()
+  ((metaclass :initarg :metaclass :initform nil)
+   (baseclasses :initarg :baseclasses :initform nil)
+   (subclasses :initarg :subclasses :initform nil)
+   (slots :initarg :slots :initform nil)
+   (namespace :initarg :namespace)
+   (mro :initarg :mro)
+   (subtype-of-type :initarg :subtype-of-type :initform nil)))
+
+(defclass py-udc-inst ()
+  ((class :initarg :class)
+   (attributes))) ;; alist
+
+
+(defun make-udc (&rest args)
+  (apply #'make-instance (find-class 'py-udc) args))
+
+(defmethod make-udc-inst ((cls py-udc))
+  (make-instance cls))

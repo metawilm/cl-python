@@ -82,8 +82,9 @@
 ;; The Python type from which all other types (classes) are derived.
 ;; It is defined in classes.cl.
 
+#+(or) ;; new class design
 (defmethod python-type-__call__ ((x python-type) &rest args)
-
+ 
   ;; X is an instance of PYTHON-TYPE, i.e. a class.
   ;; type(x) -> <type-of-x> is filtered out in call.cl
   
@@ -103,14 +104,15 @@
       
     inst))
 	
-(register-bi-class-attr/meth (find-class 'python-type) '__call__
-			     #'python-type-__call__) ;; check which one
-(register-bi-class-attr/meth (find-class 't) '__call__ 
-			     #'python-type-__call__)
-(register-bi-class-attr/meth (find-class 'class) '__call__ 
-			     #'python-type-__call__)
+#+(or)
+((register-bi-class-attr/meth (find-class 'python-type) '__call__
+			      #'python-type-__call__) ;; check which one
+ (register-bi-class-attr/meth (find-class 't) '__call__ 
+			      #'python-type-__call__)
+ (register-bi-class-attr/meth (find-class 'class) '__call__ 
+			      #'python-type-__call__))
 
-
+#+(or)
 (defmethod python-type-__new__ (pos-args kwd-args)
   (assert pos-args) ;; at least one arg
   (cond ((not pos-args)
@@ -168,11 +170,79 @@
 		   (setf (slot-value inst '__dict__) (make-namespace)))
 		 (return-from python-type-__new__ inst)))))))     
 		      
-	     
+#+(or)	     
 (let* ((m (make-static-method-accepting-kwd-args #'python-type-__new__)))
   (register-bi-class-attr/meth (find-class 't) '__new__ m)
   (register-bi-class-attr/meth (find-class 'class) '__new__ m)
   (register-bi-class-attr/meth (find-class 'python-type) '__new__ m))
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; New class design
+
+(defmethod python-type-__call__ ((x py-udc) &optional pos-args key-args)
+  (if (slot-value x 'subtype-of-type)
+      
+      ;; Calling a subclass of python-type means creating a class
+      (todo)
+    
+    ;; Calling this user-defined-class will create an instance
+    (todo)))
+
+
+(defmethod python-type-__new__ (pos-args kwd-args)
+  
+  (unless pos-args
+    (error "type.__new__: got no args"))
+  
+  (let ((cls (car pos-args)))
+    
+    (cond ((and (eq cls (find-class 'python-type))
+		(not (cdr pos-args))
+		(not kwd-args))
+
+	   ;; type(x) -> x.__class__
+	   (return-from python-type-__new__ (py-type (car pos-args))))
+	  
+	  ((or (eq cls (find-class 'python-type))
+	       (and (typep cls 'py-udc)
+		    (slot-value cls 'subtype-of-type)))
+	   ;; type.__new__() : creating a new class
+	   (destructuring-bind (metaclass name bases dict) pos-args
+	     #+(or)(warn "metaclass, name, bases, dict = ~A, ~A, ~A, ~A"
+			 metaclass name bases dict)
+	     (unless (symbolp name)
+	       (ensure-py-type name string
+			       "class name must be string (got: ~A)")
+	       (setf name (intern name #.*package*)))
+	     
+	     (multiple-value-bind (slots has-slots)
+		 (values nil nil) ;; for now
+	       #+(or)(let ((s (namespace-lookup dict '__slots__)))
+		       (if s
+			   (values (py-iterate->lisp-list s) t)
+			 (values nil nil)))
+	     
+	       (return-from python-type-__new__
+		 (make-udc :name name
+			   :metaclass metaclass
+			   :baseclasses (when bases
+					  (if (consp bases)
+					      bases
+					    (py-iterate->lisp-list bases)))
+			   :slots slots
+			   :has-slots has-slots
+			   :namespace dict
+			   :mro #+(calculate-mro xxx) nil
+			   :subtype-of-type
+			   #+(one of the bases has 
+				  python-type as base) nil)))))
+	  
+	  (t (let ((cls (car pos-args)))
+	       ;; type.__new__() : creating instance of class
+	       #+(or)(warn "instance of cls ~A:  ~A" cls inst)
+	       (return-from python-type-__new__
+		 (make-udc-inst cls)))))))
 
 
 
