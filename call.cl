@@ -8,14 +8,9 @@
 
 
 ;; None of the built-in functions take keyword argument, so give an
-;; error in case kw args are given.
-
-(defmethod py-call ((x generic-function) &optional pos-args kwd-args)
-  (when kwd-args
-    (warn "supplying keyword args to generic function ~A (kw: ~S)" x kwd-args))
-  #+(or)(py-raise 'ValueError "built-in function ~S does not take keyword arguments (got: ~A)"
-		  x kwd-args)
-  (apply x pos-args))
+;; error in case kw args are supplied.
+;; 
+;; XXX but default __init__ accepts yet ignores them...
 
 (defmethod py-call ((x function) &optional pos-args kwd-args)
   (when kwd-args
@@ -35,6 +30,8 @@
   ;; (or a FB inside this one). `return' can only occur inside a
   ;; function body.
   ;; When the function doesn't do `return', None is returned implicitly.
+  ;; 
+  ;; TODO: rewrite function body to contain block as `return' target
 
   (catch 'function-block
     (call-next-method)
@@ -73,36 +70,30 @@
 				       (funcall value-producing-f)))))))
 		
 
-(defmethod py-call ((x py-bound-method) &optional pos-args kwd-args)
+(defmethod py-call ((x bound-method) &optional pos-args kwd-args)
   "The instance enclosed in the bound method is prefixed to pos-args"
-  (unless (listp pos-args)
-    (error "pos-args should be list (got: ~A)" pos-args))
   (py-call (slot-value x 'func)
-	   (cons (slot-value x 'self)
+	   (cons (slot-value x 'object)
 		 pos-args)
 	   kwd-args))
 
 
-(defmethod py-call ((x py-unbound-method) &optional pos-args kwd-args)
+(defmethod py-call ((x unbound-method) &optional pos-args kwd-args)
   "X must be of right class, then call class method with given args."
-  (unless pos-args
-    (py-raise 'TypeError "Unbound method~% ~X~% must be called with instance as ~
-                          first argument (got no positional args instead)" x))
+
   (with-slots ((um-class class) (um-func func)) x
-    
     (let ((inst (car pos-args)))
-      
-      (unless (or (typep inst um-class) ;; most common case
-		  (subtypep (__class__ inst) um-class) ;; first arg is a python value designator or subclass instance
-		  (and (typep inst 'class) ;; method is a __new__ method, and first arg is same or subclass
-		       (subtypep inst um-class)
-		       (is-a-__new__-method um-func)))
-	(py-raise 'TypeError
-		  "Unbound method ~A must be called with instance of ~
-                   class ~%~A ~%as first argument (got as first arg: ~S)"
-		  x um-class inst))
-    
-      (py-call um-func pos-args kwd-args))))
+      (cond ((null pos-args) (py-raise 'ValueError
+				       "Unbound method takes instance as first arg (got: no pos args)"))
+	    ((or (typep inst um-class)  ;; common case
+		 (subtypep (__class__ inst) um-class)) ;; first arg is a python value designator
+	     (py-call um-func pos-args kwd-args))
+	    
+	    (t (py-raise 'TypeError
+			 "Unbound method ~A must be called with instance of ~
+                          class ~%~A ~%as first argument (got as first pos arg: ~S)"
+			 x um-class inst))))))
+
 
 
 ;;;; Calling a class creates an instance
@@ -114,14 +105,15 @@
   (multiple-value-bind (meth found)
       (internal-get-attribute cls '__new__)
     (if found
-	
-	(let ((inst (py-call meth (cons cls pos-args) kwd-args))) ;; call with class as first arg
-	  (multiple-value-bind (res found)
-	      (call-attribute-via-class inst '__init__ pos-args kwd-args)
-	    (declare (ignore res))
-	    (unless found
-	      (error "Class ~S has no method __init__" cls)))
-	  inst)
+		
+	(progn (warn "__new__ method found for class ~A" cls)
+	       (let ((inst (py-call meth (cons cls pos-args) kwd-args))) ;; call with class as first arg
+		 (multiple-value-bind (res found)
+		     (call-attribute-via-class inst '__init__ pos-args kwd-args)
+		   (declare (ignore res))
+		   (unless found
+		     (warn "Class ~S has no method __init__" cls)))
+		 inst))
       
       (error "Class ~S has no method __new__" cls))))
 

@@ -311,7 +311,7 @@
 	  ((eq type :meth)
 	   (if instance
 	       (values (make-unbound-method :func func :class cls) t)
-	     (values (make-bound-method :self instance :func func :class cls) t)))
+	     (values (make-bound-method :func func :object instance) t)))
 	  ((eq type :attr)
 	   (if instance
 	       (values (py-call func (list instance)) t)
@@ -326,7 +326,7 @@
       (case (car res)
 	(meth (return-from getattr-class-nonrec
 		(values (if instance
-			    (make-bound-method :self instance :func (cdr res))
+			    (make-bound-method :func (cdr res) :object instance)
 			  (make-unbound-method :class x :func (cdr res)))
 			t)))
 	       
@@ -350,7 +350,7 @@
       (return-from getattr-class-nonrec
 	(values (if (typep val 'python-function)
 		    (if instance
-			(make-bound-method :func val :self instance)
+			(make-bound-method :func val :object instance)
 		      (make-unbound-method :func val :class x))
 		  val)
 		t))))
@@ -377,7 +377,7 @@
 		    (mop:generic-function-methods gf))
 	      (return-from search-generic-function-attr
 		(values (if instance
-			    (make-bound-method :func gf :self instance)
+			    (make-bound-method :func gf :object instance)
 			  (make-unbound-method :func gf :class x))
 			t))))))
   (values nil nil))
@@ -415,7 +415,7 @@
       (case (car res)
 	(meth (return-from getattr-class-nonrec
 		(values (if instance
-			    (make-bound-method :self instance :func (cdr res))
+			    (make-bound-method :object instance :func (cdr res))
 			  (make-unbound-method :class x :func (cdr res)))
 			t)))
 	       

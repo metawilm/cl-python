@@ -306,7 +306,7 @@
      (__complex__  (make-complex x))))
 
 (loop for name in `(__nonzero__ __neg__ __pos__ __abs__ __complex__)
-    do (register-bi-class-attr/meth (find-class 'number) name (function name)))
+    do (register-bi-class-attr/meth (find-class 'number) name (symbol-function name)))
 
 
 (def-binary-meths py-number number (slot-value x 'val) (slot-value y 'val)
@@ -326,7 +326,7 @@
 		   (__rsub__     (- y x))))
 
 (loop for name in `(__eq__ __ne__ __add__ __radd__ __sub__ __mul__ __rmul__ __truediv__ __rtruediv__ __rsub__)
-    do (register-bi-class-attr/meth (find-class 'number) name (function name)))
+    do (register-bi-class-attr/meth (find-class 'number) name (symbol-function name)))
 
 
 ;; Power
@@ -401,7 +401,7 @@
      (__float__   (make-float x))))
 
 (loop for name in `(__int__ __long__ __float__)
-    do (register-bi-class-attr/meth (find-class 'real) name (function name)))
+    do (register-bi-class-attr/meth (find-class 'real) name (symbol-function name)))
 
 
 (def-binary-meths
@@ -432,7 +432,7 @@
 
 (loop for name in `(__mod__ __rmod__ __cmp__ __div__ __rdiv__ __floordiv__
 			    __divmod__ __rdivmod__)
-    do (register-bi-class-attr/meth (find-class 'real) name (function name)))
+    do (register-bi-class-attr/meth (find-class 'real) name (symbol-function name)))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -539,7 +539,7 @@
      ))
 
 (loop for name in `(__add__ __xor__ __or__ __lshift__ __rlshift__ __rshift__ __rrshift__)
-    do (register-bi-class-attr/meth (find-class 'integer) name (function name)))
+    do (register-bi-class-attr/meth (find-class 'integer) name (symbol-function name)))
 
 
 (defmethod mod-to-fixnum ((x integer))
@@ -569,7 +569,7 @@
      (__hex__  (format nil "0x~X" x))))
 
 (loop for name in `(__invert__ __hash__ __complex__ __int__ __long__ __float__ __oct__ __hex__)
-    do (register-bi-class-attr/meth (find-class 'integer) name (function name)))
+    do (register-bi-class-attr/meth (find-class 'integer) name (symbol-function name)))
      
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -748,7 +748,7 @@
 (loop for name in '(__cmp__ __eq__ __getitem__ __setitem__ __delitem__
 		    ;; __add__ etc...
 		    __len__ __nonzero__)
-    do (register-bi-class-attr/meth (find-class 'py-dict) name (function name)))
+    do (register-bi-class-attr/meth (find-class 'py-dict) name (symbol-function name)))
 
 
 ;;;; Dict-specific methods, in alphabetic order
@@ -929,7 +929,7 @@
 
 (mop:finalize-inheritance (find-class 'namespace))
 
-(defun make-namespace (&key (inside nil) (name nil) (builtins nil))
+(defun make-namespace (&key inside name builtins)
   "Make a new namespace.
    BUILTINS indicates whether attribute `__builtins__ should ~
      be created and pointed to the namespace with built-in functions
@@ -1016,6 +1016,10 @@
 
 (mop:finalize-inheritance (find-class 'python-function))
 
+(defmethod __get__ ((x python-function) inst class)
+  (if (eq inst *None*) ;; Hmm what if class of None were subclassable?!
+      (make-unbound-method :func x :class class) ;; <Class>.meth
+    (make-bound-method :func x :object inst))) ;; <instance>.meth
 
 ;; Lambda
 
@@ -1109,18 +1113,31 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Methods and attributes of Methods
 
-(defmethod class-method-get ((x class-method) inst class)
+(defmethod __get__ ((x class-method) inst class)
   ;; Not sure if CLASS is a required argument or if it may be None,
   ;; so take into account the situation in which it is not provided.
   (let ((klass (if (eq class *None*)
 		   (__class__ inst)
 		 class)))
-    (make-instance 'bound-method
-      :func (slot-value x 'func)
-      :object klass)))
+    (make-bound-method :func (slot-value x 'func)
+		       :object klass)))
 
-(register-bi-class-attr/meth (find-class 'class-method) '__get__ #'class-method-get)
+(register-bi-class-attr/meth (find-class 'class-method) '__get__ #'__get__)
   
+
+(defmethod __get__ ((x bi-class-attribute) inst class)
+  ;; It's an attribute of the instance, not a method of the class.
+  (declare (ignore class))
+  (assert (not (eq inst *None*)))
+  (py-call (slot-value x 'func) (list inst)))
+
+(register-bi-class-attr/meth (find-class 'bi-class-attribute) '__get__ #'__get__)
+
+
+(defmethod __get__ ((x static-method) inst class)
+  ;; whether looked up via class or instance, underlying value is returned unbound
+  (declare (ignore inst class))
+  (slot-value x 'func))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; List
@@ -1343,7 +1360,7 @@
 
 (loop for name in '(__add__ __cmp__ __contains__ __delitem__ __getitem__ __hash__ __iter__ __len__ __mul__
 		    __rmul__ __nonzero__ __reversed__ __setitem__)
-    do (register-bi-class-attr/meth (find-class 'py-list) name (function name)))
+    do (register-bi-class-attr/meth (find-class 'py-list) name (symbol-function name)))
 
 
 ;;; list-specific methods
@@ -1499,16 +1516,17 @@
 
 (defmethod iterator-next ((f py-func-iterator))
   "This is the only function that an iterator has to provide."
-  (when (slot-value f 'stopped-yet)
-    #1=(py-raise 'StopIteration
-		 "Iterator ~S has finished" f))
-  (let ((res (funcall (slot-value f 'func))))
-    (when (eql res (slot-value f 'end-value))
-      (setf (slot-value f 'stopped-yet) t)
-      #1#)
-    res))
+  (flet ((err-finished ()
+	   (py-raise 'StopIteration "Iterator ~S has finished" f)))
+    (if (slot-value f 'stopped-yet)
+	(err-finished)
+      (let ((res (funcall (slot-value f 'func))))
+	(if (eql res (slot-value f 'end-value))
+	    (progn (setf (slot-value f 'stopped-yet) t)
+		   (err-finished))
+	  res)))))
 
-(register-bi-class-attr/meth (find-class py-iterator) 'next #'iterator-next)
+(register-bi-class-attr/meth (find-class 'py-iterator) 'next #'iterator-next)
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -1621,7 +1639,7 @@
 ;;; there are no tuple-specific methods
 (loop for name in '(__add__ __cmp__ __contains__ __getitem__ __iter__ __len__
 		    __mul__ __rmul__ __setitem__)
-    do (register-bi-class-attr/meth (find-class 'py-tuple) name (function name)))
+    do (register-bi-class-attr/meth (find-class 'py-tuple) name (symbol-function name)))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -1904,9 +1922,9 @@
 
 
 (loop for name in '(__getitem__ __iter__ __len__ __mul__)
-    do (register-bi-class-attr/meth (find-class 'py-string) name (function name)))
+    do (register-bi-class-attr/meth (find-class 'py-string) name (symbol-function name)))
 				    
-(loop for k v in `((capitalize ,#'string-capitalize)
+(loop for (k v) in `((capitalize ,#'string-capitalize)
 		   (center   ,#'string-center-1)
 		   (decode   ,#'string-decode-1)
 		   (encode   ,#'string-encode-1)
@@ -1917,7 +1935,8 @@
 		   (islower  ,#'string-islower-1)
 		   (istitle  ,#'string-istitle-1)
 		   (isupper  ,#'string-isupper-1)
-		   (join     ,#'string-join-1)))
+		   (join     ,#'string-join-1))
+    do (register-bi-class-attr/meth (find-class 'py-string) k v))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;

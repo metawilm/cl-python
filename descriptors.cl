@@ -67,6 +67,6 @@
 (defmethod fdel ((x py-property))
   (slot-value x 'delete))
 
-(register-bi-class-attr/meth (find-class 'py-property) 'fget #'fget :attr)
-(register-bi-class-attr/meth (find-class 'py-property) 'fset #'fset :attr)
-(register-bi-class-attr/meth (find-class 'py-property) 'fdel #'fdel :attr)
+(register-bi-class-attr/meth (find-class 'py-property) 'fget (make-bi-class-attribute #'fget))
+(register-bi-class-attr/meth (find-class 'py-property) 'fset (make-bi-class-attribute #'fset))
+(register-bi-class-attr/meth (find-class 'py-property) 'fdel (make-bi-class-attribute #'fdel))

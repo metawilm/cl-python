@@ -52,7 +52,9 @@
   t)
 
 (defmethod pyb::callable-1 ((x python-function)) t)
-(defmethod pyb::callable-1 ((x py-method)) t)
+(defmethod pyb::callable-1 ((x static-method)) t)
+(defmethod pyb::callable-1 ((x unbound-method)) t)
+(defmethod pyb::callable-1 ((x bound-method)) t)
 
 (defmethod pyb::callable-1 ((x udc-instance))
   (or (internal-get-attribute x '__call__)
