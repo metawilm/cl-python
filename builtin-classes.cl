@@ -2219,7 +2219,13 @@
 	do (setf s (concatenate 'string s x))
 	finally (return s))))
 
+
 (defmethod unicode-string-p ((x string))
+  
+  ;; By our definition, it's a unicode string iff it contains a
+  ;; character with code > 255. A regular Python string containing
+  ;; character 0xFF can be written as: "\xff".
+  
   (loop for ch across x
       when (> (char-code ch) 255)
       do (return t)
@@ -2229,42 +2235,54 @@
   (> (char-code x) 255))
 
 (defmethod string-__repr__ ((x string))
-    (let* ((single-quotes 0) ;; minimize number of escaped quotes in the returned string
-	   (double-quotes 0)
-	   (unicode nil)
-	   (data (with-output-to-string (s)
-		   (loop for ch across x
-		       do (cond ((unicode-char-p ch)
-				 (setf unicode t)
-				 (let ((num (char-code ch)))
-				   (cond ((<= num #XFFFF) (format s "\\u~X" num))
-					 ((<= num #XFFFFFFFF) (format s "\\U~X" num))
-					 (t (error "Unicode code for char too large: ~S" ch)))))
+  (let* ((single-quotes 0) ;; minimize number of escaped quotes in the returned string
+	 (double-quotes 0)
+	 (unicode nil)
+	 (data (with-output-to-string (s)
+		 (loop for ch across x
+		     do (cond ((unicode-char-p ch)
+			       (setf unicode t)
+			       (let ((num (char-code ch)))
+				 (cond ((<= num #xFFFF) (format s "\\u~X" num))
+				       ((<= num #xFFFFFFFF) (format s "\\U~X" num))
+				       (t (error
+					   "Unicode code for char too large: ~S" ch)))))
 				
-				;; XXX make these a vector lookup
-				((char= ch #\') (incf single-quotes) (write-char ch s))
-				((char= ch #\") (incf double-quotes) (write-char ch s))
-				((char= ch #\Bell)      (write-string "\\b" s))
-				((char= ch #\Backspace) (write-string "\\b" s))
-				((char= ch #\Page)      (write-string "\\f" s))
-				((char= ch #\Newline)   (write-string "\\n" s))
-				((char= ch #\Return)    (write-string "\\r" s))
-				((char= ch #\Tab)       (write-string "\\t" s))
-				((char= ch #\VT)        (write-string "\\v" s))
-				((char= ch #\\)         (write-string "\\\\" s))
-				(t (write-char ch s))))))
-	   (delimit-quote (if (<= single-quotes double-quotes) #\' #\")))
+			      ;; XXX make these a vector lookup
+			      ((char= ch #\') (incf single-quotes) (write-char ch s))
+			      ((char= ch #\") (incf double-quotes) (write-char ch s))
+			      ((char= ch #\Bell)      (write-string "\\b" s))
+			      ((char= ch #\Backspace) (write-string "\\b" s))
+			      ((char= ch #\Page)      (write-string "\\f" s))
+			      ((char= ch #\Newline)   (write-string "\\n" s))
+			      ((char= ch #\Return)    (write-string "\\r" s))
+			      ((char= ch #\Tab)       (write-string "\\t" s))
+			      ((char= ch #\VT)        (write-string "\\v" s))
+			      ((char= ch #\\)         (write-string "\\\\" s))
+			      
+			      ;; The printable ASCII characters.
+			      ((and (<= (char-code ch) 127)  ;; <-- only ASCII
+				    (graphic-char-p ch))       (write-char ch s))
+			      
+			      (t 
+			       ;; Consider it non-printable: hex escaping
+			       (let ((code (char-code ch)))
+				 (assert (<= code 255))
+				 (format s "\\x~2,v,X" #\0 code)))))))
+	   
+	 ;; Prefer single to double quotes, if equal number of escapes needed.
+	 (delimit-quote (if (<= single-quotes double-quotes) #\' #\")))
       
-      (with-output-to-string (s)
-	(when unicode
-	  (write-char #\u s))
-	(write-char delimit-quote s)
-	(loop for ch across data
-	    when (char= ch delimit-quote)
-	    do (write-char #\\ s)
-	       (write-char ch s)
-	    else do (write-char ch s))
-	(write-char delimit-quote s))))
+    (with-output-to-string (s)
+      (when unicode
+	(write-char #\u s))
+      (write-char delimit-quote s)
+      (loop for ch across data
+	  when (char= ch delimit-quote)
+	  do (write-char #\\ s)
+	     (write-char ch s)
+	  else do (write-char ch s))
+      (write-char delimit-quote s))))
 			  
       
 (defmethod string-__str__ ((x string))
@@ -2274,9 +2292,10 @@
     (with-output-to-string (s)
       (loop for ch across x
 	  do (write-char ch s)))))
+
 #+allegro
 (defmethod py-unicode-external-format->lisp-external-format (name)
-  ;; Returns NAME, MAX-CHAR-CODE
+  ;; Returns NAME, MAX-CHAR-CODE, MAX-ENCODED-OCTET-CODE
   
   ;; Based on:
   ;;  http://meta.kabel.utwente.nl/specs/Python-Docs-2.3.3/lib/node127.html
@@ -2286,19 +2305,23 @@
   (setf name (string-lower (py-string-designator-val name)))
   (cond 
    ((member name '("ascii" "646") :test 'string=) 
-    (values :latin1 128))
+    (values :latin1 127 127))
    
    ((member name '("latin" "latin1") :test 'string=) 
-    (values :latin1 255))
+    (values :latin1 255 255))
    
    ((member name '("utf8" "utf_8" "utf" "u8") :test 'string=)
-    (values :utf8 #16x0010FFFF))
+    (values :utf8 #16x0010FFFF 255))
    
    (t (py-raise 'UnicodeError "Unrecognized Unicode external format: ~A" name))))
 
 
 #+allegro
-(defmethod py-encode-unicode ((string string) external-format)
+(defmethod py-encode-unicode ((string string) &optional external-format errors)
+  (unless external-format
+    (error "TODO: default encoding for unicode = ???"))
+  (when errors
+    (error "TODO: errors parameter for unicode encode"))
   
   ;; EXCL:OCTETS-TO-STRING replaces characters out of range of
   ;; external format with question marks #\?, but we want to get
@@ -2308,14 +2331,16 @@
   ;; octets, because Python doesn't have vectors. Python could use
   ;; regular lists, but strings are immutable so more efficient.
   
-  (multiple-value-bind (ex-format max-code)
+  (multiple-value-bind (ex-format max-code max-octet-code)
       (py-unicode-external-format->lisp-external-format external-format)
+    (declare (ignore max-octet-code))
     (loop for ch across string
 	do (let ((code (char-code ch)))
 	     (when (> (the integer code) (the integer max-code))
 	       (py-raise 'UnicodeEncodeError
-			 "Character code out of allowed range (got character code: ~A; ~@
-                          external format: ~A; max code allowed: ~A)"
+			 "While encoding string: ~@
+                          character code out of allowed range (got character code: ~A; ~@
+                          external format: ~A; max code allowed for external format: ~A)"
 			 code external-format max-code))))
     (let* ((octets (excl:string-to-octets string :external-format ex-format :null-terminate nil))
 	   (res-string (make-array (length octets) :element-type 'character)))
@@ -2324,18 +2349,30 @@
 
 
 #+allegro
-(defmethod py-decode-unicode ((string string) external-format)
+(defmethod py-decode-unicode ((string string) &optional external-format errors)
+
+  (unless external-format
+    (error "TODO: default decoding for unicode = ???"))
+  (when errors
+    (error "TODO: errors parameter for unicode encode"))
 
   ;; Python has no separate data type for the returned vector of
   ;; octets, so that' also a string.
 
-  (let* ((ex-format (py-unicode-external-format->lisp-external-format external-format))
-	 (vec (make-array (length string)
-			  :element-type '(unsigned-byte 8))))
-    (declare (dynamic-extent vec))
-    (map-into vec #'char-code string)
-    (excl:octets-to-string vec :external-format ex-format)))
-
+  (multiple-value-bind (ex-format max-code max-octet-code)
+      (py-unicode-external-format->lisp-external-format external-format)
+    (declare (ignore max-code))
+    (let ((vec (make-array (length string) :element-type '(unsigned-byte 8))))
+      (declare (dynamic-extent vec))
+      (map-into vec #'char-code string)
+      (loop for code across vec
+	  when (> code max-octet-code)
+	  do (py-raise 'UnicodeDecodeError
+		       "While decoding string: ~@
+                        character code out of allowed range (got character code: ~A; ~@
+                        external format: ~A; max octet code allowed for external format: ~A)"
+		       code ex-format max-octet-code))
+      (excl:octets-to-string vec :external-format ex-format))))
 
 ;;; string-specific methods
 
@@ -2371,10 +2408,12 @@
 	  (return))))
     count))
 
+#+(or)
 (defmethod string-decode-1 (x &optional encoding errors)
   (declare (ignore x encoding errors))
   (error "todo: string-decode"))
 
+#+(or)
 (defmethod string-encode-1 (x &optional encoding errors)
   (declare (ignore x encoding errors))
   (error "todo: string-decode"))
@@ -2537,8 +2576,8 @@
      
      (py-string-capitalize (x) (string-capitalize x)) ;; Lisp function
      (string-center (x width)                     (string-center-1 x width))
-     (string-decode (x &optional encoding errors) (string-decode-1 x encoding errors))
-     (string-encode (x &optional encoding errors) (string-encode-1 x encoding errors))
+     #+(or)(string-decode (x &optional encoding errors) (string-decode-1 x encoding errors))
+     #+(or)(string-encode (x &optional encoding errors) (string-encode-1 x encoding errors))
      (string-expandtabs (x &optional tabsize)     (string-expandtabs-1 x tabsize))
      (string-isalnum (x)  (string-isalnum-1 x))
      (string-isalpha (x)  (string-isalpha-1 x))
@@ -2627,8 +2666,8 @@
 				    
 (loop for (k v) in `((capitalize ,#'string-capitalize) ;; these are unary...
 		   (center   ,#'string-center-1)
-		   (decode   ,#'string-decode-1)
-		   (encode   ,#'string-encode-1)
+		   #+(or)(decode   ,#'string-decode-1)
+		   #+(or)(encode   ,#'string-encode-1)
 		   (expandtabs  ,#'string-expandtabs-1)
 		   (isalnum  ,#'string-isalnum-1)
 		   (isalpha  ,#'string-isalpha-1)
@@ -2660,7 +2699,10 @@
 		   (count    ,#'string-count) ;; these are binary
 		   (endswith ,#'string-endswith)
 		   (find     ,#'string-find)
-		   (index    ,#'string-index))
+		   (index    ,#'string-index)
+		   
+		   (encode ,#'py-encode-unicode) ;; unicode handling
+		   (decode ,#'py-decode-unicode))
 		   
     do (register-bi-class-attr/meth (find-class 'string) k v)
        (register-bi-class-attr/meth (find-class 'py-string) k v))

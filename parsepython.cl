@@ -16,7 +16,7 @@
       and or not for in is
       print import from as assert break continue global del exec pass
       try except finally raise
-      if elif else while clpy))
+      if elif else while #+(or)clpy))
 
 (defgrammar python-grammar (grammar)
   ()
@@ -48,7 +48,7 @@
 	    and or not for in is
 	    print import from as assert break continue global del exec pass
 	    try except finally raise
-	    if elif else while clpy)
+	    if elif else while #+(or)clpy)
   )
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
@@ -317,9 +317,9 @@
        ((identifier) . ((list 'identifier $1)))
        ((number) . ($1))
        ((string+) . ($1))
-       ((clpy-expr) . ($1)))
+       #+(or)((clpy-expr) . ($1)))
 
- (clpy-expr (clpy) (`(inline-lisp ,$1)))
+ #+(or)(clpy-expr (clpy) (`(inline-lisp ,$1)))
    
  (string+ (string) ($1))
  (string+ (string+ string) ((concatenate 'string $1 $2)))
@@ -1142,7 +1142,8 @@
 		  (let* ((read-id (read-identifier c))
 			 (token (intern read-id)))
 		    		    
-		    (cond ((eq token 'clpy) ;; allows mixing Lisp code in Python files clpy(3) -> 3
+		    (cond #+(or)
+			  ((eq token 'clpy) ;; allows mixing Lisp code in Python files clpy(3) -> 3
 			   (let ((lisp-form (read)))
 			     (when *lex-debug*
 			       (format t "lexer returning Lisp form: ~s~%" lisp-form))
