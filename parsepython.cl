@@ -1150,13 +1150,6 @@
 
 		 (t (error "Unexpected character: ~A" c)))))))))))
 
-(defun ptl ()
-  (let ((r (find-restart 'return-python-toplevel)))
-    (when r
-      (invoke-restart r))
-    (warn "No return-python-toplevel restart available")))
-
-
 (defun parse-python (&optional (*standard-input* *standard-input*))
   (let* ((lexer (make-py-lexer))
 	 (grammar (make-instance 'python-grammar :lexer lexer))
@@ -1175,71 +1168,113 @@
 
 (defparameter *show-ast* nil)
 
+
+(defun goto-python-top-level ()
+  (let ((r (find-restart 'return-python-toplevel)))
+    (if r
+	(invoke-restart r)
+      (warn "No return-python-toplevel restart available"))))
+
+(setf (top-level:alias "ptl")
+  #'goto-python-top-level)
+
 (defun repl ()
-  (format t "[CLPython -- type `:q' to quit]~%")
+  (format t "[CLPython -- type `:q' to quit, `:help' for help]~%")
   (loop
-    (let ((*scope* (make-namespace :name "repl ns"
-				   :builtins t)))
+    (let ((*scope* (make-namespace :name "repl ns" :builtins t)))
       (declare (special *scope*))
       (loop
-	(with-simple-restart (return-python-toplevel "Return to Python top level")
+	(with-simple-restart (return-python-toplevel "Return to Python top level [:ptl]")
 	  (let ((acc ()))
-	    (loop
-	      (format t ">>> ")
-	      (let ((x (read-line)))
-		(cond
-		 ((member x '(":exit" ":quit" ":q") :test 'string=)
-		  (return-from repl 'Bye))
+	    (flet ((show-ast (ast)
+		     (when *show-ast*
+		       (format t "AST: ~S~%" ast)))
+		   
+		   (eval-print-ast (ast)
+		     (loop (restart-case
+			       (let ((ev-ast (py-eval ast)))
+				 (assert (eq (car ev-ast) :file-input))
+				 (when (> (length ev-ast) 1)
+				   (let ((ev (car (last ev-ast))))
+				     (locally (declare (special *None*))
+					
+				       ;; don't print value if it's None
+				       (unless (member ev (list *None* nil) :test 'eq)
+					 (handler-case
+					     (eval-print (list ev) nil)
+					   (error ()
+					     (format t "~A (PE)~%" ev)))
+					 (namespace-bind *scope* '_ ev)))))
+				 (return-from eval-print-ast))
+			     (retry-py-eval ()
+				 :report "Retry (py-eval AST)" ())))))
+	      (loop
+		(format t ">>> ")
+		(let ((x (read-line)))
+		  (cond
+		 
+		   ((string= x ":help")
+		    (flet ((print-cmds (cmds)
+			     (loop for (cmd expl) in cmds
+				 do (format t "  ~6A: ~A~%" cmd expl))))
+		      (format t "~%In the Python interpreter:~%")
+		      (print-cmds '((":help" "print (this) help")
+				    (":lisp EXPR" "evaluate a Lisp expression")
+				    (":ns" "print current namespace")
+				    (":show-ast" "print the AST of inputted Python code")
+				    (":no-show-ast" "don't print the AST")
+				    (":q" "quit")
+				    ("_" "Python variable `_' is bound to the ~
+                                        value of the last expression")))
+		      (format t "~%In the Lisp debugger:~%")
+		      (print-cmds '((":ptl" "back to Python top level")))
+		      (format t "~%")))
+		 
+		   ((string= x ":acc")         (format t "~S" acc))
+		   ((string= x ":q")           (return-from repl 'Bye))
+		   ((string= x ":show-ast")    (setf *show-ast* t))
+		   ((string= x ":no-show-ast") (setf *show-ast* nil))
+		   ((string= x ":ns")          (format t "~&REPL namespace:~%~A~&" *scope*))
 
-		 ((string= x ":cl")
-		  (compile-file "parsepython")
-		  (load "parsepython")
-		  (setf acc ()))
+		   ((and (>= (length x) 5)
+			 (string= (subseq x 0 5) ":lisp"))
+		    (format t "~A~%"
+			    (eval (read-from-string (subseq x 6)))))
 
-		 ((string= x ":ns")
-		  (format t "~&REPL namespace:~%~A~&" *scope*))
-
-		 ((and (>= (length x) 5)
-		       (string= (subseq x 0 5) ":lisp"))
-		  (format t "~A~%"
-			  (eval (read-from-string (subseq x 6)))))
-
-		 ((string= x "")
-		  (let ((total (apply #'concatenate 'string (nreverse acc))))
-		    (setf acc ())
-		    (loop
-		      (restart-case
-			  (progn
-			    (let ((ast (parse-python-string total)))
-			      (when *show-ast*
-				(format t "~S~%" ast))
-			      (loop
-				(restart-case
-				    (let ((ev (py-eval ast)))
-				      (assert (eq (car ev) :file-input))
-				      (when (> (length ev) 1)
-					(setf ev (car (last ev)))
-					(locally (declare (special *None*))
-					  (unless (member ev (list *None* nil)
-							  :test 'eq)
-					    (handler-case
-						(eval-print (list ev) nil)
-					      (error ()
-						(format t "~A (PE)~%" ev)))
-					    (namespace-bind *scope* '_ ev))))
-				      (return))
-				  (retry-py-eval ()
-				      :report "Retry (py-eval AST)"
-				    ())))
-			      (return)))
-			(try-parse-again ()
-			    :report "Parse string again into AST")
-			(recompile-grammar ()
-			    :report "Recompile grammar"
-			  (compile-file "parsepython")
-			  (load "parsepython"))))))
-		 (t
-		  (push (concatenate 'string x (string #\Newline))
-			acc)))))))))))
+		   ((string= x "")
+		    (let ((total (apply #'concatenate 'string (nreverse acc))))
+		      (setf acc ())
+		      (loop
+			(restart-case
+			    (progn
+			      (let ((ast (parse-python-string total)))
+				(show-ast ast)
+				(eval-print-ast ast)
+				(return)))
+			  (try-parse-again ()
+			      :report "Parse string again into AST")
+			  (recompile-grammar ()
+			      :report "Recompile grammar"
+			    (compile-file "parsepython")
+			    (load "parsepython"))))))
+		 
+		   (t  
+		    (push (concatenate 'string x (string #\Newline))
+			  acc)
+		  
+		    ;; Try to parse; if that returns a "simple" AST
+		    ;; (just inspecting the value of a variable), the
+		    ;; input is complete and ther's no need to wait for
+		    ;; an empty line.
+		  
+		    (let* ((total (apply #'concatenate 'string (nreverse acc)))
+			   (ast (ignore-errors (parse-python-string total))))
+		      (when ast
+			(assert (eq (first ast) 'file-input))
+			(when (and (= (length ast) 2)
+				   (member (car (second ast)) '(testlist assign-expr) :test 'eq))
+			  (show-ast ast)
+			  (eval-print-ast ast)
+			  (setf acc nil)))))))))))))))
 
 (build-grammar python-grammar t t)
