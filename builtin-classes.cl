@@ -52,6 +52,10 @@
   ))
        
 
+(defmethod __str__ ((x python-object))
+  "__str__ falls back to __repr__"
+  (__repr__ x))
+
 (defmethod __repr__ ((x python-object))
   (with-output-to-string (s)
     (print-unreadable-object (x s :identity t :type t)
@@ -172,7 +176,12 @@
 
 (def-unary-meths 
     py-number number (slot-value x 'val)
-    ((__repr__     (format nil "~A" x))
+    (
+     ;; CPython prints *sys-neg-maxint* <= x <= *sys-pos-maxint* as X,
+     ;; outside that range as XL:  3 vs 3L. Let's not bother.
+     (__str__  (format nil "~A" x))
+     
+     (__repr__     (format nil "~A" x))
      (__nonzero__  (make-bool (/= x 0)))
      
      (__neg__     (- x))
@@ -402,10 +411,6 @@
 		   (py-raise 'ValueError "Negative shift count")))
      (__rrshift__ (__rshift__ y x))
      
-     
-     ;; CPython prints *sys-neg-maxint* <= x <= *sys-pos-maxint* as X,
-     ;; outside that range as XL:  3 vs 3L. Let's not bother.
-     ;;; (__str__ (if ... ".." "..L"))
      ))
 
 (defmethod mod-to-fixnum ((x integer))
@@ -1255,7 +1260,9 @@
 
 
 (defmethod __str__ ((x py-list))
-  (format nil "[~:_~{~S~^, ~:_~}]" (slot-value x 'list)))
+  (format nil "[~:_~{~A~^, ~:_~}]"
+	  (mapcar #'__str__ (slot-value x 'list))))
+
 
 ;;; list-specific methods
 
