@@ -241,8 +241,19 @@
 			     'user-defined-class-w/slots
 			   'user-defined-class)))
       
-      ;; Now determine the superclasses. Here are some examples of the
-      ;; resulting class precedence lists:
+      ;; Now determine the superclasses. 
+      ;; 
+      ;; The order of superclasses is:
+      ;;  1) all classes mentioned in SUPERS
+      ;;  2) the UDC-* mixin (determined above)
+      ;;  3) if there are built-in classes in SUPERS: BIO.
+      ;; 
+      ;; We always want BIO af the end, so that when built-in classes
+      ;; are subclassed, a method specialized on UDC-I takes
+      ;; precedence above one specialized on BIO.
+      ;; 
+      ;; Here are some examples of the resulting class precedence
+      ;; lists:
       ;; 
       ;;                CPL (after Foo)           meta
       ;;  ------------------------------------------------------------
@@ -260,19 +271,8 @@
       ;; 
       ;; [ When class has list of slots, meta becomes udc/slots, and in
       ;; [ CPL replace udc-i-w/d with udc-i-w/s.
-      ;; [
       ;; [ When class has both slots and dict, meta also becomes
       ;; [ udc/slots, in CPL replace udc-i-w/d with udc-i-w/d+s.
-      ;; 
-      ;; We always want BIO af the end, so that when built-in classes
-      ;; are subclassed, a method specialized on UDC-I takes
-      ;; precedence above one specialized on BIO.
-      ;; 
-      ;; 
-      ;; So, the order of superclasses is:
-      ;;  1) all classes mentioned in SUPERS
-      ;;  2) the UDC-* mixin (determined above)
-      ;;  3) if there are built-in classes in SUPERS: BIO.
 
       (let* ((has-a-builtin-super (some (lambda (c) (typep c 'builtin-class))
 					supers-cls))
@@ -288,9 +288,9 @@
 		 :direct-slots `( ,@(mapcar (lambda (slot-name) `(:name ,slot-name))
 					    the-other-slots) ))))
 	
-	;; Now there's only some bookkeeping left to do.
-	
 	(mop:finalize-inheritance k) ;; Not sure if this is needed?
+
+	;; Some bookkeeping
 	
 	(let ((namespace (or namespace
 			     (make-namespace :name (format nil
@@ -305,3 +305,4 @@
 	    (setf (slot-value k '__slots__) the-other-slots))
 	  
 	  k)))))
+

@@ -130,7 +130,7 @@
 ;; We do allow all objects as dict: lookups will go through
 ;; __getitem__, sets to __setitem__, deletes to __delitem__.
 ;; 
-;; When the dict is of default type `namespace' (a subclass of
+;; XXX When the dict is of default type `namespace' (a subclass of
 ;; `py-dict'), we could special-case it and inline the rest of the
 ;; logic. (Not sure that would buy us much.)
 ;; 
@@ -143,7 +143,7 @@
   (:documentation
    "Get attribute ATTR of X; returns VAL, FOUND-P. ~@
     Does not raise AttributeError itself, but any Python exception could be
-    raised in user-defined methods called in the process."))
+    raised in methods called in the process."))
 
 
 (defmethod internal-get-attribute :around (x attr)
@@ -155,10 +155,13 @@
   (let ((__getattr__ nil)
 	(attr-val    nil))
     
-    ;; Check user-defined classes for __getattribute__, including x
+    ;; Check user-defined classes for __getattribute__, including X
     ;; itself. While we're doing that, keep an eye on the value of
     ;; `__getattr__' and the value of the attribute itself if we come
     ;; across them.
+    ;; 
+    ;; __getattribute__ overrides the other two, but in its absence,
+    ;; one of the two others is used if present.
     
     (let (is-udc is-bic)
       (loop for cls in (mop:class-precedence-list (class-of x))
@@ -234,10 +237,13 @@
 
 (defmethod internal-get-attribute ((x (eql (find-class 'builtin-class))) attr)
   ;; builtin-class is a subtype of python-type, so ...
+  ;; XXX used where?
+  (break "eql builtin-class")
   (internal-get-attribute (find-class 'python-type) attr))
 
 (defmethod internal-get-attribute ((x (eql (find-class 'python-type))) attr)
-  (search-generic-function-attr x attr))
+  #+(or)(search-generic-function-attr x attr)
+  (break "eql python-type"))
 
 (defmethod internal-get-attribute ((x python-type) attr)
   (declare (ignore attr))
@@ -299,6 +305,190 @@
   (values nil nil))
 
 
+;;; NEW
+
+(defmethod getattr-of-instance-rec ((x udc-instance) attr)
+
+  ;; Check user-defined classes for __getattribute__, including X
+  ;; itself. While we're doing that, keep an eye on the value of
+  ;; `__getattr__' and the value of the attribute itself if we come
+  ;; across them.
+  ;; 
+  ;; __getattribute__ overrides the other two, but in its absence,
+  ;; one of the two others is used if present.
+  
+  (let* ((__getattr__ nil)
+	 (attr-val    nil)
+	 (cpl (mop:class-precedence-list (class-of x)))
+	 (cls (pop cpl)))
+    
+    (loop while (typep cls 'user-defined-class)
+	do (multiple-value-bind (val found)
+	       (getattr-of-class-nonrec cls '__getattribute__)
+	     (when found (multiple-value-bind (bound-val get-found)
+			     (call-attribute-via-class val '__get__ (list x (class-of x)))
+			   (return-from getattr-of-instance-rec
+			     (values (if get-found
+					 (py-call bound-val (list attr))
+				       (py-call val (list x attr))))))))
+	   
+	when (not attr-val)
+	do (multiple-value-bind (val found)
+	       (getattr-of-class-nonrec cls attr)
+	     (when found 
+	       (setf attr-val val)))
+
+	when (and (not attr-val) (not __getattr__))
+	do (multiple-value-bind (val found)
+	       (getattr-of-class-nonrec cls '__getattr__)
+	     (when found (setf __getattr__ val)))
+	   
+	do (setf cls (pop cpl)))
+    
+    ;; Arriving here means: no __getattribute__, but perhaps
+    ;; __getattr__ or attr-val.
+    ;; 
+    ;; If no attr-val found yet, try the builtin-classes from which
+    ;; this user-defined-class inherited (if any).
+    
+    (unless attr-val
+      (loop while (typep cls 'builtin-class)
+	  do (let ((val (lookup-bi-class-attr/meth cls attr)))
+	       (when val
+		 (multiple-value-bind (bound-val get-found)
+		     (call-attribute-via-class val '__get__ (list x (class-of x)))
+		   (return-from getattr-of-instance-rec
+		     (values (if get-found bound-val val)
+			     t)))))
+	     (setf cls (pop cpl))))
+
+    ;; Arriving here means: no regular attribute value, no
+    ;; __getattribute__, but perhaps __getattr__ or attr-val.
+
+    ;; If an attribute value found, and it is a data descriptor
+    ;; (i.e. has a `__set__' attribute), it takes precedence over the
+    ;; attributes set on the instance.
+    
+    (when (and attr-val (data-descriptor-p attr-val))
+
+      ;; Try __get__-able data descriptor
+      
+      (multiple-value-bind (bound-val get-found)
+	  (call-attribute-via-class attr-val '__get__ (list x (class-of x)))
+	    
+	(return-from getattr-of-instance-rec
+	  (values (if get-found bound-val attr-val)
+		  t))))
+    
+    ;; Look in instance dict and slots.
+    
+    (multiple-value-bind (val found)
+	(getattr-ud-instance-only x attr)
+      (when found (return-from getattr-of-instance-rec
+		    (values val t))))
+    
+    ;; Fall back to a class attribute that is not a data descriptor.
+
+    (when attr-val
+      (multiple-value-bind (bound-val get-found)
+	  (call-attribute-via-class attr-val '__get__ (list x (class-of x)))
+	    
+	(return-from getattr-of-instance-rec
+	  (values (if get-found bound-val attr-val)
+		  t))))
+    
+    ;; Fall back to the __getattr__ hook.
+    
+    (when __getattr__
+      (multiple-value-bind (bound-val get-found) 	 ;; binding needed?
+	  (call-attribute-via-class __getattr__ '__get__ (list x (class-of x)))
+	(return-from getattr-of-instance-rec
+	  (values (if get-found
+		      (py-call bound-val (list attr))
+		    (py-call __getattr__ (list x attr)))
+		  t))))
+
+    ;; Finally, give up.
+    (py-raise 'AttributeError
+	      "Object ~A has no attribute ~A" x attr)))
+    
+    
+
+
+(defmethod getattr-of-class-nonrec ((cls builtin-class) attr)
+  (let ((val (lookup-bi-class-attr/meth cls attr)))
+    (when val 
+      (return-from getattr-of-class-nonrec (values val t)))))
+
+(defmethod getattr-of-class-nonrec ((cls user-defined-class) attr)
+  (multiple-value-bind (val found)
+      (__getitem__ (slot-value cls '__dict__) attr)
+    (when found
+      (return-from getattr-of-class-nonrec (values val t)))))
+
+(defmethod getattr-of-class-nonrec ((cls (eql (find-class 't))) attr)
+  (let ((val (lookup-bi-class-attr/meth cls attr)))
+    (when val 
+      (return-from getattr-of-class-nonrec (values val t)))))
+  
+
+(defmethod getattr-of-class-rec ((cls builtin-class) attr)
+  (loop for c in (mop:class-precedence-list cls)
+      while (typep c 'builtin-class)
+      do (let ((val (getattr-of-class-nonrec c attr)))
+	   (when val
+	     (return-from getattr-of-class-rec (values val t)))))
+  
+  ;; fallback: methods specialized on class 't
+  (let ((val (getattr-of-class-nonrec (find-class 't) attr)))
+    (when val
+      (return-from getattr-of-class-rec (values val t))))
+ 
+  (values nil nil))
+
+
+(defmethod getattr-of-class-rec ((cls user-defined-class) attr)
+  ;; All udc's have a <py-dict> instance in slot named
+  ;; __dict__; that dict contains class attribs and
+  ;; methods are stored. TODO: metaclasses
+  
+  (let* ((cpl (mop:class-precedence-list cls))
+	 (c (pop cpl)))
+      
+    (loop while (typep c 'user-defined-class)
+	do (multiple-value-bind (val found)
+	       (getattr-of-class-nonrec c attr)
+	     (when found
+	       (return-from getattr-of-class-rec (values val t))))
+	   (setf c (pop cpl)))
+    
+    (assert (or (member c (list (find-class 'udc-instance-w/dict)
+				(find-class 'udc-instance-w/slots)
+				(find-class 'udc-instance-w/dict+slots)))
+		(typep c 'builtin-class)))
+    
+    (loop while (typep c 'builtin-class)
+	do (multiple-value-bind (val found)
+	       (getattr-of-class-nonrec c attr)
+	     (when found
+	       (return-from getattr-of-class-rec (values val t))))
+	   (setf c (pop cpl))))
+  
+  ;; fallback: methods specialized on class 't
+  (let ((val (getattr-of-class-nonrec (find-class 't) attr)))
+    (when val
+      (return-from getattr-of-class-rec (values val t))))
+
+  (values nil nil))
+
+(defmethod getattr-of-class-rec (cls attr)
+  (assert (member cls (list (find-class 'python-type))))
+  (let ((val (lookup-bi-class-attr/meth (find-class 't) attr)))
+    (when val 
+      (return-from getattr-of-class-rec (values val t)))))
+
+;; OLD
+
 (defgeneric getattr-class-nonrec (class attr &optional instance)
   (:documentation "Non-recursive attribute lookup in class. ~@
                    If INSTANCE is supplied, result is wrapped when appropriate. ~@
@@ -316,30 +506,7 @@
 	   (if instance
 	       (values (py-call func (list instance)) t)
 	     (values nil nil))))))
-    
-    
-#+(or) ;; replaced by above, using lookup-bi-class-attr/meth
-(defmethod getattr-class-nonrec (x attr &optional instance)   ;; default method
-  ;; (declare (ignore x attr instance))
-  (let ((res (get attr x)))
-    (when res
-      (case (car res)
-	(meth (return-from getattr-class-nonrec
-		(values (if instance
-			    (make-bound-method :func (cdr res) :object instance)
-			  (make-unbound-method :class x :func (cdr res)))
-			t)))
-	       
-	;; An attribute is only ok when we are here for looking up
-	;; an instance attribute. Otherwise, we're acting like the
-	;; attribute is not found.
-		       
-	(att (when instance
-	       (return-from getattr-class-nonrec
-		 (values (funcall (cdr res) instance)
-			 t)))))))
-  (values nil nil 'default-case))
-
+   
 (defmethod getattr-class-nonrec ((x user-defined-class) attr &optional instance)
   ;; All udc's have a <py-dict> instance in slot named
   ;; __dict__; that dict contains class attribs and
@@ -356,7 +523,6 @@
 		t))))
   (values nil nil))
 
-;;(defmethod getattr-class-nonrec ((x user-defined-object)
 
 (defmethod search-generic-function-attr ((x class) attr &optional instance)
   (declare (ignore attr instance))
@@ -469,13 +635,17 @@
    __str__ attribute of the instance."
 
   (multiple-value-bind (val found)
-      (getattr-of-class x attr)
+      (getattr-of-class-rec (__class__ x) attr)
     (if found
-	(progn
-	  (unless (typep val 'py-unbound-method)
-	    (break "call-attr-via-class: expected unbound method, got: ~A" val))
-	  (values (py-call val (cons x pos-args) key-args)
-		  t))
+	
+	(multiple-value-bind (bound-val found)
+	    (call-attribute-via-class val '__get__ (list x (__class__ x)))
+	  (if found
+	      (values (py-call bound-val pos-args key-args)
+		      t)
+	    (values (py-call val (cons x pos-args) key-args)
+		    t)))
+            
       (values nil nil))))
 
 
