@@ -345,7 +345,7 @@
     (typep x cls)))
 
 (defun pyb:isinstance (x cls)
-  (make-bool (pyb::isinstance-1 x cls)))
+  (lisp-val->py-bool (pyb::isinstance-1 x cls)))
 
 
 (defun pyb::issubclass-1 (x cls)
@@ -360,7 +360,7 @@
 (defun pyb:issubclass (x cls)
   ;; SUPER is either a class, or a tuple of classes -- denoting
   ;; Lisp-type (OR c1 c2 ..).
-  (make-bool (pyb::issubclass-1 x cls)))
+  (lisp-val->py-bool (pyb::issubclass-1 x cls)))
 
 
 (defun pyb:iter (x &optional y)

@@ -191,7 +191,7 @@
      ;; outside that range as XL:  3 vs 3L. Let's not bother.
      (__repr__     (format nil "~A" x))
      
-     (__nonzero__  (make-bool (/= x 0)))
+     (__nonzero__  (lisp-val->py-bool (/= x 0)))
      (__neg__      (- x))
      (__pos__      x)
      (__abs__      (abs x))
@@ -468,7 +468,7 @@
 (defmethod make-instance ((c py-bool) &rest initargs &key val)
   (if val *True* *False*))
 
-(defun make-bool (&optional (val nil))
+(defun lisp-val->py-bool (&optional val)
   "Make a BOOL (True of False) for given Lisp VAL."
   (check-type val (not python-object) "Lisp value, not a Python value")
   (if val *True* *False*))
@@ -631,7 +631,7 @@
   (hash-table-count (slot-value d 'hash-table)))
 
 (defmethod __nonzero__ ((d py-dict))
-  (make-bool (/= 0 (hash-table-count (slot-value d 'hash-table)))))
+  (lisp-val->py-bool (/= 0 (hash-table-count (slot-value d 'hash-table)))))
 
 ;;;; Dict-specific methods, in alphabetic order
 
@@ -670,7 +670,7 @@
   (multiple-value-bind (val found-p)
       (gethash key (slot-value d 'hash-table))
     (declare (ignore val))
-    (make-bool found-p)))
+    (lisp-val->py-bool found-p)))
 
 (defmethod dict-items ((d py-dict))
   "Return list of (k,v) tuples"
@@ -1226,7 +1226,7 @@
   (__mul__ x n))
 
 (defmethod __nonzero__ ((x py-list))
-  (make-bool (/= 0 (length (slot-value x 'list)))))
+  (lisp-val->py-bool (/= 0 (length (slot-value x 'list)))))
 
 (defmethod __repr__ ((x py-list))
   (with-output-to-string (s)
@@ -1678,14 +1678,14 @@
 (def-binary-string-meths
     ((__add__      (x y) (concatenate 'string x y))
      (__radd__     (x y) (__add__ y x))
-     (__contains__ (x y) (make-bool (search y x)))
+     (__contains__ (x y) (lisp-val->py-bool (search y x)))
      (__cmp__ (x y)      (cond ((string< x y) -1)
 			       ((string= x y) 0)
 			       (t 1)))
      (__eq__ (x y)       (string= x y))
      
      (string-count (x y) (string-count-1 x y))
-     (string-endswith (x y &optional start end) (make-bool (string-endswith-1 x y start end)))
+     (string-endswith (x y &optional start end) (lisp-val->py-bool (string-endswith-1 x y start end)))
      (string-find (x y &optional start end) (string-find-1 x y start end))
      (string-index (x y &optional start end) (string-index-1 x y (or start 0) (or end 0)))
     ))
@@ -1811,19 +1811,19 @@
 ;; predicates
 
 (defmethod string-isalnum-1 ((x string))
-  (make-bool (every #'alphanumericp x)))
+  (lisp-val->py-bool (every #'alphanumericp x)))
 
 (defmethod string-isalpha-1 ((x string))
-  (make-bool (every #'alpha-char-p x)))
+  (lisp-val->py-bool (every #'alpha-char-p x)))
 
 (defmethod string-isdigit-1 ((x string))
-  (make-bool (every #'digit-char-p x)))
+  (lisp-val->py-bool (every #'digit-char-p x)))
 
 (defmethod string-islower-1 ((x string))
-  (make-bool (every #'lower-case-p x)))
+  (lisp-val->py-bool (every #'lower-case-p x)))
 
 (defmethod string-isspace-1 ((x string))
-  (make-bool (every (lambda (c) (member c (load-time-value (list #\Space #\Tab #\Newline))))
+  (lisp-val->py-bool (every (lambda (c) (member c (load-time-value (list #\Space #\Tab #\Newline))))
 		    ;; XX check what is whitespace
 		    x)))
 
@@ -1847,11 +1847,11 @@
 		     
 		 (t
 		  (setf previous-is-cased nil))))
-    (make-bool got-cased)))
+    (lisp-val->py-bool got-cased)))
 
   
 (defmethod string-isupper-1 ((x string))
-  (make-bool (every #'upper-case-p x)))
+  (lisp-val->py-bool (every #'upper-case-p x)))
 
 (defmethod string-join-1 ((x string) sequences)
   "Join a number of strings"
