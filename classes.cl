@@ -56,6 +56,15 @@
 	    :documentation "The attributes this built-in class has"))
   (:documentation "A potentially heavily optimized Python class"))
 
+
+;; Class PYTHON-OBJECT is itself a builtin-object.
+;; This seems to work right...
+(mop:ensure-class-using-class 
+ (find-class 'python-object)
+ 'python-object
+ :metaclass (find-class 'builtin-class))
+
+
 (defclass builtin-instance (builtin-object)
   ()
   (:metaclass python-type))
@@ -65,10 +74,6 @@
     (print-unreadable-object (x s :type t :identity t)
       (format s "~A" (class-name x)))))
   
-(defmethod __repr__ ((x builtin-class))
-  (with-output-to-string (s)
-    (print-unreadable-object (x s :type t :identity t)
-      (format s "~A" (class-name x)))))
 
 ;;;; User-defined
 
@@ -86,11 +91,6 @@
   ;; this is NOT the _instance_ dict -- UDCs are *instances* of this class
   (:documentation "Represents all Python classes created within Python (at runtime)."))
 
-
-(defmethod __repr__ ((x user-defined-class))
-  (with-output-to-string (s)
-    (print-unreadable-object (x s :type t :identity t)
-      (format s "~A" (class-name x)))))
 
 ;; The reason for having the following class, is that if a UDC Foo
 ;; defined fixed slots for its instances, then the list of fixed slot
@@ -175,7 +175,18 @@
 (defun make-python-class (&key name (module "ModuleName")
 			       (supers nil) (slots nil slots-p)
 			       (documentation nil) (namespace nil))
+
+  ;; All classes that are accessible from within Python
+  ;; inherit from python-object, so throw it away when it is
+  ;; explicitly mentioned.
+  ;; 
+  ;; TODO: this hides some circularity errors in CPL.
   
+  (setf supers
+    (loop for s in supers
+	unless (eq (find-class s) (find-class 'python-object))
+	collect s))
+
   ;; Determine the slots the instances of this class are supposed to have.
   ;; 
   ;; This happens in multiple steps, as the logic is a bit tricky.
@@ -198,8 +209,9 @@
 			      do (setf lst (remove s lst :test 'eq))
 			      finally (return lst)))
 	 (inst-have-other-slots the-other-slots)
+	 
 	 (supers-cls (mapcar #'find-class supers)))
-    
+
     ;; Determine the appropriate mix-in class. This can't be more
     ;; restricted than any of the UDC superclasses.
     ;;  
