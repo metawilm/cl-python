@@ -72,7 +72,7 @@
 		   ((string= x ":q")           (return-from repl 'Bye))
 		   ((string= x ":show-ast")    (setf *show-ast* t))
 		   ((string= x ":no-show-ast") (setf *show-ast* nil))
-		   ((string= x ":ns")          (format t "~&REPL namespace:~%~A~&" *scope*))
+		   ((string= x ":ns")          (format t "~&REPL namespace:~%~S~&" (dict->alist *scope*)))
 
 		   ((and (>= (length x) 5)
 			 (string= (subseq x 0 5) ":lisp"))
