@@ -1200,7 +1200,8 @@
 					
 				       ;; don't print value if it's None
 				       (unless (member ev (list *None* nil) :test 'eq)
-					 (handler-case
+					 (eval-print (list ev) nil)
+					 #+(or)(handler-case
 					     (eval-print (list ev) nil)
 					   (error ()
 					     (format t "~A (PE)~%" ev)))

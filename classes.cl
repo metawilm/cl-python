@@ -60,7 +60,11 @@
   ()
   (:metaclass python-type))
 
-
+(defmethod __repr__ ((x class))
+  (with-output-to-string (s)
+    (print-unreadable-object (x s :type t :identity t)
+      (format s "~A" (class-name x)))))
+  
 (defmethod __repr__ ((x builtin-class))
   (with-output-to-string (s)
     (print-unreadable-object (x s :type t :identity t)

@@ -142,8 +142,8 @@
 (defgeneric internal-get-attribute (x attr)
   (:documentation
    "Get attribute ATTR of X; returns VAL, FOUND-P. ~@
-    Could raise a Python exception in the process (but does not ~@
-    raise AttributeError itself)."))
+    Does not raise AttributeError itself, but any Python exception could be
+    raised in user-defined methods."))
 
 (defmethod internal-get-attribute :around (x attr)
   ;; (format t "internal-get-attribute: ~S ~S~%" x attr)
@@ -153,8 +153,18 @@
 	
 	((and (typep x 'class)
 	      (eq attr '__bases__))
-	 (values (copy-list (mop:class-direct-superclasses x)) t)) ;; copy for safety
+	 (values (make-py-list-from-list
+		  (copy-list (mop:class-direct-superclasses x)))
+		 t)) ;; copy for safety
 	
+	((and (typep x 'class)
+	      (eq attr '__mro__))
+	 ;; "Method Resoltion Order"
+	 ;; Implementation-specific classes are hidden from this list
+	 (values (make-py-list-from-list 
+		  (loop for cls in (mop:class-precedence-list x)
+		      if (python-object-designator-p cls) collect cls))
+		 t))
 	(t
 	 (call-next-method x attr))))
 

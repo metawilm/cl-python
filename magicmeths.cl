@@ -24,8 +24,21 @@
 			    ',methname args ',methname))
 		
 		,@(let ((real-params (remove '&optional params)))
-   
-		    `((defmethod ,methname :around ((,(car params) t) ,@(cdr params))
+		    `(
+		      ;; In case of instances of user-defined classes,
+		      ;; check if the built-in method is overruled in
+		      ;; the class.
+		      (defmethod ,methname :around ((,(car params) udc-instance) ,@(cdr params))
+			(multiple-value-bind (meth found)
+			    ;; or use __class__ instead of class-of?
+			    (internal-get-attribute (class-of ,(car params)) ',methname)
+			  (if found
+			      (__call__ meth (list ,@real-params))
+			    (py-raise 'TypeError
+				      "No method ~A defined for user-defined class instance ~A"
+				      ',methname ,(car params)))))
+		      
+		      (defmethod ,methname :around ((,(car params) t) ,@(cdr params))
 			(declare (ignore ,@(cdr params)))
 			(if (next-method-p)
 			    (call-next-method)

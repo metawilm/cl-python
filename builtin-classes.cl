@@ -484,7 +484,7 @@
 ;;; Conversions to a Python boolean
 
 (defun py-val->lisp-bool (x)
-  "Despite the name, VAL is either a Lisp or Python value. ~@
+  "Somewhat contrary to its name, VAL is either a Lisp or Python value. ~@
    Returns a generalized Lisp boolean."
   (declare (special *interned-empty-string*))
   (cond
@@ -641,7 +641,8 @@
 
 (defmethod dict-clear ((d py-dict))
   "Clear all items"
-  (clrhash (slot-value d 'hash-table)))
+  (clrhash (slot-value d 'hash-table))
+  (values))
 
 (defmethod dict-copy ((d py-dict))
   "Create and return copy of dict. Keys and values themselves are not copied."
@@ -2231,6 +2232,9 @@
 (defgeneric python-object-designator-p (x)
   (:documentation "Returns DESIGNATOR-P, PYVAL where PYVAL is a ~
                    Python object iff DESIGNATOR-P "))
+
+;; shield this class from Python
+(defmethod python-object-designator-p ((x (eql (find-class 'builtin-instance)))) (values nil nil))
 
 (defmethod python-object-designator-p ((x python-object)) (values t x))
 (defmethod python-object-designator-p ((x number)) (values t (make-py-number x)))
