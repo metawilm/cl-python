@@ -3,12 +3,13 @@
 (defun generator-ast-p (ast)
   "Is AST a function definition for a generator?"
   (catch 'is-generator
-    (walk-py-form ast 
-		  (lambda (x)
-		    (case (car x)
-		      (yield (throw 'is-generator t))
-		      (funcdef (values t t)) ;; don't look for 'yield' in inner functions
-		      (t x))))
+    (walk-py-ast ast 
+		 (lambda (x value? target?)
+		   (declare (ignore value? target?))
+		   (case (car x)
+		     (yield (throw 'is-generator t))
+		     ((classdef funcdef) (values t t)) ;; don't look for 'yield' in inner functions and classes
+		     (t x))))
     nil))
 
 (defun strings->symbol (&rest strings)
@@ -36,7 +37,7 @@
 	(labels
 	    ((walk (form stack)
 	       #+(or)(break "walking: ~A" form)
-	       (walk-py-form
+	       (walk-py-ast
 		form
 		(lambda (form)
 		  (case (car form)

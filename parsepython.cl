@@ -109,7 +109,7 @@
  (:decorator+?)
 
  ;; XXX for now: ignore decorators above function definition
- (funcdef (decorator+? def identifier parameters |:| suite) ((list 'funcdef $3 $4 $6)))
+ (funcdef (decorator+? def identifier parameters |:| suite) (`(funcdef (identifier ,$3) ,$4 ,$6)))
 
  (parameters ( |(| |)| ) ((list nil nil nil)))
  (parameters ( |(| parameter-list5 |)| ) ($2))
@@ -158,26 +158,18 @@
 	     import-stmt global-stmt exec-stmt assert-stmt)
 
  (expr-stmt (testlist expr-stmt2)
-	    (#+(or)(break "expr-stmt: ~A -- ~A" $1 $2)
-	       (cond ((null $2) ;; not an assignment expression
-		      $1)
-		     ((and $2 (eq (car $2) '=))
-		      (let ((items (nreverse `(,$1 ,@(second $2)))))
-			`(assign-expr ,(car items) ,(cdr items))))
-		     ($2
-		      #+(or)(warn "aug: ~S -- ~S" $1 $2)
-		      (list 'augassign-expr $1 (car $2) (cdr $2)))
-		     (t
-		      #+(or)(break "expr-stmt: what is this??  ~A -- ~A" $1 $2)
-		      $1))
-	       #+(or)(cond ((and $2 (eq (car $2) '=)) 
-			    `(assign-expr (,$1 ,@(second $2))))
-			   ($2
-			    (warn "aug: ~S ~S" $1 $2)
-			    (list 'augassign-expr $1 (car $2) (cdr $2)))
-			   (t
-			    (warn "not a real assign expr?!: ~A" $1)
-			    $1))))
+	    ((cond ((null $2) ;; not an assignment expression
+		   $1)
+		  
+		  ((and $2 (eq (car $2) '=))
+		   (let ((items (nreverse `(,$1 ,@(second $2)))))
+		     `(assign-expr ,(car items) ,(cdr items))))
+		  
+		  ($2
+		   (list 'augassign-expr (car $2) $1 (cdr $2)))
+		  
+		  (t
+		   $1))))
 
  (expr-stmt2 (augassign testlist) ((cons $1 $2))) ;; todo: return empty list, so "foo" = (identifier 'foo), not testlist
  (expr-stmt2 (=--testlist*) ((when $1 (list '= $1))))
@@ -210,19 +202,23 @@
  
  ;; "import" module ["as" name] ( "," module ["as" name] )*
  (import-stmt :or import-normal import-from)
+ 
  (import-normal (import dotted-as-name comma--dotted-as-name*) (`(import (,$2 ,@$3))))
  (:comma--dotted-as-name*)
  (comma--dotted-as-name ( |,| dotted-as-name) ($2))
+ 
  (import-from (from dotted-name import import-from-2) (`(import-from ,$2 ,$4)))
  (import-from-2 :or
 		*
 		((import-as-name comma--import-as-name*) . ((cons $1 $2))))
  (:comma--import-as-name*)
  (comma--import-as-name (|,| import-as-name) ($2))
- (import-as-name (identifier) ((list 'as $1 $1)))
- (import-as-name (identifier as identifier) ((list 'as $1 $3)))
- (dotted-as-name (dotted-name) ((list 'not-as $1)))
- (dotted-as-name (dotted-name as identifier) ((list 'as $1 $3)))
+ (import-as-name (identifier) (`(as ,$1 (identifier ,$1))))
+ (import-as-name (identifier as identifier) (`(as ,$1 (identifier ,$3))))
+ 
+ (dotted-as-name (dotted-name) (`(as ,$1 (identifier ,$1))))  ;; must have (attributeref ..) as target
+ (dotted-as-name (dotted-name as identifier) (`(as ,$1 (identifier ,$3))))
+ 
  (dotted-name (identifier dot--name*) ((if $2
 					   `(dotted ,$1 ,@(if (eq (first $2) 'dotted)
 							      (second $2)
@@ -377,11 +373,10 @@
  (sliceop (|:| test?) ($2))
  (:test?)
 
- (exprlist (expr exprlist2) (#+(or)(break "exprlist: ~A -- ~A" $1 $2)
-			       (if $2
+ (exprlist (expr exprlist2) ((if $2
 				 (list 'tuple
 				       (cons $1 (butlast $2))
-				       (car (last $2)))
+				       #+(or)(car (last $2)))
 			       $1)))
  (exprlist2 :or
 	    (() . (nil))
@@ -412,13 +407,14 @@
  (:comma--test--\:--test*)
  (comma--test--\:--test (|,| test |:| test) ((cons $2 $4)))
  
- (classdef (class identifier OB--testlist--CB? |:| suite)
-	   (`(classdef ,$2 ,(when $3 (second $3)) ,$5)))
- (:OB--testlist--CB?)
- (OB--testlist--CB (|(| testlist |)|) ((if (eq (car $2) 'testlist)
-					   $2
-					 `(testlist (,$2) nil))))
+ (classdef (class identifier inheritance |:| suite)
+	   (`(classdef (identifier ,$2) ,$3 ,$5)))
 
+ (inheritance (|(| testlist |)|) ((if (eq (car $2) 'tuple)
+					   $2
+					 `(tuple (,$2)))))
+ (inheritance () ('(tuple nil)))
+ 
  (arglist (argument--comma* arglist-2) ((append $1 $2)))
 
  (arglist-2 :or

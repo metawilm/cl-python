@@ -270,7 +270,8 @@
 
 
 (defun eval-classdef (cname-inheritance-suite)
-  (destructuring-bind (cname inheritance suite) cname-inheritance-suite
+  (destructuring-bind ((identifier cname) inheritance suite) cname-inheritance-suite
+    (assert (eq identifier 'identifier))
     
     ;; The inheritance list will be evaluated, but MAKE-PYTHON-CLASS
     ;; expects a list of *names*, therefore after each of the items is
@@ -562,7 +563,7 @@
 	#+(or)(eval-real-assign-expr tar ev-val)))))
 
 (defun eval-augassign-expr (target-operator-expr)
-  (destructuring-bind (target operator expr) target-operator-expr
+  (destructuring-bind (operator target expr) target-operator-expr
     
     ;; e()[ f() ] += g()  is evaluated as follows:
     ;; 
@@ -585,7 +586,7 @@
 	   (py-raise 'SyntaxError
 		     "Augmented assign to forbidden place (maybe TODO) (target AST: ~A)" target))
 	  
-	  (t (let* ((ev-target (eval-one-assignment-target (car target)))
+	  (t (let* ((ev-target (eval-one-assignment-target target))
 		    (ev-expr (py-eval-1 expr))
 		    (target-value-now (py-eval-1 ev-target))
 		    (op-funcs (cdr (assoc operator *math-inplace-op-assoc*)))

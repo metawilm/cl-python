@@ -132,13 +132,13 @@
 		      (when ast
 			#+(or)(warn "repl: assert eq first 'file-input ~A" ast)
 			(assert (eq (first ast) 'file-input))
-			#+(or)(when (and (= (length ast) 2)
-					 (or (not (listp ast))
-					     (not (member (caar (second ast))
-							  '(try-except try-finally
-							    for-in funcdef classdef
-							    if while))))))
-			(show-ast ast)
-			(eval-print-ast ast)
-			(setf acc nil))))))))))))))
+			(when (and (= (length ast) 2)
+				   (or (not (listp ast))
+				       (not (member (caar (second ast))
+						    '(try-except try-finally
+						      for-in funcdef classdef
+						      if while)))))
+			  (show-ast ast)
+			  (eval-print-ast ast)
+			  (setf acc nil)))))))))))))))
 

@@ -34,7 +34,7 @@
 		 "call" "builtin-funcs" "builtin-types" "mathops"
 		 "descriptors" "attributes" "modules" "pyeval"
 		 "parsepython" "walk" "gener" "repl" "trace"
-		 "bi-modules"))
+		 "bi-modules" "pyprint"))
       #+allegro(excl::compile-file-if-needed f)
       #-allegro(compile-file (concatenate 'string f ".cl"))
       (load f)))

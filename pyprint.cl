@@ -115,14 +115,14 @@
 
 ;; XXX check prec levels
 (defvar *binary-op-precedence*
-    '((or . 0)(and . 1)(in . 3)(is . 4)
+    '((or . 0)(and . 1)(in . 3)(|not in| . 3)(is . 4)(|is not| . 4)
       (< . 5)(<= . 5)(> . 5)(>= . 5)(!= . 5) (== . 5)
       (|\|| . 6)(^ . 7)(& . 8)(<< . 9)(>> . 9)
       (+ . 10)(- . 10) (* . 11)(/ . 11)(% . 11)(// . 11)
-      (** . 12)))
+      (** . 14)))
 
 (defvar *unary-op-precedence* ;; XXX check
-    '((+ . 10)(- . 10)(~ . 7)(not . 2)))
+    '((not . 2)(+ . 12)(- . 12)(~ . 13)))
 
 (defmethod py-pprint (stream (x list))
   (case (car x)
@@ -131,12 +131,7 @@
 	      (when (second data)
 		(format stream ", ~A" (second data)))))
     
-    (assign-expr (let ((content (second x)))
-		   (case (length content)
-		     (1 (format stream "~A" (first content)))
-		     (2 (format stream "~A = ~A"
-				(first content) (second content)))
-		     (t (format stream "~{~A~^ = ~}" content)))))
+    (assign-expr (format stream "~{~A = ~^~}~A" (third x) (second x)))
     
     (attributeref (format stream "~A.~A" (second x) (third x)))
     
@@ -173,8 +168,7 @@
 	    (format stream ")")))
 
     (classdef (destructuring-bind (name supers suite) (cdr x)
-		(format stream "~&class ~A(~{~A~^,~A~}): ~A"
-			name supers suite)))
+		(format stream "~&class ~A ~A: ~A" name supers suite)))
     
     (comparison (format stream "~A ~A ~A" (third x) (second x) (fourth x)))
 
@@ -273,25 +267,14 @@
 		    (format stream "**~A" **-arg))
 		  (format stream ": ~A" expr)))))
 
-    (list    (let ((data (second x)))
-	       (if (and (second data)
-			(listp (second data))
-			(listp (car (second data)))
-			(eq (car (car (second data))) 'list-for-in))
-		 
-		   (progn  ;; list comprehension
-		     (format stream "[~A " (first data))
-		     (loop for clause in (second data)
-			 do (case (first clause)
-			      (list-for-in
-			       (format stream "for ~A in ~A "
-				       (second clause) (third clause)))
-			      (list-if
-			       (format stream "if ~A " (second clause)))))
-		     (format stream "]"))
-	       
-		 ;; regular list
-		 (format stream "[~{~A~^, ~}]" (second x)))))
+    (list  (format stream "[~{~A~^, ~}]" (second x)))
+    (list-compr (format stream "[~A" (second x))
+		(loop for clause in (third x)
+		    do (case (first clause)
+			 (list-for-in (format stream " for ~A in ~A"
+					      (second clause) (third clause)))
+			 (list-if     (format stream " if ~A" (second clause)))))
+		(format stream "]"))
     
     (pass (format stream "pass"))
     
@@ -319,19 +302,17 @@
 	     (when c
 	       (format stream ":~A" c))))
 
-    (subscription (format stream "~A[" (second x))
-		  (destructuring-bind (items comma?) (third x)
-		    (format stream "~{~A~^, ~}" items)
-		    (when comma? (format stream ",")))
-		  (format stream "]"))
+    (subscription (format stream "~A[~A]" (second x) (third x)))
 
     (suite (format stream "~&~<   ~@;~@{~A~^~&~}~:>~&" (second x)))
-    
-    (tuple (let ((data (second x)))
-	     (format stream "(")
-	     (format stream "~{~A~^, ~}" data)
-	     (format stream ",")
-	     (format stream ")")))
+	   
+    (tuple (let ((brackets? (/= *precedence-level* -1)))
+	     (when brackets? (format stream "("))
+	     (let ((items (second x)))
+	       (format stream "~{~A~^, ~}" items)
+	       (unless (cdr items)
+		 (format stream ",")))
+	     (when brackets? (format stream ")"))))
     
     (try-except (destructuring-bind (try-suite except-suites else-suite)
 		    (cdr x)
