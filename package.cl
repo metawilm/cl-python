@@ -51,3 +51,6 @@
    ;;; todo:
    :classmethod :staticmethod :property :object :type :unicode))
 
+(defpackage :python-module-sys
+  (:use)
+  (:export :modules))

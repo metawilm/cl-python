@@ -16,6 +16,8 @@
 
 (defun repl ()
   (format t "[CLPython -- type `:q' to quit, `:help' for help]~%")
+  (locally (declare (special *python-modules*))
+    (dict-clear *python-modules*))
   (loop
     (let ((*scope* (make-namespace :name "repl ns" :builtins t)))
       (declare (special *scope*))

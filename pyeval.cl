@@ -2,7 +2,6 @@
 
 (defparameter *scope* nil "Current execution namespace")
 
-
 (defun make-builtins-module ()
   
   ;; Fill a new namespace with all built-in names, and create a module
@@ -30,6 +29,7 @@
 
 (defparameter *__debug__* 1) ;; CPython readonly variable `__debug__' (see EVAL-ASSERT)
 
+(defparameter *python-modules* (make-namespace) "Registry of all modules")
 
 ;;; Evaluation
 
@@ -69,6 +69,7 @@
       (return-from py-eval ast))
     
     (case (car ast)
+      (inline-lisp (eval-inline-lisp (second ast)))
       (file-input (eval-file-input (cdr ast)))
       (testlist (apply #'eval-testlist (cdr ast)))
     
@@ -80,7 +81,10 @@
       (module (apply #'eval-module "mod_name_here" (cdr ast)))
       (funcdef (apply #'eval-funcdef (cdr ast)))
       (class (apply #'eval-classdef (cdr ast)))
+      
       (import (apply #'eval-import (cdr ast)))
+      (import-from (apply #'eval-import-from (cdr ast)))
+		   
       (assign-expr (apply #'eval-assign-expr (cdr ast)))
       (del (eval-del (second ast)))
 
@@ -133,6 +137,9 @@
     
       (t (error "uncatched in py-eval: ~S~%" ast))
       )))
+
+(defun eval-inline-lisp (form)
+  (eval form))
 
 (defun eval-try-except (suite except-clauses else-clause)
   (handler-bind
@@ -740,35 +747,95 @@
 	      (setf c (read-char stream nil nil))))
       res)))
 
-(defun eval-import (data nl)
-  (assert (null nl))
-  (destructuring-bind (normal (modname nl2))
-      data
-    (assert (eq normal 'normal))
-    (assert (eq nil nl2))
-    (let* ((file-name (concatenate 'string (string modname) ".py"))
-	   (file-contents (read-file file-name)))
+(defun make-module-object (module-name)
+  (let* ((file-name (concatenate 'string (string module-name) ".py"))
+	 (file-contents (read-file file-name)))
       
-      ;; In CPython, when the toplevel of modules is executed, the
-      ;; name of the module is not yet bound to the module object
+    ;; In CPython, when the toplevel of modules is executed, the
+    ;; name of the module is not yet bound to the module object
       
-      (let* ((module-ns (make-namespace
-			 :name (format nil "namespace for module ~A" modname)
-			 :builtins t))
-	     (module-ast (parse-python-string file-contents)))
+    (let* ((module-ns (make-namespace
+		       :name (format nil "namespace for module ~A" module-name)
+		       :builtins t))
+	   (module-ast (parse-python-string file-contents)))
 	
-	(let ((*scope* module-ns))
-	  (declare (special *scope*))
-	  (namespace-bind module-ns '__name__ modname)
-	  (namespace-bind module-ns '__file__ file-name)
-	  (py-eval module-ast))
+      (let ((*scope* module-ns))
+	(declare (special *scope*))
+	(namespace-bind module-ns '__name__ module-name)
+	(namespace-bind module-ns '__file__ file-name)
+	(py-eval module-ast))
 	
-	;; Now bind module name to the object in the enclosing namespace
-	(let ((m (make-module :name modname
-			      :namespace module-ns)))
-	  (namespace-bind *scope* modname m))))))
-      
+      ;; Now bind module name to the object in the enclosing namespace
+      (make-module :name (string file-name)
+		   :namespace module-ns))))
 
+
+(defun eval-import (items)
+  ;; TODO: use sys.path
+  (flet ((get-module-object (mod-name) ;; -> #<MODULE>, EXISTED-ALREADY-P
+	   (let ((mod (namespace-lookup *python-modules* mod-name)))
+	     (if mod
+		 (values mod t)
+	       (let ((m (make-module-object mod-name)))
+		 (namespace-bind *python-modules* mod-name m)
+		 (values m nil)))))
+	 
+	 (normalize-item (x)
+	   (if (symbolp x) `(as ,x ,x) x))
+	       
+	 (normalize-list (list)
+	   (loop for x in list
+	       if (symbolp x) collect `(as ,x ,x)
+	       else collect x)))
+    
+    (dolist (item (normalize-list items))
+      (assert (listp item))
+       
+      (ecase (car item)
+	  	  
+	(from  ;; "from a import b, c as c2" -> '(from a (b (as c c2)))
+	 (destructuring-bind (mod-name attributes)
+	     (cdr item)
+	   (let ((mo (get-module-object mod-name)))
+	     
+	     (if (eq attributes '*) ;; "from a import *"
+		 
+		 (multiple-value-bind (all found)
+		     (internal-get-attribute mo '__all__)
+		   (if found
+		       
+		       (py-iterate (attr all)
+				   (multiple-value-bind (val found)
+				       (internal-get-attribute mo attr)
+				     (unless found
+				       (py-raise 'AttributeError
+						 "Module ~A has no attribute ~A (mentioned in __all__)"
+						 mo attr))
+				     (namespace-bind *scope* attr val)))
+		     
+		     ;; no __all__ method:
+		     ;; iterate over all names in the module dict that don't start with underscore
+		     (loop for (name . val) in (dict->alist (module-dict mo))
+			 when (char/= (aref 0 (string name)) #\_) 
+			 do (namespace-bind *scope* name val))))
+
+	       (dolist (attr (normalize-list attributes))
+		 (assert (eq (car attr) 'as))
+		 (destructuring-bind (real-name new-name)
+		     (cdr attr)
+		   (multiple-value-bind (val found)
+		       (internal-get-attribute mo real-name)
+		     (if found
+			 (namespace-bind *scope* new-name val)
+		       (py-raise 'ImportError "Module ~A has no attribute: ~S" mod-name attr)))))))))
+	  
+	(as  ;; "import c as c2" -> '(as c c2)
+	 (destructuring-bind (real-name new-name)
+	     (cdr item)
+	   (let ((mo (get-module-object real-name)))
+	     (namespace-bind *scope* new-name mo))))))))
+	
+	
 (defun eval-if (clauses else-suite)
   (loop for (expr suite) in clauses
       when (py-val->lisp-bool (py-eval expr))

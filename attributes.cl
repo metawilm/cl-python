@@ -267,6 +267,10 @@
 (defmethod internal-get-attribute ((x (eql (find-class 'python-type))) attr)
   (search-generic-function-attr x attr))
 
+(defmethod internal-get-attribute ((x python-type) attr)
+  (declare (ignore attr))
+  (error "TODO: i-g-a python-type: ~A" x))
+
 (defmethod internal-get-attribute ((x user-defined-class) attr)
   (loop for cls in (mop:class-precedence-list x)
 		   ;; until (eq cls (load-time-value (find-class 'python-type)))
@@ -288,7 +292,7 @@
   ;; XXX are module __dict__ attributes overridable?
   (let ((ns (slot-value x 'namespace)))
     (cond ((eq attr '__dict__) (values ns t))
-	  (t                   (values (namespace-lookup ns attr) t)))))
+	  (t                   (namespace-lookup ns attr)))))
 
 (defmethod internal-get-attribute ((x builtin-instance) attr)
   (search-generic-function-attr (class-of x) attr x))

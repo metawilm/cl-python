@@ -14,7 +14,7 @@
       and or not for in is
       print import from as assert break continue global del exec pass
       try except finally raise
-      if elif else while))
+      if elif else while clpy))
 
 (defgrammar python-grammar (grammar)
   ()
@@ -46,7 +46,7 @@
 	    and or not for in is
 	    print import from as assert break continue global del exec pass
 	    try except finally raise
-	    if elif else while )
+	    if elif else while clpy)
   )
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
@@ -193,7 +193,7 @@
  (import-normal (import dotted-as-name comma--dotted-as-name*) (`(import (,$2 ,@$3))))
  (:comma--dotted-as-name*)
  (comma--dotted-as-name ( |,| dotted-as-name) ($2))
- (import-from (from dotted-name import import-from-2) ((list 'import-from $2 $4)))
+ (import-from (from dotted-name import import-from-2) (`(import ((from ,$2 ,$4)))))
  (import-from-2 :or
 		*
 		((import-as-name comma--import-as-name*) . ((cons $1 $2))))
@@ -309,8 +309,11 @@
        ((|`| testlist1 |`|) . ((list 'repr-list $2)))
        ((identifier) . ((list 'identifier $1)))
        ((number) . ($1))
-       ((string+) . ($1)))
+       ((string+) . ($1))
+       ((clpy-expr) . ($1)))
 
+ (clpy-expr (clpy) (`(inline-lisp ,$1)))
+   
  (string+ (string) ($1))
  (string+ (string+ string) ((concatenate 'string $1 $2)))
 
@@ -860,7 +863,7 @@
 		 ((identifier-char1-p c)
 		  (let* ((read-id (read-identifier c))
 			 (token (intern read-id)))
-		    (if (member token *reserved-words*
+		    #+(or)(if (member token *reserved-words*
 				:test #'eq)
 			(progn
 			  (when *lex-debug*
@@ -873,7 +876,28 @@
 			  (format t "lexer returning identifier: ~s~%" read-id))
 			(return-from lexer
 			  (values (tcode identifier)
-				  read-id))))))
+				  read-id))))
+		    
+		    (cond ((eq token 'clpy) ;; allows mixing Lisp code in Python files clpy(3) -> 3
+			   (let ((lisp-form (read)))
+			     (when *lex-debug*
+			       (format t "lexer returning Lisp form: ~s~%" lisp-form))
+			     (return-from lexer (values (tcode-1 (find-class 'python-grammar) 'clpy)
+							(car lisp-form)))))
+			  
+			  ((member token *reserved-words* :test #'eq)
+			   (when *lex-debug*
+			     (format t "lexer returning reserved word: ~s~%" token))
+			   (return-from lexer
+			     (values (tcode-1 (find-class 'python-grammar) token)
+				     token)))
+			  
+			  (t
+			   (when *lex-debug*
+			     (format t "lexer returning identifier: ~s~%" read-id))
+			   (return-from lexer
+			     (values (tcode identifier)
+				     read-id))))))
 
 		 ((or (char= c #\')
 		      (char= c #\")) (lex-return string (read-string c)))
