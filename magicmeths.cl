@@ -291,6 +291,7 @@
 (defgeneric __new__ (class &rest args)
   (:documentation "Allocate new instance of CLASS"))
 
+#+(or) ;; don't for now
 (defgeneric __init__ (x &rest args)
   (:documentation "Initialize class instance X"))
 

@@ -2,6 +2,19 @@
 
 ;;; Built-in classes and their methods
 
+;; There is a special method __new__ that accepts as first argument
+;; classes instead of instances. Need to special-case them in
+;; __call__, therefore keep track of them in a hash-table.
+
+(defparameter *__new__-methods* (make-hash-table :test #'eq))
+
+(defmethod register-as-__new__method ((f function))
+  (setf (gethash f *__new__-methods*) t))
+
+(defmethod is-a-__new__-method ((f function))
+  (gethash f *__new__-methods*))
+
+
 ;; TODO:
 ;;  - __mro__ attribute of classes
 ;;  - need for __eq__ when __cmp__ is already defined?
@@ -1486,6 +1499,24 @@
   "internal use only"
   (slot-value tup 'list))
 
+
+(defmethod tuple-__new__ (cls &rest options)
+  (let ((instance
+	 (cond ((not options) (make-tuple))
+	       ((cdr options) (py-raise 'TypeError "tuple.__new__() takes at most 1 argument (got: ~A)" options))
+	       (t             (make-tuple-from-list (py-iterate->lisp-list (car options)))))))
+    (if (eq cls (find-class 'py-tuple))
+	instance
+      (if (and (typep cls 'class)
+	       (subtypep cls (find-class 'py-tuple)))
+	  (change-class instance cls)
+	(py-raise 'TypeError "~S is not a subclass of ~S" cls (find-class 'py-tuple))))))
+
+(register-as-__new__method #'tuple-__new__)
+
+(defmethod __init__ ((x py-tuple) &optional pos-args kwd-args)
+  (declare (ignore pos-args kwd-args)))
+
 ;;;; magic methods
 
 ;;; XXX Many methods are similar as for py-list. Maybe move some to a
@@ -1544,7 +1575,7 @@
   ;; n <= 0 => empty list
   (make-tuple-from-list (loop for i from 1 to n
 			    append (slot-value x 'list))))
-
+  
 (defmethod __rmul__ ((x py-tuple) (n integer)) 
   (__mul__ x n))
 
@@ -1563,6 +1594,9 @@
 	    "Cannot set items of tuples"))
 
 ;;; there are no tuple-specific methods
+(def-class-specific-methods
+    py-tuple
+    ((__new__ (meth . tuple-__new__))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; String

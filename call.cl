@@ -1,30 +1,20 @@
 (in-package :python)
 
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Calling objects
+;;; Calling objects
 
 (defgeneric __call__ (x &optional pos-args kwds-args)
-  (:documentation "Call X with given arguments. Call arg rewriting must take ~
+  (:documentation "Call X with given arguments. Call arg rewriting must take ~@
                    place _before_ calling __call__ (or in __CALL__ :AROUND ?)"))
 
-#+(or) ;; can't discriminate like this
-(defmethod no-applicable-method ((f (eql #'__call__)) &rest args)
-  (signal '%magic-method-missing%)
-  (py-raise 'TypeError
-	    "Object ~A not callable (args: ~A) [no-app-meth __call__]" (car args) (cdr args)))
 
-
-;; None of the built-in functions take keyword argument, so give a
-;; warning in case kw args are given.
+;; None of the built-in functions take keyword argument, so give an
+;; error in case kw args are given.
 
 (defmethod __call__ ((x generic-function) &optional pos-args kwd-args)
   (when kwd-args
-    (warn "__call__ on GF ~A got keyword args?! (pos-args: ~A; kwd-args: ~A)"
-	   x pos-args kwd-args))
-  (let ((*check-attr-exists* nil))
-    (declare (special *check-attr-exists*)) ;; see attributes.cl
-    (apply x pos-args)))
+    (py-raise 'ValueError "built-in function ~S does not take keyword arguments (got: ~A)"
+	      x kwd-args))
+  (apply x pos-args))
 
 (defmethod __call__ ((x function) &optional pos-args kwd-args)
   (when kwd-args
@@ -40,14 +30,12 @@
   "Evaluate function body in function definition namespace."
   (declare (ignore pos-args key-args))
   
+  ;; If the AST contains `return', it exists from this FUNCTION-BLOCK
+  ;; (or a FB inside this one). `return' can only occur inside a
+  ;; function body.
+  ;; When the function doesn't do `return', None is returned implicitly.
+
   (catch 'function-block
-
-    ;; If the AST contains `return', it exists from this
-    ;; FUNCTION-BLOCK (or a FB inside this one). `return' can only
-    ;; occur inside a function body.
-    ;; 
-    ;; When the function doesn't do `return', None is returned.    
-
     (call-next-method)
     *None*))
 
@@ -65,8 +53,8 @@
       
       (let ((*scope* namespace))
 	(declare (special *scope*))
-      
 	(py-eval ast)))))
+
 
 (defmethod __call__ ((x python-function-returning-generator) &optional pos-args key-args)
   (with-slots (call-rewriter generator-creator) x
@@ -86,7 +74,6 @@
 
 (defmethod __call__ ((x py-bound-method) &optional pos-args kwd-args)
   "The instance enclosed in the bound method is prefixed to pos-args"
-  #+(or)(break "xyz")
   (unless (listp pos-args)
     (error "pos-args should be list (got: ~A)" pos-args))
   (__call__ (slot-value x 'func)
@@ -94,64 +81,65 @@
 		  pos-args)
 	    kwd-args))
 
+
 (defmethod __call__ ((x py-unbound-method) &optional pos-args kwd-args)
   "X must be of right class, then call class method with given args."
   (unless pos-args
-    (py-raise 'TypeError
-	      "Unbound method~% ~X~% must be called with instance as ~
-               first argument (got no positional args instead)"
-	      x))
-  (let ((inst (car pos-args))
-	(cls (slot-value x 'class)))
+    (py-raise 'TypeError "Unbound method~% ~X~% must be called with instance as ~
+                          first argument (got no positional args instead)" x))
+  (with-slots ((um-class class) (um-func func)) x
     
-    #+(or) ;; this check fails in cases where inst=3, cls=<py-int> TODO
-    (unless (typep inst cls)
-      (py-raise 'TypeError
-		"Unbound method ~A must be called with instance of ~
-                 class ~A as first argument (got as first arg: ~A)"
-		x cls inst))
-    
-    (when (typep cls (find-class 'user-defined-class))
-      (unless (typep inst cls)
+    (let ((inst (car pos-args)))
+      
+      (unless (or (typep inst um-class) ;; most common case
+		  (subtypep (__class__ inst) um-class) ;; first arg is a python value designator or subclass instance
+		  (and (typep inst 'class) ;; method is a __new__ method, and first arg is same or subclass
+		       (subtypep inst um-class)
+		       (is-a-__new__-method um-func)))
 	(py-raise 'TypeError
-		  "Unbound method~% ~A~% must be called with instance of ~
-                  class ~A as first argument (got as first arg: ~A)"
-		  x cls inst)))
+		  "Unbound method ~A must be called with instance of ~
+                   class ~%~A ~%as first argument (got as first arg: ~S)"
+		  x um-class inst))
     
-    (__call__ (slot-value x 'func) pos-args kwd-args)))
+      (__call__ um-func pos-args kwd-args))))
 
 
 
 ;;;; Calling a class creates an instance
 
-(defmethod __call__ ((x builtin-class) &optional pos-args kwd-args)
-  (declare (ignore kwd-args))
-  (if (eq x (find-class 'py-xrange))
-      (apply #'make-xrange pos-args)
-    (make-instance x)
-    #+(or)(let ((instance (__new__ x pos-args kwd-args)))
-	    (__init__ instance pos-args kwd-args)
-	    instance)))
+#+(or)
+(defmethod __call__ :around ((x builtin-class) &optional pos-args kwd-args)
+  (when kwd-args
+    (py-raise 'ValueError "Built-in classes do not take keyword arguments (XXX ?!) (got: ~S)" kwd-args))
+  ;; XXX or allow?
+  (call-next-method))
+
+(defmethod __call__ ((cls python-type) &optional pos-args kwd-args)
+  ;; <cls>.__new__(<cls>, ..) creates and returns a new instance
+  ;; <cls>.__init__(<cls instance>, ..) initializes it but doesn't return anything useful
+  
+  (multiple-value-bind (meth found)
+      (internal-get-attribute cls '__new__)
+    (if found
+	
+	(let ((inst (__call__ meth (cons cls pos-args) kwd-args))) ;; call with class as first arg
+	  (multiple-value-bind (res found)
+	      (call-attribute-via-class inst '__init__ pos-args kwd-args)
+	    (declare (ignore res))
+	    (unless found
+	      (error "Class ~S has no method __init__" cls)))
+	  inst)
+      
+      (error "Class ~S has no method __new__" cls))))
 
 
-
+#+(or)
 (defmethod __call__ ((cls user-defined-class) &optional pos-args kwd-args)
   ;;; Create an instance of CLS, by calling the __new__ and __init__
   ;;; methods of CLS; both are called with ARGS.
   ;;; XXX todo: rename make-instance to __new__ everywhere
   (declare (ignore pos-args kwd-args))
   (make-instance cls))
-
-    
-#|    #+(or);; don't for now
-    (multiple-value-bind (init found)
-	(namespace-lookup (slot-value cls '__dict__) '__init__)
-      (if found
-	  (__call__ init pos-args kwd-args)
-	(warn "Class ~A has no __init__ method, apparently ~
-               (superclasses not checked TODO)" x)))
-    x))
-|#
 
 
 
