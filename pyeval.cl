@@ -41,6 +41,7 @@
   (let ((*scope* (or namespace 
 		     (make-namespace :name "<new user-py-eval ns>"
 				     :builtins t))))
+    (namespace-bind *scope* '__name__ "__main__")
     (py-eval ast)))
 
 

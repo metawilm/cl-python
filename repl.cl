@@ -21,6 +21,7 @@
   (loop
     (let ((*scope* (make-namespace :name "repl ns" :builtins t)))
       (declare (special *scope*))
+      (namespace-bind *scope* '__name__ "__main__")
       (loop
 	(with-simple-restart (return-python-toplevel "Return to Python top level [:ptl]")
 	  (let ((acc ()))
