@@ -1,1 +1,8 @@
-tuple( [1,2] ) doesn't work (printer error)
+- tuple( [1,2] ) doesn't work (printer error)
+- lexer doesn't support imaginary numbers, unicode, new @ syntax
+- no metaclasses
+- no properties
+- generator functions not handled yet
+- exceptions must be recast as python exceptions as much as possible (what about tracebacks?)
+
+
