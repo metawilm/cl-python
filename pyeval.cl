@@ -50,6 +50,7 @@
   ;; During evaluation, Lisp errors may be signaled. They are
   ;; converted to the corresponding Python exception, where
   ;; appripriate.
+  ;; TODO: move this to the places where it can actually occur...
   (handler-bind 
       ((division-by-zero (lambda (c) (declare (ignore c))
 				 (py-raise 'ZeroDivisionError
@@ -326,9 +327,8 @@
 		(if stop (py-eval stop) *None*)
 		(if step (py-eval step) *None*))))
 
-#+(or)
-(defun eval-lambda (params expr)
-  'todo)
+
+
 
 (defun eval-call (primary args)
   (let ((eprim (py-eval primary))) ;; XX check order of this eval
@@ -586,37 +586,62 @@
 	do (return t)
 	finally (return nil))))
 
+
 (defun eval-funcdef (fname params suite)
   "In the current namespace, FNAME becomes bound to a function object ~@
    with given formal parameters and function body."
-  
-  ;; The default argument values are evaluated only once, at function
-  ;; definition time.
-  ;; 
-  ;; given as (k . v), not (= k v) as somewhere else XXX
+  (let* ((params (multiple-value-list (parse-function-parameter-list params)))
+	 (f (make-user-defined-function 
+	     :name fname
+	     :ast suite
+	     :namespace (make-namespace
+			 :name (format nil "ns for function ~A" fname)
+			 :inside *scope*)
+	     :params params
+	     :call-rewriter (apply #'make-call-rewriter params))))
+	
+    ;; Content of function is not evaluated yet; only when called.
+    ;; Bind function name to function object in current namespace:
+    (namespace-bind *scope* fname f)
+    f))
+
+(defun eval-lambda (params expr)
+  (let ((params (multiple-value-list (parse-function-parameter-list params))))
+    (make-lambda-function
+     :ast expr
+     :namespace (make-namespace :name "lambda namespace"
+				:inside *scope*)
+     :params params
+     :call-rewriter (apply #'make-call-rewriter params))))
+
+(defun parse-function-parameter-list (params)
+  "Returns POS-PARAMS, KW-PARAMS, *-PAR, **-PAR as multiple values"
+
   (destructuring-bind (pos-kw-params *-par **-par)
       params
-    (let* ((kw-params (loop for x in pos-kw-params if (consp x) collect x))
-	   (pos-params (set-difference pos-kw-params kw-params))
-	   (kw-params (loop for (k . v) in kw-params
-			  collect `(,k . ,(py-eval v)))))
-      
-      (let* ((params (list pos-params kw-params *-par **-par))
-	     ;; (dummy (format t "FUNCDEF params: ~A~%" params))
-	     (f (make-user-defined-function
-		 :name fname
-		 :ast suite
-		 :namespace (make-namespace
-			     :name (format nil "<ns for function ~A>" fname)
-			     :inside *scope*)
-		 :params params
-		 :call-rewriter (apply #'make-call-rewriter params)
-		 :enclosing-scope *scope*)))
-	
-	;; Content of function is not evaluated yet; only when called.
-	;; Bind function name to function object in current namespace:
-	(namespace-bind *scope* fname f)
-	f))))
+    
+    ;; Keyword arguments must come after positional arguments.
+    ;; The grammar doesn't restrict that, so check it here.
+    
+    (let ((found-kw nil))
+      (mapc (lambda (x)
+	      (cond ((consp x)
+		     (setf found-kw x))
+		    ((and found-kw (symbolp x))
+		     (py-raise 'SyntaxError
+			       "Non-default argument '~A' follows default argument '~A'"
+			       x (car found-kw)))
+		    (t)))
+	    pos-kw-params))
+    
+    (loop for x in pos-kw-params
+	if (consp x) 
+	collect (progn (setf (cdr x) (py-eval (cdr x)))
+		       x)
+	into kw-args
+	     
+	else collect x into pos-args
+	finally (return (values pos-args kw-args *-par **-par)))))
 
 
 (defun eval-classdef (cname inheritance suite)

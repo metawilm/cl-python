@@ -339,7 +339,7 @@
       (__getitem__ (slot-value x '__dict__) attr)
     (when found
       (return-from getattr-class-nonrec
-	(values (if (typep val 'user-defined-function)
+	(values (if (typep val 'python-function)
 		    (if instance
 			(make-bound-method :func val :self instance)
 		      (make-unbound-method :func val :class x))

@@ -876,58 +876,42 @@
 ;; defined while running Python.
 
 (defclass python-function (builtin-instance)
-  ()
+  ((ast             :initarg :ast   
+		    :documentation "AST of the function code")
+   (params          :initarg :params
+		    :documentation "Formal parameters, e.g. '((a b) ((c . 3)(d . 4)) args kwargs)")
+   (call-rewriter   :initarg :call-rewriter
+		    :documentation "Function that normalizes actual arguments")
+   (namespace       :initarg :namespace
+	            :type namespace
+   	            :documentation "The namespace in which the function code is ~
+                                    executed (the lexical scope -- this is not ~
+                                    func.__dict__)"))
   (:metaclass builtin-class))
 
 (mop:finalize-inheritance (find-class 'python-function))
 
-  
-      
 
-#+(or) ;; unused -- built-in functions are directly called (after argument massaging)
-(progn (defclass builtin-function (python-function)
-	 ((name :initarg :name)
-	  (func :initarg :func :type function :documentation "The Lisp function"))
-	 (:documentation "A built-in function wraps a Lisp function. ~@
-                   It may accept positional arguments, but no keyword arguments.")
-	 (:metaclass builtin-class))
-       ;; XXX there's no need for builtin-function
-	 ;; to store the number of parameters as CL will check that upon
-	 ;; call. Because keyword args are not allowed, the formal arg names
-	 ;; don't matter either.
+;; Lambda
 
+(defclass py-lambda-function (python-function)
+  ()
+  (:metaclass builtin-class))
 
-       (defun make-builtin-function (name func)
-	 (check-type func function)
-	 (make-instance 'builtin-function :name name :func func))
+(mop:finalize-inheritance (find-class 'py-lambda-function))
+
+(defun make-lambda-function (&rest options)
+  (apply #'make-instance 'py-lambda-function options))
+
+(defmethod __repr__ ((x py-lambda-function))
+  (with-output-to-string (s)
+    (print-unreadable-object (x s :type t :identity t))))
 
 
-       (defmethod print-object ((x builtin-function) stream)
-	 (print-unreadable-object (x stream)
-	   (with-slots (name func) x
-	     (format stream "built-in function ~A -- wrapper for ~A" name func))))
-
-
-       (defun builtin-function-p (x)
-	 (typep x 'builtin-function)))
-
+;; Regular function
 
 (defclass user-defined-function (python-function)
-  ((name :initarg :name :type string)
-   (ast :initarg :ast :documentation "The AST of the function code")
-   (namespace :initarg :namespace
-	      :type namespace
-	      :documentation "The namespace in which the function code is ~
-                              executed (the lexical scope -- this is not ~
-                              func.__dict__)")
-   (params :initarg :params
-	   :documentation "The formal function parameters ~
-                           (e.g. '((a b) ((c . 3)(d . 4)) args kwargs")
-   (call-rewriter :initarg :call-rewriter
-		  :documentation "Function that normalizes actual arguments")
-   (enclosing-scope :initarg :enclosing-scope
-		    :documentation "The namespace enclosing `namespace'"))
-  (:documentation "A Python function, user-defined or built-in.")
+  ((name :initarg :name :type string))
   (:metaclass builtin-class))
 
 (mop:finalize-inheritance (find-class 'user-defined-function))
@@ -942,14 +926,10 @@
   (check-type namespace namespace)
   (apply #'make-instance 'user-defined-function options))
 
+#+(or) ;; unused
 (defun python-function-p (f)
   "Predicate: is F a python function?"
   (typep f 'user-defined-function))
-
-(defmethod print-object ((f user-defined-function) stream)
-  (print-unreadable-object (f stream)
-    (with-slots (name params) f
-      (format stream "user-defined function ~A with params ~A" name params))))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -1034,7 +1014,7 @@
   (with-output-to-string (stream)
     (print-unreadable-object (x stream :identity nil :type t)
       (with-slots (class func) x
-	(format stream "~_:class ~S~_:func ~S" class func)))))
+	(format stream "~_:class ~S ~_:func ~S" class func)))))
 
 
 ;;;; Bound
@@ -1075,7 +1055,7 @@
   (with-output-to-string (stream)
     (print-unreadable-object (x stream :identity nil :type t)
       (with-slots (class func self) x
-	(format stream "~_:class ~S~_:func ~S~_:self ~S"
+	(format stream ":class ~S ~_:func ~S ~_:self ~S"
 		class func self)))))
 
 

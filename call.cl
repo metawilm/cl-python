@@ -36,31 +36,36 @@
 
 ;;; user-defined functions/methods:   
 
-(defmethod __call__ ((x user-defined-function) &optional pos-args key-args)
+(defmethod __call__ :around ((x user-defined-function) &optional pos-args key-args)
   "Evaluate function body in function definition namespace."
+  (declare (ignore pos-args key-args))
   
-  (let* ((actual-args (funcall (slot-value x 'call-rewriter) pos-args key-args))
-	 (namespace (slot-value x 'namespace))
-	 (ast (slot-value x 'ast)))
-    
-    ;; Evaluate function AST in the function definition namespace
-    ;; extended with the current argument values.
-    (loop for (arg . val) in actual-args
-	do (namespace-bind namespace arg val))
-    (let ((*scope* namespace))
-      (declare (special *scope*))
+  (catch 'function-block
+
+    ;; If the AST contains `return', it exists from this
+    ;; FUNCTION-BLOCK (or a FB inside this one). `return' can only
+    ;; occur inside a function body.
+    ;; 
+    ;; When the function doesn't do `return', None is returned.    
+
+    (call-next-method)
+    *None*))
+
+
+(defmethod __call__ ((x python-function) &optional pos-args key-args)
+  (with-slots (call-rewriter namespace ast) x
+    (let ((actual-args (funcall call-rewriter pos-args key-args)))
       
-      ;; If the AST contains `return', it exists from this
-      ;; FUNCTION-BLOCK (or a FB inside this one). `return' can only
-      ;; occur inside a function body.
-      (catch 'function-block
-	
-	(py-eval ast)
-	
-	;; When the function doesn't do `return', None is returned --
-	;; so make it the last value here (no need to throw as
-	;; `return' does - it's the last value anyway).
-	*None*))))
+      ;; Evaluate function AST in the function definition namespace
+      ;; extended with the current argument values.
+
+      (loop for (arg . val) in actual-args
+	  do (namespace-bind namespace arg val))
+      
+      (let ((*scope* namespace))
+	(declare (special *scope*))
+      
+	(py-eval ast)))))
 
 
 (defmethod __call__ ((x py-bound-method) &optional pos-args kwd-args)
@@ -224,7 +229,8 @@
 	  (if f*
 	      (push (cons f* (make-tuple-from-list pos-arg-2)) result)
 	    (if pos-arg-2
-		(error "Too many positional args supplied"))))
+		(py-raise 'TypeError
+			  "Too many positional args supplied"))))
 	 
 	;; Assign kw args
 	(let ((for-f** ()))

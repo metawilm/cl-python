@@ -118,7 +118,7 @@
  (parameters ( |(| |)| ) ((list nil nil nil)))
  (parameters ( |(| parameter-list5 |)| ) ($2))
 
- (parameter-list5 (defparameter+) ((list $1 nil nil)))
+ (parameter-list5 (defparameter+)                        ((list $1 nil nil)))
  (parameter-list5 (defparameter+ ni-*-ident ni-**-ident) ((list $1 $2 $3)))
  (parameter-list5 (defparameter+ ni-*-ident            ) ((list $1 $2 nil)))
  (parameter-list5 (defparameter+            ni-**-ident) ((list $1 nil $2)))
@@ -326,7 +326,8 @@
  (testlist-gexp (test gen-for) ((list $1 $2)))
  (testlist-gexp (test comma--test* comma?) ((list (cons $1 $2) (if $3 t nil))))
 
- (lambdef (lambda #+(or)varargslist? |:| test))
+ (lambdef (lambda parameter-list5 |:| test) ((list $1 $2 $4)))
+ (lambdef (lambda                 |:| test) ((list $1 nil $3)))
 
  (trailer+ :or
 	   ((|(| arglist? |)|) . ((list (list 'call $2))))
