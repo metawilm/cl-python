@@ -94,7 +94,8 @@
 	       :type string
 	       :documentation "the module this class was defined in")
    (__dict__ :initarg :namespace
-	     :documentation "UDC class namespace, containing its methods and class attributes"))
+	     :documentation "UDC class namespace, containing its methods and class attributes"
+	     :initform (make-namespace) ))
   ;; this is NOT the _instance_ dict -- UDCs are *instances* of this class
   (:documentation "Represents all Python classes created within Python (at runtime)."))
 
@@ -188,11 +189,12 @@
   (when (eq metaclass (find-class 'python-type))
     (setf metaclass nil))
   
-  (cond (metaclass (assert (typep metaclass 'class))
-		   (unless (subtypep metaclass 'python-type)
-		     (py-raise 'TypeError
-			       "Metaclass for class ~A is ~A, which is not a subtype of `type'."
-			       name (class-name metaclass)))
+  (cond (metaclass (warn "make-u-d-class with given metaclass: ~A" metaclass)
+		   (assert (typep metaclass 'class))
+		   #+(or)(unless (subtypep metaclass 'python-type)
+			   (py-raise 'TypeError
+				     "Metaclass for class ~A is ~A, which is not a subtype of `type'."
+				     name (class-name metaclass)))
 		   (when has-slots
 		     (warn "Class ~A has __metaclass__ specified. Therefore, the value for ~@
                             __slots__ is ignored (value of __slots__: ~A)"
@@ -309,13 +311,17 @@
 	     (the-supers `(,@supers ,the-mixin ,@(when has-a-builtin-super
 						   '(builtin-instance builtin-object))))
 	     
+	     (dummy (warn "Creating ~A: supers = ~A  meta = ~A" name the-supers the-metaclass))
+	     
 	     ;; Finally, create the class
 	     (k (mop:ensure-class
 		 name
 		 :direct-superclasses the-supers
 		 :metaclass the-metaclass
 		 :documentation documentation
-		 :direct-slots `( ,@(mapcar (lambda (slot-name) `(:name ,slot-name))
+		 :direct-slots `( ,@(mapcar (lambda (slot-name) (if (eq slot-name '__dict__)
+								    `(:name ,slot-name :iniform '(make-namespace))
+								  `(:name ,slot-name)))
 					    the-other-slots) ))))
 	
 	(mop:finalize-inheritance k) ;; Not sure if this is needed?
@@ -354,9 +360,10 @@
 						&key supers module namespace)
   (let ((klass (mop:ensure-class name
 				 :direct-superclasses `(,@(remove (find-class 'python-object) supers)
-							  user-defined-class python-object) ;; udc?
-				 :metaclass #+(or)metaclass
-				 (metaclass-for-udc-with-ud-metaclass metaclass)
+							  #+(or)user-defined-class
+							  udc-instance-w/dict python-object) ;; udc?
+				 :metaclass #+(or)metaclass (metaclass-for-udc-with-ud-metaclass metaclass)
+				 :direct-slots '((:name __dict__))
 				 )))
     (mop:finalize-inheritance klass)
     (setf (slot-value klass '__dict__) namespace
@@ -365,7 +372,7 @@
     klass)) ;; XXX user-defined-object mixin?
 
 
-(defclass udc-with-ud-metaclass (user-defined-class udc-instance-w/dict)
+(defclass udc-with-ud-metaclass (#+(or)user-defined-class udc-instance-w/dict)
   ()) ;; metatype?
 
 (mop:finalize-inheritance (find-class 'udc-with-ud-metaclass))

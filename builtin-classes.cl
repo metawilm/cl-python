@@ -40,13 +40,17 @@
 (defmethod __class__ ((x real))          (find-class 'py-float))
 (defmethod __class__ ((x complex))       (find-class 'py-complex))
 (defmethod __class__ ((x string))        (find-class 'py-string))
-(defmethod __class__ ((x user-defined-class))   (let ((k (class-of x)))
-						  (if (subtypep k 'udc-with-ud-metaclass)
-						      (loop for cls in (mop:class-precedence-list k)
-							  when (typep cls 'user-defined-class)
-							  do (return cls)
-							  finally (error "no udc for metaclass?"))
-						    (find-class 'python-type))))
+
+(defmethod __class__ ((x user-defined-class))
+  (cond ((typep x 'udc-with-ud-metaclass)
+	 (loop for cls in (mop:class-precedence-list (class-of x))
+	     when (typep cls 'user-defined-class)
+	     do (return cls)))
+	(t (let ((k (class-of x)))
+	     (if (typep k 'user-defined-class)
+		 k
+	       (find-class 'python-type))))))
+
 (defmethod __class__ ((x builtin-class)) (find-class 'python-type))
 (defmethod __class__ ((x function))      (find-class 'python-type)) ;; XXX show function name
 (defmethod __class__ ((x python-object)) (class-of x)) ;; XXX check
@@ -106,7 +110,7 @@
 ;; The Python type from which all other types (classes) are derived.
 ;; It is defined in classes.cl.
 
-(defmethod python-type-__call__ ((x python-type) &optional clsname bases dict)
+(defmethod python-type-__call__ ((x python-type) &rest args)
 
   ;; X is an instance of PYTHON-TYPE, i.e. a class.
   ;; type(x) -> <type-of-x> is filtered out in call.cl
@@ -115,14 +119,15 @@
     (error "type.__call__ excepted class as first arg, got: ~A"))
   
   (let ((inst (py-call (or (internal-get-attribute x '__new__)
-			   
-			   ;; This should use PY-RAISE, but order of loading is incorrect for that
-			   (error "TypeError: Can't create ~A instance: no __new__ method" x))
-		       (list x clsname bases dict))))
+			   (py-raise 'TypeError "Can't create ~A instance: no __new__ method" x))
+		       (cons x args))))
+    
     ;; CPython doesn't initialize INST if it not an instance of PYTHON-TYPE ?!
-    (let ((init (internal-get-attribute x '__init__)))
-      (when init
-	(py-call init (list clsname bases dict))))
+    (when (typep inst x) ;; ?!
+      (let ((init (internal-get-attribute x '__init__)))
+	(when init
+	  ;; (destructuring-bind (clsname bases dict) args
+	  (py-call init (cons inst args)))))  ;; (list clsname bases dict))))))
       
     inst))
 	
@@ -140,8 +145,12 @@
     (return-from python-type-__new__ (py-type metaclass)))
   
   (unless (and name dict)
-    (warn "type.__new__(x) -> instane of x")
-    (make-instance metaclass))
+    (warn "type.__new__(x) -> instance of x")
+    (let ((inst (make-instance metaclass)))
+      (when (and (slot-exists-p inst '__dict__)
+		 (not (slot-boundp inst '__dict__)))
+	(setf (slot-value inst '__dict__) (make-namespace))
+	(return-from python-type-__new__ inst))))
   
   #+(or)(error "type.__new__ got not 1 or 4 args: ~A ~A ~A ~A" metaclass name bases dict)
   
@@ -1767,7 +1776,7 @@
 
 (defmethod __get__ ((x function) inst class)
   (if (eq inst *None*)
-      (make-unbound-method :func x :class class) ;; <Class>.meth
+      x  ;; #+(or)(make-unbound-method :func x :class class) ;; <Class>.meth
     (make-bound-method :func x :object inst))) ;; <instance>.meth
 
 (defmethod __repr__ ((x function))
@@ -1801,7 +1810,7 @@
 
 (defmethod __get__ ((x python-function) inst class)
   (if (eq inst *None*) ;; Hmm what if class of None were subclassable?!
-      (make-unbound-method :func x :class class) ;; <Class>.meth
+      x #+(or)(make-unbound-method :func x :class class) ;; <Class>.meth
     (make-bound-method :func x :object inst))) ;; <instance>.meth
 
 (register-bi-class-attr/meth (find-class 'python-function) '__get__ #'__get__)

@@ -19,7 +19,8 @@
 	 (kons  (cons class attr-value))
 	 (assval (assoc class alist)))
     (when assval
-      (warn "builtin-class-methods already had a func for method ~A of class ~A"
+      (warn "builtin-class-methods already had a func for method ~A of class ~A; ~
+             it will be replaced"
 	    meth-name class))
     (push kons alist)
     (setf (gethash meth-name *builtin-class-attr/meths*) alist)))

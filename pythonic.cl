@@ -3,12 +3,13 @@
 ;; Pythonic:  some nice macros to do Pythonic things
 
 
+#+(or)
 (defmacro py-raise (exc-type string &rest format-args)
   "Raise Python exception of type EXC-TYPE, ~@
    where STRING with FORMAT-ARGS is the exception argument."
   `(error ,exc-type :args (format nil ,string ,@format-args)))
 
-(defun py-raise-1 (exc-type string &rest format-args)
+(defun py-raise (exc-type string &rest format-args)
   (error exc-type :args (apply #'format nil string format-args)))
 
 ;; XXX All uses of PY-ITERATE should be changed to use GET-PY-ITERATE-FUN instead.

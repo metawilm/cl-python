@@ -132,7 +132,9 @@
 	     nil))))
   
 (defmethod py-get-attribute :around ((x class) (attr symbol))
-  (cond ((eq attr '__mro__)
+  (cond ((eq attr '__class__)
+	 (__class__ x))
+	((eq attr '__mro__)
 	 (make-tuple-from-list (py-class-mro x)))
 	((eq attr '__name__)
 	 (symbol-name (class-name x)))
@@ -578,6 +580,11 @@
   (verify-settable-attribute x attr)
   (call-next-method))
 
+(defmethod internal-set-attribute (x attr val)
+  (if (typep (class-of x) 'udc-with-ud-metaclass)
+      (namespace-bind (slot-value x '__dict__) attr val)
+    (break "internal-set-attribte: uncatched")))
+    
 (defmethod internal-set-attribute ((x user-defined-class) attr val)
   ;; Don't worry about metaclasses yet: assume all classes have a
   ;; attribute __dict__ which is a mapping that supports __setitem__
@@ -680,9 +687,17 @@
 
 
 (defmethod verify-settable-attribute (x attr)
+  (if (typep (class-of x) 'udc-with-ud-metaclass)
+      t
+    (raise-setattr-error x attr)))
+
+;; (setf (namespace-bind (slot-value x '__dict__) attr))
+
+#+(or)
+(defmethod verify-settable-attribute (x attr)
   ;; Can't set any attribute of built-in objects (whether classes or instances).
   ;; (Everything not of type USER-DEFINED-CLASS is a built-in type.)
-  (raise-setattr-error x attr))
+  )
 
 (defmethod verify-settable-attribute ((x user-defined-class) attr)
   ;; In CPython:
