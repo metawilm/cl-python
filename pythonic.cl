@@ -8,43 +8,6 @@
    where STRING with FORMAT-ARGS is the exception argument."
   `(error ,exc-type :args (format nil ,string ,@format-args)))
 
-(defmacro py-raise-simple (exc-type val)
-  "Raise Python exception with simple value"
-  `(error ,exc-type :args ,val))
-
-#+(or) ;; old version, using %signals% that are not used anymore
-(defmacro py-iterate ((val object) &body body)
-  "Iterate over OBJECT, successively binding VAL to the new value
-   and executing BODY.
-   This works is OBJECT implements either __iter__ or __getitem__."
-  ;; XX assumes OBJECT is a first-class object.
-  (let ((iterator '#:iterator))
-    `(block py-iterate
-       (tagbody 
-	 (handler-case (__iter__ ,object)
-	   ((or AttributeError %magic-method-missing%) ()
-	     (go try-getitem))
-	   (:no-error (,iterator) (loop (handler-case (next ,iterator)
-					  (StopIteration () (return-from py-iterate))
-					  (:no-error (,val) ,@body)))))
-	try-getitem
-	 ,(let ((index '#:index))
-	    `(let ((,index 0))
-	       (loop 
-		 (handler-case (__getitem__ ,object ,index)
-		   (AttributeError () (if (= ,index 0)
-					  (go error)
-					(return-from py-iterate)))
-		   (IndexError () ;; even ok if index = 0 (empty sequence)
-		     (return-from py-iterate))
-		   (%magic-method-missing% ()
-		     (go error))
-		   (:no-error (,val)
-		     ,@body
-		     (incf ,index))))))
-	error
-	 (py-raise 'TypeError
-		   "Iteration over non-sequence (got: ~A)" ,object)))))
 
 (defmacro py-iterate ((val object) &body body)
   "Iterate over OBJECT, successively binding VAL to the new value
@@ -117,6 +80,7 @@
 	  (py-raise 'TypeError
 		    "Iteration over non-sequence (got: ~A)" object))))))
 
+
 (defmacro ensure-py-type (vars cl-type err-str)
   "Ensure that all vars in VARS are a designator for CL-TYPE, if so SETF all vars
    to the CL-TYPE value they designate. Raise TypeError if check fails; ERR-STR
@@ -143,6 +107,7 @@
 				 (setf ,var ,val)
 			       (py-raise 'TypeError ,err-str ,var)))))))
 
+
 (defun convert-to-py-object (x)
   "Return PYTHON-OBJECT, CONVERTED-P"
   (typecase x
@@ -151,6 +116,7 @@
     (string        (values (make-py-string x) t))
     ((eql (find-class 'python-type)) (values x nil))
     (t (error "Not a recognized Python object: ~A" x))))
+
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; Bridging the gap: making Lisp functions callable from within Python
@@ -216,6 +182,8 @@
     (setf pos (nreverse pos))
     (values pos keys kvs)))
 
+
+#+(or) ;; test
 (assert (equal (multiple-value-list (lispargs->pyargs '(a b &key (key1 val1) (key2 val2))))
 	       (list '(a b) '(key1 key2) '((key1 . val1) (key2 . val2)))))
 
@@ -224,3 +192,4 @@
 	 (format t "FOO got:  a: ~S  b: ~S  key1: ~S  key2: ~S~%" a b key1 key2))
        (foo 1 2 :key2 3)
        (__call__ #'foo '(1 2) '((key2 . 3))))
+
