@@ -25,7 +25,15 @@
 		
 		,@(let ((real-params (remove '&optional params)))
    
-		    `((defmethod ,methname ((,(car params) udc-instance) ,@(cdr params))
+		    `((defmethod ,methname :around ((,(car params) t) ,@(cdr params))
+			(declare (ignore ,@(cdr params)))
+			(if (next-method-p)
+			    (call-next-method)
+			  (py-raise 'TypeError
+				    "No method ~A defined for arg ~S [XXX]"
+				    ',methname ,(car params))))
+		      
+		      (defmethod ,methname ((,(car params) udc-instance) ,@(cdr params))
 			;; When this method is called, it means the
 			;; corresponding method is not just looked up
 			;; but really that it is being called:
@@ -45,10 +53,10 @@
 			  
 			  (cond
 			   
-			   ((and found (pyb:callable found))
+			   ((and found (pyb:callable meth))
 			    ;; XXX need to match keyword arguments here
 			    ;; (like, accept `other' keyword in: def __lt__(self, other): ..
-			    (let ((res (__call__ meth (list ,@real-params))))
+			    (let ((res (__call__ meth (list ,@(cdr real-params)))))
 			      (declare (special *NotImplemented*))
 			      (when (eq res *NotImplemented*)
 				(signal '%not-implemented-result%)) ;; why?
@@ -80,8 +88,8 @@
  
  ;; string representation
  ;; XXX these are handled in builtin-classes.cl
- #+(or)(__repr__ (x) "repr(x) -> readable string representation of x") ;; both must return string
- #+(or)(__str___ (x) "str(x) -> string representation of x") ;; fallback: __repr__
+ (__repr__ (x) "repr(x) -> readable string representation of x") ;; both must return string
+ (__str__  (x) "str(x) -> string representation of x") ;; fallback: __repr__
 
  ;; Comparison
  (__eq__ (x y) "x == y") ;; these can return any value, but bool (True/False) is common
@@ -142,7 +150,7 @@
  (__floordiv__ (x y) "x // y")
  (__mod__ (x y) "x % y")
  (__divmod__ (x y) "divmod(x,y)") ;; should be ( _floordiv_(), _mod_() )
- (__pow__ (x y &optional z) "pow(x,y[,z])")
+ #+(or)(__pow__ (x y &optional z) "pow(x,y[,z])")
  (__lshift__ (x y) "x << y")
  (__rshift__ (x y) "x >> y")
  (__and__ (x y) "x & y")
@@ -178,7 +186,7 @@
  ;; __rtruediv__ is not supported either
  (__rmod__ (x y) "reversed x % y")
  (__rdivmod__ (x y) "reversed divmod(x,y)")
- (__rpow__ (x y &optional z) "reversed x ** y")
+ #+(or)(__rpow__ (x y &optional z) "reversed x ** y")
  (__rlshift__ (x y) "reversed x << y")
  (__rrshift__ (x y) "reversed x >> y")
  (__rand__ (x y) "reversed x & y")

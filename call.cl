@@ -20,8 +20,8 @@
 
 (defmethod __call__ ((x generic-function) &optional pos-args kwd-args)
   (when kwd-args
-    (warn "__call__ on GF ~A got keyword args?! (pos-args: ~A; kwd-args: ~A - ignored)"
-	  x pos-args kwd-args))
+    (error "__call__ on GF ~A got keyword args?! (pos-args: ~A; kwd-args: ~A - ignored)"
+	   x pos-args kwd-args))
   (apply x pos-args))
 
 (defmethod __call__ ((x function) &optional pos-args kwd-args)
@@ -65,6 +65,8 @@
 (defmethod __call__ ((x py-bound-method) &optional pos-args kwd-args)
   "The instance enclosed in the bound method is prefixed to pos-args"
   #+(or)(break "xyz")
+  (unless (listp pos-args)
+    (error "pos-args should be list (got: ~A)" pos-args))
   (__call__ (slot-value x 'func)
 	    (cons (slot-value x 'self)
 		  pos-args)

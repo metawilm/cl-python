@@ -321,14 +321,16 @@
   (when (fboundp attr)
     (let ((gf (symbol-function attr)))
       (if (typep gf 'generic-function)
-	  (if (some (lambda (meth) 
-		      (subtypep x (car (mop:method-specializers meth))))
-		    (mop:generic-function-methods gf))
-	      (return-from getattr-class-nonrec
-		(values (if instance
-			    (make-bound-method :func gf :self instance)
-			  (make-unbound-method :func gf :class x))
-			t))))))
+
+	(if (some (lambda (meth) 
+		    (and (null (method-qualifiers meth)) ;; ignore the ':around' catch-all one
+			 (subtypep x (car (mop:method-specializers meth)))))
+		  (mop:generic-function-methods gf))
+	    (return-from getattr-class-nonrec
+	      (values (if instance
+			  (make-bound-method :func gf :self instance)
+			(make-unbound-method :func gf :class x))
+		      t))))))
 
   ;; attribute: `<complex>.real -> value
   ;; 
