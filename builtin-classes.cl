@@ -2057,8 +2057,14 @@
 (defmethod slice-indices ((x py-slice) length)
   "Return 1 or 4 values (nonempty, start, stop, step) indicating requested slice.
    nonempty: T or nil
-   if nonempty is T: 0 <= start <= stop <= length"
-  
+   if nonempty is T: START is the index of the first item of the resulting slice
+                     STOP the index of the last item
+                     STEP the amount by which to increase each time (can be negative; is not zero)
+                     if step > 0:
+                       0 <= start <= stop <= length-1
+                     if step < 0:
+                       0 <= stop <= start <= length-1"
+
   ;; CPython doesn't define the outcome of this method exactly. Like,
   ;; where is this documented:
   ;; 
@@ -2106,7 +2112,7 @@
       (ensure-py-type step integer "Slice indices must be integers (got: ~A)"))
     
     (flet ((empty-slice ()
-	     (values nil length length 1)))
+	     (values nil)))
       
       (cond ((= step 0) 	  (py-raise 'ValueError "Slice step cannot be zero"))
        	    
@@ -2119,17 +2125,23 @@
 		  (< step 0))     (empty-slice))
 	    
 	    ((and (< start stop)
-		  (> step 0))	  (progn (setf start (max start 0))
-					 (setf stop  (min stop length))
-					 (values t start stop step)))
+		  (> step 0))	  (let ((start (max start 0))
+					(stop  (min stop length))
+					(real-stop (+ start (* step (floor (- stop 1 start)
+									   step)))))
+				    (assert (<= real-stop stop))
+				    (values t start real-stop step)))
 	    
 	    ((and (< start stop)
 		  (< step 0))	  (empty-slice))
 
 	    ((and (> start stop)
-		  (< step 0))	  (progn (setf stop (max stop 0))
-					 (setf start (min start length))
-					 (values t start stop step)))
+		  (< step 0))	  (let ((start (min start length))
+					(stop  (max stop 0))
+					(real-stop (+ start (* step (floor (- stop -1 start)
+									   step)))))
+				    (assert (>= real-stop stop))
+				    (values t start real-stop step)))
 	    
 	    ((and (> start stop)
 		  (> step 0))	  (empty-slice))))))
@@ -2139,17 +2151,29 @@
   "Given a (Lisp) list, extract the sublist corresponding to the slice as a fresh list."
   (multiple-value-bind (nonempty start stop step)
       (slice-indices slice (length list))
+    
     (unless nonempty
       (return-from extract-list-slice (make-py-list)))
-    (let ((current (nthcdr start list))
-	  (acc ())
-	  (i start))
-      (loop
-	(push (car current) acc)
-	(setf current (nthcdr step current))
-	(incf i step)
-	(cond ((= i stop) (return-from extract-list-slice (nreverse acc)))
-	      ((null current) (error "internal error: slice indices incorrect")))))))
+    
+    (let ((in-reverse (< step 0)))
+      
+      (when in-reverse
+	(rotatef start stop)
+	(setf step (* -1 step)))
+      
+      (let* ((current (subseq list start (1+ stop)))
+	     (acc ())
+	     (i start))
+	(loop
+	  (push (car current) acc)
+	  (cond ((= i stop) (return-from extract-list-slice
+			      (if in-reverse
+				  acc
+				(nreverse acc))))
+		((null current) (error "internal error: slice indices incorrect")))
+	  (setf current (nthcdr step current))
+	  (incf i step))))))
+
 
 (defmethod extract-list-item-by-index ((list cons) (index integer))
   (ensure-py-type index integer
