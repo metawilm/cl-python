@@ -39,7 +39,7 @@
 					
 				       ;; don't print value if it's None
 				       (unless (member ev (list *None* nil) :test 'eq)
-					 (eval-print (list ev) nil)
+					 (format t "~A~%" (call-attribute-via-class ev '__repr__))
 					 (namespace-bind *scope* '_ ev)
 					 (setf *last-val* ev)))))
 				 (return-from eval-print-ast))
