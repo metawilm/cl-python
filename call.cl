@@ -55,7 +55,7 @@
   (apply x pos-args))
 
 
-(defmethod py-call ((x bi-function-accepting-kw-args) &optional pos-arg kwd-arg)
+(defmethod py-call ((x lisp-function-accepting-kw-args) &optional pos-arg kwd-arg)
   (funcall (slot-value x 'func) pos-arg kwd-arg))
 
 

@@ -175,12 +175,12 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; A special kind of built-in function
 
-(defclass bi-function-accepting-kw-args (builtin-instance)
+(defclass lisp-function-accepting-kw-args (python-function) ;; WWW was: builtin-instance
   ((func :initarg :func))
   (:metaclass builtin-class))
 
-(mop:finalize-inheritance (find-class 'bi-function-accepting-kw-args))
+(mop:finalize-inheritance (find-class 'lisp-function-accepting-kw-args))
 
-(defun make-bi-function-accepting-kw-args (func)
-  (make-instance 'bi-function-accepting-kw-args :func func))
+(defun make-lisp-function-accepting-kw-args (func)
+  (make-instance 'lisp-function-accepting-kw-args :func func))
 
