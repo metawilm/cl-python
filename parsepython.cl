@@ -190,11 +190,10 @@
  (:testlist?)
  (yield-stmt (yield testlist?) ((list $1 $2)))
 
- (raise-stmt (raise) ((list $1)))
- (raise-stmt (raise test) ((list $1 $2)))
- (raise-stmt (raise test |,| test) ((list $1 $2 $4)))
+ (raise-stmt (raise) ((list $1 nil nil nil)))
+ (raise-stmt (raise test) ((list $1 $2 nil nil)))
+ (raise-stmt (raise test |,| test) ((list $1 $2 $4 nil)))
  (raise-stmt (raise test |,| test |,| test) ((list $1 $2 $4 $6)))
-
 
  ;; "import" module ["as" name] ( "," module ["as" name] )*
  (import-stmt :or import-normal import-from)
@@ -242,9 +241,9 @@
 	   ((try |:| suite except--suite+ else--suite?) . ((list 'try-except $3 $4 $5)))
 	   ((try |:| suite finally |:| suite)  	        . ((list 'try-finally $3 $6))))
 
- (except--suite (except |:| suite) (`(except (nil nil) ,$3)))
- (except--suite (except test |:| suite) (`(except (,$2 nil) ,$4)))
- (except--suite (except test |,| test |:| suite) (`(except (,$2 ,$4) ,$6)))
+ (except--suite (except |:| suite) (`((nil nil) ,$3)))
+ (except--suite (except test |:| suite) (`((,$2 nil) ,$4)))
+ (except--suite (except test |,| test |:| suite) (`((,$2 ,$4) ,$6)))
 
  (except--suite+ (except--suite) ((list $1)))
  (except--suite+ (except--suite+ except--suite) ((append $1 (list $2))))

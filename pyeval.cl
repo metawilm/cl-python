@@ -83,7 +83,9 @@
       (import (apply #'eval-import (cdr ast)))
       (assign-expr (apply #'eval-assign-expr (cdr ast)))
       (del (eval-del (second ast)))
+
       (try-except (apply #'eval-try-except (cdr ast)))
+      (raise (apply #'eval-raise (cdr ast)))
     
       ;; expressions:
       (identifier (eval-identifier (second ast)))
@@ -117,32 +119,71 @@
       (ellipsis *Ellipsis*)
 
       ;; statements
-      (return (eval-return (cadr ast)))
-      ;; for now, SUITE returns the values of all stmts/exprs in it.
+      (pass) ;; nothing
       (suite (eval-suite (second ast)))
+      
       (for-in (apply #'eval-for-in (cdr ast)))
+      (while (apply #'eval-while (cdr ast)))
       (break (eval-break))
       (continue (eval-continue))
       (if (apply #'eval-if (cdr ast)))
-      (while (apply #'eval-while (cdr ast)))
+            
+      (return (eval-return (cadr ast)))
       (assert (apply #'eval-assert (cdr ast)))
-    
-      (pass) ;; nothing
     
       (t (error "uncatched in py-eval: ~S~%" ast))
       )))
 
 (defun eval-try-except (suite except-clauses else-clause)
   (handler-bind
-      ((Exception (lambda (c)
-		    (loop for (nil (class (nil parameter)) handler-form) in except-clauses
-			do (when (typep c (py-eval class))
-			     (namespace-bind *scope* parameter c)
+      ((Exception (lambda (e)
+		    (loop for ((class parameter) handler-form) in except-clauses
+			do (when (or (null class)
+				     (typep e (py-eval class)))
+			     (when parameter
+			       (assert (eq (first parameter) 'identifier))
+			       (namespace-bind *scope* (second parameter) e))
 			     (py-eval handler-form)
 			     (return-from eval-try-except nil))))))
     (py-eval suite))
   (py-eval else-clause))
 
+
+(defun eval-raise (exctype value traceback)
+  ;; Complicated interpretation of parameters. See Python Reference Manual, par 6.9
+  
+  (cond (traceback
+	 (error "Traceback parameter to RAISE not supported (yet?)"))
+	
+	((null exctype) ;; the others are nil as well reraise last exception
+	 (error "TODO: reraise previous exception"))
+	 
+	((typep exctype 'class)
+	 (cond ((null value) (py-raise-simple value *None*))	
+		
+		((typep value exctype) (py-raise-simple exctype value))
+	  
+	       ((typep value 'py-tuple)  
+		(error "TODO: making exception instance from tuple")
+		(py-raise-simple exctype 
+				 (__call__ exctype (tuple->lisp-list value))))
+	       
+	       ((eq value *None*)
+		(error "TODO: making exception instance")
+		(py-raise-simple exctype 
+				 (__call__ exctype nil nil)))
+	       (t (error "TODO: making exception instance")
+		  (py-raise-simple exctype 
+				   (__call__ exctype (list value) nil)))))
+	
+	(t  ;; exctype is an instance
+	 (unless (eq value *None*)
+	   (py-raise 'ValueError
+		     "RAISE: when first arg is instance, second argument must be None (got: ~A)"
+		     value))
+	 (py-raise-simple (__class__ exctype)
+			  exctype))))
+		
 		    
 (defun eval-assert (test expr)
   "Test whether assertion holds. Is only executed when __debug__ is true"

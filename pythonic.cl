@@ -8,6 +8,9 @@
    where STRING with FORMAT-ARGS is the exception argument."
   `(error ,exc-type :args (format nil ,string ,@format-args)))
 
+(defmacro py-raise-simple (exc-type val)
+  "Raise Python exception with simple value"
+  `(error ,exc-type :args ,val))
 
 (defmacro py-iterate ((val object) &body body)
   "Iterate over OBJECT, successively binding VAL to the new value
