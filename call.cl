@@ -70,7 +70,7 @@
 
 (defmethod __call__ ((x python-function-returning-generator) &optional pos-args key-args)
   (with-slots (call-rewriter generator-creator) x
-    
+    (declare (special *scope*))
     (let ((ns (make-namespace :name "generator namespace"
 			      :inside *scope*))
 	  (value-producing-f (funcall generator-creator)))
@@ -80,6 +80,7 @@
       
       (make-iterator-from-function (lambda () 
 				     (let ((*scope* ns))
+				       (declare (special *scope*))
 				       (funcall value-producing-f)))))))
 		
 
