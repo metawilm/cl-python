@@ -65,7 +65,12 @@
     
 	   (when (eql ast (find-class 'python-type))
 	     (return-from py-eval ast))
-    
+
+	   ;; This allows all kinds of Lisp values to be used directly in Python,
+	   ;; e.g. using `clpy(...)'
+	   (unless (listp ast)
+	     (return-from py-eval ast))
+	   
 	   (case (car ast)
 	     (inline-lisp (eval-inline-lisp (second ast)))
 	     (file-input (apply #'eval-file-input (cdr ast)))
