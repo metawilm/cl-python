@@ -534,7 +534,10 @@
 		(incf res x))
     res))
 
-(defun pyb:type (x)
+#+(or) ;; `type' refers to the builtin class `python-type'
+(defun pyb:type (x &optional bases dict)
+  (when (or bases dict)
+    (error "type(...) to create a new type: not implemented yet (got: ~A ~A ~A)" x bases dict))
   (__class__ x))
 
 (defun pyb:unichr (i)
