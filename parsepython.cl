@@ -1242,7 +1242,7 @@
 			    (eval (read-from-string (subseq x 6)))))
 
 		   ((string= x "")
-		    (let ((total (apply #'concatenate 'string (nreverse acc))))
+		    (let ((total (apply #'concatenate 'string (reverse acc))))
 		      (setf acc ())
 		      (loop
 			(restart-case
@@ -1261,13 +1261,13 @@
 		   (t  
 		    (push (concatenate 'string x (string #\Newline))
 			  acc)
-		  
+
 		    ;; Try to parse; if that returns a "simple" AST
 		    ;; (just inspecting the value of a variable), the
 		    ;; input is complete and ther's no need to wait for
 		    ;; an empty line.
 		  
-		    (let* ((total (apply #'concatenate 'string (nreverse acc)))
+		    (let* ((total (apply #'concatenate 'string (reverse acc)))
 			   (ast (ignore-errors (parse-python-string total))))
 		      (when ast
 			(assert (eq (first ast) 'file-input))
