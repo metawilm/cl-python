@@ -600,16 +600,19 @@
 	 ((char= second #\.) ;; <digit>.<something> like 1.2 or 1.23 or 1.234 etc
 	  (unread-char second)) ;; and continue
 
+	 ((alphanumericp second)
+	  (error "Invalid number (got: '0~A'" second))
+	   
 	 (t ;; non-number stuff after a zero, like `]' in `x[0]'
 	  (unread-char second)
 	  (return-from read-number 0)))))
 
     (let* ((c (read-char-nil))
 	   (d (and c (digit-char-p c base))))
-      (excl:while d
-	(setf res (+ (* res base) d)
-	      c (read-char-nil)
-	      d (and c (digit-char-p c base))))
+      (loop while d do
+	    (setf res (+ (* res base) d)
+		  c (read-char-nil)
+		  d (and c (digit-char-p c base))))
 
       ;; only decimal numbers may have a fraction
       (if (and c
@@ -843,15 +846,16 @@
 		  ;; Returning NEWLINE is not needed when last line
 		  ;; in file was already NEWLINE, but for simplicity
 		  ;; just return it always here.
+
 		  (if (> (car indentation-stack) 0)
 
 		      (progn
 			(lex-todo eof 'eof)
 			(lex-todo newline 'newline) ;; needed?
 
-			(excl:while (> (car indentation-stack) 0)
-			  (pop indentation-stack)
-			  (lex-todo dedent 'dedent))
+			(loop while (> (car indentation-stack) 0)
+			    do (pop indentation-stack)
+			       (lex-todo dedent 'dedent))
 
 			(lex-return newline 'newline))
 
@@ -883,7 +887,7 @@
 			     (when *lex-debug*
 			       (format t "lexer returning Lisp form: ~s~%" lisp-form))
 			     (return-from lexer (values (tcode-1 (find-class 'python-grammar) 'clpy)
-							(car lisp-form)))))
+							lisp-form))))
 			  
 			  ((member token *reserved-words* :test #'eq)
 			   (when *lex-debug*
