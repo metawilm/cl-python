@@ -8,7 +8,6 @@
 ;;;
 ;;; TODO: 
 ;;;  - insert line ends for too long lines
-;;;  - look at unifying testlist/exprlist
 
 (defvar *py-pprint-dispatch* (copy-pprint-dispatch nil))
 
@@ -328,21 +327,12 @@
 
     (suite (format stream "~&~<   ~@;~@{~A~^~&~}~:>~&" (second x)))
     
-    ((testlist exprlist) #+(or) ;; old code, with comma
-			 (destructuring-bind (data comma?)
-			     (cdr x)
-			   (let ((brackets (or comma? (cdr data))))
-			     (when brackets (format stream "("))
-			     (format stream "~{~A~^, ~}" data)
-			     (when comma?
-			       (format stream ","))
-			     (when brackets (format stream ")"))))
-			 (let ((data (second x)))
-			   (format stream "(")
-			   (format stream "~{~A~^, ~}" data)
-			   (format stream ",")
-			   (format stream ")")))
-
+    (tuple (let ((data (second x)))
+	     (format stream "(")
+	     (format stream "~{~A~^, ~}" data)
+	     (format stream ",")
+	     (format stream ")")))
+    
     (try-except (destructuring-bind (try-suite except-suites else-suite)
 		    (cdr x)
 		  (format stream "try: ~A" try-suite)

@@ -654,7 +654,7 @@
     (identifier tg)
   
     ;; (TUPLE (A B)) and (LIST (A B)) both go to (LIST (<A> <B>))
-    ((tuple list) `(,(car tg) ,@(mapcar #'eval-one-assignment-target (second tg))))
+    ((tuple list) `(,(car tg) ,(mapcar #'eval-one-assignment-target (second tg))))
     
     ;; foo.x => (attributeref (identifier foo) (identifier x))
     ;; 

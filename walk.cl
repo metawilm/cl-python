@@ -121,7 +121,7 @@
 	 `(subscription ,(do-walk (second form)) ,(third form)))
 	      
 	(suite  `(suite ,(map-walk (second form))))
-	(testlist `(testlist ,(map-walk (second form)) ,(third form)))
+	(tuple `(tuple ,(map-walk (second form))))
 	      
 	(try-except
 	 (destructuring-bind
