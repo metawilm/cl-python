@@ -895,74 +895,306 @@
       (make-module :name (string file-name)
 		   :namespace module-ns))))
 
+(defun is-directory (path)
+  #+allegro
+  (excl:file-directory-p path))
+
+(defun is-file (path)
+  (and (probe-file path)
+       #+allegro
+       (eq (excl.osi:stat-type (excl.osi:stat path)) :file)))
+
+
+(defmethod load-py-source-file ((mod-name symbol) (paths list)
+				&key (module-ok t) (package-ok t))
+  
+  "Load python source file with given NAME. Search will try all ~@
+   PATHS (a list). If MODULE-OK or PACKAGE-OK is false, ~@
+   then that kind of source file is not allowed.
+   Returns the module or package, or NIL."
+  
+  ;; Documentation: http://www.python.org/doc/essays/packages.html
+  
+  (dolist (path-dir paths)
+    (block mapper
+	
+      (unless (directory-p path-dir)
+	(warn "sys.path contains non-directory: ~A (skipped)" path-dir)
+	(return-from mapper nil))
+	
+      ;; Create all pathnames we might use (XXX)
+	
+      (let* ((mod-name-str (symbol-name mod-name))
+	     (mod-path (make-pathname :directory path-dir
+				      :name mod-name))
+	     (mod/__init__.py-path (make-pathname :directory mod-path
+						  :name '__init__.py ))
+	     (mod.py-path (make-pathname
+			   :directory path-dir
+			   :name (concatenate 'string mod-name-str ".py"))))
+	  
+	;; Either MOD is a directory, in which case there should be a
+	;; MOD/__init__.py file in it to make it a package; or there
+	;; is a file named MOD.py.
+	  
+	(cond ((and package-ok
+		    (is-directory mod-path)
+		    (is-file mod/__init__.py-path))
+		
+	       ;; Create a package.
+	       ;; 
+	       ;; Now, file __init__.py is read and evaluated. Before
+	       ;; evaluation of the content is started, a magic
+	       ;; variable __path__ is inserted in the file's
+	       ;; namespace.
+		 
+	       (let ((mod-ast (parse-python-string (read-file mod/__init__.py-path)))
+		     (ns (make-namespace :builtins t)))
+		   
+		 (loop for (k . v) in
+		       `((__path__ ,(make-py-list-from-list (list mod-name-str)))
+			 (__file__ ,(concatenate 'string  ;; relative to a path
+				      mod-name-str "/__init__.py"))
+			 (__name__ ,mod-name-str))
+		     do (namespace-bind ns k v))
+		   
+		 (let ((*scope* ns))
+		   (py-eval mod-ast))
+		   
+		 (return-from load-py-source-file
+		   (make-py-package :namespace ns
+				    :init-file (truename mod/__init__.py-path)
+				    :directory (truename mod-path) ))))
+		
+		
+	      ((and module-ok
+		    (is-file mod.py-path))
+		 
+	       ;; Create a module.
+	       ;; Packages have __path__ attribute ; modules don't.
+		 
+	       (let ((mod-ast (parsepython-string (read-file mod.py-path)))
+		     (ns (make-namespace :builtins t)))
+		   
+		 (loop for (k . v) in
+		       `((__file__ ,(concatenate 'string  ;; relative to a path
+				      mod-name-str ".py"))
+			 (__name__ ,mod-name-str))
+		     do (namespace-bind ns k v))
+		   
+		 (let ((*scope* ns))
+		   (py-eval mod-ast))
+		   
+		 (return-from load-py-source-file
+		   (make-py-module :namespace ns
+				   :module-truename (truename mod.py-path) )))))))))
+
 
 (defun eval-import (items)
-  ;; TODO: use sys.path
-  (flet ((get-module-object (mod-name) ;; -> #<MODULE>, EXISTED-ALREADY-P
-	   (let ((mod (namespace-lookup *sys.modules* mod-name)))
-	     (declare (special *sys.modules*))
-	     (if mod
-		 (values mod t)
-	       (let ((m (make-module-object mod-name)))
-		 (namespace-bind *sys.modules* mod-name m)
-		 (values m nil)))))
-	 
-	 (normalize-item (x)
-	   (if (symbolp x) `(as ,x ,x) x))
-	       
-	 (normalize-list (list)
-	   (loop for x in list
-	       if (symbolp x) collect `(as ,x ,x)
-	       else collect x)))
-    
-    (dolist (item (normalize-list items))
-      (assert (listp item))
-       
-      (ecase (car item)
-	  	  
-	(from  ;; "from a import b, c as c2" -> '(from a (b (as c c2)))
-	 (destructuring-bind (mod-name attributes)
-	     (cdr item)
-	   (let ((mo (get-module-object mod-name)))
-	     
-	     (if (eq attributes '*) ;; "from a import *"
-		 
-		 (multiple-value-bind (all found)
-		     (internal-get-attribute mo '__all__)
-		   (if found
-		       
-		       (py-iterate (attr all)
-				   (multiple-value-bind (val found)
-				       (internal-get-attribute mo attr)
-				     (unless found
-				       (py-raise 'AttributeError
-						 "Module ~A has no attribute ~A (mentioned in __all__)"
-						 mo attr))
-				     (namespace-bind *scope* attr val)))
-		     
-		     ;; no __all__ method:
-		     ;; iterate over all names in the module dict that don't start with underscore
-		     (loop for (name . val) in (dict->alist (module-dict mo))
-			 when (char/= (aref 0 (string name)) #\_) 
-			 do (namespace-bind *scope* name val))))
+  (dolist (item items)
+   (eval-import-one item)))
 
-	       (dolist (attr (normalize-list attributes))
-		 (assert (eq (car attr) 'as))
-		 (destructuring-bind (real-name new-name)
-		     (cdr attr)
-		   (multiple-value-bind (val found)
-		       (internal-get-attribute mo real-name)
-		     (if found
-			 (namespace-bind *scope* new-name val)
-		       (py-raise 'ImportError "Module ~A has no attribute: ~S" mod-name attr)))))))))
+
+
+(defun eval-import-one (item)  ;; XXX untested
+  (when (consp mod-ast)
+    (assert (eq (car mod-ast) 'dotted)))
+  
+  (let* ((mod-name-ast (second item))
+	 (mod-dotted-string (module-list-to-dotted-string mod-ast))
+	 (mod-obj (py-dict-gethash *sys.modules* mod-string))
+	 (first-name-symbol (if (symbolp mod-ast)
+				mod-ast 
+			      (car (second mod-ast))))
+	 (bind-name (if (eq (first item) 'as)
+			(third item) 
+		      first-name-symbol)))
+      
+    (when mod-obj  ;; Module already loaded. Simply bind name.
+      (namespace-bind *scope* bind-name mod-obj)
+      (return-from eval-import-one nil))
+    
+    (when (symbolp mod-ast) ;; Simple case of a single module
+      (let ((mod-obj (or (load-py-source-file first-name-symbol *sys.paths*
+					      :module-ok t :package-ok t)
+			 (py-raise 'ImportError
+				   "Could not import module/package ~A" first-name))))
+	(namespace-bind *scope* bind-name mod-obj))
+      (return-from eval-import-one nil))
+    
+    
+    ;; Determine how much of the modules are already imported
+    ;; (for "foo.bar.baz", lookup "foo", "foo.bar", .. until
+    ;; it stalls).
+      
+    (progn
+      (assert (eq (first mod-ast) 'dotted))
+      (let* ((packages-todo (butlast (cdr (second ast))))
+	     (first-pkg-name (pop packages-todo)))
+	
+	;; Is first pkg name available?
+	
+	(let ((first-pkg
+	       (or (py-dict-gethash *sys.modules* (string first-pkg-name))
+		   (load-py-source-file first-name *sys.paths*
+					:module-ok nil :package-ok t)
+		   (py-raise 'ImportError
+			     "Could not import package ~A (as part of ~A)"
+			     first-pkg-name mod-dotted-string))))
 	  
-	(as  ;; "import c as c2" -> '(as c c2)
-	 (destructuring-bind (real-name new-name)
-	     (cdr item)
-	   (let ((mo (get-module-object real-name)))
-	     (namespace-bind *scope* new-name mo))))))))
-	
-	
+	  (check-type first-pkg py-package)
+	  	  
+	  ;; Then traverse from first package to second etc
+	  
+	  (loop with curr-pkg = first-pkg
+	      with curr-path
+	      with next-pkg-name
+	      with pkg-done = ()
+	      while packages-todo
+	      do 
+		(setf next-pkg-name (pop packages-todo))
+		(push next-pkg-name pkg-done)
+		(setf curr-path-dots (module-list-to-dotted-string
+				      `(dotted ,@(reverse done-packages)))
+		      curr-path-slashes (module-list-to-dotted-string
+					 `(dotted ,@(reverse done-packages)) "/"))
+		
+		(let ((dotted-string (module-list-to-dotted-string names))
+		      (pkg-obj (py-dict-gethash *sys.modules* dotted-string)))
+		   
+		  (if pkg-obj
+		      
+		      (progn (check-type pkg-obj py-package)
+			     (setf curr-pkg pkg-obj))
+
+		    (let* ((pkg-dir (slot-value curr-pkg 'directory))
+			   (next-pkg-dir (make-pathname :directory pkg-dir
+							:name next-pkg-name))
+			   (__init__.py-path (make-pathname :directory next-pkg-dir
+							    :name "__init__.py")))
+		      (cond 
+		       ((not (is-directory pkg-dir))
+			(py-raise 'ImportError "Directory ~A disappeared" pkg-dir))
+		       ((not (is-directory next-pkg-dir))
+			(py-raise 'ImportError "Package ~A not found (directory ~A)"
+				  next-pkg-name next-pkg-dir))
+		       ((not (is-file __init__.py-path))
+			(py-raise 'ImportError "Package ~A has no __init__.py at ~A"
+				  next-pkg-name __init__.py-path))
+		       
+		       (let ((mod-ast (parsepython-string (read-file __init__.py-path)))
+			     (ns (make-namespace :builtins t)))
+			 
+			 (loop for (k . v) in
+			       `((__path__ ,(make-py-list-from-list curr-path-slashes))
+				 (__file__ ,(concatenate 'string
+					      curr-path-dots "/__init__.py"))
+				 (__name__ ,(string curr-pkg)))
+			     do (namespace-bind ns k v))
+		   
+			 (let ((*scope* ns))
+			   (py-eval mod-ast))
+			 
+			 (setf curr-pkg
+			   (make-py-package
+			    :namespace ns
+			    :init-file (truename mod/__init__.py-path)
+			    :directory (truename mod-path) )))))))))))))
+
+			
+(defun module-list-to-dotted-string (mod-ast &optional (sep "."))
+  (assert (or (symbolp mod-ast)
+	      (eq (car mod-ast) 'dotted)))
+  (if (symbolp mod-ast)
+      (symbol-name mod-ast)
+    (progn (setf mod-ast (cdr mod-ast))
+	   (loop with res = ""
+	       for sublist on mod-ast
+	       do (setf res (concatenate 'string res
+					 (symbol-name (car sublist))
+					 (when (cdr sublist) sep)))
+	       finally (return res)))))
+
+;; XXX todo
+(defun eval-import-from (mod items)
+  ;; "from a.b.c import d"  -->  (import-from (dotted a b c) ((as d d)))
+  ;; "from a import b"      -->  (import-from a ((as b b)))
+  
+  ;; First, evaluate the source from which the items should come.
+  
+  (let* ((mod-string (module-list-to-dotted-string mod))
+	 (mod-obj (py-dict-gethash *sys.modules* mod-string)))
+    
+    (when (not mod-obj)
+      (let ((mod (load-module-by-name mod-string
+				      (py-raise 'ImportError "No module named ~A" mod-string))
+	  
+		 ((eq items '*)
+		  (multiple-value-bind (all-names found)
+		      (internal-get-attribute mod-obj '__all__)
+		    (if found
+		 
+			;; First attempt: the __all__ attribute of the module.
+		 
+			(dolist (name (py-iterate->lisp-list all-names))
+			  (namespace-bind *scope* name 
+					  (or (internal-get-attribute mod-obj name)
+					      (py-raise 'AttributeError
+							"Module ~A has no attribute ~A ~@
+                                                  (mentioned in __all__)"
+							mod-obj name))))
+	       
+		      ;; Fall-back: import all names from the module dict
+		      ;; that don't start with underscore.
+	       
+		      (loop for (name . val) in (dict->alist (module-dict mod-obj))
+			  when (char/= (aref 0 (string name)) #\_) 
+			  do (namespace-bind *scope* name val)))))
+	  
+		 (t
+		  (loop for (as? name-in-mod name-here) in items
+		      do (assert (eq as? 'as))
+			 (let ((obj (or (internal-get-attribute mod-obj name-in-mod)
+					(py-raise 'ImportError "Module ~A has no attribute ~A"
+						  mod-string name-in-mod))))
+			   (namespace-bind *scope* name-here obj)))))))
+      XXXX todo)))
+
+  ;; AST `item':
+    ;;  import a         ->  (not-as a)
+    ;;  import a as b    ->  (as a b)
+    ;;  import a.b       ->  (not-as (dotted a b))
+    ;;  import a.b as c  ->  (as (dotted a b) c)
+    ;;
+    ;;
+    ;;  A `module' is a `xxx.py' file. A `package' is a directory with
+    ;;  a `__init__.py' file.
+    ;;
+    ;;
+    ;;  "import foo.bar.baz"
+    ;;    
+    ;;    Each except last name (foo and bar) must be packages, not
+    ;;    modules. Last name (baz) must be either a module or a
+    ;;    package.
+    ;;    
+    ;;    In current namespace, 'foo' gets bound to <foo> package.
+    ;;    
+    ;;    The value of `foo' before the import statement is irrelevant.
+    ;;  
+    ;;  
+    ;;  "import foo.bar.baz as zut"
+    ;;  
+    ;;    Binds 'zut' to package or module <foo.bar.baz>
+    ;;  
+    ;;    
+    ;;  *sys.modules* : a py-dict, mapping from dotted names to
+    ;;                  module/package objects
+    ;;
+    ;;    Here, {'foo': <foo pkg>, 'foo.bar': <foo.bar pkg>, 
+    ;;           'foo.bar.baz': <foo.bar.baz mod [or pkg]>} would be added to
+    ;;    *sys.modules*.
+
+      
 (defun eval-if (clauses else-suite)
   (loop for (expr suite) in clauses
       when (py-val->lisp-bool (py-eval expr))

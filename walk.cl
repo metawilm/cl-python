@@ -75,7 +75,7 @@
 		      (do-walk else-suite)))))
     
 	  ((inline-lisp raise assert del list testlist identifier return yield dict
-	    attributeref subscription slice call assign-expr import
+	    attributeref subscription slice call assign-expr import import-from
 	    comparison unary binary tuple slice print print>> lambda
 	    continue break pass augassign-expr global) 
 	   form))))))

@@ -103,4 +103,3 @@
 
 (defun make-bi-function-accepting-kw-args (func)
   (make-instance 'bi-function-accepting-kw-args :func func))
-

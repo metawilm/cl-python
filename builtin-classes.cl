@@ -922,6 +922,12 @@
   "Returns T or NIL."
   (= (__cmp__ x y) 0))
 
+(defmethod py-dict-gethash ((d py-dict) key)
+  (gethash key (slot-value d 'hash-table)))
+
+(defmethod py-dict-sethash ((d py-dict) key val)
+  (setf (gethash key (slot-value d 'hash-table)) val))
+		 
 (defmethod __getitem__ ((d py-dict) key)
   (multiple-value-bind (val found)
       (gethash key (slot-value d 'hash-table))
@@ -1369,35 +1375,58 @@
     :generator-creator (eval (create-generator-function ast))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Module
+;; Package/Module
+;; 
+;; A package is the same as a module, only behaviour regarding
+;; `import' is a different.
 
-(defclass py-module (builtin-instance)
-  ((name :initarg :name :type string)
-   (namespace :initarg :namespace :type namespace))
+(defclass py-package/module (builtin-instance)
+  ((namespace :initarg :namespace :type namespace))
   (:metaclass builtin-class))
 
-(mop:finalize-inheritance (find-class 'py-module))
+(mop:finalize-inheritance (find-class 'py-package/module))
 
-(defun make-module (&rest options)
-  (apply #'make-instance 'py-module options))
-
-(defmethod __repr__ ((x py-module))
-  (with-output-to-string (stream)
-    (print-unreadable-object (x stream :type t)
-      (with-slots (name namespace) x
-	(let ((file (namespace-lookup namespace '__file__))
-	      (name (namespace-lookup namespace '__name__)))
-	  (format stream "~A" (or name "?"))
-	  (when file
-	    (format stream "from file ~A" file)))))))
-
-(defmethod module-dict ((x py-module))
+(defmethod package/module-dict ((x py-package/module))
   (slot-value x 'namespace))
 
-(defmethod namespace-lookup ((x py-module) var)
+(defmethod namespace-lookup ((x py-package/module) var)
   (namespace-lookup (slot-value x 'namespace) var))
 
-(register-bi-class-attr/meth (find-class 'py-module) '__dict__ (make-bi-class-attribute #'module-dict))
+(register-bi-class-attr/meth (find-class 'py-package/module) '__dict__
+			     (make-bi-class-attribute #'package/module-dict))
+
+(defmethod __repr__ ((x py-package/module))
+  (with-output-to-string (stream)
+    (print-unreadable-object (x stream :type t)
+      (with-slots (namespace module) x
+	(let ((name (namespace-lookup namespace '__name__))
+	      (file (namespace-lookup namespace '__file__)))
+	  (format stream "~A" (or name ""))
+	  (when file
+	    (format stream " from file ~A" file)))))))
+
+
+;;; Module
+
+(defclass py-module (py-package/module)
+  ((module :initarg :module))
+  (:metaclass builtin-class))
+
+(defun make-py-module (&rest options)
+  (apply #'make-instance 'py-module options))
+
+
+;;; Package
+
+(defclass py-package (py-package/module)
+  ((init-file :initarg :init-file)
+   (directory :initarg :directory))
+  (:metaclass builtin-class))
+
+(mop:finalize-inheritance (find-class 'py-package))
+
+(defun make-py-package (&rest options)
+  (apply #'make-instance 'py-package options))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;

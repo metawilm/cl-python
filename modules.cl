@@ -1,6 +1,6 @@
 (in-package :python)
 
-(defparameter *sys.modules* (make-namespace))
+(defparameter *sys.modules* (make-dict)) ;; not a namespace, as keys can be dotted names
 (defparameter *sys.path* nil)
 
 (defparameter *__builtin__-module* nil)
@@ -9,8 +9,8 @@
 
 (defmacro make-std-module (name &optional bindings)
   `(let* ((ns (make-namespace :builtins t))
-	  (mod (make-module :name ,(string name) :namespace ns)))
-     (namespace-bind *sys.modules* ',name mod)
+	  (mod (make-py-module :namespace ns)))
+     (py-dict-sethash *sys.modules* ',name mod)
      (namespace-bind ns '__name__ (string ',name))
      ,@(loop for (k v) in bindings
 	   collect `(namespace-bind ns ',k ,v))
@@ -61,9 +61,7 @@
 (make-bi-module)
 
 
-;; Keep a copy of the initial modules, for use in the REPL
+;; Keep a copy of the initial modules; used by the REPL.
 
-
-;; (eval-when (:load-toplevel :execute) required??
-(defparameter *initial-sys.modules* (namespace-copy *sys.modules*))
+(defparameter *initial-sys.modules* (dict-copy *sys.modules*))
 

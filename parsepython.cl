@@ -199,15 +199,15 @@
  (import-normal (import dotted-as-name comma--dotted-as-name*) (`(import (,$2 ,@$3))))
  (:comma--dotted-as-name*)
  (comma--dotted-as-name ( |,| dotted-as-name) ($2))
- (import-from (from dotted-name import import-from-2) (`(import ((from ,$2 ,$4)))))
+ (import-from (from dotted-name import import-from-2) (`(import-from ,$2 ,$4)))
  (import-from-2 :or
 		*
 		((import-as-name comma--import-as-name*) . ((cons $1 $2))))
  (:comma--import-as-name*)
  (comma--import-as-name (|,| import-as-name) ($2))
- (import-as-name (identifier) ($1))
+ (import-as-name (identifier) ((list 'as $1 $1)))
  (import-as-name (identifier as identifier) ((list 'as $1 $3)))
- (dotted-as-name (dotted-name) ($1))
+ (dotted-as-name (dotted-name) ((list 'not-as $1)))
  (dotted-as-name (dotted-name as identifier) ((list 'as $1 $3)))
  (dotted-name (identifier dot--name*) ((if $2
 					   `(dotted ,$1 ,@(if (eq (first $2) 'dotted)
