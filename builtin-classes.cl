@@ -1074,7 +1074,7 @@
       (gethash key (slot-value d 'hash-table))
     (if found
 	val
-      (py-raise 'KeyError "No such key: ~A" (__str__ key)))))
+      (py-raise 'KeyError "No such key: ~A" (py-str key)))))
 
 (defmethod __iter__ ((d py-dict))
   (dict-iter-keys d))
@@ -1261,7 +1261,6 @@
 		     (values     ,#'dict-values))
     do (register-bi-class-attr/meth (find-class 'py-dict) k v))
 
-
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Namespace
 ;; 
@@ -1282,15 +1281,18 @@
 ;; directly, so d.__getitem__ and d.__setitem__ don't work, although
 ;; d.items() does.)
 
+#+(or)
 (defclass namespace (py-dict)
   ((name :initarg :name :type string)
    (enclosing-ns :initarg :inside :initform nil)
    (hash-table :initform (make-hash-table :test 'eq)))
   (:metaclass builtin-class))
 
+#+(or)
 (mop:finalize-inheritance (find-class 'namespace))
 
 
+#+(or)
 (defun make-namespace (&key inside name builtins)
 
   "Make a new namespace.
@@ -1319,6 +1321,7 @@
 ;; becomes important when the __dict__ objects is read directly, or
 ;; assigned to directly (like "x.__dict__ = ...").
 
+#+(or)
 (defmethod check-only-symbol-keys ((x namespace))
   #+(or) ;; useful for debugging
   (maphash (lambda (k v)
@@ -1326,15 +1329,17 @@
 	     (check-type k symbol))
 	   (slot-value x 'hash-table)))
 
+#+(or)
 (defmethod namespace-bind ((x namespace) var val)
   (ensure-py-type var attribute-name "Invalid attribute name: ~A")
   (check-type var symbol)
-  (check-only-symbol-keys x)
+  #+(or)(check-only-symbol-keys x)
   (setf (gethash var (slot-value x 'hash-table)) val))
 
+#+(or)
 (defmethod namespace-lookup ((x namespace) (var symbol))
   "Recursive lookup. Returns two values:  VAL, FOUND-P"
-  (check-only-symbol-keys x)
+  #+(or)(check-only-symbol-keys x)
   (multiple-value-bind (val found) ;; m-v-b, as NIL is valid VAR
       (gethash var (slot-value x 'hash-table))
     (cond (found                        (values val t))
@@ -1342,16 +1347,18 @@
 					 (slot-value x 'enclosing-ns) var))
 	  (t                            nil))))
 
+#+(or)
 (defmethod namespace-delete ((x namespace) (var symbol))
   "Delete the attribute."
   ;; todo: when in an enclosing namespace
   (check-type var symbol)
-  (check-only-symbol-keys x)
+  #+(or)(check-only-symbol-keys x)
   (let ((res (remhash var (slot-value x 'hash-table))))
     (unless res
       (py-raise 'NameError
 		"No variable with name ~A" var))))
 
+#+(or)
 (defmethod namespace-declare-global ((x namespace) (var-name symbol))
   (let* ((module-namespace (loop with namespace = x
 			       with encl-ns = (slot-value namespace 'enclosing-ns)
@@ -1383,8 +1390,9 @@
 	(add-method (ensure-generic-function 'namespace-lookup) lookup-meth)
 	(add-method (ensure-generic-function 'namespace-bind)   bind-meth)))))
   
+#+(or)
 (defmethod namespace-copy ((x namespace))
-  (check-only-symbol-keys x)
+  #+(or)(check-only-symbol-keys x)
   (with-slots (name enclosing-ns hash-table) x
     (let* ((x-copy (make-namespace :inside enclosing-ns
 				   :name name))
@@ -1394,15 +1402,17 @@
 	       hash-table)
       x-copy)))
 
+#+(or)
 (defmethod namespace-clear ((x namespace))
   (clrhash (slot-value x 'hash-table))
   (setf (slot-value x 'enclosing-ns) nil))
 
 ;; py-dict-like methods
 
+#+(or)
 (defmethod __getitem__ ((x namespace) key)
   "Contrary to PY-DICT, does not raise KeyError."
-  (check-only-symbol-keys x)
+  #+(or)(check-only-symbol-keys x)
   (cond ((symbolp key))
 	((stringp key) (setf key (intern key #.*package*)))
 	((typep key 'py-string) (setf key (intern (slot-value key 'val) #.*package*)))
@@ -1410,8 +1420,9 @@
   (check-type key symbol)
   (gethash key (slot-value x 'hash-table)))
 
+#+(or)
 (defmethod __repr__ ((x namespace))
-  (check-only-symbol-keys x)
+  #+(or)(check-only-symbol-keys x)
   (with-output-to-string (stream)
     (pprint-logical-block (stream nil)
       (format stream "{")
@@ -1421,6 +1432,218 @@
 
 ;; XXX register?
 
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Mapping
+;; 
+;; Abstract class, superclass for PY-ALIST and PY-DICT.
+;; 
+;; Calls these methods for the actual mutating work:
+;;  __setitem__
+
+(defclass py-mapping (builtin-instance)
+  ()
+  (:metaclass builtin-class))
+
+(mop:finalize-inheritance (find-class 'py-mapping))
+
+
+;; default __new__
+
+(defmethod py-mapping-__init__ (pos-arg key-arg)
+  (let ((x (car pos-arg)))
+    (assert (typep x 'py-mapping))
+    (setf pos-arg (cdr pos-arg))
+  
+    ;; Either:   - no arguments (empty mapping);
+    ;;           - one positional argument (mapping object)
+    ;;           - keyword arguments: the key-values of the mapping
+    
+    (cond ((not (or pos-arg key-arg)) )
+
+	  ((and (car pos-arg) (not (cdr pos-arg)) (not key-arg))
+
+	   ;; Try it as mapping first, using  keys()  and  __getitem__().
+	   ;; If that fails because the methods are not present, try as iterable.
+	   
+	   (let* ((src (car pos-arg))
+		  (src-keys (call-attribute-via-class src 'keys))
+		  (getitem-meth (and src-keys (getattr-of-class src '__getitem__))))
+	     (if getitem-meth 
+		 
+		 (map-over-py-object
+		  (lambda (key) (__setitem__ x key (py-call getitem-meth (list key))))
+		  src-keys)
+	       
+	       (map-over-py-object
+		(lambda (item)
+		  (typecase item
+		    
+		    (py-list/tuple ;; common case
+		     (let ((v (slot-value item 'vec)))
+		       (if (= (length v) 2)
+			   (__setitem__ x (aref v 0) (aref v 1))
+			 (py-raise 'TypeError
+				   "dict(seq): seq must contains elements ~@
+                                    of length 2 (got: ~A for #(key value))" v))))
+		    
+		    (t (let* ((iter-f (get-py-iterate-fun item))
+			      (key (funcall iter-f))
+			      (val (and key (funcall iter-f)))
+			      (third (and val (funcall iter-f))))
+			 (when (and val (not third))
+			   (__setitem__ x key val))))))
+		src))))))
+  *None*)  
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; A-List
+;; 
+;; As a replacement for dictionary.
+
+(defclass py-alist (py-mapping)
+  ((alist :initform () :initarg :alist))
+  (:metaclass builtin-class))
+
+(defmethod __getitem__ ((x py-alist) key)
+  (with-slots (alist) x
+    (or (cdr (assoc key alist :test #'py-==))
+	(py-raise 'KeyError "No such key: ~A" (py-str key)))))
+
+(defmethod __setitem__ ((x py-alist) key val)
+  (with-slots (alist) x
+    (let ((k (assoc key alist :test #'py-==)))
+      (if k
+	  (setf (cdr k) val)
+	(let ((k (cons key val)))
+	  (push k alist))))))
+
+(defmethod __delitem__ ((x py-alist) key)
+  (with-slots (alist) x
+    (if (py-== (caar alist) key)
+	(setf alist (cdr alist))
+      (loop with prev = alist
+	  with curr = (cdr alist)
+	  do (cond ((null curr) )
+		   ((py-== (caar curr) key)
+		    (setf (cdr prev) (cdr curr))
+		    (return))
+		   (t (setf prev curr
+			    curr (cdr curr))))))))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; EQ A-list
+;; 
+;; Used for implementing namespaces. 
+;; Differences with py-alist:
+;;  - returns NIL for not found
+;;  - uses EQ as test, not PY-==
+
+(defclass py-eq-alist (py-alist)
+  ()
+  (:metaclass builtin-class))
+
+(defun make-py-eq-alist ()
+  (make-instance 'py-eq-alist))
+
+(defmethod __getitem__ ((x py-eq-alist) (key symbol))
+  (with-slots (alist) x
+    (cdr (assoc key alist))))
+
+(defmethod __setitem__ ((x py-eq-alist) (key symbol) val)
+  (with-slots (alist) x
+    (let ((k (assoc key alist :test 'eq)))
+      (if k
+	  (setf (cdr k) val)
+	(let ((k (cons key val)))
+	  (push k alist))))))
+
+(defmethod __delitem__ ((x py-eq-alist) (key symbol))
+  (with-slots (alist) x
+    (if (eq (caar alist) key)
+	(setf alist (cdr alist))
+      (loop with prev = alist
+	  with curr = (cdr alist)
+	  do (cond ((null curr) (return))
+		   ((eq (caar curr) key)
+		    (setf (cdr prev) (cdr curr))
+		    (return))
+		   (t (setf prev curr
+			    curr (cdr curr))))))))
+
+(defstruct (al-namespace #+(or)(:type :vector))
+  (enclosing-ns nil)
+  (alist        nil)
+  (global-ns    nil)
+  (builtins     nil))
+	   
+(defun make-namespace (&key inside name builtins)
+  ;;(declare (ignore name))
+  ;;(format t "make-namespace ~A  in: ~A  bi: ~A~%" name inside builtins)
+  (let ((ns (make-al-namespace :enclosing-ns inside)))
+    (when builtins
+      (locally (declare (special *__builtin__-module-namespace*))
+	(namespace-bind ns '__builtins__ *__builtin__-module-namespace*)
+	(setf (al-namespace-builtins ns) *__builtin__-module-namespace*)))
+    ns))
+
+(defun namespace-bind (ns key val)
+  (assert (symbolp key))
+  ;;(format t "binding ~A -> ~A~%" key val)
+  (let* ((alist (al-namespace-alist ns))
+	 (k (assoc key alist :test 'eq)))
+    (if k
+	(if (eq (cdr k) :global)
+	    (namespace-bind (al-namespace-global-ns ns) key val)
+	  (setf (cdr k) val))
+      (setf (al-namespace-alist ns) (cons (cons key val) alist)))))
+
+(defun namespace-lookup (ns key)
+  ;;(format t "lookup ~A~%" key)
+  ;;(break)
+  (let ((k (assoc key (al-namespace-alist ns) :test 'eq)))
+    (if k
+	(if (eq (cdr k) :global)
+	    (namespace-lookup (al-namespace-global-ns ns) key)
+	  (values (cdr k) t))
+      (when (al-namespace-enclosing-ns ns)
+	;;(format t "trying enclosing for ~A~%" key)
+	(namespace-lookup (al-namespace-enclosing-ns ns) key)))))
+
+(defun namespace-delete (ns key)
+  (let ((alist (al-namespace-alist ns)))
+    (if (eq (caar alist) key)
+	(setf (al-namespace-alist ns) (cdr alist))
+      (loop with prev = alist
+	  with curr = (cdr alist)
+	  do (cond ((null curr) (return))
+		   ((eq (caar curr) key)
+		    (setf (cdr prev) (cdr curr))
+		    (return))
+		   (t (setf prev curr
+			    curr (cdr curr))))))))
+
+(defun namespace-declare-global (ns key)
+  ;;(format t "ns-decl-global~%")
+  ;; Asumes name not already bound or declare global
+  (setf (al-namespace-alist ns) 
+    (cons (cons key :global) (al-namespace-alist ns)))
+  (unless (al-namespace-global-ns ns)
+    (loop with curr-ns = ns
+	with enc = (al-namespace-enclosing-ns curr-ns)
+	while enc do
+	  (setf curr-ns enc
+		enc (al-namespace-enclosing-ns curr-ns))
+	finally (assert curr-ns)
+		(setf (al-namespace-global-ns ns) curr-ns))))
+
+(defun namespace-copy (ns)
+  (let ((new-ns (make-al-namespace :enclosing-ns (al-namespace-enclosing-ns ns))))
+    (let ((bi-ns (al-namespace-builtins ns)))
+      (when bi-ns
+	(namespace-bind new-ns '__builtins__ bi-ns)
+	(setf (al-namespace-builtins new-ns) bi-ns)))
+    new-ns))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Function
@@ -1486,7 +1709,8 @@
 
 (defun make-user-defined-function (&rest options &key namespace &allow-other-keys)
   "Make a python function"
-  (check-type namespace namespace)
+  (declare (ignorable namespace))
+  #+(or)(check-type namespace namespace)
   (apply #'make-instance 'user-defined-function options))
 
 
@@ -1525,7 +1749,8 @@
 ;; `import' is a different.
 
 (defclass py-package/module (builtin-instance)
-  ((namespace :initarg :namespace :type namespace))
+  ((namespace :initarg :namespace
+	      #+py-namespace-dict :type #+py-namespace-dict namespace))
   (:metaclass builtin-class))
 
 (mop:finalize-inheritance (find-class 'py-package/module))
@@ -1533,9 +1758,11 @@
 (defmethod package/module-dict ((x py-package/module))
   (slot-value x 'namespace))
 
+#+(or)
 (defmethod namespace-lookup ((x py-package/module) var)
   (namespace-lookup (slot-value x 'namespace) var))
 
+#+(or)
 (register-bi-class-attr/meth (find-class 'py-package/module) '__dict__
 			     (make-bi-class-attribute #'package/module-dict))
 
@@ -2244,15 +2471,17 @@
   (print-list/tuple x :prefix #\[ :suffix #\] :empty-seq "[]" :kind :repr))
 
 
-(defmethod move-vec-items ((vec vector) (delta integer) &key (start 0) (stop (length vec)) make-nil)
+(defmethod move-vec-items ((vec vector) (delta integer) &key (start 0) (stop (1- (length vec))) make-nil)
   "Move subset of items in vector to the left or right"
-  (declare (optimize (speed 3)))
-  (cond ((= delta 0) )
-	
-	((not (or start stop))
-	 (error "MOVE-VEC-ITEMS: :start or :stop must be given when delta != 0 (delta: ~A)" delta))
+  
+  (cond ((> start stop)
+	 (error "The :start index (~A) is greater than :stop index (~A)" start stop))
+	 
+	((= delta 0) )
 	
 	((< delta 0) ;; shift to the left
+	 (when (< (+ start delta) 0)
+	   (error "Array index of first element will become lower than 0"))
 	 (loop for src-i from start to stop
 	     for dest-i from (+ start delta)
 	     do (setf (aref vec dest-i) (aref vec src-i)))
@@ -2261,6 +2490,8 @@
 	       do (setf (aref vec i) nil))))
 	
 	((> delta 0) ;; shift to the right
+	 (when (>= (+ stop delta) (length vec))
+	   (error "Array index of first element will become greater than vector length"))
 	 (loop for src-i from stop downto start
 	     for dest-i downfrom (+ stop delta)
 	     do (setf (aref vec dest-i) (aref vec src-i)))

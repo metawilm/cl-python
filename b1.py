@@ -1,4 +1,6 @@
 def depth0(n):
+    if n == 1000:
+      return n
     try:
         n = depth0(n+1)
     except RuntimeError:
@@ -6,7 +8,9 @@ def depth0(n):
     return n
 
 def depth1(n, pea):
-    ## print n - WB
+    #print n #- WB
+    if n == 300: ## WB
+       return n, pea ##raise RuntimeError ## WB
     p = (pea, pea)
     for i in xrange(n):
         p = (p, pea)
@@ -21,6 +25,7 @@ def main():
     pea = []
     base, p = depth1(0, pea)
     print base >= 996
+    return ## WB
     pea.append(p)
     while p[1] is not pea:
         q = p[1]

@@ -276,9 +276,11 @@
 		    t))))))
   (values nil nil))
 
+(defmethod getattr-of-module ((x py-module) (attr symbol))
+  (namespace-lookup (slot-value x 'namespace) attr))
+  
 (defmethod getattr-of-module ((x py-module) attr)
-  ;; XXX for now...
-  (namespace-lookup x attr))
+  (getattr-of-module x (intern (py-string-designator-val attr) #.*package*))) ;;XXX uses internal knowledge of module
 
 
 ;; Remove use of unbound methods... XXX check if this doesn't remove too much...
@@ -450,7 +452,8 @@
 (defmethod getattr-of-class-nonrec ((cls user-defined-class) attr)
   ;; (break "g-a of class nonrec: ~A, ~A" cls attr)
   (multiple-value-bind (val found)
-      (py-dict-gethash (slot-value cls '__dict__) attr) ;; XXX
+      ;;(py-dict-gethash (slot-value cls '__dict__) attr) ;; XXX
+      (namespace-lookup (slot-value cls '__dict__) attr)
     (when found
       (return-from getattr-of-class-nonrec
 	(values val #+(or)(maybe-bind val *None* cls)
@@ -583,7 +586,9 @@
 	    (warn "accessing namespace as dict: partly TODO"))
 	  (values val t)))
     
-    (__getitem__ (slot-value x '__dict__) attr)))
+    (namespace-lookup (slot-value x '__dict__) attr)))
+
+;;    #+(or)(__getitem__ (slot-value x '__dict__) attr)))
 
 (defmethod getattr-of-ud-instance-nonrec ((x udc-instance-w/slots) attr)
   (cond ((eq attr '__slots__)
@@ -600,10 +605,12 @@
       (progn (warn "Accessing namespace: partly TODO")
 	     (values (slot-value x '__dict__) t))
     
-    (handler-case 
-	(__getitem__ (slot-value x '__dict__) attr)
-      (KeyError ()   ;; __getitem__ on py-dict can throw it
-	(values nil nil)))))
+    (namespace-lookup (slot-value x '__dict__) attr)))
+    
+#+(or)(handler-case
+	  (__getitem__ (slot-value x '__dict__) attr)
+	(KeyError ()   ;; __getitem__ on py-dict can throw it
+	  (values nil nil)))
 
 
 ;; Shortcuts
@@ -718,8 +725,10 @@
 (defmethod setattr-udi ((x udc-instance-w/dict) attr val)
   (if (eq attr '__dict__)
       (setf (slot-value x '__dict__) val)
-    (call-attribute-via-class (slot-value x '__dict__) '__setitem__
-			      (list attr val))))
+    (namespace-bind (slot-value x '__dict__) attr val))) ;; was: __setitem__
+
+;;    #+(or)(call-attribute-via-class (slot-value x '__dict__) '__setitem__
+;;			      (list attr val))))
 
 (defmethod setattr-udi ((x udc-instance-w/slots) attr val)
   (if (slot-exists-p x attr)

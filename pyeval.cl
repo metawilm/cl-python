@@ -94,6 +94,8 @@
   (funcall x (cdr ast)))
 
 (defmethod py-eval-1 ((ast list)) ;; uses FUNCALL for all!
+  (declare (dynamic-extent ast))
+  
   (case (car ast)
     
     (file-input (funcall #'eval-file-input (cdr ast)))
@@ -745,6 +747,7 @@
   (mapcar #'eval-one-assignment-target targets))
 
 (defun eval-one-assignment-target (tg)
+  
   (when (atom tg)
     (py-raise 'SyntaxError
 	      "Cannot assign to a literal (got target: ~A)" tg))
@@ -752,7 +755,7 @@
   (case (car tg)
     ;; (IDENTIFIER a) : remains the same
     (identifier tg)
-
+  
     (testlist ;; how about comma?
      `(list ,@(mapcar #'eval-one-assignment-target (second tg))))
       
@@ -1099,15 +1102,14 @@
       (funcall func (py-eval-1 val)))))
 
 (defun eval-binary (operator-left-right)
-  (declare (special *math-binary-op-assoc*)
-	   (optimize (speed 3) (safety 0) (debug 0))) ;; defined in mathops.cl
+  (declare (special *math-binary-op-assoc*)) ;; defined in mathops.cl
   (destructuring-bind (operator left right) operator-left-right
-    (when (and (eq operator '/)
-	       *__future__.division*)
-      (setf operator '/t/))
+    #+(or)(when (and (eq operator '/)
+		     *__future__.division*)
+	    (setf operator '/t/))
     (let ((func (cdr (assoc operator *math-binary-op-assoc*))))
-      (assert func () "Operator ~A has no corresponding py-~A function?! ~A"
-	      operator operator *math-binary-op-assoc*)
+      #+(or)(assert func () "Operator ~A has no corresponding py-~A function?! ~A"
+		    operator operator *math-binary-op-assoc*)
       (funcall func (py-eval-1 left) (py-eval-1 right)))))
 
 (defun eval-binary-lazy (operator-left-right)

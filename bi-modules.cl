@@ -15,19 +15,19 @@
 	  *__builtin__-module-namespace* ns)
     
     (do-external-symbols (s 'python-builtin-functions)
-      (namespace-bind ns (symbol-name s) (symbol-function s)))
+      (namespace-bind ns (intern s #.*package*) (symbol-function s))) ;; sym-name
   
     (do-external-symbols (s 'python-builtin-types)
       (if (boundp s) ;; check needed, as some symbols are TODO
-	  (namespace-bind ns (symbol-name s) (symbol-value s))))
+	  (namespace-bind ns (intern s #.*package*) (symbol-value s))))
 
     (loop for (key val) in
-	  `((None ,*None*)
-	    (Ellipsis ,*Ellipsis*)
-	    (NotImpemented ,*NotImplemented*)
-	    (True ,*True*)
-	    (False ,*False*)
-	    (__debug__ ,*__debug__*))
+	  `((None           ,*None*)
+	    (Ellipsis       ,*Ellipsis*)
+	    (NotImpemented  ,*NotImplemented*)
+	    (True           ,*True*)
+	    (False          ,*False*)
+	    (__debug__      ,*__debug__*))
 	do (namespace-bind ns key val))
   
     (loop for (name . exc) in *python-exceptions*

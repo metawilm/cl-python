@@ -157,13 +157,20 @@
     (map-over-py-object (lambda (x) (push x res)) object)
     (nreverse res)))
 
-(defun map-over-py-object (fun object)
+(defmethod map-over-py-object (fun object)
   "Iterate over OBJECT, calling Lisp function FUN on each value. Returns nothing."
   (loop with f = (get-py-iterate-fun object)
       with val = (funcall f)
       while val do (funcall fun val)
 		   (setf val (funcall f)))
   (values))
+
+#+(or)
+(defmethod map-over-py-object (fun (x py-list/tuple))
+  (loop for elm across (slot-value x 'vec)
+      do (funcall fun elm))
+  (values))
+
 
 (defmacro ensure-py-type (vars cl-type err-str)
   "Ensure that all vars in VARS are a designator for CL-TYPE, if so SETF all vars
