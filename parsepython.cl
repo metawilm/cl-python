@@ -711,13 +711,32 @@
 	(res 0))
 	
     (flet ((read-int (&optional (res 0))
-	     (loop with ch = (read-char-nil)
+	     
+	     ;; This version calls the Lisp reader on the string with numbers
+	     (loop with vec = (make-array 5 :adjustable t :fill-pointer 0 :element-type 'character)
+		 with ch = (read-char-nil)
+			   
+		 initially 
+		 (when (/= 0 res)
+		   (vector-push-extend (code-char (+ (char-code #\0) res)) vec))
+			  
 		 while (and ch (digit-char-p ch base))
-		 do (setf res (+ (* res base) (digit-char-p ch base))
-			  ch (read-char-nil))
+		 do (vector-push-extend ch vec)
+		    (setf ch (read-char-nil))
+		    
 		 finally (when ch 
 			   (unread-char ch))
-			 (return res))))
+			 (let ((*read-base* base))
+			   (return (read-from-string vec))))
+	     
+	     #+(or) ;; Equivalent code, but not calling the lisp reader, so slightly slower than the above.
+	     (loop with ch = (read-char-nil)
+			while (and ch (digit-char-p ch base))
+			do (setf res (+ (* res base) (digit-char-p ch base))
+				 ch (read-char-nil))
+			finally (when ch 
+				  (unread-char ch))
+				(return res))))
 	  
       (if (char= first-char #\0)
 

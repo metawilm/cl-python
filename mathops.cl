@@ -39,6 +39,7 @@
 	  
 	  ,@(when cl-op
 	      `((defmethod ,fname ((x number) (y number))
+		  (declare (optimize (speed 3) (safety 0) (debug 0)))
 		  (,cl-op x y))))
 	  
 	  (defmethod ,fname (x y)
@@ -87,7 +88,7 @@
 		  '((py-+   +      __add__      __radd__      +)
 		    (py--   -      __sub__      __rsub__      -)
 		    (py-*   *      __mul__      __rmul__      *)
-		    (py-/t/ /t/    __truediv__  __rtruediv__  /) ;; /t/ a little hack; pyeval.cl
+		    (py-/t/ /t/    __truediv__  __rtruediv__ )  ;; /t/ a little hack; pyeval.cl ;; not cl-op /: want float, not ratio
 		    (py-//  //     __floordiv__ __rfloordiv__)
 		    (py-/   /      __div__      __rdiv__)
 		    (py-%   %      __mod__      __rmod__)

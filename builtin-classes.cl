@@ -531,7 +531,7 @@
 		    ((= x y)  0)))
      (__div__       (/ x y))
      (__rdiv__      (__div__ y x))
-     (__floordiv__  (floor x y))
+     (__floordiv__  (values (floor x y)))
      (__rfloordiv__ (__floordiv__ y x))
      (__divmod__    (make-tuple-from-list (multiple-value-list (floor x y))))
      (__rdivmod__   (__divmod__ y x))))
@@ -725,7 +725,7 @@
     py-int integer (slot-value x 'val) (slot-value y 'val)
     
     ;; division is floor division (unless "from __future__ import division")
-    ((__div__ (floor x y))
+    ((__div__ (values (floor x y)))
      
      ;; bit operations -> lisp integer
      (__and__ (logand x y))
@@ -1242,24 +1242,37 @@
 
 (mop:finalize-inheritance (find-class 'namespace))
 
+
 (defun make-namespace (&key inside name builtins)
+
   "Make a new namespace.
    BUILTINS indicates whether attribute `__builtins__ should ~
      be created and pointed to the namespace with built-in functions
      `<__builtin__ module>.__dict__', available as *__builtin__-module-namespace*.
    INSIDE gives the enclosing scope(s)."
+
   (let ((ns (make-instance 'namespace :name name :inside inside)))
     (declare (special *__builtin__-module-namespace*))
     (when builtins
       (namespace-bind ns '__builtins__ *__builtin__-module-namespace*))
     ns))
 
+#+(or) ;; this is an optimization: re-use old namespaces
+(defmethod make-namespace-from-namespace ((x namespace) &key inside name builtins)
+  (declare (special *__builtin__-module-namespace*))
+  (setf (slot-value x 'name) name
+	(slot-value x 'enclosing-scope) inside)
+  (when builtins
+    (namespace-bind x '__builtins__ *__builtin__-module-namespace*))
+  x)
 
-;; For now, a bit paranoid regarding the rule that all keys are
-;; symbols. This becomes important when the __dict__ objects is read
-;; directly, or assigned to directly (like "x.__dict__ = ...").
+
+;; Be paranoid regarding the rule that all keys are symbols. This
+;; becomes important when the __dict__ objects is read directly, or
+;; assigned to directly (like "x.__dict__ = ...").
 
 (defmethod check-only-symbol-keys ((x namespace))
+  #+(or) ;; useful for debugging
   (maphash (lambda (k v)
 	     (declare (ignore v))
 	     (check-type k symbol))
@@ -1332,6 +1345,12 @@
       (maphash (lambda (k v) (setf (gethash k ht-copy) v))
 	       hash-table)
       x-copy)))
+
+(defmethod namespace-clear ((x namespace))
+  (clrhash (slot-value x 'hash-table))
+  (setf (slot-value x 'enclosing-ns) nil))
+
+;; py-dict-like methods
 
 (defmethod __getitem__ ((x namespace) key)
   "Contrary to PY-DICT, does not raise KeyError."
@@ -1710,10 +1729,10 @@
   (py-raise 'TypeError "List objects are unhashable"))
 
 (defmethod __iter__ ((x py-list))
-  (let ((list-copy (copy-list (slot-value x 'list)))) ;; copy-tree ?!
+  (let ((list (slot-value x 'list))) ;; copy-tree ?!
     (make-iterator-from-function
      (lambda ()
-       (pop list-copy)))))
+       (pop list)))))
 
 (defmethod __len__ ((x py-list))
   (length (slot-value x 'list)))
@@ -2077,10 +2096,10 @@
     (mod-to-fixnum res)))
    
 (defmethod __iter__ ((x py-tuple))
-  (let ((list-copy (copy-list (slot-value x 'list)))) ;; copy-tree ?!
+  (let ((list (slot-value x 'list))) ;; copy-tree ?!
     (make-iterator-from-function
      (lambda ()
-       (pop list-copy)))))
+       (pop list)))))
 
 (defmethod __len__ ((x py-tuple))
   (length (slot-value x 'list)))

@@ -85,6 +85,16 @@
   (time (py-call x))
   (terpri))
 
+(defmethod clpy.timeit (x)
+  #+allegro
+  (let* ((start (mp:process-cpu-msec-used sys:*current-process*))
+	 (ignored (py-call x))
+	 (stop (mp:process-cpu-msec-used sys:*current-process*)))
+    (declare (ignore ignored))
+    (terpri)
+    (format t "~A" (coerce (/ (- stop start) 1000) 'float))))
+    
+  
 (defmethod py-profile-count (x)
   (prof:with-profiling (:count t)
     (py-call x))
@@ -133,6 +143,7 @@
 		    (trace #'clpy.trace)
 		    (untrace #'clpy.untrace)
 		    (time #'py-time)
+		    (timeit #'clpy.timeit)
 		    (prof_c #'py-profile-count)
 		    (prof_t #'py-profile-time)
 		    (prof_s #'py-profile-space)

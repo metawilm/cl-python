@@ -1,6 +1,6 @@
 (in-package :python)
 
-(declaim (optimize (debug 3)))
+;; (declaim (optimize (debug 3)))
 
 ;; Attribute getting and setting
 ;; =============================
@@ -264,10 +264,23 @@
 (defmethod getattr-of-module ((x py-module) attr)
   ;; XXX for now...
   (namespace-lookup x attr))
-   
 
+
+;; Remove use of unbound methods... XXX check if this doesn't remove too much...
+      
 (defmethod maybe-bind ((x function) instance class)
-  (__get__ x instance class))
+  (if (member instance (load-time-value (list nil *None*) :test 'eq))
+      x
+    (__get__ x instance class)))
+
+(defmethod maybe-bind ((x user-defined-function) instance class)
+  (declare (ignore class))
+  (if (member instance (load-time-value (list nil *None*) :test 'eq))
+      x
+    (call-next-method)))
+
+;; end remove ...
+
 
 (defmethod maybe-bind ((x unbound-method) instance class)
   (declare (ignore class))
@@ -430,6 +443,7 @@
 
 
 
+#+(or)
 (defmethod getattr-of-class-rec :around ((cls class) attr)
   (declare (ignore attr))
   (call-next-method))

@@ -1,6 +1,6 @@
 (in-package :python)
 
-(declaim (optimize (debug 3)))
+;; (declaim (optimize (debug 3)))
 
 ;;; Calling objects
 
@@ -129,7 +129,7 @@
 				     (let ((*scope* ns))
 				       (declare (special *scope*))
 				       (funcall value-producing-f)))))))
-		
+
 
 (defmethod py-call ((x bound-method) &optional pos-args kwd-args)
   "The instance enclosed in the bound method is prefixed to pos-args"
@@ -137,6 +137,7 @@
 	   (cons (slot-value x 'object)
 		 pos-args)
 	   kwd-args))
+
 
 
 (defmethod py-call ((x unbound-method) &optional pos-args kwd-args)

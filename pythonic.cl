@@ -17,42 +17,119 @@
     (make-iterator-from-function f)))
 
 
+;; macro
+
+#+(or) ;; needs work; maybe not needed anyway?
+(defmacro foreach-in-object ((item object) &body body)
+  "Returns if there were any items in OBJECT (generalizes boolean)"
+  (let ((object '#:object))
+    `(block foreach-in-object
+     
+       (when (let ((kl (class-of ,object)))
+	       (or (eq kl (find-class 'py-tuple))
+		   (eq kl (find-class 'py-list))))
+	 (let ((lst (slot-value object list)))
+	   (return-from foreach-in-object
+	     (if lst
+		 (progn (dolist (,item lst)
+			  ,@body)
+			t)
+	       nil))))
+       
+       ;; Using __iter__ is the prefered way.
+       (multiple-value-bind (iter-meth found)
+	   (getattr-of-class ,object '__iter__)
+	 
+	 (if found
+	     
+	     (let* ((iterator (py-call iter-meth (list object)))
+		    (next-meth (getattr-of-class iterator 'next)))
+	       
+	       ;; One could argue that looking up the `next' method should
+	       ;; only happen when the first value is requested. Doing it
+	       ;; earlier, as it is now, will detect the error below sooner.
+	       
+	       (unless next-meth
+		 (py-raise 'TypeError "Got invalid iterator (no `next' method): ~A" iterator))
+	       
+	       
+	       (labels ((get-next-val-fun ()
+			  (handler-case (values (py-call next-meth (list iterator)))
+			    (StopIteration () (values nil nil))
+			    (:no-error (val)  (values val t)))))
+		 (lambda () (get-next-val-fun))))
+      
+	   ;; Fall-back: __getitem__ with successive integers, starting from 0.
+	   ;; 
+	   ;; There is the theoretical possibility that the object's class,
+	   ;; or just the __getitem__ method, is changed or removed while
+	   ;; we do this iteration.  By storing the __getitem__ method we
+	   ;; evade that; however, it might be semantically wrong,
+	   ;; theoretically speaking.
+      
+	   (multiple-value-bind (getitem-meth found)
+	       (getattr-of-class object '__getitem__)
+	     (if found
+
+		 (let ((index 0))
+		   (labels ((get-next-val-fun ()
+			      (handler-case (py-call getitem-meth (list object index))
+				(IndexError () (values nil nil))  ;; even ok if index = 0 (empty sequence)
+				(:no-error (val)
+				  (incf index)
+				  (values val t)))))
+		     (lambda () (get-next-val-fun))))
+	  
+	       ;; If nothing works...
+	  
+	       (py-raise 'TypeError
+			 "Iteration over non-sequence (got: ~A)" object))))))))
+
+
+;; fun
+
+(defvar *py-tuple-list* nil)
+
 (defun get-py-iterate-fun (object)
   "Return a function that when called returns VAL, T, where VAL is the next value ~@
    gotten by iterating over OBJECT. Returns NIL, NIL upon exhaustion."
   
-  (when (let ((kl (class-of object)))
-	  (or (eq kl (find-class 'py-tuple))
-	      (eq kl (find-class 'py-list))))
+  ;; can't use load-time-value, because classes load after this file... XXX
+  (unless *py-tuple-list*
+    (setf *py-tuple-list* (list (find-class 'py-tuple) (find-class 'py-list))))
+  
+  (when (member (class-of object) *py-tuple-list* :test 'eq)
     (return-from get-py-iterate-fun 
-      (let ((copy-list (copy-list (slot-value object 'list))))
-	(declare (dynamic-extent copy-list))
+      (let ((list (slot-value object 'list)))
+	(declare (dynamic-extent list))
 	(lambda ()
-	  (let ((val (pop copy-list)))
+	  (let ((val (pop list)))
 	    (when val
 	      (values val t)))))))
-  
+
   ;; Using __iter__ is the prefered way.
   (multiple-value-bind (iter-meth found)
       (getattr-of-class object '__iter__)
-	     
+      
     (if found
-	
+	  
 	(let* ((iterator (py-call iter-meth (list object)))
 	       (next-meth (getattr-of-class iterator 'next)))
-	  
+	    
 	  ;; One could argue that looking up the `next' method should
 	  ;; only happen when the first value is requested. Doing it
 	  ;; earlier, as it is now, will detect the error below sooner.
-	  
+	    
 	  (unless next-meth
-	    (py-raise 'TypeError "Got invalid iterator (no `next' method): ~A" iterator))
+	    (py-raise 'TypeError "Got invalid iterator (no `next' method): ~A" iterator))	 
 	  (labels ((get-next-val-fun ()
-		       (handler-case (values (py-call next-meth (list iterator)))
+		     (let ((li (list iterator)))
+		       (declare (dynamic-extent li))
+		       (handler-case (values (py-call next-meth li))
 			 (StopIteration () (values nil nil))
-			 (:no-error (val)  (values val t)))))
-	      (lambda () (get-next-val-fun))))
-      
+			 (:no-error (val)  (values val t))))))
+	    (lambda () (get-next-val-fun))))
+	
       ;; Fall-back: __getitem__ with successive integers, starting from 0.
       ;; 
       ;; There is the theoretical possibility that the object's class,
@@ -82,6 +159,7 @@
 
 (defun py-iterate->lisp-list (object)
   "Returns a Lisp list, that may not be modified destructively."
+
   (when (or (eq (class-of object) (find-class 'py-tuple))
 	    (eq (class-of object) (find-class 'py-list)))
     (return-from py-iterate->lisp-list (slot-value object 'list)))
@@ -98,15 +176,6 @@
       while val do (funcall fun val)
 		   (setf val (funcall f)))
   (values))
-
-#+(or) ;; old
-(defun map-over-py-object (fun object)
-  "Iterate over OBJECT, calling Lisp function FUN on each value. Returns nothing."
-  (loop with f = (get-py-iterate-fun object)
-      with val = (funcall f)
-      when val collect (funcall fun val)
-      while val do (setf val (funcall f))))
-
 
 (defmacro ensure-py-type (vars cl-type err-str)
   "Ensure that all vars in VARS are a designator for CL-TYPE, if so SETF all vars

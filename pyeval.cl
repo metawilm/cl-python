@@ -4,6 +4,10 @@
 (defparameter *__debug__* 1) ;; CPython readonly variable `__debug__' (see EVAL-ASSERT)
 (defparameter *__future__.division* nil)
 
+
+#+(or) ;; namespace re-use optimization
+(defparameter *namespace-cache* (make-array 100 :fill-pointer 0 :adjustable nil))
+    
 ;;; Evaluation
 
 (defun user-py-eval (ast &optional namespace)
@@ -72,7 +76,7 @@
      (return-from py-eval-1 ast)) ;; string designator
     ((eql nil) (error "PY-EVAL of NIL")))
     
-  (when (eql ast (find-class 'python-type))
+  (when (eq ast (load-time-value (find-class 'python-type)))
     (return-from py-eval-1 ast))
   
   ;; This allows all kinds of Lisp values to be used directly in Python,
@@ -157,7 +161,7 @@
   (eval form))
 
 (defun eval-try-except (suite except-clauses else-clause)
-  (declare (optimize (debug 3)))
+  ;;(declare (optimize (debug 3)))
   
   ;; Note that the Exception class that an 'except' clause catches, is
   ;; evaluated after an exception is thrown, not earlier; so long as
@@ -342,9 +346,12 @@
 		"Name ~A is not defined" name)))
 
 (defun eval-return (val)
-  (throw 'function-block (if val 
-			     (py-eval-1 val)
-			   *None*)))
+  (let ((res (if val (py-eval-1 val) *None*)))
+    
+    #+(or) ;; namespace reuse optimization
+    (vector-push *scope* *namespace-cache*)
+    
+    (throw 'function-block res)))
 
 (defun eval-dict (data)
   ;; eval keys and values in this order: key1, val1, key2, val2, ...
@@ -849,7 +856,6 @@
   
   (let* ((ns (make-namespace :name (format nil "<ns for class ~A>" cname)
 			     :inside *scope*))
-	 
 	 (supers (mapcar
 		  (lambda (x)
 		    (let ((c (py-eval-1 x)))
