@@ -606,59 +606,48 @@
 	      
 	    (setf c (read-char-error)))))))))
 
-#+(or)
-(defun read-number (first-char)
-  ;; Actually, parsing numbers is a weird (dare I say, wrong) in
-  ;; Python. These examples make that clear (note the !'s) (using
-  ;; Python 2.3.4):
-  ;;
-  ;; integers:     input  -> base-10 val  system used
-  ;;                 11           11         10 (decimal)
-  ;;                011            9          8 (octal)
-  ;;               0x11           17         16 (hexadecimal)
-  ;;
-  ;; integers with exponent:
-  ;;       11e3 = 011e3 = 11E3 = 11e+3 == 11E+3 = 11000.0 (a float)
-  ;;       11e-3 = 0.011 (approx)
-  ;;       0x11e3 = regular hex 4579
-  ;;
-  ;; floats:       input  -> base-10 val  system used
-  ;;                11.3         11.3        10
-  ;;               011.3         11.3        10    ! (exp: error)
-  ;;              0x11.3           *syntax error*
-  ;;
-  ;; floats with exponent:
-  ;;        011.3e3 = 11.3e3 = 011.3e+3 = 11.3e+3 = 11300
-  ;;        011.3e-3 = 11.3e-3 = 11300
-  ;;
-  ;; imag ints:    input  -> base-10 val  system used
-  ;;                11j          11j         10
-  ;;               011j          11j         10    ! (exp: 9j)
-  ;;              0x11j           *syntax error*   ! (exp: 17j)
-  ;;
-  ;; imag ints with exponent:
-  ;;         1e3j = 1000j etc.
-  ;;
-  ;; imag floats:  input  -> base-10 val  system used
-  ;;               11.3j         11.3j       10
-  ;;              011.3j         11.3j       10   ! (exp: error)
-  ;;             0x11.3j          *syntax error*
-  ;;
-  ;; imag floats with exp:
-  ;;    1.0e-3j -> 0.001j etc.
-  ;;
-  ;; Integers (dec, oct, hex) may have the suffix `l' or `L', meaning
-  ;; `long', though the difference between regular and long integers
-  ;; has mostly ceased to exist (operations on regular integers that
-  ;; return an integer in the range of long integers, implicitly
-  ;; convert the result to a long). We ignore any difference between
-  ;; regular and long integers.
 
-  ;; The algorithm:
-  ;;  keep reading digits, or one dot
-  ;;      until next char is neither `j' nor hexdigit
-  ;;  if there's a dot -> ...
-  )
+;; integers:     input  -> base-10 val  system used
+;;                 11           11         10 (decimal)
+;;                011            9          8 (octal)
+;;               0x11           17         16 (hexadecimal)
+;;
+;; integers with exponent:
+;;       11e3 = 011e3 = 11E3 = 11e+3 == 11E+3 = 11000.0 (a float)
+;;       11e-3 = 0.011 (approx)
+;;       0x11e3 = regular hex 4579
+;;
+;; floats:       input  -> base-10 val  system used
+;;                11.3         11.3        10
+;;               011.3         11.3        10    ! (exp: error)
+;;              0x11.3           *syntax error*
+;;
+;; floats with exponent:
+;;        011.3e3 = 11.3e3 = 011.3e+3 = 11.3e+3 = 11300
+;;        011.3e-3 = 11.3e-3 = 11300
+;;
+;; imag ints:    input  -> base-10 val  system used
+;;                11j          11j         10
+;;               011j          11j         10    ! (exp: 9j)
+;;              0x11j           *syntax error*   ! (exp: 17j)
+;;
+;; imag ints with exponent:
+;;         1e3j = 1000j etc.
+;;
+;; imag floats:  input  -> base-10 val  system used
+;;               11.3j         11.3j       10
+;;              011.3j         11.3j       10   ! (exp: error)
+;;             0x11.3j          *syntax error*
+;;
+;; imag floats with exp:
+;;    1.0e-3j -> 0.001j etc.
+;;
+;; Integers (dec, oct, hex) may have the suffix `l' or `L', meaning
+;; `long', though the difference between regular and long integers
+;; has mostly ceased to exist (operations on regular integers that
+;; return an integer in the range of long integers, implicitly
+;; convert the result to a long). We ignore any difference between
+;; regular and long integers.
 
 (defun read-number (&optional (first-char (read-char-error)))
   (assert (digit-char-p first-char 10))
@@ -679,21 +668,30 @@
 	  (let ((second (read-char-nil)))
 	    (setf res (cond ((null second) 0) ;; eof
 			     
-			    ((member second '(#\x #\X)) (setf base 16)
-							(read-int))
-			    ((digit-char-p second 8) (setf base 8)
-						     (read-int))
-			    ((char= second #\.) (unread-char second)
-						0)
-			    ((digit-char-p second 10) (read-int))
-			    ((member second '(#\j #\J)) #(0 0))
-			    ((member second '(#\l #\L)) 0)
+			    ((member second '(#\x #\X))
+			     (setf base 16)
+			     (read-int))
+			    
+			    ((digit-char-p second 8)
+			     (setf base 8)
+			     (read-int (digit-char-p second 8)))
+			    
+			    ((char= second #\.)
+			     (unread-char second)
+			     0)
+			    
+			    ((digit-char-p second 10) 
+			     (read-int (digit-char-p second 10)))
+			    
+			    ((member second '(#\j #\J))  #(0 0))
+			    ((member second '(#\l #\L))  0)
 			    (t (unread-char second)
 			       0)))) ;; non-number, like `]' in `x[0]'
 	
 	(setf res (read-int (digit-char-p first-char 10))))
       
-      (let ((has-frac nil))
+      (let ((has-frac nil) (has-exp nil))
+	
 	(when (= base 10)
 	  (let ((dot? (read-char-nil)))
 	    (if (eql dot? #\.)
@@ -717,19 +715,62 @@
 							 :initial-contents lst
 							 :element-type 'character))))))
 		      
-	      (unread-char dot?))))
-		
-	;; discard optional `L' (for `long') suffix for integers
-	(when (not has-frac)
+	      (when dot? (unread-char dot?)))))
+	
+	;; exponent marker
+	(when (= base 10)
 	  (let ((ch (read-char-nil)))
-	    (unless (member ch '(#\l #\L))
-	      (unread-char ch))))
+	    (if (member ch '(#\e #\E))
 		
-	;; suffix `j' means imaginary
-	(let ((ch (read-char-nil)))
-	  (if (member ch '(#\j #\J))
-	      (setf res (complex 0 res))
-	    (unread-char ch)))
+		(progn
+		  (setf has-exp t)
+		  (let ((ch2 (read-char-error))
+			(exp 0)
+			(minus nil)
+			(got-num nil))
+		  
+		    (cond
+		      ((char= ch2 #\+))
+		      ((char= ch2 #\-)       (setf minus t))
+		      ((digit-char-p ch2 10) (setf exp (digit-char-p ch2 10)
+						   got-num t))
+		      (t (py-raise 'SyntaxError
+				   "Exponent for literal number invalid: ~A ~A" ch ch2)))
+		  
+		    (unless got-num
+		      (let ((ch3 (read-char-error)))
+			(if (digit-char-p ch3 10)
+			    (setf exp (+ (* 10 exp) (digit-char-p ch3 10)))
+			  (py-raise 'SyntaxError
+				    "Exponent for literal number invalid: ~A ~A ~A"
+				    ch ch2 ch3))))
+		  
+		    (loop with ch
+			while (and (setf ch (read-char-nil))
+				   (digit-char-p ch 10))
+			do (setf exp (+ (* 10 exp) (digit-char-p ch 10)))
+			finally (when ch (unread-char ch)))
+		  
+		    (when minus
+		      (setf exp (* -1 exp)))
+		  
+		    (setf res (* res (expt 10 exp)))))
+	      
+	      (when ch
+		(unread-char ch))))
+
+	  ;; suffix `L' for `long integer'
+	  (unless (or has-frac has-exp)
+	    (let ((ch (read-char-nil)))
+	      (if (and (not (member ch '(#\l #\L)))
+		       ch)
+		  (unread-char ch))))
+		
+	  ;; suffix `j' means imaginary
+	  (let ((ch (read-char-nil)))
+	    (if (member ch '(#\j #\J))
+		(setf res (complex 0 res))
+	      (when ch (unread-char ch)))))
 		
 	res))))
 		

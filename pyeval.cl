@@ -2,7 +2,7 @@
 
 (defparameter *scope* nil "Current execution namespace")
 (defparameter *__debug__* 1) ;; CPython readonly variable `__debug__' (see EVAL-ASSERT)
-
+(defparameter *__future__.division* nil)
 
 ;;; Evaluation
 
@@ -923,6 +923,9 @@
 
 (defun eval-binary (operator left right)
   (declare (special *math-binary-op-assoc*)) ;; defined in mathops.cl
+  (when (and (eq operator '/)
+	     *__future__.division*)
+    (setf operator '/t/))
   (let ((func (cdr (assoc operator *math-binary-op-assoc*))))
     (assert func () "Operator ~A has no corresponding py-~A function?! ~A"
 	    operator operator *math-binary-op-assoc*)

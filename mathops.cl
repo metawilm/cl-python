@@ -87,7 +87,7 @@
 		  '((py-+   +      __add__      __radd__      +)
 		    (py--   -      __sub__      __rsub__      -)
 		    (py-*   *      __mul__      __rmul__      *)
-		    (py-/t/ /      __truediv__  __rtruediv__  /)
+		    (py-/t/ /t/    __truediv__  __rtruediv__  /) ;; /t/ a little hack; pyeval.cl
 		    (py-//  //     __floordiv__ __rfloordiv__)
 		    (py-/   /      __div__      __rdiv__)
 		    (py-%   %      __mod__      __rmod__)

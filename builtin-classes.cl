@@ -6,7 +6,7 @@
 
 
 ;; XXX todo:  eval-for-in calls __iter__
-;;            __new__ must accept subclasses
+;;  from __future__ import division
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; The `magic methods' shared by all objects.
@@ -475,7 +475,7 @@
      (__cmp__ (cond ((< x y) -1)
 		    ((> x y)  1)
 		    ((= x y)  0)))
-     (__div__       (floor x y))
+     (__div__       (/ x y))
      (__rdiv__      (__div__ y x))
      (__floordiv__  (floor x y))
      (__rfloordiv__ (__floordiv__ y x))
@@ -503,7 +503,8 @@
 	((null (cdr args)) (make-complex (convert-to-number (car args) 'complex)))
 	((null (cddr args)) (make-complex  ;; both args can be complex
 			     (+ (convert-to-number (first args) 'complex)
-				(* #C(0 1) (convert-to-number (second args) 'complex)))))
+				(* #C(0 1) 
+				   (convert-to-number (second args) 'complex)))))
 	(t (py-raise 'ValueError "Too many args for complex.__new__ (got: ~A)" args))))
 
 (register-bi-class-attr/meth (find-class 'py-complex) '__new__ 
@@ -520,7 +521,9 @@
 		 (sxhash x)))
      (__repr__ (if (= (complex-imag x) 0)
 		   (__repr__ (complex-real x))
-		 (format nil "~(A + ~Aj)" (realpart x) (imagpart x))))
+		 (if (>= (imagpart x) 0)
+		     (format nil "(~A + ~Aj)" (realpart x) (imagpart x))
+		   (format nil "(~A - ~Aj)" (realpart x) (* -1 (imagpart x))))))
      (complex-real (realpart x))
      (complex-imag (imagpart x))
      (complex-conjugate (conjugate x))))
@@ -613,10 +616,15 @@
   (:method ((x py-int)) (slot-value x 'val))
   (:method (x) (py-raise "Integer expected (got: ~S)" x)))
 
+		     
 (def-binary-meths
     py-int integer (slot-value x 'val) (slot-value y 'val)
+    
+    ;; division is floor division (unless "from __future__ import division")
+    ((__div__ (floor x y))
+     
     ;; bit operations -> lisp integer
-    ((__and__ (logand x y))
+    (__and__ (logand x y))
      (__xor__ (logxor x y))
      (__or__  (logior x y))
 
