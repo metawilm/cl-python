@@ -26,6 +26,7 @@
 
 (defmethod register-bi-class-attr/meth ((class class) (meth-name symbol) (func function) (type symbol))
   "Puts the method in the hash table. TYPE is either :ATTR or :METH."
+  (assert (member type '(:attr :meth)))
   (let* ((alist (gethash meth-name *builtin-class-attr/meths*))
 	 (kons  (cons class (cons func type)))
 	 (assval (assoc class alist)))
@@ -40,8 +41,6 @@
   "Returns METHOD, TYPE. Both are NIL if not found."
   (let ((val (cdr (assoc class (gethash meth-name *builtin-class-attr/meths*)))))
     (values (car val) (cdr val))))
-
-
 
 (defmacro def-class-specific-methods (class data)
   `(progn ,@(loop for (attname func kind) in data
@@ -80,31 +79,16 @@
 				  ,result)))))
 
 
-;; Regarding string representation of Python objects:
-;;    __str__       is a representation targeted to humans
-;;    __repr__      if possible,  eval(__repr__(x)) should be equal to x
-;; 
-;; To reduce duplication:
-;;    print-object  falls back to writing __str__
-;;    __str__       falls back to returning __repr__
-;;    __repr__      returns by default the print-unreadable-object representation
 
-(defmethod print-object ((x python-object) stream)
-  (print-unreadable-object (x stream :identity t :type t))
-  ;; it's not a good idea to fall back to __str__, because it could give
-  ;; infinite loops when debugging __str__ methods, for example.
-  #+(or)(write-string (__str__ x) stream))
 
-(defmethod __str__ (x) 
-  ;; This method is not only for X of type python-object, but also for
-  ;; regular numbers, for example.
-  (__repr__ x))
-
-(defmethod __repr__ (x)
-  ;; Also for all X, not just Python objects.
-  (with-output-to-string (s)
-    (print-unreadable-object (x s :identity t :type t))))
-
+;;; A few methods shared by all standard objects:
+;;; 
+;;; __class__, __delattr__, __doc__, __getattribute__, __hash__,
+;;; __init__, __new__, __reduce__, __reduce_ex__, __repr__,
+;;; __setattr__, __str__
+;;; 
+;;; Using metaclasses, classes can be created that might not have
+;;; these methods.
 
 (defgeneric __class__ (x)
   (:documentation "The class of X. X must be a python-object designator."))
@@ -117,7 +101,6 @@
 (defmethod __class__ ((x function))      (find-class 'python-type)) ;; XXX doesn't show function name
 (defmethod __class__ ((x python-object)) (class-of x)) ;; XXX check
 
-
 ;; PYTHON-OBJECT is both an instance and a subclass of PYTHON-TYPE.
 (defmethod __class__ ((x (eql (find-class 'python-object)))) (find-class 'python-type))
 
@@ -125,8 +108,86 @@
 (defmethod __class__ ((x (eql (find-class 'python-type)))) x)
 
 
+(defgeneric __delattr__ (x attr) (:documentation "Delete attribute named ATTR of X"))
+(defmethod  __delattr__ (x attr)  (internal-del-attribute x attr))
+(register-bi-class-attr/meth (find-class 'python-object) '__delattr__ #'__delattr__ :meth)
+
+(defgeneric __doc__ (x) (:documentation "documentation"))
+(defmethod  __doc__ (x) (multiple-value-bind (val found)
+			    (internal-get-attribute x '__doc__)
+			  (if found
+			      val
+			    *None*)))
+(register-bi-class-attr/meth (find-class 'python-object) '__doc__ #'__doc__ :attr)
+
+(defgeneric __getattribute__ (x attr))
+(defmethod  __getattribute__ (x attr)
+  (or (internal-get-attribute x attr)
+      (py-raise 'AttributeError "object ~A no attribute ~A" x attr)))
+(register-bi-class-attr/meth (find-class 'python-object) '__getattribute__ #'__getattribute__ :meth)
+
+(defgeneric __hash__ (x))
+(defmethod  __hash__ (x) (pyb:id x)) ;; hash defaults to id
+
+(defgeneric __init__ (x &rest arguments))
+(defmethod  __init__ (x &rest arguments)
+  (declare (ignore arguments))
+  *None*)
+
+(defgeneric __new__ (cls &rest arguments))
+(defmethod __new__ (cls &rest arguments)
+  (declare (ignore arguments))
+  (make-instance cls))
+
+#+(or) ;; don't for now...
+(progn (defgeneric __reduce__ ---)"; "helper for pickle"
+       (defmethod ---))a
+
+#+(or) ;; don't for now...
+(progn (defgeneric __reduce_eq__ ---)"; "helper for pickle"
+       (defmethod ---))
+
+
+;; Regarding string representation of Python objects:
+;;    __str__       is a representation targeted to humans
+;;    __repr__      if possible,  eval(__repr__(x)) should be equal to x
+;; 
+;; To reduce duplication:
+;;    print-object  falls back to writing __str__
+;;    __str__       falls back to returning __repr__
+;;    __repr__      returns by default the print-unreadable-object representation
+
+(defmethod print-object ((x python-object) stream)
+  ;; it's not a good idea to fall back to __str__, because it could give
+  ;; infinite loops when debugging __str__ methods, for example.
+  (print-unreadable-object (x stream :identity t :type t)))
+
+(defmethod __str__ (x) 
+  ;; This method is not only for X of type python-object, but also for
+  ;; regular numbers, for example.
+  (__repr__ x))
+
+(defmethod __repr__ (x)
+  ;; Also for all X, not just Python objects.
+  (with-output-to-string (s)
+    (print-unreadable-object (x s :identity t :type t))))
+
+(defgeneric __setattr__ (x attr val))
+(defmethod  __setattr__ (x attr val)
+  (internal-set-attribute x attr val))
+
+#+(or) ;; XXX
+(def-class-specific-methods
+    python-type
+    ((__new__  #'py-type-__new__  :meth)
+     (__init__ #'py-type-__init__ :meth)))
+;; etc...
+
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Some default methods (XXX or just regular functions?)
+
+;; XXX todo...
 
 (defun py-type-__new__ (cls &rest options)
   (declare (ignore options))
