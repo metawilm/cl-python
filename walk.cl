@@ -77,5 +77,5 @@
 	  ((inline-lisp raise assert del list testlist identifier return yield dict
 	    attributeref subscription slice call assign-expr import
 	    comparison unary binary tuple slice print print>> lambda
-	    continue break pass) 
+	    continue break pass augassign-expr) 
 	   form))))))

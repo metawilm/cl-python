@@ -476,9 +476,9 @@
 			 :fill-pointer 0)))
     (vector-push-extend first-char res)
     (let ((c (read-char-nil)))
-      (excl:while (identifier-char2-p c)
-	(vector-push-extend c res)
-	(setf c (read-char-nil)))
+      (loop while (identifier-char2-p c)
+	  do (vector-push-extend c res)
+	     (setf c (read-char-nil)))
       (unless (null c)
 	(unread-char c)))
     (intern res #.*package*)))
@@ -494,42 +494,109 @@
     (let ((second (read-char-error))
 	  (third (read-char-nil)))
 
-      ;; "" ('') but not """ (''') --> empty string
-      (when (and (char= first-char second)
-		 (or (null third)
-		     (char/= first-char third)))
+      (cond 
+       
+       ;; "" ('') but not """ (''') --> empty string
+       ((and (char= first-char second)
+	     (or (null third)
+		 (char/= first-char third)))
+	
 	(when third
 	  (unread-char third))
 	(return-from read-string ""))
+       
+       
+       ;; """ or ''': a long? multi-line? string
+       ((char= first-char second third)
+	
+	(let* ((res (make-array 50
+				:element-type 'character
+				:adjustable t
+				:fill-pointer 0))
+	       (x (read-char-error))
+	       (y (read-char-error))
+	       (z (read-char-error)))
+	  
+	  (loop until (char= first-char x y z)
+	      do (vector-push-extend
+		  (shiftf x y z (read-char-error))
+		  res))
+	  (return-from read-string res)))
+      
 
-      ;;; """ or ''': a long? multi-line? string
-      (when (char= first-char second third)
-	(let ((res (make-array 50
+       ;; non-empty string with one starting quote
+       ;; Quotes can be escaped with a backslash.
+       (t 
+	
+	(unless third
+	  (py-raise 'SyntaxError "Quoted string not finished"))
+	
+	(let ((res (make-array 30
 			       :element-type 'character
 			       :adjustable t
 			       :fill-pointer 0)))
-	  (let ((x (read-char-error))
-		(y (read-char-error))
-		(z (read-char-error)))
-	    (loop
-	      (when (char= first-char x y z)
-		(return))
-	      (vector-push-extend
-	       (shiftf x y z (read-char-error))
-	       res))
-	    (return-from read-string res))))
-
-      ;; non-empty string with one starting quote
-      (let ((res (make-array 30
-			     :element-type 'character
-			     :adjustable t
-			     :fill-pointer 0)))
-	(vector-push-extend second res)
-	(let ((c third))
-	  (excl:while (char/= c first-char)
-	    (vector-push-extend c res)
-	    (setf c (read-char-error)))
-	  (return-from read-string res))))))
+	  
+	  (unless (char= second #\\)
+	    (vector-push-extend second res))
+	  
+	  (let ((c third)
+		(prev-backslash (char= second #\\)))
+	    
+	    (loop 
+	      (cond
+	       ;; Rules: <http://meta.kabel.utwente.nl/specs/Python-Docs-2.3.3/ref/strings.html>
+	    
+	       (prev-backslash
+		(case c
+		  (#\Newline) ;; ignore: quoted string continues on next line
+		  (#\\ (vector-push-extend #\\ res))        (#\' (vector-push-extend #\' res))
+		  (#\" (vector-push-extend #\" res))        (#\a (vector-push-extend #\Bell res))
+		  (#\b (vector-push-extend #\Backspace res))(#\f (vector-push-extend #\Page res))
+		  (#\n (vector-push-extend #\Newline res))
+		  ((#\N #\u #\U) (error "TODO: unicode support in strings"))
+		  (#\r (vector-push-extend #\Return res)) (#\t (vector-push-extend #\Tab res))
+		  (#\u (error "TODO: unicode support"))   (#\v (vector-push-extend #\VT  res))
+		  
+		  ((#\0 #\1 #\2 #\3 #\4 #\5 #\6 #\7) ;; char code: up to three octal digits
+		   (let ((char-code
+			  (loop with res = (digit-char-p c 8)
+			      with x = c
+			      for num from 1
+			      while (and (<= num 2) (digit-char-p x 8))
+			      do (setf res (+ (* res 8) (digit-char-p x 8))
+				       x (read-char-error))
+			      finally (unread-char x)
+				      (return res))))
+		     (vector-push-extend (code-char char-code) res)))
+		  
+		  (#\x (let* ((a (read-char-error)) ;; char code: up to two hex digits
+			      (b (read-char-error)))
+			 (unless (digit-char-p a 16)
+			   (py-raise 'SyntaxError
+				     "Invalid hex in string literal:  \ x ~A" a))
+			 (vector-push-extend
+			  (code-char (if (digit-char-p b 16)
+					 (+ (* 16 (digit-char-p a 16))
+					    (digit-char-p b 16))
+				       (progn (unread-char b)
+					      (digit-char-p a 16)))) res)))
+		  
+		  (t 
+		   ;; Backslash is not used for escaping: collect both
+		   ;; the backslash itself and the character just
+		   ;; read.
+		   (vector-push-extend #\\ res)
+		   (vector-push-extend c res)))
+		
+		(setf prev-backslash nil))
+	       
+	       ((char= c #\\)
+		(setf prev-backslash t))
+	       
+	       ((char= c first-char) ;; end quote of literal string
+		(return-from read-string res)))
+	      
+	      (setf c (read-char-error))))))))))
 
 #+(or)
 (defun read-number (first-char)
@@ -608,7 +675,10 @@
 
 	 ((alphanumericp second)
 	  (error "Invalid number (got: '0~A'" second))
-	   
+
+	 ((member second '(#\L #\l)) ;; it's a "long" integer -- ignored
+	  (return-from read-number 0))
+	 
 	 (t ;; non-number stuff after a zero, like `]' in `x[0]'
 	  (unread-char second)
 	  (return-from read-number 0)))))
@@ -634,9 +704,9 @@
 	    (vector-push #\. fraction-v)
 	    (let ((c (read-char-nil)))
 
-	      (excl:while (and c (digit-char-p c 10))
-		(vector-push-extend c fraction-v)
-		(setf c (read-char-nil)))
+	      (loop while (and c (digit-char-p c 10))
+		  do (vector-push-extend c fraction-v)
+		     (setf c (read-char-nil)))
 
 	      (incf res (read-from-string fraction-v))
 
@@ -645,7 +715,8 @@
 		(unread-char c))))
 
 	(when c
-	  (unread-char c))))
+	  (unless (member c '(#\L #\l))
+	    (unread-char c)))))
 
     res))
 
@@ -718,20 +789,21 @@
 
 
 (defun read-whitespace ()
-  "Reads all whitespace, until first non-whitespace character.
+  "Reads all whitespace and comments, until first non-whitespace ~@
+   character.
 
-   If Newline was found inside whitespace, values returned are (t N)
-   where N is the amount of whitespace after the Newline (N >= 0)
-   before the first non-whitespace character (in other words, the
-   indentation of the first non-whitespace character) measured in
-   spaces, where each Tab is equivalent to *tab-width-spaces* spaces.
+   If Newline was found inside whitespace, values returned are (t N) ~@
+   where N is the amount of whitespace after the Newline (N >= 0) ~@
+   before the first non-whitespace character (in other words, the ~@
+   indentation of the first non-whitespace character) measured in ~@
+   spaces, where each Tab is equivalent to *tab-width-spaces* spaces. ~@
 
-   If no Newline was encountered, returns NIL.
+   If no Newline was encountered, returns NIL. ~@
    If EOF encountered, NIL is returned."
 
   (let ((found-newline nil)
 	(c (read-char-nil))
-	(n 1))
+	(n 0))
     (loop
       (cond ((not c) (return-from read-whitespace
 		       (if found-newline (values t n) nil)))
@@ -739,6 +811,9 @@
 				       n 0))
 	    ((char= c #\Space) (incf n))
 	    ((char= c #\Tab) (incf n *tab-width-spaces*))
+	    ((char= c #\#) (read-comment-line c)
+			   (setf found-newline t
+				 n 0))
 	    (t (unread-char c)
 	       (return-from read-whitespace
 		 (if found-newline (values t n) nil))))
@@ -748,8 +823,8 @@
   "Read until the end of the line, excluding the Newline."
   (assert (char= c #\#))
   (let ((c (read-char-nil)))
-    (excl:while (and c (char/= c #\Newline))
-      (setf c (read-char-nil)))
+    (loop while (and c (char/= c #\Newline))
+	do (setf c (read-char-nil)))
     (unread-char c)))
 
 #+(or)
@@ -960,7 +1035,7 @@
 		    (if (and c2 (char= c2 #\Newline))
 			(go next-char)
 		      (error "Syntax error: continuation character \\ ~
-                              must be followed by Newline"))))
+                              must be followed by Newline, but got ~S" c2))))
 
 		 (t (error "Unexpected character: ~A" c)))))))))))
 
