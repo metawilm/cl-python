@@ -1133,7 +1133,8 @@
   "Return list of (k,v) tuples"
   (let* ((h (slot-value d 'hash-table))
 	 (res ()))
-    (maphash (lambda (k v) (push (make-tuple k v) res))
+    (maphash (lambda (k v) (push (make-tuple (make-array 2 :initial-contents (list k v)))
+				 res))
 	     h)
     (make-py-list-from-list res)))
 
@@ -1145,7 +1146,7 @@
 		  (multiple-value-bind (ret key val) 
 		      (next-f)
 		    (when ret
-		      (make-tuple key val))))))))
+		      (make-tuple (make-array 2 :initial-contents (list key val))))))))))
     res))
 
 (defmethod dict-iter-keys ((d py-dict))
@@ -1202,7 +1203,7 @@
 	(if entry?
 	    (progn
 	      (remhash key hash-table)
-	      (make-tuple key val))
+	      (make-tuple (make-array 2 :initial-contents (list key val))))
 	  (py-raise 'KeyError "popitem: dictionary is empty"))))))
 
 (defmethod dict-setdefault ((d py-dict) key &optional (defval *None*))
@@ -1630,7 +1631,7 @@
    In case of empty range, returns (length,length,1)."
   (multiple-value-bind (start stop step)
       (slice-indices x length)
-    (make-tuple start stop step)))
+    (make-tuple (make-array 3 :initial-content (list start stop step)))))
 
 ;; Function SLICE-INDICES returns multiple values, best explained by example:
 ;; Assume x = [0,1,2] so LENGTH = 3
@@ -1838,7 +1839,7 @@
 ;; Superclass shared by tuple and list
 
 (defclass py-list/tuple (builtin-instance)
-  ((vec :type :vector :initarg :vec))
+  ((vec :type vector :initarg :vec))
   (:metaclass builtin-class))
 
 (defmethod __cmp__ ((x py-list/tuple) (y py-list/tuple))
@@ -1969,23 +1970,13 @@
 	   (aref vec i)
 	 nil)))))
 
-(defmethod __reversed__ ((x py-list))
-  "Return a reverse iterator"
-  (let* ((vec (slot-value x 'vec))
-	 (i (length vec)))
-    (make-iterator-from-function
-     (lambda ()
-       (if (<= 0 (decf i) (1- (length vec))) ;; may be modified in between
-	   (aref vec i)
-	 nil)))))
-
     
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Tuple
 ;; wpytuple
 
-(defclass py-tuple (builtin-instance)
-  ((vec :type vector :initarg :vec))
+(defclass py-tuple (py-list/tuple)
+  ()
   (:metaclass builtin-class))
 
 (mop:finalize-inheritance (find-class 'py-tuple))
@@ -1998,7 +1989,7 @@
 
 (defun make-tuple-from-list (list)
   (make-instance 'py-tuple
-    :vec (make-vector (length list) :initial-contents list)))
+    :vec (make-array (length list) :initial-contents list)))
 
 (defun tuple->lisp-list (tup)
   (declare (ignore tup))
@@ -2025,12 +2016,6 @@
 			     (make-static-method #'py-tuple-__new__))
 
 ;; default noop __init__
-
-;;; XXX Many methods are similar as for py-list. Maybe move some to a
-;;; shared superclass py-sequence. However, the implementation of
-;;; py-list is likely to change, in order to allow efficient
-;;; lookup-by-index of O(1). This change might remove much of the
-;;; redundancy.
 
 (defmethod __add__ ((x py-tuple) (y py-tuple))
   (cond ((eq x *the-empty-tuple*) y)
@@ -2088,8 +2073,8 @@
 ;; List : represented by adjustable vector
 ;; wpylist
 
-(defclass py-list (builtin-instance)
-  ((vec :type vector :initarg :vec))
+(defclass py-list (py-list/tuple)
+  ()
   (:metaclass builtin-class))
 
 (mop:finalize-inheritance (find-class 'py-list))
@@ -3431,7 +3416,7 @@
   (with-slots (index generator) x
     (let ((res (funcall generator)))
       (if res
-	  (prog1 (make-tuple index res)
+	  (prog1 (make-tuple (make-array 2 :initial-contents (list index res)))
 	    (incf index))
 	(py-raise 'StopIteration "Finished")))))
     
