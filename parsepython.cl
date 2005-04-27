@@ -255,9 +255,9 @@
 	   ((try |:| suite except--suite+ else--suite?) . ((list 'try-except $3 $4 $5)))
 	   ((try |:| suite finally |:| suite)  	        . ((list 'try-finally $3 $6))))
 
- (except--suite (except |:| suite) (`((nil nil) ,$3)))
- (except--suite (except test |:| suite) (`((,$2 nil) ,$4)))
- (except--suite (except test |,| test |:| suite) (`((,$2 ,$4) ,$6)))
+ (except--suite (except |:| suite) (`(nil nil ,$3)))
+ (except--suite (except test |:| suite) (`(,$2 nil ,$4)))
+ (except--suite (except test |,| test |:| suite) (`(,$2 ,$4 ,$6)))
 
  (except--suite+ (except--suite) ((list $1)))
  (except--suite+ (except--suite+ except--suite) ((append $1 (list $2))))

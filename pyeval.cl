@@ -731,7 +731,7 @@
     (let* ((handler-scope *scope*)
 	   (handler-func
 	    (lambda (exc)
-	      (loop for ((cls/tuple parameter) handler-form) in except-clauses
+	      (loop for (cls/tuple parameter handler-form) in except-clauses
 		  do (cond 
 		     
 		      ;; `except Something:'  where Something a class or tuple
