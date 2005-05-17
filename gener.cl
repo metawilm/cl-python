@@ -4,8 +4,8 @@
   "Is AST a function definition for a generator?"
   (catch 'is-generator
     (walk-py-ast ast 
-		 (lambda (x value? target?)
-		   (declare (ignore value? target?))
+		 (lambda (x &key value target)
+		   (declare (ignore value target))
 		   (case (car x)
 		     (yield (throw 'is-generator t))
 		     ((classdef funcdef) (values t t)) ;; don't look for 'yield' in inner functions and classes
