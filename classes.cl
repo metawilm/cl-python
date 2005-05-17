@@ -1,90 +1,111 @@
 (in-package :python)
 
-;; Python classes
-;; 
-;; They behave like new-style classes, which means they support
-;; __slots__, descriptors.
 
-;; Python objects have metaclass PYTHON-TYPE. (The exception is
-;; classes that specify a `__metaclass__'; I guess we should ignore
-;; them for now as this option is not used by most people.)
-;;
-;; Most Python objects have their own attribute dictionary. The
-;; exception are instances of built-in types like `int', `dict',
-;; `list', `tuple', `str'.
+;; Python metatypes
 
-(defclass python-type (standard-class) ()
-	  (:documentation "PYTHON-TYPE is the metaclass of Python objects. ~@
-                           It corresponds to the Python type `type'."))
-
-(defclass python-object () ()
-	  (:metaclass python-type))
-
-;; PYTHON-TYPE is a subclass of PYTHON-OBJECT.
-(mop:ensure-class-using-class
- (find-class 'python-type)
- 'python-type
- :direct-superclasses (mapcar #'find-class '(python-object standard-class)))
-
-;; TODO: PYTHON-TYPE is a both a subclass and an instance of PYTHON-OBJECT.
-
-(mop:finalize-inheritance (find-class 'python-type))
-(mop:finalize-inheritance (find-class 'python-object))
-
-
-(defmethod print-object ((x python-type) stream)
-  (print-unreadable-object (x stream :type t :identity t)
-    (when (typep x 'class)
-      (format stream "~A" (class-name x)))))
-
-
-;; Some definitions:
-;; 
-;;  All CLOS objects in the Python world are either an instance of
-;;  BUILTIN-OBJECT or USER-DEFINED-OBJECT.
-;; 
-;;  Every BUILTIN-OBJECT instance is either a BUILTIN-CLASS instance or
-;;  a BUILTIN-INSTANCE instance.
-;; 
-;;  Every USER-DEFINED-OBJECT instance is either a USER-DEFINED-CLASS
-;;  or a UDC-INSTANE instance.
-
-
-;;;; Built-in
-
-(defclass builtin-object (python-object)
+(defclass python-meta-type (standard-class)
   ())
 
-(defclass builtin-class (python-type builtin-object)
-  ((methods :allocation :class
-	    :documentation "The methods this built-in class implements")
-   (members :allocation :class
-	    :documentation "The attributes this built-in class has"))
-  (:documentation "A potentially heavily optimized Python class"))
+(defmethod make-instance ((cls (eql (find-class 'python-meta-type))) &rest initargs)
+  ;; Create a new Python metatype
+  ...)
+
+(defmethod initialize-instance ((cls python-meta-type) &rest initargs)
+  ;; Initialize a Python metatype
+  ...)
+
+(defmethod slot-value-using-class ((x (eql python-meta-type)) instance slot-name)
+  ;; Get attribute of an instance of a Python metatype
+  ...)
+
+(defmethod (setf slot-value-using-class)
+    (new-value (cls (eql (find-class 'python-meta-type))) instance slot-name)
+  ;; Set attribute value of a Python metatype
+  ...)
+
+(defmethod slot-boundp-using-class
+    ((x (eql (find-class 'python-meta-type))) instance slot-name)
+  ;; Does a Python metatype have the attribute?
+  ...)
+
+(defmethod slot-makunbound-using-class
+    ((x (eql (find-class 'python-meta-type))) instance slot-name)
+  ;; Remove attribute of a Python metatype
+  ...)
 
 
-;; Class PYTHON-OBJECT is an instance of BUILTIN-CLASS (which is a subclass of PYTHON-TYPE),
-;; but PYTHON-OBJECT is not a subclass of PYTHON-TYPE.
+;; Python classes
 
-(mop:ensure-class-using-class 
- (find-class 'python-object)
- 'python-object
- :metaclass (find-class 'builtin-class))
+(defclass python-type (standard-class)
+  ((name :initarg :name))
+  (:metaclass python-meta-type))
+
+(defmethod make-instance ((cls python-meta-type) &rest initargs)
+  ;; Create a new Python class that has CLS as metaclass
+  ...)
+
+(defmethod initialize-instance ((cls python-type) &rest initargs)
+  ;; Initialize a Python class
+  ...)
+
+(defmethod compute-slots ((cls python-type))
+  ;; Determine the slots of a Python class
+  ...)
+
+(defmethod slot-value-using-class ((cls python-meta-type) instance slot-name)
+  ;; Get attribute of a Python class
+  ...)
+
+(defmethod (setf slot-value-using-class)
+    (new-value (cls python-meta-type) instance slot-name)
+  ;; Set atttribute value of a Python class
+  ...)
+
+(defmethod slot-boundp-using-class ((x python-meta-type) instance slot-name)
+  ;; Does instance have the attribute?
+  ...)
+
+(defmethod slot-makunbound-using-class ((x python-meta-type) instance slot-name)
+  ;; Remove attribute of a Python class
+  ...)
 
 
-(defclass builtin-instance (builtin-object)
+;; Instances of Python classes
+
+(defclass python-object (standard-object)
   ()
   (:metaclass python-type))
 
-(defmethod __repr__ ((x class))
-  (with-output-to-string (s)
-    (print-unreadable-object (x s :type t :identity t)
-      (format s "~A" (class-name x)))))
-  
+(defmethod make-instance ((cls python-type) &rest initargs)
+  ;; Create an instance of a Python class.
+  ...)
 
-;;;; User-defined
+(defmethod initialize-instance ((x python-object) &rest initargs)
+  ;; Initialize a Python object (an instance of a Python class)
+  ...)
 
-(defclass user-defined-object (python-object) ())
+(defmethod slot-value-using-class ((x python-type) instance slot-name)
+  ;; Get attribute of an instance of a Python class
+  ...)
+
+(defmethod (setf slot-value-using-class)
+    (new-value (x python-type) instance slot-name)
+  ;; Set atttribute value of an instance of a Python class
+  ...)
+
+(defmethod slot-boundp-using-class ((x python-type) instance slot-name)
+  ;; Does instance have the attribute?
+  ...)
+
+(defmethod slot-makunbound-using-class ((x python-type) instance slot-name)
+  ;; Remove attribute of an instance of a Python class
+  ...)
+
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; OLD ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defclass user-defined-class (user-defined-object python-type)
   ((__name__ :initarg :name
