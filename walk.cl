@@ -11,19 +11,14 @@
   (walk-py-ast ast f :walk-lists-only walk-lists-only))
 
 (defun walk-py-ast (ast f &key (walk-lists-only t))
-  (declare (optimize (debug 3))
-	   (notinline walk-py-form))
-  
-  "Walk recursively through AST, calling F on each statement.
-
-F should return a (possibly new) form to walk through, derived in some way 
-from the form it's given).
-
-The collected results are returned as a new AST.
+  "Walk recursively through AST, calling F on each statement. F should
+return a (possibly new) form to walk through, derived in some way
+from the form it's given). The collected results are returned as a new AST.
 
 When F returns two values and the second value is T, the form returned in
 the first value is considered the final form and it is not walked into."
-
+  
+  (declare (optimize (debug 3)) (notinline walk-py-ast))
   (assert (listp ast))
   
   ;; `file-input' is evaluated in a context where its value is not
@@ -70,7 +65,6 @@ the first value is considered the final form and it is not walked into."
   ;; Given a recurse function F, walks FORM in given VALUE/TARGET context.
   (declare (optimize (debug 3)))
   (assert (listp form))
-  
   (ecase (car form)
       
     (assert
@@ -209,7 +203,7 @@ the first value is considered the final form and it is not walked into."
 	   ,(funcall f suite :value t))))
       
     ((list tuple)
-     ;; the contained items are a target if the list itself is
+     ;; the items within are target if the list itself is
      `(,(first form)
        ,(loop for x in (second form) collect
 	      (funcall f x :value value :target target))))
