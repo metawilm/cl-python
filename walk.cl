@@ -11,7 +11,8 @@ return a (possibly new) form to walk through, derived in some way
 from the form it's given). The collected results are returned as a new AST.
 
 When F returns two values and the second value is T, the form returned in
-the first value is considered the final form and it is not walked into.
+the first value is considered the final form and it is not walked into; it
+is collected as-is.
 
 The initial form is considered an expressions used for its value iff VALUE;
 it is considered an assignment target iff TARGET.
@@ -24,28 +25,28 @@ If WALK-LISTS-ONLY, F is not called on numbers and strings."
 
   (assert (or (listp ast) (null walk-lists-only)))
   
-  (flet ((walk-py-ast-1 (ast &rest context)
-	   (assert ast)
-	   (if (and walk-lists-only (not (listp ast)))
+  (labels ((walk-py-ast-1 (ast &rest context)
+	     (assert ast)
+	     (if (and walk-lists-only (not (listp ast)))
+		 
+		 ;; Don't call user function on AST
+		 ast
 	       
-	       ;; Don't call user function on AST
-	       ast
-	     
-	     ;; Call user function on whole form. The returned values
-	     ;; control how we proceed.
-	     (multiple-value-bind (ret-ast final-p) 
-		 (apply f ast context)
-	       
-	       (cond (final-p         ret-ast)
-		     
-		     ((or (listp ret-ast) (not walk-lists-only))
-		      (apply #'ast-recurse-fun (lambda (ast &rest context)
-						 (walk-py-ast-1 ast f context))
-			     ret-ast
-			     context))
-		     
-		     (t (break "Walking AST: invalid return value ~A for ~A with ~A"
-			       ret-ast ast f)))))))
+	       ;; Call user function on whole form. The returned values
+	       ;; control how we proceed.
+	       (multiple-value-bind (ret-ast final-p) 
+		   (apply f ast context)
+		 
+		 (cond (final-p         ret-ast)
+		       
+		       ((or (listp ret-ast) (not walk-lists-only))
+			(apply #'ast-recurse-fun (lambda (ast &rest context)
+						   (walk-py-ast-1 ast f context))
+			       ret-ast
+			       context))
+		       
+		       (t (break "Walking AST: invalid return value ~A for ~A with ~A"
+				 ret-ast ast f)))))))
     
     (walk-py-ast-1 ast :value value :target target)))
 
@@ -96,15 +97,16 @@ VALUE and TARGET context."
 			   ((pos * **)
 			    `(,(first arg) ,(funcall f (second arg) :value t)))
 			     
-			   (key  ;; in key args, the key name is not a target
+			   (key  ;; in a call with key args, the key names are not targets
 			    `(key ,(second arg)
 				  ,(funcall f (third arg) :value t)))))))
       
     (classdef 
      (assert (not (or target value)))
      (destructuring-bind (cname inheritance suite) (cdr form)
+       (assert (eq (car inheritance) 'tuple))
        `(classdef ,(funcall f cname :target t)
-		  ,(funcall f inheritance :value t) ;; a tuple
+		  ,(funcall f inheritance :value t)
 		  ,(funcall f suite))))
       
     (comparison  
@@ -290,9 +292,11 @@ VALUE and TARGET context."
 
 
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; 
+;; Handy functions for dealing with ASTs
 
-
-(defun map-sub-ast (func ast &key nodes not-inside (recurse t)
+(defun map-sub-ast (func ast &key (nodes t) not-inside (recurse t)
 				  (same-namespace nil) (check-self t))
   
   ;;  FUNC         : function of three args: (AST &key VALUE TARGET)
@@ -300,78 +304,78 @@ VALUE and TARGET context."
   ;;  
   ;; :NODES        : a symbol or a list of symbols, or T for all
   ;; :NOT-INSIDE   : designator for a list of symbols
-  ;;                 (initial AST arg is not checked against this) [evaluated]
+  ;;                 (initial AST arg is not checked against this)
   ;; :RECURSE      : recurse into returned forms?
-  ;; :NODE-CONTEXT    : required context of returned form,
-  ;;                    one of :TARGET :VALUE :TARGET-AND-VALUE, or NIL for any [eval]
   ;; :SAME-NAMESPACE T <->  :not-inside '(classdef funcdef lambda) [eval]
   ;; :CHECK-SELF : return initial AST arg if it matches?
   
   (check-type ast list) ;; number, string?
-  (when (symbolp nodes)
-    (setf nodes (list nodes)))
-  (check-type nodes list)
+  
+  (if (symbolp nodes)
+      (setf nodes (list nodes))
+    (check-type nodes list))
+  
   (when same-namespace
-    (setf not-inside (append (list 'classdef 'funcdef 'lambda) not-inside)))
+    (setf not-inside (append `(list 'classdef 'funcdef 'lambda) not-inside)))
 
   (let ((initial-ast ast))
-    (walk-py-ast
-     ast
-     
-     (lambda (ast &rest context)
-     
-       (let* ((is-match (and (or check-self
-				 (not (eq initial-ast ast)))
-			     (or (eq nodes t)
-				 (member (car ast) nodes))))
-	      (do-recurse (and (or recurse
-				   (not is-match))
-			       (not (member (car ast) not-inside)))))
-	 
-	 (when is-match (apply #'funcall func ast context))
-	 
-	 (if do-recurse
-	     ast
-	   (values nil t)))) ;; nil is the final value for the walker
-     
-     :walk-lists-only t)))
+    (walk-py-ast ast
+		 (lambda (ast &rest context)
+		   (let* ((is-match (and (or check-self (not (eq initial-ast ast)))
+					 (or (eq nodes t) (member (car ast) nodes))))
+			  (do-recurse (and (or (not is-match) recurse)
+					   (not (member (car ast) not-inside)))))
+		     (when is-match
+		       (apply #'funcall func ast context))
+		     
+		     (if do-recurse
+			 ast
+		       (values nil t)))) ;; nil is the final value for the walker
+		 :walk-lists-only t)))
 
 
-(defmacro with-sub-ast ((target nodes ast (&rest options)) &body body)
+(defmacro with-sub-ast ((target nodes ast &optional options-list) &body body)
   "Examples:
-     (with-sub-ast (cls-ast class ast (:same-namespace t ...)) ...)
-     (with-sub-ast ((expr-ast &key value target) (binary unary) ast
-                       (:same-namespace t :recurse t)) ...)
-  "
-  (when (symbolp target) (setf target (list target)))
-  (check-type target list)
-  (when (symbolp nodes) (setf nodes (list nodes)))
-  (check-type nodes list)
-  
-  (let ((dummy '#:dummy))
-    `(map-sub-ast (lambda ,(if (member '&key target)
-			       `(,@target &allow-other-keys)
-			     `(,@target &rest ,dummy))
-		    ,@(unless (member '&key target)
+     (with-sub-ast (cls-ast 'classdef ast (:same-namespace t ...)) ...)
+     (with-sub-ast ((expr-ast &key value target) '(binary unary) ast
+                       (:same-namespace t :recurse t)) ...)"
+  ;; XXX maybe there are better ways to deal with the various target forms
+  (let* ((dummy '#:dummy)
+	 (target (cond ((symbolp target)          `(,target &rest ,dummy))
+		       ((= (length target) 1)     `(,(car target) &rest ,dummy))
+		       ((>= (length target) 1)
+			(assert (eq (second target) '&key) ()
+			  "form: (var) or (var &key ...) where possible keywords are ~
+                           :value and :target  (got: ~A)" target)
+			(assert (every (lambda (kw)
+					 (member kw '(:value :target &allow-other-keys)))
+				       (cddr target))
+			    () "Got invalid keyword (only :value and :target are supported) ~
+                                (got: ~A)" (cddr target))
+			`(,(car target) &key ,@(cddr target)
+					,@(unless (member '&allow-other-keys (cddr target))
+					    '(&allow-other-keys))))
+		       (t (error "Malformed with-sub-ast target variable(s) (got: ~A)" target)))))
+    
+    `(map-sub-ast (lambda ,target
+		    ,@(when (member dummy target) 
 			`((declare (ignore ,dummy))))
 		    ,@body)
 		  ,ast
-		  :nodes ',nodes ,@options)))
+		  :nodes ,nodes ,@options-list)))
 
 
 #+(or)
 (defun guess-annotate-class-attributes (ast)
-  (with-sub-ast (classdef-ast :node 'classdef :ast ast)
-    (with-sub-ast (funcdef-ast :node 'funcdef :ast classdef-ast :same-namespace t)
+  (with-sub-ast (classdef-ast 'classdef ast)
+    (with-sub-ast (funcdef-ast 'funcdef classdef-ast (:same-namespace t))
       (when (has_>=1_args)
         (let ((first-arg-name (first xxx)))
-          (with-sub-ast (attr-ref-ast :node 'attribute-ref :ast funcdef-ast
-                                      :same-namespace t)
-            (when (eq (car xx) first-arg-name)
-              (register-attribute (second xx) classdef-ast))))))))
+          (with-sub-ast (attr-ref-ast 'attribute-ref funcdef-ast (:same-namespace t))
+            (when (eq (cadr attr-ref-ast) first-arg-name)
+              (register-attribute (cadr attr-ref-ast) classdef-ast))))))))
 
 ;;;
-
 ;; Derive from the AST the likely attributes of class instances, by
 ;; looking for assignments of the form `self.x = y' in the body of
 ;; methods that take `self' as first arg, inside classes.
