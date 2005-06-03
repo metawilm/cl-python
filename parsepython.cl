@@ -109,10 +109,16 @@
  (:decorator+?)
 
  ;; XXX for now: ignore decorators above function definition
- (funcdef (decorator+? def identifier parameters |:| suite) (`(funcdef (identifier ,$3) ,$4 ,$6)))
+ (funcdef (decorator+? def identifier parameters |:| suite)
+	  (`(funcdef (identifier ,$3) ,$4 ,$6)))
 
  (parameters ( |(| |)| ) ((list nil nil nil)))
- (parameters ( |(| parameter-list5 |)| ) ($2))
+ (parameters ( |(| parameter-list5 |)| )
+	     (`(,@(loop for p in (car $2)
+		      if (symbolp p) collect p into pos
+		      else collect p into kw
+		      finally (return (list pos kw)))
+		 ,@(cdr $2))))
 
  (parameter-list5 (defparameter+)                        ((list $1 nil nil)))
  (parameter-list5 (defparameter+ ni-*-ident ni-**-ident) ((list $1 $2 $3)))
@@ -347,8 +353,12 @@
 						`(tuple (,$1 . ,$2))
 					      $1)))
  
- (lambdef (lambda parameter-list5 |:| test) ((list $1 $2 $4)))
- (lambdef (lambda                 |:| test) ((list $1 '(nil nil nil) $3)))
+ (lambdef (lambda parameter-list5 |:| test)
+	  (`(,$1 
+	     ,(loop for p in $2 when (symbolp p) collect p)
+	     ,(loop for p in $2 when (consp p) collect p)
+	     ,$4)))
+ (lambdef (lambda                 |:| test) ((list $1 '(nil nil nil nil) $3)))
 
  (trailer+ :or
 	   ((|(| arglist? |)|) . ((list (list 'call $2))))
@@ -450,370 +460,6 @@
 				   `(tuple (,$1 . ,$2))
 				 $1))))
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-#+(or) ;; old version
-(python-prods
-
- ;; Rules (including their names) are taken from the CPython grammar
- ;; file from CPython CVS, file Python/Grammar/Grammar, 20040827.
-
- ;; The start symbol: regular python files
- (python-grammar (file-input) ((list 'file-input (nreverse $1))))
-
- (file-input () ())
- (file-input (file-input newline) ($1))
- (file-input (file-input stmt) ((cons $2 $1)))
-
- (decorator (@ dotted-name newline) ((list 'decorator $1 $2)))
- (decorator (@ dotted-name |(| arglist |)| newline) ((list 'decorator $2 $4)))
- (:decorator+)
- (:decorator+?)
-
- ;; XXX for now: ignore decorators above function definition
- (funcdef (decorator+? def identifier parameters |:| suite) ((list 'funcdef $3 $4 $6)))
-
- (parameters ( |(| |)| ) ((list nil nil nil)))
- (parameters ( |(| parameter-list5 |)| ) ($2))
-
- (parameter-list5 (defparameter+)                        ((list $1 nil nil)))
- (parameter-list5 (defparameter+ ni-*-ident ni-**-ident) ((list $1 $2 $3)))
- (parameter-list5 (defparameter+ ni-*-ident            ) ((list $1 $2 nil)))
- (parameter-list5 (defparameter+            ni-**-ident) ((list $1 nil $2)))
- (parameter-list5 (              *-ident    ni-**-ident) ((list nil $1 $2)))
- (parameter-list5 (              *-ident               ) ((list nil $1 nil)))
- (parameter-list5 (                         **-ident   ) ((list nil nil $1)))
-
- (defparameter+ (defparameter) ((list $1)))
- (defparameter+ (defparameter+ |,| defparameter) ((append $1 (list $3))))
-
- (ni-*-ident  ( |,| *-ident ) ($2))
- (*-ident ( * identifier ) ($2))
-
- (ni-**-ident ( |,| **-ident) ($2))
- (**-ident ( ** identifier ) ($2))
-
- (defparameter (fpdef) ($1))
- (defparameter (fpdef = test) ((cons $1 $3)))
- 
- (fpdef :or
-	((identifier) . ($1))
-	((|(| fplist |)|) . (`(list ,$2)))) ;; WWW or just $2
-
- (fplist (fpdef comma--fpdef* comma?) ((cons $1 $2)))
- (:comma--fpdef*)
- (comma--fpdef (|,| fpdef) ($2))
-
- (:comma?)
- (comma (|,|) ((list $1)))
-
- (stmt :or simple-stmt compound-stmt)
- (simple-stmt (small-stmt semi--small-stmt* semi? newline) ((if $2 (list 'suite (cons $1 $2))
-							      $1)))
-
- (semi--small-stmt (|;| small-stmt) ($2))
- (:semi--small-stmt*)
- (:semi?)
- (semi (|;|))
-
- (small-stmt :or expr-stmt print-stmt del-stmt pass-stmt flow-stmt
-	     import-stmt global-stmt exec-stmt assert-stmt)
-
- (expr-stmt (testlist expr-stmt2)
-	    (#+(or)(break "expr-stmt: ~A -- ~A" $1 $2)
-	       (cond ((null $2) ;; not an assignment expression
-		      $1)
-		     ((and $2 (eq (car $2) '=))
-		      (let ((items (nreverse `(,$1 ,@(second $2)))))
-			`(assign-expr ,(car items) ,(cdr items))))
-		     ($2
-		      #+(or)(warn "aug: ~S -- ~S" $1 $2)
-		      (list 'augassign-expr $1 (car $2) (cdr $2)))
-		     (t
-		      #+(or)(break "expr-stmt: what is this??  ~A -- ~A" $1 $2)
-		      $1))
-	       #+(or)(cond ((and $2 (eq (car $2) '=)) 
-			    `(assign-expr (,$1 ,@(second $2))))
-			   ($2
-			    (warn "aug: ~S ~S" $1 $2)
-			    (list 'augassign-expr $1 (car $2) (cdr $2)))
-			   (t
-			    (warn "not a real assign expr?!: ~A" $1)
-			    $1))))
-
- (expr-stmt2 (augassign testlist) ((cons $1 $2))) ;; todo: return empty list, so "foo" = (identifier 'foo), not testlist
- (expr-stmt2 (=--testlist*) ((when $1 (list '= $1))))
- (:=--testlist*)
- (=--testlist (= testlist) ($2))
-
- (augassign :or += -= *= /= %= &= |\|=| ^= <<= >>= **= //= )
-
- (print-stmt :or
-	     ((print) . (`(print nil nil)))
-	     ((print test |,--test*| comma?) . ((list 'print (cons $2 $3) (if $4 t nil))))
-	     ((print >> test |,--test*| comma?) . ((list 'print->> $3 $4 (if $5 t nil)))))
- (:|,--test*|)
- (|,--test| (|,| test) ($2))
-
- (del-stmt (del exprlist) ((list $1 $2)))
- (pass-stmt (pass) ((list $1)))
- (flow-stmt :or break-stmt continue-stmt return-stmt raise-stmt yield-stmt)
-
- (break-stmt (break) ((list $1)))
- (continue-stmt (continue) ((list $1)))
- (return-stmt (return testlist?) ((list $1 $2)))
- (:testlist?)
- (yield-stmt (yield testlist?) ((list $1 $2)))
-
- (raise-stmt (raise) ((list $1 nil nil nil)))
- (raise-stmt (raise test) ((list $1 $2 nil nil)))
- (raise-stmt (raise test |,| test) ((list $1 $2 $4 nil)))
- (raise-stmt (raise test |,| test |,| test) ((list $1 $2 $4 $6)))
- 
- ;; "import" module ["as" name] ( "," module ["as" name] )*
- (import-stmt :or import-normal import-from)
- (import-normal (import dotted-as-name comma--dotted-as-name*) (`(import (,$2 ,@$3))))
- (:comma--dotted-as-name*)
- (comma--dotted-as-name ( |,| dotted-as-name) ($2))
- (import-from (from dotted-name import import-from-2) (`(import-from ,$2 ,$4)))
- (import-from-2 :or
-		*
-		((import-as-name comma--import-as-name*) . ((cons $1 $2))))
- (:comma--import-as-name*)
- (comma--import-as-name (|,| import-as-name) ($2))
- (import-as-name (identifier) ((list 'as $1 $1)))
- (import-as-name (identifier as identifier) ((list 'as $1 $3)))
- (dotted-as-name (dotted-name) ((list 'not-as $1)))
- (dotted-as-name (dotted-name as identifier) ((list 'as $1 $3)))
- (dotted-name (identifier dot--name*) ((if $2
-					   `(dotted ,$1 ,@(if (eq (first $2) 'dotted)
-							      (second $2)
-							    $2))
-					 $1)))
- (:dot--name*)
- (dot--name (|.| identifier) ($2))
-
- (global-stmt (global identifier comma--identifier*)
-	      (`(global ,(if $3 (cons $2 $3) (list $2)))))
- (:comma--identifier*)
- (comma--identifier (|,| identifier) ($2))
- (exec-stmt (exec expr) ((list $1 $2)))
- (exec-stmt (exec expr in test) ((list $1 $2 $4)))
- (exec-stmt (exec expr in test |,| test) ((list $1 $2 $4 $6)))
- (assert-stmt (assert test comma--test?) ((list $1 $2 $3)))
- (:comma--test?)
- (comma--test (|,| test) ($2))
-
- (compound-stmt :or if-stmt while-stmt for-stmt try-stmt funcdef classdef)
- (if-stmt (if test |:| suite elif--test--suite* else--suite)
-	  (`(if ((,$2 ,$4) ,@$5) ,$6)))
- (if-stmt (if test |:| suite elif--test--suite*)
-	  (`(if ((,$2 ,$4) ,@$5) nil)))
- (:elif--test--suite*)
- (elif--test--suite (elif test |:| suite) ((list $2 $4)))
- (else--suite (else |:| suite) ($3))
- (while-stmt (while test |:| suite else--suite?) ((list $1 $2 $4 $5)))
- (:else--suite?)
- (for-stmt (for exprlist in testlist |:| suite else--suite?)
-	   ((list 'for-in $2 $4 $6 $7))
-	   (:precedence high-prec))
- (try-stmt :or
-	   ((try |:| suite except--suite+ else--suite?) . ((list 'try-except $3 $4 $5)))
-	   ((try |:| suite finally |:| suite)  	        . ((list 'try-finally $3 $6))))
-
- (except--suite (except |:| suite) (`((nil nil) ,$3)))
- (except--suite (except test |:| suite) (`((,$2 nil) ,$4)))
- (except--suite (except test |,| test |:| suite) (`((,$2 ,$4) ,$6)))
-
- (except--suite+ (except--suite) ((list $1)))
- (except--suite+ (except--suite+ except--suite) ((append $1 (list $2))))
-
- (suite :or
-	((simple-stmt) . ((list 'suite (list $1))))
-	((newline indent stmt+ dedent) . ((list 'suite $3))))
-
- (stmt+ (stmt) ((list $1)))
- (stmt+ (stmt+ stmt) ((append $1 (list $2))))
-
- (expr (binop2-expr) ($1))
-
- (test :or
-       lambdef
-       binop-expr)
-
- (binop-expr :or
-	     ((binop-expr and binop-expr) . ((list 'binary-lazy $2 $1 $3)))
-	     ((binop-expr or  binop-expr) . ((list 'binary-lazy $2 $1 $3)))
-	     ((not binop-expr)            . ((list 'unary $1 $2)))
-	     ((binop-expr <  binop-expr)  .  ((list 'comparison $2 $1 $3)))
-	     ((binop-expr <= binop-expr)  . ((list 'comparison $2 $1 $3)))
-	     ((binop-expr >  binop-expr)  .  ((list 'comparison $2 $1 $3)))
-	     ((binop-expr >= binop-expr)  . ((list 'comparison $2 $1 $3)))
-	     ((binop-expr != binop-expr)  . ((list 'comparison $2 $1 $3)))
-	     ((binop-expr <> binop-expr)  . ((list 'comparison '!= $1 $3))) ;; <> is same as !=
-	     ((binop-expr == binop-expr)  . ((list 'comparison $2 $1 $3)))
-	     ((binop-expr in binop-expr)  . ((list 'binary $2 $1 $3)))
-	     ((binop-expr is binop-expr)  . ((list 'binary $2 $1 $3))))
- (binop-expr (binop2-expr) ($1) (:precedence or))
-
- (binop2-expr :or
-	      atom
-	      ((atom trailer+) . ((parse-trailers (list 'trailers $1 $2))))
-	      ((binop2-expr +  binop2-expr) . ((list 'binary $2 $1 $3)))
-	      ((binop2-expr -  binop2-expr) . ((list 'binary $2 $1 $3)))
-	      ((binop2-expr *  binop2-expr) . ((list 'binary $2 $1 $3)))
-	      ((binop2-expr /  binop2-expr) . ((list 'binary $2 $1 $3)))
-	      ((binop2-expr ** binop2-expr) . ((list 'binary $2 $1 $3)))
-	      ((binop2-expr // binop2-expr) . ((list 'binary $2 $1 $3)))
-
-	      ((binop2-expr << binop2-expr) . ((list 'binary $2 $1 $3)))
-	      ((binop2-expr >> binop2-expr) . ((list 'binary $2 $1 $3)))
-	      ((binop2-expr &  binop2-expr) . ((list 'binary $2 $1 $3)))
-	      ((binop2-expr ^  binop2-expr) . ((list 'binary $2 $1 $3)))
-	      ((binop2-expr \| binop2-expr) . ((list 'binary $2 $1 $3)))
-	      (( ~ binop2-expr) . ((list 'unary $1 $2)))
-	      ((binop2-expr %  binop2-expr) . ((list 'binary $2 $1 $3)))
-	      )
- 
- ;; some with explicit precedences
- 
- (binop-expr (binop-expr not in binop-expr)
-	     ((list 'binary '|not in| $1 $4)) (:precedence in)) ;; was binop2
- (binop-expr (binop-expr is not binop-expr)
-	     ((list 'binary '|is not| $1 $4)) (:precedence is)) ;; was binop2
- 
- (binop2-expr (+ binop2-expr) ((list 'unary $1 $2))
-	      (:precedence unary-plusmin))
- (binop2-expr (- binop2-expr) ((list 'unary $1 $2))
-	      (:precedence unary-plusmin))
-
- (atom :or
-       ((|(| comma? |)|) . ((list 'testlist nil (if $2 t nil))))
-       ((|(| testlist-gexp |)|) . ($2))
-
-       ((|[| |]|) . ((list 'list nil)))
-       ((|[| listmaker |]|) . ($2))
-       ((|{| |}|) . ((list 'dict nil)))
-       ((|{| dictmaker |}|) . ((list 'dict $2)))
-       ((|`| testlist1 |`|) . ((list 'backticks $2)))
-       ((identifier) . ((list 'identifier $1)))
-       ((number) . ($1))
-       ((string+) . ($1)))
-
- (string+ (string) ($1))  ;; join consecutive string literals: "s" "b" => "sb"
- (string+ (string+ string) ((concatenate 'string $1 $2))) 
-
- (listmaker (test list-for) ((list 'list-compr $1 $2)))
- (listmaker (test comma--test* comma?) ((list 'list (cons $1 $2))))
- (:comma--test*)
-
-
- (testlist-gexp (test gen-for) ((list 'testlist $1 $2)))
- (testlist-gexp (test comma--test* comma?) ((if (or $2 $3)
-						(list 'testlist
-						      (cons $1 $2)
-						      (if $3 t nil))
-					      $1)))
- 
- (lambdef (lambda parameter-list5 |:| test) ((list $1 $2 $4)))
- (lambdef (lambda                 |:| test) ((list $1 '(nil nil nil) $3)))
-
- (trailer+ :or
-	   ((|(| arglist? |)|) . ((list (list 'call $2))))
-	   ((|[| subscriptlist |]|) . ((list (list 'subscription $2))))
-	   ((|.| identifier) . (`((attributeref (identifier ,$2)))))
-	   ((trailer+ |(| arglist? |)|) . ((append $1 (list (list 'call $3)))))
-	   ((trailer+ |[| subscriptlist |]|) . ((append $1 (list (list 'subscription $3)))))
-	   ((trailer+ |.| identifier) . ((append $1 `((attributeref (identifier ,$3)))))))
-
-
- (:arglist?)
- (subscriptlist (subscript comma--subscript* comma?) ((list (append (list $1) $2)
-							    (if $3 t nil))))
- (:comma--subscript*)
- (comma--subscript (|,| subscript) ($2))
- (subscript :or
-	    |...|
-	    test
-	    ((test? |:| test? sliceop?) . (`(slice ,$1 ,$3 ,$4))))
- (:sliceop?)
- (sliceop (|:| test?) ($2))
- (:test?)
-
- (exprlist (expr exprlist2) (#+(or)(break "exprlist: ~A -- ~A" $1 $2)
-			       (if $2
-				 (list 'exprlist
-				       (cons $1 (butlast $2))
-				       (car (last $2)))
-			       $1)))
- (exprlist2 :or
-	    (() . (nil))
-	    ((|,|) . ((list t)))
-	    ((|,| expr exprlist2) . ((list $2 $3))))
-
- (testlist (test testlist2) (#+(or)(break "testlist: ~A -- ~A" $1 $2)
-			     (if $2
-				   `(testlist ,(cons $1 $2))
-			       $1)
-			     #+(or)(list 'testlist
-					 (cons $1 (butlast $2))
-					 (car (last $2)))))
- (testlist2 :or
-	    (() . (nil))
-	    ((|,|) . ((list t)))
-	    ((|,| test testlist2) . ((cons $2 $3))))
-
-
- (testlist-safe :or
-		((test) . ($1))
-		((test comma--test+ comma?) . ((list $1 $2))))
- (:comma--test+)
-
- (dictmaker :or
-	    ;;((test |:| test comma?) . ((cons $1 $3)))
-	    ((test |:| test comma--test--\:--test* comma?) . ((cons (cons $1 $3) $4))))
- (:comma--test--\:--test*)
- (comma--test--\:--test (|,| test |:| test) ((cons $2 $4)))
- 
- (classdef (class identifier OB--testlist--CB? |:| suite)
-	   (`(classdef ,$2 ,(when $3 (second $3)) ,$5)))
- (:OB--testlist--CB?)
- (OB--testlist--CB (|(| testlist |)|) ((if (eq (car $2) 'testlist)
-					   $2
-					 `(testlist (,$2) nil))))
-
- (arglist (argument--comma* arglist-2) ((append $1 $2)))
-
- (arglist-2 :or
-	    ;; optional comma is semantically meaningless
-	    ((argument comma?) . ((list $1)))
-	    ((|*| test comma--**--test?) . ((append (list (list $1 $2))
-						    $3
-						    nil)))
-	    ((|**| test) . ((list (list $1 $2)))))
- (:argument--comma*)
- (argument--comma (argument |,|) ($1))
- (:comma--**--test?)
- (comma--**--test (|,| ** test) ((list (list $2 $3))))
-
- (argument (test) ((list 'pos $1)))
- 
- #+(or) ;; kw = val: kw must be identifier
- (argument (test = test) ((list 'key $1 $3)))
- 
- (argument (identifier = test) ((list 'key $1 $3)))
- (argument (test gen-for) ((list 'gen-for $1 $2)))
-
- (list-iter :or list-for list-if)
- (list-for (for exprlist in testlist-safe list-iter?) 
-	   (`((list-for-in ,$2 ,$4) . ,$5)))
- (:list-iter?)
- (list-if (if test list-iter?) (`((list-if ,$2) . ,$3)))
- (gen-iter :or gen-for gen-if)
- (gen-for (for exprlist in test gen-iter?))
- (gen-if (if test gen-iter?) ((list $1 $2 $3)))
- (:gen-iter?)
- (testlist1 (test |,--test*|) (`(,$1 ,@(when $2 $2)))))
 
 (build-grammar python-grammar t t)
 
@@ -834,28 +480,212 @@
 #+(or) ;; test
 (parse-trailers '(trailers (id foo) ((subscription (id x)) (attributeref (id a)))))
 
-#|
-  1 char:  =[]()<>{}.,:|^%+-*/~@
-  2 chars: != // << >>  <> != ==
-               += -= *= /= //= %=  ^= |=  **= <<= >>=
-  3 chars: **= <<= >>=  "
-|#
-
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Lexer
 
+(defvar *lex-read-char*)
+(defvar *lex-unread-char*)
+
+(defvar *lex-debug* nil)
 (defvar *tab-width-spaces* 8)
 
 
-(defmacro read-char-nil ()
-  "Returns a character, or NIL on eof"
-  `(read-char *standard-input* nil nil t))
+(defun make-py-lexer (&key (read-chr   (lambda () (read-char *standard-input* nil nil t)))
+			   (unread-chr (lambda (c) (unread-char c *standard-input*))))
+  "Return a lexer for the Python grammar.
 
-(defmacro read-char-error ()
-  `(or (read-char-nil)
-       (error "Unexpected end of file")))
+READ-CHAR is a function that returns either a character or NIL (it should not signal ~
+an error on eof).
+
+UNREAD-CHAR is a function of one character that ensures the next call to READ-CHAR
+returns the given character. UNREAD-CHAR is called at most once between two calls of
+READ-CHAR."
+  (let ((tokens-todo ())
+	(indentation-stack (list 0))
+	(open-lists ()))
+    
+    (lambda (grammar &optional op)
+      (declare (ignore grammar op))
+      
+      (let ((*lex-read-char* read-chr)
+	    (*lex-unread-char* unread-chr))
+	(block lexer
+
+	  (when tokens-todo
+	    (let ((item (pop tokens-todo)))
+	      (when *lex-debug*
+		(format t "lexer returns: ~s  (from todo)~%" (car item)))
+	      (return-from lexer (apply #'values item))))
+
+	  (with-terminal-codes (python-grammar)
+	    
+	    (macrolet ((lex-todo (val1 val2) ;; (lex-todo name <value>)
+			 `(let ((eval2 ,val2))
+			    (when *lex-debug*
+			      (format t "lexer todo: ~s~%" 'eval2))
+			    (push (list (tcode ,val1) eval2) tokens-todo)))
+		       
+		       (lex-return (val1 val2) ;; (lex-return name <value>)
+			 `(let ((eval2 ,val2))
+			    (when *lex-debug*
+			      (format t "lexer returns: ~s ~s~%" ',val1 eval2))
+			    (return-from lexer (values (tcode ,val1) eval2))))
+		       
+		       (find-token-code (token) ;; (find-token-code name)
+			 `(tcode-1 (load-time-value
+				    (find-class 'python-grammar)) ,token)))
+	      
+	      (tagbody next-char
+		(let ((c (read-chr-nil)))
+		  
+		  (cond
+
+		   ((not c)
+		    ;; Before returning EOF, return a NEWLINE followed
+		    ;; by a DEDENT for every currently active indent.
+		    
+		    (lex-todo eof 'eof)
+		    (loop while (> (car indentation-stack) 0)
+			do (pop indentation-stack)
+			   (lex-todo dedent 'dedent))
+		    (lex-return newline 'newline))
+		   
+		   
+		   ((digit-char-p c 10)
+		    (lex-return number (read-number c)))
+
+		   ((identifier-char1-p c)
+		    (let* ((read-id (read-identifier c))
+			   (token (intern read-id #.*package*)))
+		      
+		      (cond ((member token '(u r ur) :test #'string-equal)
+			     ;; u"abc"    : `u' stands for `Unicode string'
+			     ;; u + b     : `u' is an identifier
+			     ;; r"s/f\af" : `r' stands for `raw string'
+			     ;; r + b     : `r' is an identifier
+			     ;; ur"asdf"  : `ur' stands for `raw unicode string'
+			     ;; ur + a    : `ur' is identifier
+			     ;; `u' must appear before 'r' if both are present
+			     
+			     (let ((ch (read-chr-nil)))
+			       (if (char-member ch '(#\' #\"))
+				   
+				   (let ((is-unicode
+					  (member token '(u ur) :test #'string-equal))
+					 (is-raw
+					  (member token '(r ur) :test #'string-equal)))
+				     (lex-return string
+						 (read-string ch :unicode is-unicode :raw is-raw)))
+				 (progn
+				   (when ch (unread-chr ch))
+				   (lex-return identifier token)))))
+			    
+			    ((member token *reserved-words* :test #'eq)
+			     (when *lex-debug*
+			       (format t "lexer returns: reserved word ~s~%" token))
+			     (return-from lexer
+			       (values (find-token-code token) token)))
+			    
+			    (t
+			     #+(or)(when *lex-debug*
+			       (format t "lexer returns: identifier: ~s~%" read-id))
+			     (lex-return identifier read-id)))))
+
+		   ((char-member c '(#\' #\"))
+		    (lex-return string (read-string c)))
+
+		   ((or (punct-char1-p c)
+			(punct-char-not-punct-char1-p c))
+		    (let ((token (read-punctuation c)))
+		      
+		      ;; Keep track of whether we are in a bracketed
+		      ;; expression (list, tuple or dict), because in
+		      ;; that case newlines are ignored. (Note that
+		      ;; READ-STRING handles multi-line strings itself.)
+		      ;; 
+		      ;; There is no check for matching brackets here:
+		      ;; left to the grammar.
+		      
+		      (case token
+			(( [ { \( ) (push token open-lists))
+			(( ] } \) ) (pop open-lists)))
+		      
+		      (when *lex-debug*
+			(format t "lexer returns: punctuation token ~s~%" token))
+		      (return-from lexer 
+			(values (find-token-code token) token))))
+
+		   ((char-member c '(#\Space #\Tab #\Newline #\Return))
+		    (unread-chr c)
+		    (multiple-value-bind (newline new-indent)
+			(read-whitespace)
+		      
+		      (when (or (not newline) open-lists)
+			(go next-char))
+		      
+		      ;; Return Newline now, but also determine if
+		      ;; there are any indents or dedents to be
+		      ;; returned in next calls.
+		      
+		      (cond
+		       ((= (car indentation-stack) new-indent)) ;; same level
+
+		       ((< (car indentation-stack) new-indent) ; one indent
+			(push new-indent indentation-stack)
+			(lex-todo indent 'indent))
+
+		       ((> (car indentation-stack) new-indent) ; dedent(s)
+			(loop while (> (car indentation-stack) new-indent)
+			    do (pop indentation-stack)
+			       (lex-todo dedent 'dedent))
+			
+			(unless (= (car indentation-stack) new-indent)
+			  (raise-syntax-error
+			   "Dedent didn't arrive at a previous indentation level ~
+                          (indent level after dedent: ~A spaces)" new-indent))))
+		      
+		      (lex-return newline 'newline)))
+		   
+		   ((char= c #\#) ;; comment to end-of-line
+		    (read-comment-line c)
+		    (go next-char))
+
+		   ((char= c #\\) ;; next line is continuation of this one
+		    (let ((c2 (read-chr-nil)))
+		      (if (and c2 (char= c2 #\Newline))
+			  (go next-char)
+			(raise-syntax-error 
+			 "Syntax error: continuation character \\ ~
+                        must be followed by Newline, but got ~S" c2))))
+		   
+		   (t (raise-syntax-error
+		       "Lexer got unexpected character: ~A (code: ~A)"
+		       c (char-code c)))))))))))))
+
+
+(defun raise-syntax-error (s &rest args)
+  ;; Signal SyntaxError if available, otherwise a normal error.
+  (let ((s (apply #'format nil s args))
+	(s-err (find-class 'SyntaxError nil)))
+    (if s-err
+	(error 'SyntaxError :args s)
+      (error (concatenate 'string "SyntaxError: " s)))))
+
+
+(defun read-chr-nil ()
+  "Returns a character, or NIL on eof/error"
+  (funcall *lex-read-char*))
+
+(defun read-chr-error ()
+  "Return a character, or raise a SyntaxError"
+  (or (read-chr-nil)
+      (raise-syntax-error "Unexpected end of file")))
+
+(defun unread-chr (ch)
+  (funcall *lex-unread-char* ch))
+
 
 (defmacro char-member (ch list)
   (let ((char '#:char))
@@ -863,30 +693,93 @@
        (and ,char (member ,char ,list :test #'char=)))))
 
 
-(defun raise-syntax-error (s &rest args)
-  ;; Raise SyntaxError, if available
-  (let ((s-err (find-class 'SyntaxError nil))
-	(s (apply #'format nil s args)))
-    (if s-err
-	(error 'SyntaxError :args s)
-      (error (concatenate 'string "SyntaxError: " s)))))
-
 ;; Identifier
 
 (defmacro identifier-char1-p (c)
   "Says whether C is a valid character to start an identifier with. ~@
    C must be either a character or nil."
-  `(and ,c
-       (or (alpha-char-p ,c)
-	   (char= ,c #\_))))
+  (let ((ch '#:ch))
+    `(let ((,ch ,c))
+       (and ,ch
+	    (or (alpha-char-p ,ch)
+		(char= ,ch #\_))))))
 
 (defmacro identifier-char2-p (c)
   "Says whether C is a valid character to occur in an identifier as ~@
    second or later character. C must be either a character or nil."
-  `(and ,c
-       (or (alphanumericp ,c)
-	   (char= ,c #\_))))
+  (let ((ch '#:ch))
+    `(let ((,ch ,c))
+       (and ,ch
+	    (or (alphanumericp ,ch)
+		(char= ,ch #\_))))))
 
+
+(defparameter *id-char-vec-length* 20)
+(defparameter *id-history-size* 20)
+
+(defun read-identifier (first-char)
+  "Returns the identifier read as string. ~@
+   Identifiers start start with an underscore or alphabetic character; ~@
+   second and further characters must be alphanumeric or underscore."
+  
+  ;; By caching the last returned identifiers, a lot less arrays have
+  ;; to be allocated.
+  
+  (assert (identifier-char1-p first-char))
+  
+  (let ((symbol-cache (load-time-value
+		       (make-array *id-history-size* :element-type 'symbol)))
+	(symbol-cache-replace-ix (load-time-value (list 0)))
+	(char-vec     (load-time-value
+		       (make-array *id-char-vec-length* :element-type 'character
+				   :initial-element #\q ))))
+    
+    (macrolet ((cache-symbol (s)
+		 (let ((sym '#:sym))
+		   `(let ((,sym ,s))
+		      (setf (aref symbol-cache (car symbol-cache-replace-ix)) ,sym)
+		      (when (= (incf (car symbol-cache-replace-ix)) *id-history-size*)
+			(setf (car symbol-cache-replace-ix) 0))
+		      ,sym))))
+			 
+      (loop
+	  for ch = first-char then (read-chr-nil)
+	  for i from 0 below *id-char-vec-length*
+	  while (identifier-char2-p ch) do (setf (aref char-vec i) ch)
+	  finally
+	    (when (and ch (not (identifier-char2-p ch)))
+	      (unread-chr ch))
+	    (return
+	      (if (or (< i *id-char-vec-length*) (null ch)) ;; eof or other token following ID
+			
+		  (loop for ci from 0 below *id-history-size*
+		      when (string= (aref symbol-cache ci) char-vec :end2 i)
+		      return (aref symbol-cache ci)
+		      finally
+			(return (loop with arr = (make-array i :element-type 'character)
+				    for j from 0 below i
+				    do (setf (aref arr j) (aref char-vec j))
+				    finally
+				      (return (cache-symbol (intern arr #.*package*))))))
+		
+		(loop with arr = (make-array (+ *id-char-vec-length* 5) 
+					     :element-type 'character
+					     :initial-element #\q
+					     :adjustable t
+					     :fill-pointer *id-char-vec-length*)
+		    initially (loop for i from 0 below i
+				  do (setf (aref arr i) (aref char-vec i)))
+		    for ch = (read-chr-nil)
+		    while (identifier-char2-p ch) do (vector-push-extend ch arr)
+		    finally (when ch (unread-chr ch))
+			    (return
+			      (loop for ci from 0 below *id-history-size*
+				  when (string= (aref symbol-cache ci) arr)
+				  return (aref symbol-cache ci)
+				  finally
+				    (return (cache-symbol (intern arr #.*package*))))))))))))
+
+#+(or) ;; Equivalent original code. Allocates an array for every identifier.
 (defun read-identifier (first-char)
   "Returns the identifier read as string. ~@
    Identifiers start start with an underscore or alphabetic character; ~@
@@ -898,12 +791,13 @@
 			  :fill-pointer 0))))
     (setf (fill-pointer res) 0)
     (vector-push-extend first-char res)
-    (let ((c (read-char-nil)))
-      (loop while (identifier-char2-p c)
-	  do (vector-push-extend c res)
-	     (setf c (read-char-nil)))
-      (unless (null c)
-	(unread-char c)))
+    
+    (loop
+	for c = (read-chr-nil)
+	while (identifier-char2-p c)
+	do (vector-push-extend c res)
+	finally (when c (unread-chr c)))
+    ;;(incf (aref *id-length* (length res)))
     (intern (simple-string-from-vec res) #.*package*)))
 
 
@@ -924,7 +818,7 @@
   (when raw
     ;; Include escapes literally in the resulting string.
       
-    (loop with ch = (read-char-error)
+    (loop with ch = (read-chr-error)
 	with res = (load-time-value
 		    (make-array 10 :element-type 'character
 				:adjustable t :fill-pointer 0))
@@ -940,12 +834,12 @@
 			 
 		       (loop for i below 4
 			   with code = 0
-			   with ch = (read-char-error)
+			   with ch = (read-chr-error)
 			   do (setf code (+ (* code 16)
 					    (or (digit-char-p ch 16)
 						(raise-syntax-error
 						 "Non-hex digit in \"\u...\": ~S" ch)))
-				    ch (read-char-error))
+				    ch (read-chr-error))
 			   finally (vector-push-extend (code-char code) res))
 		       
 		     (vector-push-extend #\u res))
@@ -964,28 +858,28 @@
 	     (t (vector-push-extend ch res)
 		(setf num-bs 0)))
 	     
-	   (setf ch (read-char-error))))
+	   (setf ch (read-chr-error))))
     
   (assert (not raw))
     
-  (let* ((second (read-char-error))
-	 (third (read-char-nil)))
+  (let* ((second (read-chr-error))
+	 (third (read-chr-nil)))
     (cond 
      ((char= first-char second third)      ;; """ or ''': a probably long multi-line string
       (loop
 	  with res = (load-time-value 
 		      (make-array 50 :element-type 'character :adjustable t :fill-pointer 0))
-	  with x = (read-char-error) and y = (read-char-error) and z = (read-char-error)
+	  with x = (read-chr-error) and y = (read-chr-error) and z = (read-chr-error)
 	  initially (setf (fill-pointer res) 0)
 		      
 	  until (char= first-char z y x)
-	  do (vector-push-extend (shiftf x y z (read-char-error)) res)
+	  do (vector-push-extend (shiftf x y z (read-chr-error)) res)
 	       
 	  finally (return-from read-string (simple-string-from-vec res))))
        
      ((char= first-char second)  ;; ""/'' but not """/''' --> empty string
       (when third
-	(unread-char third))
+	(unread-chr third))
       (return-from read-string ""))
        
      (t ;; Non-empty string with one starting quote, possibly containing escapes
@@ -1017,16 +911,16 @@
 	      (#\N
 	       (if unicode  ;; unicode char by name: u"\N{latin capital letter l with stroke}"
 		     
-		   (let ((ch2 (read-char-error))) 
+		   (let ((ch2 (read-chr-error))) 
 		     (unless (char= ch2 #\{)
 		       (raise-syntax-error
 			"In Unicode string: \N{...} expected, but got ~S after \N" ch2))
-		     (loop with ch = (read-char-error)
+		     (loop with ch = (read-chr-error)
 			 with vec = (make-array 10 :element-type 'character
 						:adjustable t :fill-pointer 0)
 			 while (char/= ch #\}) do
 			   (vector-push-extend (if (char= ch #\space) #\_ ch) vec)
-			   (setf ch (read-char-error))
+			   (setf ch (read-chr-error))
 			 finally
 			   #+(or)(break "Charname: ~S" vec)
 			   (vector-push-extend (name-char vec) res)))
@@ -1040,7 +934,7 @@
 			     (loop for i below (if (char= c #\u) 4 8) ;; \uf7d6 \U12345678
 				 with code = 0
 				 with ch
-				 do (setf ch   (read-char-error)
+				 do (setf ch   (read-chr-error)
 					  code (+ (* 16 code) 
 						  (or (digit-char-p ch 16)
 						      (raise-syntax-error
@@ -1057,13 +951,13 @@
 		   for num from 1
 		   while (and (<= num 3) (digit-char-p x 8))
 		   do (setf code (+ (* code 8) (digit-char-p x 8))
-			    x (read-char-error))
-		   finally (unread-char x)
+			    x (read-chr-error))
+		   finally (unread-chr x)
 			   (vector-push-extend (code-char code) res)))
 	      
 	      
-	      (#\x (let* ((a (read-char-error)) ;; char code: up to two hex digits
-			  (b (read-char-error)))
+	      (#\x (let* ((a (read-chr-error)) ;; char code: up to two hex digits
+			  (b (read-chr-error)))
 		     
 		     (cond ((not (digit-char-p a 16))
 			    (raise-syntax-error "Non-hex digit found in \x..: ~S" a))
@@ -1074,7 +968,7 @@
 						res))
 			   
 			   (t (vector-push-extend (digit-char-p a 16) res)
-			      (unread-char b)))))
+			      (unread-chr b)))))
 	        
 	      (t 
 	       ;; Backslash is not used for escaping: collect both the backslash
@@ -1093,7 +987,7 @@
 	   (t 
 	    (vector-push-extend c res)))
 	      
-	  (setf c (read-char-error))))))))
+	  (setf c (read-chr-error))))))))
 
 
 ;; Number
@@ -1140,17 +1034,18 @@
 ;; convert the result to a long). We ignore any difference between
 ;; regular and long integers.
 
-(defun read-number (&optional (first-char (read-char-error)))
+(defun read-number (&optional (first-char (read-chr-error)))
   (assert (digit-char-p first-char 10))
   (let ((base 10)
 	(res 0))
 	
     (flet ((read-int (&optional (res 0))
 	     
+	     ;;#+(or)
 	     ;; This version calls the Lisp reader on the string with digits
 	     (loop with vec = (make-array 5 :adjustable t :fill-pointer 0
 					  :element-type 'character)
-		 with ch = (read-char-nil)
+		 with ch = (read-chr-nil)
 			   
 		 initially 
 		 (when (/= 0 res)
@@ -1158,27 +1053,27 @@
 			  
 		 while (and ch (digit-char-p ch base))
 		 do (vector-push-extend ch vec)
-		    (setf ch (read-char-nil))
+		    (setf ch (read-chr-nil))
 		    
 		 finally (when ch 
-			   (unread-char ch))
+			   (unread-chr ch))
 			 (let ((*read-base* base))
 			   (return (read-from-string vec))))
 	     
 	     #+(or)
 	     ;; Equivalent code, but not calling the lisp reader, so
 	     ;; slightly slower than the above.
-	     (loop with ch = (read-char-nil)
+	     (loop with ch = (read-chr-nil)
 			while (and ch (digit-char-p ch base))
 			do (setf res (+ (* res base) (digit-char-p ch base))
-				 ch (read-char-nil))
+				 ch (read-chr-nil))
 			finally (when ch 
-				  (unread-char ch))
+				  (unread-chr ch))
 				(return res))))
 	  
       (if (char= first-char #\0)
 
-	  (let ((second (read-char-nil)))
+	  (let ((second (read-chr-nil)))
 	    (setf res (cond ((null second) 0) ;; eof
 			     
 			    ((char-member second '(#\x #\X))
@@ -1190,7 +1085,7 @@
 			     (read-int (digit-char-p second 8)))
 			    
 			    ((char= second #\.)
-			     (unread-char second)
+			     (unread-chr second)
 			     0)
 			    
 			    ((digit-char-p second 10) 
@@ -1199,7 +1094,7 @@
 			    ((char-member second '(#\j #\J))  (complex 0 0))
 			    ((char-member second '(#\l #\L))  0)
 			    
-			    (t (unread-char second)
+			    (t (unread-chr second)
 			       0)))) ;; non-number, like `]' in `x[0]'
 	
 	(setf res (read-int (digit-char-p first-char 10))))
@@ -1207,40 +1102,40 @@
       (let ((has-frac nil) (has-exp nil))
 	
 	(when (= base 10)
-	  (let ((dot? (read-char-nil)))
+	  (let ((dot? (read-chr-nil)))
 	    (if (and dot? (char= dot? #\.))
 		
 		(progn
 		  (setf has-frac t)
 		  (incf res
 			(loop
-			    with ch = (read-char-nil)
+			    with ch = (read-chr-nil)
 			    with lst = ()
 			    while (and ch (digit-char-p ch 10))
 			    do (push ch lst)
-			       (setf ch (read-char-nil))
+			       (setf ch (read-chr-nil))
 			       
 			    finally (push #\L lst) ;; use `long-float' (CPython uses 32-bit C `long')
 				    (push #\0 lst)
 				    (setf lst (nreverse lst))
 				    (push #\. lst)
 				    (push #\0 lst)
-				    (unread-char ch)
+				    (unread-chr ch)
 				    (return (read-from-string 
 					     (make-array (length lst)
 							 :initial-contents lst
 							 :element-type 'character))))))
 		      
-	      (when dot? (unread-char dot?)))))
+	      (when dot? (unread-chr dot?)))))
 	
 	;; exponent marker
 	(when (= base 10)
-	  (let ((ch (read-char-nil)))
+	  (let ((ch (read-chr-nil)))
 	    (if (char-member ch '(#\e #\E))
 		
 		(progn
 		  (setf has-exp t)
-		  (let ((ch2 (read-char-error))
+		  (let ((ch2 (read-chr-error))
 			(exp 0)
 			(minus nil)
 			(got-num nil))
@@ -1254,17 +1149,17 @@
 			 "Exponent for literal number invalid: ~A ~A" ch ch2)))
 		  
 		    (unless got-num
-		      (let ((ch3 (read-char-error)))
+		      (let ((ch3 (read-chr-error)))
 			(if (digit-char-p ch3 10)
 			    (setf exp (+ (* 10 exp) (digit-char-p ch3 10)))
 			  (raise-syntax-error
 			   "Exponent for literal number invalid: ~A ~A ~A" ch ch2 ch3))))
 		    
 		    (loop with ch
-			while (and (setf ch (read-char-nil))
+			while (and (setf ch (read-chr-nil))
 				   (digit-char-p ch 10))
 			do (setf exp (+ (* 10 exp) (digit-char-p ch 10)))
-			finally (when ch (unread-char ch)))
+			finally (when ch (unread-chr ch)))
 		  
 		    (when minus
 		      (setf exp (* -1 exp)))
@@ -1272,33 +1167,115 @@
 		    (setf res (* res (expt 10 exp)))))
 	      
 	      (when ch
-		(unread-char ch)))))
+		(unread-chr ch)))))
 	
-	;; CPython allows `j', decimal, not for hex (SyntaxError) or octal (becomes decimal!!?)
-	;; and allows 'L' for decimal, hex, octal
+	;; CPython allows `j', decimal, not for hex (SyntaxError) or
+	;; octal (becomes decimal!!?)  and allows 'L' for decimal,
+	;; hex, octal
 	
 	
 	;; suffix `L' for `long integer'
 	(unless (or has-frac has-exp)
-	  (let ((ch (read-char-nil)))
+	  (let ((ch (read-chr-nil)))
 	    (if (and ch 
 		     (not (char-member ch '(#\l #\L))))
-		(unread-char ch))))
+		(unread-chr ch))))
 		
 	;; suffix `j' means imaginary
-	(let ((ch (read-char-nil)))
+	(let ((ch (read-chr-nil)))
 	  (if (char-member ch '(#\j #\J))
 	      (setf res (complex 0 res))
-	    (when ch (unread-char ch)))))
+	    (when ch (unread-chr ch)))))
 		
       res)))
 		
 
 ;;; Punctuation
 
+(defun read-punctuation (c1)
+  "Returns puncutation as symbol."
+  (assert (or (punct-char1-p c1)
+	      (punct-char-not-punct-char1-p c1)))
+  (let ((c2 (read-chr-nil)))
+    (if (punct-char2-p c1 c2)
+	
+	(let ((c3 (read-chr-nil)))
+	  (if (punct-char3-p c1 c2 c3)
+
+	      ;; 3 chars
+	      (ecase c1
+		(#\* '**=)
+		(#\< '<<=)
+		(#\> '>>=)
+		(#\/ '//=))
+		    
+	    ;;#+(or)(let ((vec (make-array 3 :element-type 'character
+	    ;;			 :initial-contents (list c1 c2 c3))))
+	    ;;  (intern vec #.*package*))
+		
+	    ;; 2 chars
+	    (progn (when c3 
+		     (unread-chr c3))
+		   (ecase c2
+		     (#\= (ecase c1
+			    (#\= '==) (#\> '>=) (#\< '<=) (#\+ '+=) (#\- '-=)
+			    (#\* '*=) (#\^ '^=) (#\! '!=) (#\/ '/=) (#\| '\|=)
+			    (#\% '%=) (#\& '&=)))
+		     (#\> (ecase c1
+			    (#\< '<>)
+			    (#\> '>>)))
+		     (#\< (ecase c1
+			    (#\< '<<)))
+		     (#\/ (ecase c1
+			    (#\/ '//)))
+		     (#\* (ecase c1
+			    (#\* '**)))))))
+		     
+      ;;#+(or)(let ((vec (make-array 2 :element-type 'character
+      ;;			 :initial-contents (list c1 c2))))
+      ;;  (intern vec #.*package*)))))
+	    
+      ;; 1 char, or two of three dots
+      
+      (if (and c2 (char= #\. c1 c2))
+	  
+	  (if (char= (read-chr-error) #\.)
+	      
+	      '|...|  ;; (load-time-value (intern "..." #.*package*))
+	    
+	    (raise-syntax-error "Dots `..' may only occur as triple: `...'"))
+	
+	(if (punct-char1-p c1)
+	    
+	    (progn (when c2 (unread-chr c2))
+		   (ecase c1
+		     (#\. '|.|) (#\= '|=|) (#\+ '|+|) (#\[ '|[|) (#\] '|]|) (#\( '|(|)
+		     (#\) '|)|) (#\< '|<|) (#\> '|>|) (#\{ '|{|) (#\} '|}|) (#\- '|-|)
+		     (#\` '|`|) (#\, '|,|) (#\: '|:|) (#\| '|\||) (#\^ '|^|) (#\& '|&|)
+		     (#\% '|%|) (#\* '|*|) (#\/ '|/|) (#\~ '|~|)))
+		   
+	  ;;(let ((vec (make-array 1 :element-type 'character :initial-contents (list c1))))
+	  ;;  (intern vec)))
+	  
+	  (raise-syntax-error
+	   "Character `!' may only occur as in `!=', not standalone"))))))
+
+
 (defmacro punct-char1-p (c)
-  `(and ,c
+  (let ((arr #.(loop
+		   with arr = (make-array 128 :element-type 'bit :initial-element 0)
+		   for ch across "`=[]()<>{}.,:|^&%+-*/~;@"
+		   do (setf (aref arr (char-code ch)) 1)
+		   finally (return arr))))
+    `(let ((cc (char-code ,c)))
+       (and (< cc 128) 
+	    (= (aref ,arr cc) 1)))))
+
+#+(or) ;; it used to be this, but the above table-based lookup is way faster
+(defmacro punct-char1-p (c)
+  `(and ,c 
 	(position ,c "`=[]()<>{}.,:|^&%+-*/~;@")))
+
 
 (defmacro punct-char-not-punct-char1-p (c)
   "Punctuation  !  may only occur in the form  !=  "
@@ -1324,270 +1301,80 @@
 	(char= ,c1 ,c2)
 	(char-member ,c1 '( #\* #\< #\> #\/ ))))
 
-(defun read-punctuation (c1)
-  "Returns puncutation as symbol."
-  (assert (or (punct-char1-p c1)
-	      (punct-char-not-punct-char1-p c1)))
-  (let ((c2 (read-char-nil)))
-    (if (punct-char2-p c1 c2)
-	
-	(let ((c3 (read-char-nil)))
-	  (if (punct-char3-p c1 c2 c3)
-	      
-	      ;; 3 chars
-	      (let ((vec (make-array 3 :element-type 'character)))
-		(setf (aref vec 0) c1
-		      (aref vec 1) c2
-		      (aref vec 3) c3)
-		(intern vec #.*package*))
-		
-	    ;; 2 chars
-	    (progn (when c3 
-		     (unread-char c3))
-		   (let ((vec (make-array 2 :element-type 'character)))
-		     (setf (aref vec 0) c1
-			   (aref vec 1) c2)
-		     (intern vec #.*package*)))))
-	    
-      ;; 1 char, or two of three dots
-      
-      (if (and c2 (char= #\. c1 c2))
-	  
-	  (if (char= (read-char-error) #\.)
-	      (load-time-value (intern "..." #.*package*))
-	    (error "Characters `..' may only occur as in `...'"))
-	
-	(if (punct-char1-p c1)
-	    
-	    (progn (when c2 (unread-char c2))
-		   (intern (string c1)))
-	  
-	  (error
-	   "Character `!' may only occur as in `!=', not standalone"))))))
 
+;;; Whitespace
 
 (defun read-whitespace ()
-  "Reads all whitespace and comments, until first non-whitespace ~@
-   character.
+  "Reads all whitespace and comments, until first non-whitespace character.
 
-   If Newline was found inside whitespace, values returned are (t N) ~@
-   where N is the amount of whitespace after the Newline (N >= 0) ~@
-   before the first non-whitespace character (in other words, the ~@
-   indentation of the first non-whitespace character) measured in ~@
-   spaces, where each Tab is equivalent to *tab-width-spaces* spaces. ~@
+If Newline was found inside whitespace, values returned are (t N) where N
+is the amount of whitespace after the Newline before the first
+non-whitespace character (in other words, the indentation of the first
+non-whitespace character) measured in spaces, where each Tab is equivalent
+to *tab-width-spaces* spaces - so N >= 0.
 
-   If no Newline was encountered, returns NIL. ~@
-   If EOF encountered, NIL is returned."
-
-  (let ((found-newline nil)
-	(c (read-char-nil))
-	(n 0))
-    (loop
-      (cond ((not c) (return-from read-whitespace nil))
-;;		       (if found-newline (values t n) nil)))
-	    ((or (char= c #\Newline)
-		 (char= c #\Return))
-	     (setf found-newline t
-		   n 0))
-	    ((char= c #\Space) (incf n))
-	    ((char= c #\Tab) (incf n *tab-width-spaces*))
-	    ((char= c #\#) (read-comment-line c)
-			   (setf found-newline t
-				 n 0))
-	    (t (unread-char c)
-	       (return-from read-whitespace
-		 (if found-newline (values t n) nil))))
-      (setf c (read-char-nil)))))
+If no Newline was encountered before a non-whitespace character, or if EOF
+is encountered, NIL is returned."
+  
+  (loop
+      with found-newline = nil and n = 0
+      for c = (read-chr-nil)
+      do (case c
+	   ((nil)                  (return-from read-whitespace nil))
+	   
+	   ((#\Newline #\Return)   (setf found-newline t
+					 n 0))
+	   
+	   (#\Space                (incf n))
+	   
+	   (#\Tab                  (incf n *tab-width-spaces*))
+	   
+	   (#\#                    (progn (read-comment-line c)
+					  (setf found-newline t
+						n 0)))
+	   
+	   (t                      (unread-chr c)
+				   (return-from read-whitespace
+				     (if found-newline (values t n) nil))))))
 
 (defun read-comment-line (c)
-  "Read until the end of the line, excluding the Newline."
+  "Read until the end of the line, leaving the last #\Newline in the source."
   (assert (char= c #\#))
-  (let ((c (read-char-nil)))
-    (loop while (and c (char/= c #\Newline))
-	do (setf c (read-char-nil)))
-    (when c
-      (unread-char c))))
+  (loop
+      for c = (read-chr-nil) while (and c (char/= c #\Newline))
+      finally (when c (unread-chr c))))
 
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Lexer usage
 
+(defun parse-python-with-lexer (&rest lex-options)
+  (let* ((lexer (apply #'make-py-lexer lex-options))
+	 (grammar (make-instance 'python-grammar :lexer lexer)))
+    (parse grammar)))
 
-(defvar *lex-debug* nil)
+(defgeneric parse-python-file (source)
+  (:method ((s stream))
+	   (parse-python-with-lexer :read-chr   (lambda () (read-char s nil nil))
+				    :unread-chr (lambda (c) (unread-char c s))))
+  (:method (filename)
+	   (with-open-file (f filename :direction :input)
+	     (parse-python-file f))))
 
-;; XXX take a function that gives characters
+(defmethod parse-python-string ((s string))
+  (let ((next-i 0)
+	(max-i (length s)))
+    (parse-python-with-lexer
+     :read-chr (lambda ()
+		  (when (< next-i max-i)
+		    (prog1 (char s next-i) (incf next-i))))
+     
+     :unread-chr (lambda (c)
+		    (assert (and c (> next-i 0) (char= c (char s (1- next-i)))))
+		    (decf next-i)))))
 
-(defun make-py-lexer (&optional (*standard-input* *standard-input*))
-  (let ((tokens-todo (list))
-	(indentation-stack (list 0))
-	(open-lists ()))
     
-    (lambda (grammar &optional op)
-      (declare (ignore grammar op))
-      (block lexer
-
-	(when tokens-todo
-	  (when *lex-debug*
-	    (format t "lexer returns ~s  (from TODO)~%" (car tokens-todo)))
-	  (return-from lexer (apply #'values (pop tokens-todo))))
-
-	(with-terminal-codes (python-grammar)
-	  
-	  (macrolet ((lex-todo (val1 val2) ;; (lex-todo name <value>)
-		       `(let ((eval2 ,val2))
-			  (when *lex-debug*
-			    (format t "lexer-todo: ~s ~s~%" ',val1 eval2))
-			  (push (list (tcode ,val1) eval2) tokens-todo)))
-		     
-		     (lex-return (val1 val2) ;; (lex-return name <value>)
-		       `(let ((eval2 ,val2))
-			  (when *lex-debug*
-			    (format t "lexer returning: ~s ~s~%" ',val1 eval2))
-			  (return-from lexer (values (tcode ,val1) eval2))))
-		     
-		     (find-token-code (token) ;; (find-token-code name)
-		       `(tcode-1 (load-time-value
-				  (find-class 'python-grammar)) ,token))
-		     
-		     (member-eq (item list)
-		       `(member ,item ,list :test #'eq)))
-	    
-	    (tagbody next-char
-	      (let ((c (read-char-nil)))
-		
-		(cond
-
-		 ((not c)
-		  ;; Before returning EOF, return a NEWLINE followed
-		  ;; by a DEDENT for every currently active indent.
-		 
-		  (lex-todo eof 'eof)
-		  (loop while (> (car indentation-stack) 0)
-		      do (pop indentation-stack)
-			 (lex-todo dedent 'dedent))
-		  (lex-return newline 'newline))
-		 
-		 
-		 ((digit-char-p c 10)
-		  (lex-return number (read-number c)))
-
-		 ((identifier-char1-p c)
-		  (let* ((read-id (read-identifier c))
-			 (token (intern read-id #.*package*)))
-		    
-		    (cond ((member-eq token '(u U  r R  ur uR Ur UR))
-			   ;; u"abc"    : `u' stands for `Unicode string'
-			   ;; u + b     : `u' is an identifier
-			   ;; r"s/f\af" : `r' stands for `raw string'
-			   ;; r + b     : `r' is an identifier
-			   ;; ur"asdf"  : `ur' stands for `raw unicode string'
-			   ;; ur + a    : `ur' is identifier
-			   ;; `u' must appear before 'r' if both are present
-			   
-			   (let ((ch (read-char-nil)))
-			     (if (char-member ch '(#\' #\"))
-				
-				 (let ((is-unicode
-					(member-eq token '(u U  ur uR Ur UR)))
-				       (is-raw
-					(member-eq token '(r R  ur uR Ur UR))))
-				   (lex-return
-				    string
-				    (read-string ch
-						 :unicode is-unicode
-						 :raw is-raw)))
-			       (progn
-				 (when ch (unread-char ch))
-				 (lex-return identifier token)))))
-			  
-			  ((member-eq token *reserved-words*)
-			   (when *lex-debug*
-			     (format t "lexer returning reserved word: ~s~%"
-				     token))
-			   (return-from lexer
-			     (values (find-token-code token) token)))
-			  
-			  (t
-			   (when *lex-debug*
-			     (format t "lexer returning identifier: ~s~%"
-				     read-id))
-			   (lex-return identifier read-id)))))
-
-		 ((char-member c '(#\' #\"))
-		  (lex-return string (read-string c)))
-
-		 ((or (punct-char1-p c)
-		      (punct-char-not-punct-char1-p c))
-		  (let ((token (read-punctuation c)))
-		    
-		    ;; Keep track of whether we are in a bracketed
-		    ;; expression (list, tuple or dict), because in
-		    ;; that case newlines are ignored. (Note that
-		    ;; READ-STRING handles multi-line strings itself.)
-		    
-		    (case token
-		      (( [ { \( ) (push token open-lists))
-		      (( ] } \) ) (pop open-lists)))
-		    
-		    (when *lex-debug*
-		      (format t "lexer returning punctuation token: ~s  ~s~%"
-			      token token))
-		    (return-from lexer 
-		      (values (find-token-code token) token))))
-
-		 ((char-member c '(#\Space #\Tab #\Newline #\Return))
-		  (unread-char c)
-		  (multiple-value-bind (newline new-indent)
-		      (read-whitespace)
-		    
-		    (when (or (not newline) open-lists)
-		      (go next-char))
-		    
-		    ;; Return Newline now, but also determine if
-		    ;; there are any indents or dedents to be
-		    ;; returned in next calls.
-		      
-		    (cond
-		     ((= (car indentation-stack) new-indent)) ;; same level
-
-		     ((< (car indentation-stack) new-indent) ; one indent
-		      (push new-indent indentation-stack)
-		      (lex-todo indent 'indent))
-
-		     ((> (car indentation-stack) new-indent) ; dedent(s)
-		      (loop while (> (car indentation-stack) new-indent)
-			  do (pop indentation-stack)
-			     (lex-todo dedent 'dedent))
-		      
-		      (unless (= (car indentation-stack) new-indent)
-			
-			;; Raise Python SyntaxError if available,
-			;; otherwise normal error.
-			
-			(let ((serr (find-class 'SyntaxError nil))
-			      (s (format nil
-					 "Dedent didn't arrive at a previous ~
-                                          indentation level (indent level ~
-                                          after dedent: ~A spaces)"
-					 new-indent)))
-			  (if serr
-			      (error 'SyntaxError :args s)
-			    (error (format nil "SyntaxError: ~A" s)))))))
-		    
-		    (lex-return newline 'newline)))
-		 
-		 ((char= c #\#) ;; comment to end-of-line
-		  (read-comment-line c)
-		  (go next-char))
-
-		 ((char= c #\\) ;; next line is continuation of this one
-		  (let ((c2 (read-char-nil)))
-		    (if (and c2 (char= c2 #\Newline))
-			(go next-char)
-		      (error "Syntax error: continuation character \\ ~
-                              must be followed by Newline, but got ~S" c2))))
-		 
-		 (t (error "Python lexer got unexpected character: ~A (~A)"
-			   c (char-code c))))))))))))
-
+#+(or)
 (defun parse-python (&optional (*standard-input* *standard-input*))
   (let* ((lexer (make-py-lexer))
 	 (grammar (make-instance 'python-grammar :lexer lexer))
@@ -1595,12 +1382,15 @@
 	 (*print-pretty* t))
     (parse grammar)))
 
+#+(or)
 (defun parse-python-string (string)
   (with-input-from-string (stream string)
     (parse-python stream)))
 
+#+(or)
 (defun parse-python-string-literal (string)
   (second (py-eval (parse-python-string string))))
 
+#+(or)
 (defun file->ast (fname)
   (parse-python-string (read-file fname)))
