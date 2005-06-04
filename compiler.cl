@@ -1,5 +1,83 @@
 (in-package :python)
 
+;; Each node in the s-expression returned by the
+;; parse-python-{file,string} corresponds to a macro defined below
+;; that generates the corresponding Lisp code.
+
+
+(defvar *scope* nil "Current execution namespace.")
+
+(defmacro with-py-error-handlers (&body body)
+  `(handler-bind
+       ((division-by-zero
+	 (lambda (c)
+	   (declare (ignore c))
+	   (py-raise 'ZeroDivisionError "Division or modulo by zero")))
+	
+	#+allegro
+	(excl:synchronous-operating-system-signal
+	 (lambda (c)
+	   (when (string= (slot-value c 'excl::format-control)
+			  "~1@<Stack overflow (signal 1000)~:@>")
+	     (py-raise 'RuntimeError "Stack overflow"))))
+	
+	#+allegro
+	(excl:interrupt-signal
+	 (lambda (c)
+	   (let ((fa (slot-value c 'excl::format-arguments)))
+	     (when (and (listp fa)
+			(string= (second fa) "Keyboard interrupt"))
+	       (py-raise 'KeyboardInterrupt "Keyboard interrupt")))))
+	
+	;; more?
+	)
+     ,@body))
+
+
+(defmacro module-stmt (items)
+  ;; register module (its name, the namespace, etc)
+  (let* ((*scope* (make-namespace))
+	 (module (make-module :namespace *scope*)))
+    (progn ,@items)))
+  
+(defmacro funcdef-stmt ..)
+(defmacro assign-expr ..)
+(defmacro augassign-expr ..)
+(defmacro print-stmt ..)
+(defmacro break-stmt ..)
+(defmacro continue-stmt ..)
+(defmacro return-stmt ..)
+(defmacro yield-stmt ..)
+(defmacro raise-stmt ..)
+(defmacro import-stmt ..)
+(defmacro import-from-stmt ..)
+(defmacro global-stmt ..)
+(defmacro exec-stmt ..)
+(defmacro assert-stmt ..)
+(defmacro if-stmt ..)
+(defmacro while-stmt ..)
+(defmacro try-except-stmt ..)
+(defmacro try-finally-stmt ..)
+(defmacro for-in-stmt ..)
+(defmacro suite-stmt ..)
+(defmacro binary-lazy-expr ..)
+(defmacro binary-expr ..)
+(defmacro unary-expr ..)
+(defmacro comparison-expr ..)
+(defmacro tuple-expr ..)
+(defmacro list-expr ..)
+(defmacro list-compr-expr ..)
+(defmacro dict-expr ..)
+(defmacro backticks-expr ..)
+(defmacro identifier-expr ..)
+(defmacro labmda-expr ..)
+(defmacro call-expr ..)
+(defmacro subscription-expr ..)
+(defmacro attributeref-expr ..)
+(defmacro slice-expr ..)
+(defmacro classdef-stmt ..)
+
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; 
 ;; Keep track of built-in names shadowed by the user.
@@ -56,6 +134,15 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 
+(destructuring-bind (&key entry-assumed exit-set)
+    (referenced-vars-simple ast :assumed '(x y))
+  )
+  
+(referenced-variables (ast)
+		      
+
+
+
 (defun annotate-ast (ast)
   (walk-py-ast ast #'annotate-ast-1))
 
@@ -72,17 +159,17 @@
     
 	))
 
-(defun funcdef-get-vars (ast)
+(defun funcdef-vars (ast)
   "Given AST of a function (FUNCDEF), returns
      PARAMS LOCALS OUTER-SCOPE GLOBALS
 where: PARAMS : the formal parameters
        LOCALS : the local variables
-       OUTER-SCOPE : the variables to be found in an enclosing scope (possibly
-                     the global module namespace)
-      GLOBALS : the variables to be found in the global module namespace."
+       OUTER-SCOPE : the variables to be found in an enclosing scope 
+                     (possibly the global module namespace)
+       GLOBALS : the variables to be found in the global module namespace."
   
   (assert (eq (car ast) 'funcdef)) ;; XXX lambda
-    
+  
   (destructuring-bind
       (fname (pos-key-params *-param **-param) suite) (cdr ast)
     (declare (ignore fname))
