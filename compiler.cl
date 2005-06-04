@@ -3,6 +3,10 @@
 ;; Each node in the s-expression returned by the
 ;; parse-python-{file,string} corresponds to a macro defined below
 ;; that generates the corresponding Lisp code.
+;; 
+;; Note that each AST node has a name ending in "-expr" or
+;; "-stmt". There no is separate package for those symbols (should
+;; there be?)
 
 
 (defvar *scope* nil "Current execution namespace.")
@@ -34,34 +38,117 @@
      ,@body))
 
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; 
+;; AST macros
+;; 
+
 (defmacro module-stmt (items)
   ;; register module (its name, the namespace, etc)
   (let* ((*scope* (make-namespace))
 	 (module (make-module :namespace *scope*)))
     (progn ,@items)))
-  
+
+(defmacro suite-stmt (stmts)
+  (progn ,@stmts))
+
 (defmacro funcdef-stmt ..)
-(defmacro assign-expr ..)
-(defmacro augassign-expr ..)
-(defmacro print-stmt ..)
-(defmacro break-stmt ..)
-(defmacro continue-stmt ..)
-(defmacro return-stmt ..)
-(defmacro yield-stmt ..)
-(defmacro raise-stmt ..)
+(defmacro classdef-stmt ..)
+
+(defmacro identifier-expr (name)
+  `(namespace-lookup ,name))
+
+(defmacro assign-expr (val targets)
+  `(let ((val ,val))
+     ,@(loop for target in targets
+	   collect `(setf ,target ,val))))
+
+(defun (setf identifier-expr) (val name)
+  (setf (namespace-lookup ,name
+			  
+(defun (setf attributeref-expr) (val)
+  
+  
+(defmacro augassign-expr (op place val)
+  (assert (member (car place) '(tuple subscription-expr
+				attributeref-expr identifier-expr)))
+  `(let (place-obj-1 place-obj-2)
+     ,(case (car place)
+	(tuple (py-raise 'SyntaxError ;; perhaps check in parser
+			 "Augmented assignment to multiple places not possible ~
+                          (got: ~A)" `(,place ,op ,val)))
+	
+	((subscription-expr attributeref-expr)
+	 `(setf place-obj-1 ,(second place)
+		place-obj-2 ,(third place))))
+     
+     (let* ((ev-val ,val)
+	    (place-val-now ,(ecase (car place)
+			      (identifier-expr ,place)
+			      ((attributeref-expr subscription-expr)
+			       `(,(car place) place-obj-1 place-obj-2)))))
+       
+       ,(multiple-value-bind (py-@= py-@) (lookup-inplace-op-func op)
+	  `(or (funcall ,py-@= place-val-now ev-val) ;; returns true iff __i@@@__ found
+	       (let ((new-val (funcall ,py-@ place-val-now ev-val)))
+		 (assign-expr ev-val (,(ecase (car place)
+					 (identifier-expr ,place)
+					 ((attributeref-expr subscription-expr)
+					  `(,(car place) place-obj-1 place-obj-2)))))))))))
+
 (defmacro import-stmt ..)
 (defmacro import-from-stmt ..)
+(defmacro raise-stmt ..)
+
+(defmacro if-stmt (if-clauses else-clause)
+  `(cond ,@(loop for (cond body) in if-clauses
+	       collect `((py-val->lisp-bool ,cond) ,body))))
+
+(defmacro for-in-stmt (target source suite else-suite)
+  `(catch 'break
+     (let* ((take-else t)
+	    (f (lambda (x)
+		  (setf take-else nil)
+		  (assign-expr x (,target))
+		  (catch 'continue
+		    ,suite))))
+       (declare (dynamic-extent f))
+       (map-over-py-object f ,source))
+     (when (and take-else ,else-suite)
+       ,eval-suite)))
+
+(defmacro while-stmt (test suite else-suite)
+  `(tagbody
+    :break
+     (loop
+	 with take-else = t
+	 while (py-val->lisp-bool ,test)
+	 do (tagbody
+	     :continue
+	      (setf take-else nil)
+	      ,suite)
+	 finally (when (and (not taken) ,else-suite)
+		   ,else-suite)))) 
+
+(defmacro break-stmt ()
+  `(go :break))
+
+(defmacro continue-stmt ()
+  `(go :continue))
+
+(defmacro return-stmt (val)
+  `(return-from :function-body val))
+       
+(defmacro yield-stmt ..)
+(defmacro try-except-stmt ..)
+(defmacro try-finally-stmt ..)
+(defmacro print-stmt ..)
 (defmacro global-stmt ..)
 (defmacro exec-stmt ..)
 (defmacro assert-stmt ..)
-(defmacro if-stmt ..)
-(defmacro while-stmt ..)
-(defmacro try-except-stmt ..)
-(defmacro try-finally-stmt ..)
-(defmacro for-in-stmt ..)
-(defmacro suite-stmt ..)
-(defmacro binary-lazy-expr ..)
+
 (defmacro binary-expr ..)
+(defmacro binary-lazy-expr ..)
 (defmacro unary-expr ..)
 (defmacro comparison-expr ..)
 (defmacro tuple-expr ..)
@@ -69,14 +156,12 @@
 (defmacro list-compr-expr ..)
 (defmacro dict-expr ..)
 (defmacro backticks-expr ..)
-(defmacro identifier-expr ..)
 (defmacro labmda-expr ..)
 (defmacro call-expr ..)
 (defmacro subscription-expr ..)
 (defmacro attributeref-expr ..)
 (defmacro slice-expr ..)
-(defmacro classdef-stmt ..)
-
+(defmacro generator-expr ..)
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; 
