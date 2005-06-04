@@ -2,7 +2,7 @@
 
 (in-package :python)
 
-(declaim (optimize (debug 3)))
+#+(or)(declaim (optimize (debug 3)))
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (require :yacc)
@@ -44,23 +44,20 @@
 	    **= <<= >>= |...|
 	    |;|   ;; multiple statements same line
 	    @     ;; decorator
-	    ;; keywords:
-	    def class return yield lambda
+	    ;; reserved words:
+	    def class lambda return yield
 	    and or not for in is
-	    print import from as assert break continue global del exec pass
-	    try except finally raise
-	    if elif else while)
-  )
+	    print from import as assert break continue global del exec pass
+	    if elif else while try except finally raise))
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (defun generate-python-rule (name)
     (check-type name symbol)
     (let* ((name (intern name #.*package*))
-	   (str (symbol-name name))
-	   (len (length str))
+	   (str  (symbol-name name))
+	   (len  (length str))
 	   (item (intern (subseq str 0 (- len 1)) #.*package*))
-	   ;;(name-2 (intern (concatenate 'string str "2") #.*package*))
-	   (dp 'defproduction))
+	   (dp   'defproduction))
       (ecase (aref str (1- len))
 
 	(#\+ `((,dp (,name python-grammar) (,item) ($1))
@@ -90,59 +87,62 @@
 		  res))
     `(progn ,@(nreverse res))))
 
-;; new version
 (python-prods
 
  ;; Rules (including their names) are taken from the CPython grammar
  ;; file from CPython CVS, file Python/Grammar/Grammar, 20040827.
 
  ;; The start symbol: regular python files
- (python-grammar (file-input) ((list 'file-input (nreverse $1))))
+ (python-grammar (file-input) ((list 'module-stmt (nreverse $1))))
 
  (file-input () ())
  (file-input (file-input newline) ($1))
  (file-input (file-input stmt) ((cons $2 $1)))
 
- (decorator (@ dotted-name newline) ((list 'decorator $1 $2)))
- (decorator (@ dotted-name |(| arglist |)| newline) ((list 'decorator $2 $4)))
+ (decorator (|@| dotted-name newline) ((list 'decorator $1 $2)))
+ (decorator (|@| dotted-name |(| arglist |)| newline) ((list 'decorator $2 $4)))
  (:decorator+)
  (:decorator+?)
 
- ;; XXX for now: ignore decorators above function definition
  (funcdef (decorator+? def identifier parameters |:| suite)
-	  (`(funcdef (identifier ,$3) ,$4 ,$6)))
+	  ;; XXX for now: ignore decorators above function definition
+	  (`(funcdef-stmt (identifier ,$3) ,$4 ,$6)))
 
  (parameters ( |(| |)| ) ((list nil nil nil)))
  (parameters ( |(| parameter-list5 |)| )
 	     (`(,@(loop for p in (car $2)
-		      if (symbolp p) collect p into pos
-		      else collect p into kw
+		      if (and (listp p) (eq (car p) :key))
+			 collect (cdr p) into kw
+		      else collect p into pos
 		      finally (return (list pos kw)))
 		 ,@(cdr $2))))
 
- (parameter-list5 (defparameter+)                        ((list $1 nil nil)))
- (parameter-list5 (defparameter+ ni-*-ident ni-**-ident) ((list $1 $2 $3)))
- (parameter-list5 (defparameter+ ni-*-ident            ) ((list $1 $2 nil)))
- (parameter-list5 (defparameter+            ni-**-ident) ((list $1 nil $2)))
- (parameter-list5 (              *-ident    ni-**-ident) ((list nil $1 $2)))
- (parameter-list5 (              *-ident               ) ((list nil $1 nil)))
- (parameter-list5 (                         **-ident   ) ((list nil nil $1)))
+ (parameter-list5 (defparameter+                       ) ((list  $1 nil nil)))
+ (parameter-list5 (defparameter+ ni-*-ident ni-**-ident) ((list  $1  $2  $3)))
+ (parameter-list5 (defparameter+ ni-*-ident            ) ((list  $1  $2 nil)))
+ (parameter-list5 (defparameter+            ni-**-ident) ((list  $1 nil  $2)))
+ (parameter-list5 (              *-ident    ni-**-ident) ((list nil  $1  $2)))
+ (parameter-list5 (              *-ident               ) ((list nil  $1 nil)))
+ (parameter-list5 (                         **-ident   ) ((list nil nil  $1)))
 
  (defparameter+ (defparameter) ((list $1)))
  (defparameter+ (defparameter+ |,| defparameter) ((append $1 (list $3))))
 
  (ni-*-ident  ( |,| *-ident ) ($2))
- (*-ident ( * identifier ) ($2))
+ (*-ident ( |*| identifier ) ($2))
 
  (ni-**-ident ( |,| **-ident) ($2))
- (**-ident ( ** identifier ) ($2))
+ (**-ident ( |**| identifier ) ($2))
 
- (defparameter (fpdef) ($1))
- (defparameter (fpdef = test) ((cons $1 $3)))
+ (defparameter (fpdef         ) ($1))
+ (defparameter (fpdef |=| test) (`(:key ,$1 . ,$3)))
+ ;; Can't use symbol vs. cons for distinguishing positional and
+ ;; keyword arguments, as as positional args may be a structure:
+ ;;   def f((x,y), z, q=4): ...
  
  (fpdef :or
-	((identifier) . ($1))
-	((|(| fplist |)|) . (`(list ,$2)))) ;; WWW or just $2
+	((identifier) . (`(identifier-expr ,$1)))
+	((|(| fplist |)|) . (`(tuple ,$2))))
 
  (fplist (fpdef comma--fpdef* comma?) ((cons $1 $2)))
  (:comma--fpdef*)
@@ -152,8 +152,8 @@
  (comma (|,|) ((list $1)))
 
  (stmt :or simple-stmt compound-stmt)
- (simple-stmt (small-stmt semi--small-stmt* semi? newline) ((if $2 (list 'suite (cons $1 $2))
-							      $1)))
+ (simple-stmt (small-stmt semi--small-stmt* semi? newline)
+	      ((if $2 (list 'suite-stmt (cons $1 $2)) $1)))
 
  (semi--small-stmt (|;| small-stmt) ($2))
  (:semi--small-stmt*)
@@ -177,53 +177,53 @@
 		  (t
 		   $1))))
 
- (expr-stmt2 (augassign testlist) ((cons $1 $2))) ;; todo: return empty list, so "foo" = (identifier 'foo), not testlist
+ (expr-stmt2 (augassign testlist) ((cons $1 $2)))
  (expr-stmt2 (=--testlist*) ((when $1 (list '= $1))))
  (:=--testlist*)
- (=--testlist (= testlist) ($2))
+ (=--testlist (|=| testlist) ($2))
 
- (augassign :or += -= *= /= %= &= |\|=| ^= <<= >>= **= //= )
+ (augassign :or |+=| |-=| |*=| |/=| |%=| |&=| |\|=| |^=| |<<=| |>>=| |**=| |//=| )
 
  (print-stmt :or
 	     ((print) . (`(print nil nil)))
-	     ((print test |,--test*| comma?) . ((list 'print (cons $2 $3) (if $4 t nil))))
-	     ((print >> test |,--test*| comma?) . ((list 'print->> $3 $4 (if $5 t nil)))))
+	     ((print test |,--test*| comma?)      . ((list 'print-stmt nil (cons $2 $3) (if $4 t nil))))
+	     ((print |>>| test |,--test*| comma?) . ((list 'print-stmt $3  $4           (if $5 t nil)))))
  (:|,--test*|)
  (|,--test| (|,| test) ($2))
 
- (del-stmt (del exprlist) ((list $1 $2)))
- (pass-stmt (pass) ((list $1)))
+ (del-stmt  (|del| exprlist) ((list 'del-stmt $2)))
+ (pass-stmt (|pass|)         ((list 'pass-stmt)))
  (flow-stmt :or break-stmt continue-stmt return-stmt raise-stmt yield-stmt)
 
- (break-stmt (break) ((list $1)))
- (continue-stmt (continue) ((list $1)))
- (return-stmt (return testlist?) ((list $1 $2)))
+ (break-stmt    (|break|)            ((list 'break-stmt)))
+ (continue-stmt (|continue|)         ((list 'continue-stmt)))
+ (return-stmt   (|return| testlist?) ((list 'return-stmt $2)))
  (:testlist?)
- (yield-stmt (yield testlist?) ((list $1 $2)))
+ (yield-stmt    (|yield| testlist?)  ((list 'yield-stmt $2)))
 
- (raise-stmt (raise) ((list $1 nil nil nil)))
- (raise-stmt (raise test) ((list $1 $2 nil nil)))
- (raise-stmt (raise test |,| test) ((list $1 $2 $4 nil)))
- (raise-stmt (raise test |,| test |,| test) ((list $1 $2 $4 $6)))
+ (raise-stmt (|raise|                       ) ((list 'raise-stmt nil nil nil)))
+ (raise-stmt (|raise| test                  ) ((list 'raise-stmt  $2 nil nil)))
+ (raise-stmt (|raise| test |,| test         ) ((list 'raise-stmt  $2  $4 nil)))
+ (raise-stmt (|raise| test |,| test |,| test) ((list 'raise-stmt  $2  $4  $6)))
  
  ;; "import" module ["as" name] ( "," module ["as" name] )*
  (import-stmt :or import-normal import-from)
  
- (import-normal (import dotted-as-name comma--dotted-as-name*) (`(import (,$2 ,@$3))))
+ (import-normal (import dotted-as-name comma--dotted-as-name*) (`(import-stmt (,$2 ,@$3))))
  (:comma--dotted-as-name*)
  (comma--dotted-as-name ( |,| dotted-as-name) ($2))
  
- (import-from (from dotted-name import import-from-2) (`(import-from ,$2 ,$4)))
+ (import-from (|from| dotted-name |import| import-from-2) (`(import-from-stmt ,$2 ,$4)))
  (import-from-2 :or
 		*
 		((import-as-name comma--import-as-name*) . ((cons $1 $2))))
  (:comma--import-as-name*)
  (comma--import-as-name (|,| import-as-name) ($2))
- (import-as-name (identifier) (`(as ,$1 (identifier ,$1))))
- (import-as-name (identifier as identifier) (`(as ,$1 (identifier ,$3))))
+ (import-as-name (identifier) (`(|as| ,$1 (identifier ,$1))))
+ (import-as-name (identifier |as| identifier) (`(as ,$1 (identifier ,$3))))
  
  (dotted-as-name (dotted-name) (`(as ,$1 (identifier ,$1))))  ;; must have (attributeref ..) as target
- (dotted-as-name (dotted-name as identifier) (`(as ,$1 (identifier ,$3))))
+ (dotted-as-name (dotted-name |as| identifier) (`(as ,$1 (identifier ,$3))))
  
  (dotted-name (identifier dot--name*) ((if $2
 					   `(dotted ,$1 ,@(if (eq (first $2) 'dotted)
@@ -233,46 +233,44 @@
  (:dot--name*)
  (dot--name (|.| identifier) ($2))
 
- (global-stmt (global identifier comma--identifier*)
-	      (`(global ,(if $3 (cons $2 $3) (list $2)))))
+ (global-stmt (|global| identifier comma--identifier*)
+	      (`(global-stmt ,(if $3 (cons $2 $3) (list $2)))))
  (:comma--identifier*)
  (comma--identifier (|,| identifier) ($2))
- (exec-stmt (exec expr) ((list $1 $2)))
- (exec-stmt (exec expr in test) ((list $1 $2 $4)))
- (exec-stmt (exec expr in test |,| test) ((list $1 $2 $4 $6)))
- (assert-stmt (assert test comma--test?) ((list $1 $2 $3)))
+ (exec-stmt (|exec| expr                   ) ((list 'exec-stmt $1 $2)))
+ (exec-stmt (|exec| expr |in| test         ) ((list 'exec-stmt $1 $2 $4)))
+ (exec-stmt (|exec| expr |in| test |,| test) ((list 'exec-stmt $1 $2 $4 $6)))
+ (assert-stmt (|assert| test comma--test?)   ((list 'assert-stmt $2 $3)))
  (:comma--test?)
  (comma--test (|,| test) ($2))
 
  (compound-stmt :or if-stmt while-stmt for-stmt try-stmt funcdef classdef)
- (if-stmt (if test |:| suite elif--test--suite* else--suite)
-	  (`(if ((,$2 ,$4) ,@$5) ,$6)))
- (if-stmt (if test |:| suite elif--test--suite*)
-	  (`(if ((,$2 ,$4) ,@$5) nil)))
+ (if-stmt (|if| test |:| suite elif--test--suite* else--suite) (`(if-stmt ((,$2 ,$4) ,@$5) ,$6)))
+ (if-stmt (|if| test |:| suite elif--test--suite*)             (`(if-stmt ((,$2 ,$4) ,@$5) nil)))
  (:elif--test--suite*)
- (elif--test--suite (elif test |:| suite) ((list $2 $4)))
- (else--suite (else |:| suite) ($3))
- (while-stmt (while test |:| suite else--suite?) ((list $1 $2 $4 $5)))
+ (elif--test--suite (|elif| test |:| suite) ((list $2 $4)))
+ (else--suite (|else| |:| suite) ($3))
+ (while-stmt (|while| test |:| suite else--suite?) ((list 'while-stmt $2 $4 $5)))
  (:else--suite?)
- (for-stmt (for exprlist in testlist |:| suite else--suite?)
-	   ((list 'for-in $2 $4 $6 $7))
+ (for-stmt (|for| exprlist |in| testlist |:| suite else--suite?)
+	   ((list 'for-in-stmt $2 $4 $6 $7))
 	   (:precedence high-prec))
  (try-stmt :or
-	   ((try |:| suite except--suite+ else--suite?) . ((list 'try-except $3 $4 $5)))
-	   ((try |:| suite finally |:| suite)  	        . ((list 'try-finally $3 $6))))
+	   ((|try| |:| suite except--suite+ else--suite?) . ((list 'try-except-stmt $3 $4 $5)))
+	   ((|try| |:| suite |finally| |:| suite)  	  . ((list 'try-finally-stmt $3 $6))))
 
- (except--suite (except |:| suite) (`(nil nil ,$3)))
- (except--suite (except test |:| suite) (`(,$2 nil ,$4)))
- (except--suite (except test |,| test |:| suite) (`(,$2 ,$4 ,$6)))
+ (except--suite (|except| |:| suite) (`(nil nil ,$3)))
+ (except--suite (|except| test |:| suite) (`(,$2 nil ,$4)))
+ (except--suite (|except| test |,| test |:| suite) (`(,$2 ,$4 ,$6)))
 
  (except--suite+ (except--suite) ((list $1)))
  (except--suite+ (except--suite+ except--suite) ((append $1 (list $2))))
 
  (suite :or
-	((simple-stmt) . ((list 'suite (list $1))))
-	((newline indent stmt+ dedent) . ((list 'suite $3))))
+	((simple-stmt) . ((list 'suite-stmt (list $1))))
+	((|newline| |indent| stmt+ |dedent|) . ((list 'suite-stmt $3))))
 
- (stmt+ (stmt) ((list $1)))
+ (stmt+ (stmt)       ((list $1)))
  (stmt+ (stmt+ stmt) ((append $1 (list $2))))
 
  (expr (binop2-expr) ($1))
@@ -282,158 +280,135 @@
        binop-expr)
 
  (binop-expr :or
-	     ((binop-expr and binop-expr) . ((list 'binary-lazy $2 $1 $3)))
-	     ((binop-expr or  binop-expr) . ((list 'binary-lazy $2 $1 $3)))
-	     ((not binop-expr)            . ((list 'unary $1 $2)))
-	     ((binop-expr <  binop-expr)  .  ((list 'comparison $2 $1 $3)))
-	     ((binop-expr <= binop-expr)  . ((list 'comparison $2 $1 $3)))
-	     ((binop-expr >  binop-expr)  .  ((list 'comparison $2 $1 $3)))
-	     ((binop-expr >= binop-expr)  . ((list 'comparison $2 $1 $3)))
-	     ((binop-expr != binop-expr)  . ((list 'comparison $2 $1 $3)))
-	     ((binop-expr <> binop-expr)  . ((list 'comparison '!= $1 $3))) ;; <> is same as !=
-	     ((binop-expr == binop-expr)  . ((list 'comparison $2 $1 $3)))
-	     ((binop-expr in binop-expr)  . ((list 'binary $2 $1 $3)))
-	     ((binop-expr is binop-expr)  . ((list 'binary $2 $1 $3))))
+	     ((binop-expr |and| binop-expr) . ((list 'binary-lazy-expr $2 $1 $3)))
+	     ((binop-expr |or|  binop-expr) . ((list 'binary-lazy-expr $2 $1 $3)))
+	     ((|not| binop-expr)            . ((list 'unary-expr $1 $2)))
+	     ((binop-expr |<|  binop-expr)  . ((list 'comparison-expr $2 $1 $3)))
+	     ((binop-expr |<=| binop-expr)  . ((list 'comparison-expr $2 $1 $3)))
+	     ((binop-expr |>|  binop-expr)  . ((list 'comparison-expr $2 $1 $3)))
+	     ((binop-expr |>=| binop-expr)  . ((list 'comparison-expr $2 $1 $3)))
+	     ((binop-expr |!=| binop-expr)  . ((list 'comparison-expr $2 $1 $3)))
+	     ((binop-expr |<>| binop-expr)  . ((list 'comparison-exr '!= $1 $3))) ;; <> is same as !=
+	     ((binop-expr |==| binop-expr)  . ((list 'comparison-expr $2 $1 $3)))
+	     ((binop-expr |in| binop-expr)  . ((list 'binary-expr     $2 $1 $3)))
+	     ((binop-expr |is| binop-expr)  . ((list 'binary-expr     $2 $1 $3))))
  (binop-expr (binop2-expr) ($1) (:precedence or))
 
  (binop2-expr :or
 	      atom
-	      ((atom trailer+) . ((parse-trailers (list 'trailers $1 $2))))
-	      ((binop2-expr +  binop2-expr) . ((list 'binary $2 $1 $3)))
-	      ((binop2-expr -  binop2-expr) . ((list 'binary $2 $1 $3)))
-	      ((binop2-expr *  binop2-expr) . ((list 'binary $2 $1 $3)))
-	      ((binop2-expr /  binop2-expr) . ((list 'binary $2 $1 $3)))
-	      ((binop2-expr ** binop2-expr) . ((list 'binary $2 $1 $3)))
-	      ((binop2-expr // binop2-expr) . ((list 'binary $2 $1 $3)))
+	      ((atom trailer+)              . ((parse-trailers (list 'trailers $1 $2))))
+	      ((binop2-expr |+|  binop2-expr) . ((list 'binary-expr $2 $1 $3)))
+	      ((binop2-expr |-|  binop2-expr) . ((list 'binary-expr $2 $1 $3)))
+	      ((binop2-expr |*|  binop2-expr) . ((list 'binary-expr $2 $1 $3)))
+	      ((binop2-expr |/|  binop2-expr) . ((list 'binary-expr $2 $1 $3)))
+	      ((binop2-expr |**| binop2-expr) . ((list 'binary-expr $2 $1 $3)))
+	      ((binop2-expr |//| binop2-expr) . ((list 'binary-expr $2 $1 $3)))
 
-	      ((binop2-expr << binop2-expr) . ((list 'binary $2 $1 $3)))
-	      ((binop2-expr >> binop2-expr) . ((list 'binary $2 $1 $3)))
-	      ((binop2-expr &  binop2-expr) . ((list 'binary $2 $1 $3)))
-	      ((binop2-expr ^  binop2-expr) . ((list 'binary $2 $1 $3)))
-	      ((binop2-expr \| binop2-expr) . ((list 'binary $2 $1 $3)))
-	      (( ~ binop2-expr) . ((list 'unary $1 $2)))
-	      ((binop2-expr %  binop2-expr) . ((list 'binary $2 $1 $3)))
-	      )
+	      ((binop2-expr |<<| binop2-expr) . ((list 'binary-expr $2 $1 $3)))
+	      ((binop2-expr |>>| binop2-expr) . ((list 'binary-expr $2 $1 $3)))
+	      ((binop2-expr |&|  binop2-expr) . ((list 'binary-expr $2 $1 $3)))
+	      ((binop2-expr |^|  binop2-expr) . ((list 'binary-expr $2 $1 $3)))
+	      ((binop2-expr |\|| binop2-expr) . ((list 'binary-expr $2 $1 $3)))
+	      ((            |~|  binop2-expr) . ((list 'unary-expr     $1 $2)))
+	      ((binop2-expr |%|  binop2-expr) . ((list 'binary-expr $2 $1 $3))))
  
  ;; some with explicit precedences
  
- (binop-expr (binop-expr not in binop-expr)
-	     ((list 'binary '|not in| $1 $4)) (:precedence in)) ;; was binop2
- (binop-expr (binop-expr is not binop-expr)
-	     ((list 'binary '|is not| $1 $4)) (:precedence is)) ;; was binop2
+ (binop-expr (binop-expr |not| |in| binop-expr)
+	     ((list 'binary-expr '|not in| $1 $4)) (:precedence |in|)) ;; was binop2
+ (binop-expr (binop-expr |is| |not| binop-expr)
+	     ((list 'binary-expr '|is not| $1 $4)) (:precedence |is|)) ;; was binop2
  
- (binop2-expr (+ binop2-expr) ((list 'unary $1 $2))
+ (binop2-expr (|+| binop2-expr) ((list 'unary-expr $1 $2))
 	      (:precedence unary-plusmin))
- (binop2-expr (- binop2-expr) ((list 'unary $1 $2))
+ (binop2-expr (|-| binop2-expr) ((list 'unary-expr $1 $2))
 	      (:precedence unary-plusmin))
 
  (atom :or
-       ((|(| comma? |)|) . ((list 'tuple nil)))
+       ((|(| comma? |)|)        . ((list 'tuple-expr nil)))
        ((|(| testlist-gexp |)|) . ($2))
 
-       ((|[| |]|) . ((list 'list nil)))
-       ((|[| listmaker |]|) . ($2))
-       ((|{| |}|) . ((list 'dict nil)))
-       ((|{| dictmaker |}|) . ((list 'dict $2)))
-       ((|`| testlist1 |`|) . ((list 'backticks $2)))
-       ((identifier) . ((list 'identifier $1)))
-       ((number) . ($1))
-       ((string+) . ($1)))
+       ((|[|           |]|)    . ((list 'list-expr nil)))
+       ((|[| listmaker |]|)    . ($2))
+       ((|{|           |}|)    . ((list 'dict-expr nil)))
+       ((|{| dictmaker |}|)    . ((list 'dict-expr $2)))
+       ((|`| testlist1 |`|)    . ((list 'backticks-expr $2)))
+       ((identifier)           . ((list 'identifier-expr $1)))
+       ((number)               . ($1))
+       ((string+)              . ($1)))
 
- (string+ (string) ($1))  ;; join consecutive string literals: "s" "b" => "sb"
+ (string+ (string) ($1))  ;; consecutive string literals are joined: "s" "b" => "sb"
  (string+ (string+ string) ((concatenate 'string $1 $2))) 
 
- (listmaker (test list-for) ((list 'list-compr $1 $2)))
- (listmaker (test comma--test* comma?) ((list 'list (cons $1 $2))))
+ (listmaker (test list-for) ((list 'list-compr-expr $1 $2)))
+ (listmaker (test comma--test* comma?) ((list 'list-expr (cons $1 $2))))
  (:comma--test*)
 
-
- (testlist-gexp (test gen-for) (`(tuple (,$1 . ,$2))))
- (testlist-gexp (test comma--test* comma?) ((if (or $2 $3)
-						`(tuple (,$1 . ,$2))
-					      $1)))
+ (testlist-gexp (test gen-for)             (`(tuple-expr (,$1 . ,$2))))
+ (testlist-gexp (test comma--test* comma?) ((if (or $2 $3) `(tuple-expr (,$1 . ,$2)) $1)))
  
- (lambdef (lambda parameter-list5 |:| test)
-	  (`(,$1 
+ (lambdef (|lambda|                 |:| test) ((list 'lambda-expr '(nil nil nil nil) $3)))
+ (lambdef (|lambda| parameter-list5 |:| test)
+	  (`(lambda-expr 
 	     ,(loop for p in $2 when (symbolp p) collect p)
 	     ,(loop for p in $2 when (consp p) collect p)
 	     ,$4)))
- (lambdef (lambda                 |:| test) ((list $1 '(nil nil nil nil) $3)))
 
  (trailer+ :or
-	   ((|(| arglist? |)|) . ((list (list 'call $2))))
-	   ((|[| subscriptlist |]|) . ((list (list 'subscription $2))))
-	   ((|.| identifier) . (`((attributeref (identifier ,$2)))))
-	   ((trailer+ |(| arglist? |)|) . ((append $1 (list (list 'call $3)))))
-	   ((trailer+ |[| subscriptlist |]|) . ((append $1 (list (list 'subscription $3)))))
-	   ((trailer+ |.| identifier) . ((append $1 `((attributeref (identifier ,$3)))))))
-
+	   ((|(| arglist?      |)|)          . ((list (list 'call-expr $2))))
+	   ((|[| subscriptlist |]|)          . ((list (list 'subscription-expr $2))))
+	   ((|.| identifier)                 . (`((attributeref-expr (identifier ,$2)))))
+	   ((trailer+ |(| arglist? |)|)      . ((append $1 (list (list 'call-expr $3)))))
+	   ((trailer+ |[| subscriptlist |]|) . ((append $1 (list (list 'subscription-expr $3)))))
+	   ((trailer+ |.| identifier)        . ((append $1 `((attributeref-expr
+							      (identifier-expr ,$3)))))))
 
  (:arglist?)
- (subscriptlist (subscript comma--subscript* comma?) ((if (or $2 $3)
-							  `(tuple (,$1 . ,$2))
-							$1)))
+ (subscriptlist (subscript comma--subscript* comma?)
+		((if (or $2 $3) `(tuple (,$1 . ,$2)) $1)))
  (:comma--subscript*)
  (comma--subscript (|,| subscript) ($2))
  (subscript :or
 	    |...|
 	    test
-	    ((test? |:| test? sliceop?) . (`(slice ,$1 ,$3 ,$4))))
+	    ((test? |:| test? sliceop?) . (`(slice-expr ,$1 ,$3 ,$4))))
  (:sliceop?)
  (sliceop (|:| test?) ($2))
  (:test?)
 
- (exprlist (expr exprlist2) ((if $2
-				 (list 'tuple
-				       (cons $1 (butlast $2))
-				       #+(or)(car (last $2)))
-			       $1)))
+ (exprlist (expr exprlist2) ((if $2 (list 'tuple (cons $1 (butlast $2))) $1)))
  (exprlist2 :or
-	    (() . (nil))
-	    ((|,|) . ((list t)))
+	    (()                   . (nil))
+	    ((|,|)                . ((list t)))
 	    ((|,| expr exprlist2) . ((list $2 $3))))
 
- (testlist (test testlist2) (#+(or)(break "testlist: ~A -- ~A" $1 $2)
-			     (if $2
-				   `(tuple ,(cons $1 $2))
-			       $1)
-			     #+(or)(list 'testlist
-					 (cons $1 (butlast $2))
-					 (car (last $2)))))
+ (testlist (test testlist2) ((if $2 `(tuple ,(cons $1 $2)) $1)))
  (testlist2 :or
-	    (() . (nil))
-	    ((|,|) . ((list t)))
+	    (()                   . (nil))
+	    ((|,|)                . ((list t)))
 	    ((|,| test testlist2) . ((cons $2 $3))))
 
-
  (testlist-safe :or
-		((test) . ($1))
+		((test)                     . ($1))
 		((test comma--test+ comma?) . ((list $1 $2))))
  (:comma--test+)
 
- (dictmaker :or
-	    ;;((test |:| test comma?) . ((cons $1 $3)))
-	    ((test |:| test comma--test--\:--test* comma?) . ((cons (cons $1 $3) $4))))
+ (dictmaker (test |:| test comma--test--\:--test* comma?) ((cons (cons $1 $3) $4)))
  (:comma--test--\:--test*)
  (comma--test--\:--test (|,| test |:| test) ((cons $2 $4)))
  
- (classdef (class identifier inheritance |:| suite)
-	   (`(classdef (identifier ,$2) ,$3 ,$5)))
+ (classdef (|class| identifier inheritance |:| suite)
+	   (`(classdef-stmt (identifier ,$2) ,$3 ,$5)))
 
- (inheritance (|(| testlist |)|) ((if (eq (car $2) 'tuple)
-					   $2
-					 `(tuple (,$2)))))
- (inheritance () ('(tuple nil)))
+ (inheritance (                ) ('()))
+ (inheritance (|(| testlist |)|) ((if (eq (car $2) 'tuple) $2 `(tuple (,$2)))))
  
  (arglist (argument--comma* arglist-2) ((append $1 $2)))
 
  (arglist-2 :or
-	    ;; optional comma is semantically meaningless
-	    ((argument comma?) . ((list $1)))
-	    ((|*| test comma--**--test?) . ((append (list (list $1 $2))
-						    $3
-						    nil)))
-	    ((|**| test) . ((list (list $1 $2)))))
+	    ((argument comma?)           . ((list $1))) ;; optional comma semantically meaningless
+	    ((|*| test comma--**--test?) . ((append (list (list $1 $2)) $3)))
+	    ((|**| test)                 . ((list (list $1 $2)))))
  (:argument--comma*)
  (argument--comma (argument |,|) ($1))
  (:comma--**--test?)
@@ -441,25 +416,21 @@
 
  (argument (test) ((list 'pos $1)))
  
- #+(or) ;; kw = val: kw must be identifier
- (argument (test = test) ((list 'key $1 $3)))
- 
- (argument (identifier = test) ((list 'key $1 $3)))
+ (argument (identifier |=| test) ((list 'key $1 $3)))
  (argument (test gen-for) ((list 'gen-for $1 $2)))
 
  (list-iter :or list-for list-if)
- (list-for (for exprlist in testlist-safe list-iter?) 
+ (list-for (|for| exprlist |in| testlist-safe list-iter?) 
 	   (`((list-for-in ,$2 ,$4) . ,$5)))
  (:list-iter?)
- (list-if (if test list-iter?) (`((list-if ,$2) . ,$3)))
+ (list-if (|if| test list-iter?) (`((list-if ,$2) . ,$3)))
+ 
  (gen-iter :or gen-for gen-if)
- (gen-for (for exprlist in test gen-iter?))
- (gen-if (if test gen-iter?) ((list $1 $2 $3)))
+ (gen-for (|for| exprlist |in| test gen-iter?) (`(gen-for-in ,$2 ,$4 ,$5)))
+ (gen-if  (|if| test gen-iter?)                (`(gen-if ,$2 ,$3)))
  (:gen-iter?)
- (testlist1 (test |,--test*|) ((if $2
-				   `(tuple (,$1 . ,$2))
-				 $1))))
-
+ 
+ (testlist1 (test |,--test*|) ((if $2 `(tuple (,$1 . ,$2)) $1))))
 
 (build-grammar python-grammar t t)
 
@@ -490,6 +461,7 @@
 
 (defvar *lex-debug* nil)
 (defvar *tab-width-spaces* 8)
+
 
 
 (defun make-py-lexer (&key (read-chr   (lambda () (read-char *standard-input* nil nil t)))
@@ -557,10 +529,10 @@ READ-CHAR."
 		    (lex-return number (read-number c)))
 
 		   ((identifier-char1-p c)
-		    (let* ((read-id (read-identifier c))
-			   (token (intern read-id #.*package*)))
+		    (let ((token (read-identifier c)))
+		      (assert (symbolp token))
 		      
-		      (cond ((member token '(u r ur) :test #'string-equal)
+		      (cond ((member token '(u r ur U R UR))
 			     ;; u"abc"    : `u' stands for `Unicode string'
 			     ;; u + b     : `u' is an identifier
 			     ;; r"s/f\af" : `r' stands for `raw string'
@@ -573,16 +545,16 @@ READ-CHAR."
 			       (if (char-member ch '(#\' #\"))
 				   
 				   (let ((is-unicode
-					  (member token '(u ur) :test #'string-equal))
+					  (member token '(u ur U UR)))
 					 (is-raw
-					  (member token '(r ur) :test #'string-equal)))
+					  (member token '(r ur R UR))))
 				     (lex-return string
 						 (read-string ch :unicode is-unicode :raw is-raw)))
 				 (progn
 				   (when ch (unread-chr ch))
 				   (lex-return identifier token)))))
 			    
-			    ((member token *reserved-words* :test #'eq)
+			    ((reserved-word-p token)
 			     (when *lex-debug*
 			       (format t "lexer returns: reserved word ~s~%" token))
 			     (return-from lexer
@@ -591,7 +563,7 @@ READ-CHAR."
 			    (t
 			     #+(or)(when *lex-debug*
 			       (format t "lexer returns: identifier: ~s~%" read-id))
-			     (lex-return identifier read-id)))))
+			     (lex-return identifier token)))))
 
 		   ((char-member c '(#\' #\"))
 		    (lex-return string (read-string c)))
@@ -678,6 +650,10 @@ READ-CHAR."
   "Returns a character, or NIL on eof/error"
   (funcall *lex-read-char*))
 
+(define-compiler-macro read-chr-nil ()
+  `(locally (declare (optimize (speed 3) (safety 1) (debug 0)))
+     (funcall *lex-read-char*)))
+
 (defun read-chr-error ()
   "Return a character, or raise a SyntaxError"
   (or (read-chr-nil)
@@ -687,103 +663,148 @@ READ-CHAR."
   (funcall *lex-unread-char* ch))
 
 
-(defmacro char-member (ch list)
+(defun char-member (ch list)
+  (and ch
+       (member ch list :test #'char=)))
+
+(define-compiler-macro char-member (ch list)
   (let ((char '#:char))
     `(let ((,char ,ch))
        (and ,char (member ,char ,list :test #'char=)))))
 
+(defun reserved-word-p (sym)
+  (let ((ht (load-time-value
+	     
+	     #+allegro ;; use a hashtable without values
+	     (let ((ht (make-hash-table :test 'eq :values nil)))
+	       (dolist (w *reserved-words*) (excl:puthash-key w ht))
+	       ht)
+	     
+	     #-allegro ;; use regular hashtable
+	     (let ((ht (make-hash-table :test 'eq)))
+	       (dolist (w *reserved-words*) (setf (gethash w ht) t))
+	       ht))))
+    
+    (gethash (the symbol sym) ht)))
+  
 
 ;; Identifier
 
-(defmacro identifier-char1-p (c)
-  "Says whether C is a valid character to start an identifier with. ~@
-   C must be either a character or nil."
-  (let ((ch '#:ch))
+(defun identifier-char1-p (c)
+  "Is C a character with which an identifier can start?
+C must be either a character or NIL."
+  (and c
+       (or (alpha-char-p c)
+	   (char= c #\_))))
+
+
+
+(defun identifier-char2-p (c)
+  "Can C occur in an identifier as second or later character?
+C must be either a character or NIL."
+  (and c
+       (or (alphanumericp c)
+	   (char= c #\_))))
+
+(define-compiler-macro identifier-char2-p (c)
+  (let ((ch '#:ch)
+	(code '#:code)
+	(arr #.(loop with arr = (make-array 128 :element-type 'bit :initial-element 0)
+		   for ch-code from 0 below 128
+		   for ch = (code-char ch-code)
+		   do (setf (aref arr ch-code) (if (or (alphanumericp ch)
+						       (char= ch #\_))
+						   1 0))
+		   finally (return arr))))
     `(let ((,ch ,c))
        (and ,ch
-	    (or (alpha-char-p ,ch)
-		(char= ,ch #\_))))))
-
-(defmacro identifier-char2-p (c)
-  "Says whether C is a valid character to occur in an identifier as ~@
-   second or later character. C must be either a character or nil."
-  (let ((ch '#:ch))
-    `(let ((,ch ,c))
-       (and ,ch
-	    (or (alphanumericp ,ch)
-		(char= ,ch #\_))))))
+	    (let ((,code (char-code ,ch)))
+	      (and (< ,code 128)
+		   (= (aref ,arr ,code) 1)))))))
 
 
-(defparameter *id-char-vec-length* 20)
-(defparameter *id-history-size* 20)
+(defconstant +id-history-size+ 15 "Number of previous identifiers to cache.")
+(defconstant +id-char-vec-length+ 15
+  "Cached vector for identifier, used for looking up identifier in cache
+before allocating a vector on its own.")
 
 (defun read-identifier (first-char)
-  "Returns the identifier read as string. ~@
-   Identifiers start start with an underscore or alphabetic character; ~@
-   second and further characters must be alphanumeric or underscore."
+  "Read an identifier (which is possibly a reserved word) and return it as a
+symbol. Identifiers start with an underscore or alphabetic character, while
+second and later characters must be alphanumeric or underscore."
   
-  ;; By caching the last returned identifiers, a lot less arrays have
-  ;; to be allocated.
+  ;; By caching the last returned identifiers, which are likely to
+  ;; recur, a lot less arrays have to be allocated.
   
+  (declare (optimize (speed 3) (safety 1) (debug 0)))
   (assert (identifier-char1-p first-char))
   
-  (let ((symbol-cache (load-time-value
-		       (make-array *id-history-size* :element-type 'symbol)))
+  (let ((symbol-cache (load-time-value (make-array +id-history-size+)))
+	(symbol-name-cache (load-time-value (make-array +id-history-size+)))
 	(symbol-cache-replace-ix (load-time-value (list 0)))
-	(char-vec     (load-time-value
-		       (make-array *id-char-vec-length* :element-type 'character
-				   :initial-element #\q ))))
+	(char-vec     (load-time-value (make-array +id-char-vec-length+ :element-type 'character))))
     
     (macrolet ((cache-symbol (s)
 		 (let ((sym '#:sym))
 		   `(let ((,sym ,s))
-		      (setf (aref symbol-cache (car symbol-cache-replace-ix)) ,sym)
-		      (when (= (incf (car symbol-cache-replace-ix)) *id-history-size*)
+		      (setf (svref symbol-cache (car symbol-cache-replace-ix)) ,sym)
+		      (setf (svref symbol-name-cache (car symbol-cache-replace-ix)) (symbol-name ,sym))
+		      (when (= (incf (car symbol-cache-replace-ix)) +id-history-size+)
 			(setf (car symbol-cache-replace-ix) 0))
 		      ,sym))))
 			 
       (loop
 	  for ch = first-char then (read-chr-nil)
-	  for i from 0 below *id-char-vec-length*
+	  for i from 0 below +id-char-vec-length+
 	  while (identifier-char2-p ch) do (setf (aref char-vec i) ch)
 	  finally
 	    (when (and ch (not (identifier-char2-p ch)))
 	      (unread-chr ch))
 	    (return
-	      (if (or (< i *id-char-vec-length*) (null ch)) ;; eof or other token following ID
-			
-		  (loop for ci from 0 below *id-history-size*
-		      when (string= (aref symbol-cache ci) char-vec :end2 i)
-		      return (aref symbol-cache ci)
+	      (if (or (< i +id-char-vec-length+) (null ch))
+
+		  ;; eof or other token following relatively short ID
+		  (loop for ci from 0 below +id-history-size+
+		      when (loop with cached-sym-str = (svref symbol-name-cache ci)
+			       initially (when (/= (length (the string cached-sym-str)) i)
+					   (return nil))
+			       for j from 0 below i
+			       unless (eql (the character (char cached-sym-str j))
+					   (the character (schar char-vec j)))
+			       return nil
+			       finally (return t))
+		      do (return (aref symbol-cache ci))
 		      finally
 			(return (loop with arr = (make-array i :element-type 'character)
 				    for j from 0 below i
-				    do (setf (aref arr j) (aref char-vec j))
+				    do (setf (schar arr j) (schar char-vec j))
 				    finally
-				      (return (cache-symbol (intern arr #.*package*))))))
+				      (return (cache-symbol (or (find-symbol arr #.*package*)
+								(intern arr #.*package*)))))))
 		
-		(loop with arr = (make-array (+ *id-char-vec-length* 5) 
+		(loop with arr = (make-array (+ +id-char-vec-length+ 5) 
 					     :element-type 'character
-					     :initial-element #\q
 					     :adjustable t
-					     :fill-pointer *id-char-vec-length*)
+					     :fill-pointer +id-char-vec-length+)
 		    initially (loop for i from 0 below i
-				  do (setf (aref arr i) (aref char-vec i)))
+				  do (setf (char arr i) (schar char-vec i)))
 		    for ch = (read-chr-nil)
 		    while (identifier-char2-p ch) do (vector-push-extend ch arr)
 		    finally (when ch (unread-chr ch))
 			    (return
-			      (loop for ci from 0 below *id-history-size*
-				  when (string= (aref symbol-cache ci) arr)
-				  return (aref symbol-cache ci)
+			      (loop for ci from 0 below +id-history-size+
+				  when (string= (svref symbol-cache ci) arr)
+				  return (svref symbol-cache ci)
 				  finally
-				    (return (cache-symbol (intern arr #.*package*))))))))))))
+				    (return (cache-symbol (or (find-symbol arr #.*package*)
+							      (intern arr #.*package*)))))))))))))
 
-#+(or) ;; Equivalent original code. Allocates an array for every identifier.
+#+(or) ;; Equivalent, but a bit slower, original code. Allocates an array for every identifier.
 (defun read-identifier (first-char)
   "Returns the identifier read as string. ~@
    Identifiers start start with an underscore or alphabetic character; ~@
    second and further characters must be alphanumeric or underscore."
+
   (assert (identifier-char1-p first-char))
   (let ((res (load-time-value
 	      (make-array 6 :element-type 'character
@@ -797,8 +818,9 @@ READ-CHAR."
 	while (identifier-char2-p c)
 	do (vector-push-extend c res)
 	finally (when c (unread-chr c)))
-    ;;(incf (aref *id-length* (length res)))
-    (intern (simple-string-from-vec res) #.*package*)))
+    
+    (or (find-symbol res #.*package*)
+	(intern (simple-string-from-vec res) #.*package*))))
 
 
 ;; String
@@ -1355,8 +1377,12 @@ is encountered, NIL is returned."
 
 (defgeneric parse-python-file (source)
   (:method ((s stream))
-	   (parse-python-with-lexer :read-chr   (lambda () (read-char s nil nil))
-				    :unread-chr (lambda (c) (unread-char c s))))
+	   (parse-python-with-lexer :read-chr   (lambda ()
+						  (declare (optimize (speed 3) (safety 1) (debug 0)))
+						  (read-char s nil nil))
+				    :unread-chr (lambda (c)
+						  (declare (optimize (speed 3) (safety 1) (debug 0)))
+						  (unread-char c s))))
   (:method (filename)
 	   (with-open-file (f filename :direction :input)
 	     (parse-python-file f))))
