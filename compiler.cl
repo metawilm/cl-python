@@ -4,12 +4,10 @@
 ;; parse-python-{file,string} corresponds to a macro defined below
 ;; that generates the corresponding Lisp code.
 ;; 
-;; Note that each AST node has a name ending in "-expr" or
+;; Note that each such AST node has a name ending in "-expr" or
 ;; "-stmt". There no is separate package for those symbols (should
 ;; there be?)
 
-
-(defvar *scope* nil "Current execution namespace.")
 
 (defmacro with-py-error-handlers (&body body)
   `(handler-bind
@@ -42,37 +40,182 @@
 ;; 
 ;; AST macros
 ;; 
+;; Lexical variables that keep internal Python state hidden from the
+;; user take the form +NAME+ while local variables that should not
+;; clash with Python's local variables take the form .NAME. 
+;; 
+;; The Python compiler uses its own kind of declaration to keep state
+;; in generated code. The declaration is named PYDECL.
+
+#+allegro 
+(eval-when (:compile :load :eval)
+  (sys:define-declaration pydecl (declaration env) nil :declare)
+  (defun get-pydecl (var env)
+    (cdr (assoc var (sys:declaration-information 'pydecl e) :test #'eq))))
+
+
+
+(defstruct comp-namespace kind locals)
+;; kind: one of (:module :function :class)
+
+(defun module-scope (scopes-list) 
+  (assert scopes-list)
+  (let ((ms (car (last scopes-list))))
+    (assert (eq (comp-namespace-kind ms) :module))
+    ms))
+
 
 (defmacro module-stmt (items)
-  ;; register module (its name, the namespace, etc)
-  (let* ((*scope* (make-namespace))
-	 (module (make-module :namespace *scope*)))
-    (progn ,@items)))
+  
+  ;; A module is translated into one lambda that creates and returns a
+  ;; module object. Executing the lambda might have side effects (like
+  ;; things being printed, other modules being modified, or perhaps a
+  ;; hard disk getting formatted).
+  
+  (let ((gv (module-global-vars items)))
+    
+    `(lambda ()
+       (let* ((+module-scope+ (make-module-namespace))
+	      (+module+ (make-module :namespace module-scope))
+	      (+module-global-var-names+ (make-array ,(length gv) :initial-contents ',gv))
+	      (+module-global-var-vals+  (make-array ,(length gv) :initial-element :unbound)))
+	 
+	 (locally (declare (pydecl (:module-global-var-names
+				    ,(make-array (length gv) :initial-contents ',gv))
+				   (:module-lexical-visible-vars ())
+				   (:inside-function nil)))
+	   ,@items
+	   +module+))))) ;; XXX if executing module failed, where to catch error?
 
 (defmacro suite-stmt (stmts)
-  (progn ,@stmts))
+  `(progn ,@stmts))
 
-(defmacro funcdef-stmt ..)
+(defmacro funcdef-stmt (decorators
+			name (&whole formal-args pos-args key-args *-arg **-arg)
+			suite
+			&environment e)
+  
+  (assert (eq (car name) 'identifier))
+  
+  (multiple-value-bind (arg-names local-names outer-scope-names global-names)
+      (funcdef-vars params suite)
+    
+    ;; Determine closed-over variables (present as local in enclosing
+    ;; functions). The other variables are globals.
+
+    (multiple-value-bind (closed-over-names global-names)
+	(loop
+	    with lex-vars = (get-pydecl :module-lexical-visible-vars e)
+	    
+	    for os-name in outer-scope-names
+	    if (member os-name lex-vars) 
+	    collect os-name into closed-overs
+	    else collect os-name into globals
+	    
+	    finally (return (values closed-overs globals)))
+      
+      (multiple-value-bind (simple-func-args destruct-statement)
+	  ;; replace: def f( (x,y), z):  ..
+	  ;;; by:     def f( _tmp , z):  (x,y) = _tmp; ..
+	  (simplify-arguments formal-args)
+	
+	`(let ((.func.
+		(make-py-function
+		 :name ',(second name)
+		 :locals ',local-names
+		 :function (lambda ,simple-func-args
+			     (let ,(loop for loc in locals collect `(,loc :unbound))
+			       ,destruct-statement
+			       (locally
+				   (declare 
+				    (pydecl (:function-variables (:global ',global-names)
+								 (:closed-over ',closed-overs)
+								 (:local ',local-names))
+					    (:inside-function t)))
+				 ,suite))))))
+	   (assign-expr .func. (,name)))))))
+
+(defmacro assign-expr (val targets &environment e)
+  ;; XXX check order of evaluation
+  (let* ((in-func (get-pydecl :inside-function e))
+	 (func-vars (and in-func (get-pydecl :function-variables e)))
+	 (func-var-globals (and func-vars (cdr (assoc :global func-vars))))
+	 (func-var-locals (and func-vars (cdr (assoc :local func-vars))))
+	 (func-var-closed-over (and func-vars (cdr (assoc :closed-over func-vars)))))
+    
+    `(let ((.val. ,val))
+       ,@(loop for tg in targets collect
+	       (ecase (car tg)
+		 (identifier (let ((name (second tg)))
+			       (cond ((or (member name func-var-locals)
+					  (member name func-var-closed-over))
+				      `(setq ,name .val))
+				     
+				    ((member name func-var-globals)
+				     (let ((ix (position name (get-pydecl :module-global-var-names))))
+				       (assert ix () "Variable ~A is global (?), but no ~
+                                                      entry in :module-global-var-names ~A ?!"
+					       name (get-pydecl :module-global-var-names))
+				       
+				       `(let ((old-val (svref +module-global-var-vals+ ,ix)))
+					  
+					  (cond ((typep old-val 'user-object)
+						 (if (py-data-descriptor-p old-val) ;; __set__
+						     (py-call-attribute-via-class old-val '__set__
+										  .val.)
+						   (setf (svref +module-global-var-vals+ ,ix) .val.)))
+						
+						(t
+						 (setf (svref +module-global-var-vals+ ,ix) .val.))))))
+				    
+				    ((or (member name func-var-locals)
+					 (member name func-var-closed-over))
+				     (let ((old-val ,name))
+				       `(cond ((typep old-val 'user-object)
+					       (if (py-data-descriptor-p old-val) ;; __set__
+						   (py-call-attribute-via-class old-val '__set__
+										.val.)
+						 (setf ,name .val.)))
+						
+					      (t
+					       (setf ,name .val.)))))
+				    
+				    (t (error :unexpected)))))
+		
+		 (subscription-expr (error 'todo))
+		 (attributeref-expr (error 'todo)))))))
+			
 (defmacro classdef-stmt ..)
 
 (defmacro identifier-expr (name)
-  `(namespace-lookup ,name))
+  (break "identifier at top-level?"))
 
-(defmacro assign-expr (val targets)
-  `(let ((val ,val))
-     ,@(loop for target in targets
-	   collect `(setf ,target ,val))))
+; #+(or)
+; (if *inside-function-body*
+;     (if (member name *
+; 		`(namespace-lookup ,name))
+	
+; 	(defmacro assign-expr (val targets)
+	  
+;   `(let ((val ,val))
+;      ,@(loop for target in targets
+; 	   collect (ecase (car target)
+; 		     (identifier 
+			   
+; 			   `(setf ,target ,val))))
 
-(defun (setf identifier-expr) (val name)
-  (setf (namespace-lookup ,name
+;(defun (setf identifier-expr) (val name)
+;  (setf (namespace-lookup ,name
 			  
-(defun (setf attributeref-expr) (val)
+;(defun (setf attributeref-expr) (val)
   
-  
+
 (defmacro augassign-expr (op place val)
   (assert (member (car place) '(tuple subscription-expr
 				attributeref-expr identifier-expr)))
-  `(let (place-obj-1 place-obj-2)
+  
+  `(let ,(when (member (car place) '(attributeref-expr subscription-expr))
+	   '(place-obj-1 place-obj-2))
      ,(case (car place)
 	(tuple (py-raise 'SyntaxError ;; perhaps check in parser
 			 "Augmented assignment to multiple places not possible ~
@@ -92,7 +235,7 @@
 	  `(or (funcall ,py-@= place-val-now ev-val) ;; returns true iff __i@@@__ found
 	       (let ((new-val (funcall ,py-@ place-val-now ev-val)))
 		 (assign-expr ev-val (,(ecase (car place)
-					 (identifier-expr ,place)
+					 (identifier-expr place)
 					 ((attributeref-expr subscription-expr)
 					  `(,(car place) place-obj-1 place-obj-2)))))))))))
 
@@ -106,28 +249,28 @@
 
 (defmacro for-in-stmt (target source suite else-suite)
   `(catch 'break
-     (let* ((take-else t)
-	    (f (lambda (x)
-		  (setf take-else nil)
-		  (assign-expr x (,target))
+     (let* ((.take-else. t)
+	    (.f. (lambda (.x.)
+		  (setf .take-else. nil)
+		  (assign-expr .x. (,target))
 		  (catch 'continue
 		    ,suite))))
-       (declare (dynamic-extent f))
-       (map-over-py-object f ,source))
-     (when (and take-else ,else-suite)
-       ,eval-suite)))
+       (declare (dynamic-extent .f.))
+       (map-over-py-object .f. ,source))
+     (when (and .take-else. ,else-suite)
+       ,else-suite)))
 
 (defmacro while-stmt (test suite else-suite)
   `(tagbody
     :break
      (loop
-	 with take-else = t
+	 with .take-else. = t
 	 while (py-val->lisp-bool ,test)
 	 do (tagbody
 	     :continue
-	      (setf take-else nil)
+	      (setf .take-else. nil)
 	      ,suite)
-	 finally (when (and (not taken) ,else-suite)
+	 finally (when (and .take-else. ,else-suite)
 		   ,else-suite)))) 
 
 (defmacro break-stmt ()
@@ -137,13 +280,18 @@
   `(go :continue))
 
 (defmacro return-stmt (val)
-  `(return-from :function-body val))
+  `(return-from :function-body ,val))
        
 (defmacro yield-stmt ..)
 (defmacro try-except-stmt ..)
 (defmacro try-finally-stmt ..)
 (defmacro print-stmt ..)
-(defmacro global-stmt ..)
+
+(defmacro global-stmt (names)
+  (if *inside-function-body*
+      (loop for n in names do (push n *function-globals*))
+    (warn "Bogus `global' statement: not inside a function")))
+   
 (defmacro exec-stmt ..)
 (defmacro assert-stmt ..)
 
@@ -308,15 +456,4 @@ where: PARAMS : the formal parameters
   :walk-lists-only t)
       
       (values params locals outer-scope globals))) )
-
-
-
-
-
-
-
-
-
-
-
 
