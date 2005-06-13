@@ -9,32 +9,6 @@
 ;; there be?)
 
 
-(defmacro with-py-error-handlers (&body body)
-  `(handler-bind
-       ((division-by-zero
-	 (lambda (c)
-	   (declare (ignore c))
-	   (py-raise 'ZeroDivisionError "Division or modulo by zero")))
-	
-	#+allegro
-	(excl:synchronous-operating-system-signal
-	 (lambda (c)
-	   (when (string= (slot-value c 'excl::format-control)
-			  "~1@<Stack overflow (signal 1000)~:@>")
-	     (py-raise 'RuntimeError "Stack overflow"))))
-	
-	#+allegro
-	(excl:interrupt-signal
-	 (lambda (c)
-	   (let ((fa (slot-value c 'excl::format-arguments)))
-	     (when (and (listp fa)
-			(string= (second fa) "Keyboard interrupt"))
-	       (py-raise 'KeyboardInterrupt "Keyboard interrupt")))))
-	
-	;; more?
-	)
-     ,@body))
-
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; 
@@ -48,42 +22,42 @@
 ;; in generated code. The declaration is named PYDECL.
 
 #+allegro 
-(eval-when (:compile :load :eval)
-  (sys:define-declaration pydecl (declaration env) nil :declare)
-  (defun get-pydecl (var env)
-    (cdr (assoc var (sys:declaration-information 'pydecl e) :test #'eq))))
+(eval-when (:compile :load :eval) ;; ??
+  (sys:define-declaration
+      pydecl (&rest property-pairs) nil :declare
+      (lambda (declaration env)
+	(values :declare
+		(cons 'pydecl
+		      (nconc (cdr declaration)
+			     (sys:declaration-information 'pydecl env)))))))
 
+#+allegro
+(defun get-pydecl (var env)
+  (cdr (assoc var (sys:declaration-information 'pydecl e) :test #'eq)))
 
-
-(defstruct comp-namespace kind locals)
-;; kind: one of (:module :function :class)
-
-(defun module-scope (scopes-list) 
-  (assert scopes-list)
-  (let ((ms (car (last scopes-list))))
-    (assert (eq (comp-namespace-kind ms) :module))
-    ms))
+#+allegro
+(defmacro with-pydecl (pairs &body body)
+  `(locally (declare (pydecl ,@pairs))
+     ,@body))
 
 
 (defmacro module-stmt (items)
   
   ;; A module is translated into one lambda that creates and returns a
-  ;; module object. Executing the lambda might have side effects (like
-  ;; things being printed, other modules being modified, or perhaps a
-  ;; hard disk getting formatted).
+  ;; module object. Executing the lambda, i.e. importing the module,
+  ;; might have all kinds of side effects.
   
   (let ((gv (module-global-vars items)))
     
     `(lambda ()
        (let* ((+module-scope+ (make-module-namespace))
-	      (+module+ (make-module :namespace module-scope))
+	      (+module+       (make-module :namespace module-scope))
 	      (+module-global-var-names+ (make-array ,(length gv) :initial-contents ',gv))
 	      (+module-global-var-vals+  (make-array ,(length gv) :initial-element :unbound)))
-	 
-	 (locally (declare (pydecl (:module-global-var-names
-				    ,(make-array (length gv) :initial-contents ',gv))
-				   (:module-lexical-visible-vars ())
-				   (:inside-function nil)))
+
+	 (with-pydecl ((:module-global-var-names ,(make-array (length gv) :initial-contents gv))
+		       (:module-lexical-visible-vars ())
+		       (:inside-function nil))
 	   ,@items
 	   +module+))))) ;; XXX if executing module failed, where to catch error?
 
@@ -104,14 +78,10 @@
     ;; functions). The other variables are globals.
 
     (multiple-value-bind (closed-over-names global-names)
-	(loop
-	    with lex-vars = (get-pydecl :module-lexical-visible-vars e)
-	    
+	(loop with lex-vars = (get-pydecl :module-lexical-visible-vars e)
 	    for os-name in outer-scope-names
-	    if (member os-name lex-vars) 
-	    collect os-name into closed-overs
+	    if (member os-name lex-vars) collect os-name into closed-overs
 	    else collect os-name into globals
-	    
 	    finally (return (values closed-overs globals)))
       
       (multiple-value-bind (simple-func-args destruct-statement)
@@ -126,108 +96,78 @@
 		 :function (lambda ,simple-func-args
 			     (let ,(loop for loc in locals collect `(,loc :unbound))
 			       ,destruct-statement
-			       (locally
-				   (declare 
-				    (pydecl (:function-variables (:global ',global-names)
-								 (:closed-over ',closed-overs)
-								 (:local ',local-names))
-					    (:inside-function t)))
+			       (with-pydecl ((:function-variables (:global ',global-names)
+								  (:closed-over ',closed-overs)
+								  (:local ',local-names))
+					     (:inside-function t))
 				 ,suite))))))
 	   (assign-expr .func. (,name)))))))
 
 (defmacro assign-expr (val targets &environment e)
   ;; XXX check order of evaluation
-  (let* ((in-func (get-pydecl :inside-function e))
-	 (func-vars (and in-func (get-pydecl :function-variables e)))
-	 (func-var-globals (and func-vars (cdr (assoc :global func-vars))))
-	 (func-var-locals (and func-vars (cdr (assoc :local func-vars))))
+  (let* ((in-func              (get-pydecl :inside-function e))
+	 (func-vars            (and in-func (get-pydecl :function-variables e)))
+	 (func-var-locals      (and func-vars (cdr (assoc :local func-vars))))
 	 (func-var-closed-over (and func-vars (cdr (assoc :closed-over func-vars)))))
     
-    `(let ((.val. ,val))
+    `(let ((val ,val))
        ,@(loop for tg in targets collect
 	       (ecase (car tg)
-		 (identifier (let ((name (second tg)))
-			       (cond ((or (member name func-var-locals)
-					  (member name func-var-closed-over))
-				      `(setq ,name .val))
-				     
-				    ((member name func-var-globals)
-				     (let ((ix (position name (get-pydecl :module-global-var-names))))
-				       (assert ix () "Variable ~A is global (?), but no ~
-                                                      entry in :module-global-var-names ~A ?!"
-					       name (get-pydecl :module-global-var-names))
-				       
-				       `(let ((old-val (svref +module-global-var-vals+ ,ix)))
-					  
-					  (cond ((typep old-val 'user-object)
-						 (if (py-data-descriptor-p old-val) ;; __set__
-						     (py-call-attribute-via-class old-val '__set__
-										  .val.)
-						   (setf (svref +module-global-var-vals+ ,ix) .val.)))
-						
-						(t
-						 (setf (svref +module-global-var-vals+ ,ix) .val.))))))
-				    
-				    ((or (member name func-var-locals)
-					 (member name func-var-closed-over))
-				     (let ((old-val ,name))
-				       `(cond ((typep old-val 'user-object)
-					       (if (py-data-descriptor-p old-val) ;; __set__
-						   (py-call-attribute-via-class old-val '__set__
-										.val.)
-						 (setf ,name .val.)))
-						
-					      (t
-					       (setf ,name .val.)))))
-				    
-				    (t (error :unexpected)))))
-		
-		 (subscription-expr (error 'todo))
-		 (attributeref-expr (error 'todo)))))))
+		 
+		 (identifier
+		  (let ((name (second tg)))
+		    (if (or (member name func-var-locals) (member name func-var-closed-over))
+			`(setq ,name val)
+		      (let ((ix (position name (get-pydecl :module-global-var-names))))
+			(assert ix () "Variable ~A is global (?), but no ~
+                                            entry in :module-global-var-names ~A ?!"
+				name (get-pydecl :module-global-var-names))
+			`(setf (svref +module-global-var-vals+ ,ix) val)))))
+		 
+		 (subscription-expr
+		  (destructuring-bind (primary subs) (cdr tg)
+		    ;; TODO: if prim is known/guessed to be dict/list/tuple, inline
+		    `(setf (py-subscription ,prim ,subs) val)))
+		 
+		 (attributeref-expr
+		  (destructuring-bind (primary attr) (cdr subscription-expr)
+		    `(setf (py-attributeref ,primary ,attr) val))))))))
 			
 (defmacro classdef-stmt ..)
 
-(defmacro identifier-expr (name)
-  (break "identifier at top-level?"))
-
-; #+(or)
-; (if *inside-function-body*
-;     (if (member name *
-; 		`(namespace-lookup ,name))
-	
-; 	(defmacro assign-expr (val targets)
+(defmacro identifier-expr (name &environment e)
+  (let* ((in-func              (get-pydecl :inside-function e))
+	 (func-vars            (and in-func (get-pydecl :function-variables e)))
+	 (func-var-locals      (and func-vars (cdr (assoc :local func-vars))))
+	 (func-var-closed-over (and func-vars (cdr (assoc :closed-over func-vars)))))
+    
+    (cond ((or (member name func-var-locals) (member name func-var-closed-over))
+	   name)
 	  
-;   `(let ((val ,val))
-;      ,@(loop for target in targets
-; 	   collect (ecase (car target)
-; 		     (identifier 
-			   
-; 			   `(setf ,target ,val))))
-
-;(defun (setf identifier-expr) (val name)
-;  (setf (namespace-lookup ,name
-			  
-;(defun (setf attributeref-expr) (val)
+	  ((member name func-var-globals)
+	   (let ((ix (position name (get-pydecl :module-global-var-names))))
+	     (assert ix () "Variable ~A is global (?), but no ~
+                            entry in :module-global-var-names ~A ?!"
+		     name (get-pydecl :module-global-var-names))
+	     `(svref +module-global-var-vals+ ,ix))))))
   
 
 (defmacro augassign-expr (op place val)
-  (assert (member (car place) '(tuple subscription-expr
-				attributeref-expr identifier-expr)))
-  
-  `(let ,(when (member (car place) '(attributeref-expr subscription-expr))
-	   '(place-obj-1 place-obj-2))
-     ,(case (car place)
-	(tuple (py-raise 'SyntaxError ;; perhaps check in parser
-			 "Augmented assignment to multiple places not possible ~
-                          (got: ~A)" `(,place ,op ,val)))
-	
-	((subscription-expr attributeref-expr)
-	 `(setf place-obj-1 ,(second place)
-		place-obj-2 ,(third place))))
+  (when (eq (car place) 'tuple)
+    (py-raise 'SyntaxError ;; perhaps check in parser
+	      "Augmented assignment to multiple places not possible (got: ~A)"
+	      `(,place ,op ,val)))
+
+  (assert (member (car place) '(subscription-expr attributeref-expr identifier-expr)))
+
+  `(let* ,(when (member (car place) '(attributeref-expr subscription-expr))
+	    '((place-obj-1 ,(second place))
+	      (place-obj-2 ,(third place))))
      
      (let* ((ev-val ,val)
 	    (place-val-now ,(ecase (car place)
-			      (identifier-expr ,place)
+			      (identifier-expr
+			       ,place)
 			      ((attributeref-expr subscription-expr)
 			       `(,(car place) place-obj-1 place-obj-2)))))
        
@@ -245,51 +185,64 @@
 
 (defmacro if-stmt (if-clauses else-clause)
   `(cond ,@(loop for (cond body) in if-clauses
-	       collect `((py-val->lisp-bool ,cond) ,body))))
+	       collect `((py-val->lisp-bool ,cond) ,body))
+	 ,@(when else-clause
+	     `((t ,else-clause)))))
 
 (defmacro for-in-stmt (target source suite else-suite)
-  `(catch 'break
+  `(tagbody
      (let* ((.take-else. t)
 	    (.f. (lambda (.x.)
 		  (setf .take-else. nil)
 		  (assign-expr .x. (,target))
-		  (catch 'continue
-		    ,suite))))
+		  (tagbody 
+		    (locally (declare (pydecl (:inside-loop t)))
+		      ,suite)
+		   :continue))))
        (declare (dynamic-extent .f.))
        (map-over-py-object .f. ,source))
-     (when (and .take-else. ,else-suite)
-       ,else-suite)))
+     
+     ,(when else-suite `(when .take-else. ,else-suite))
+    :break))
 
 (defmacro while-stmt (test suite else-suite)
   `(tagbody
-    :break
      (loop
 	 with .take-else. = t
 	 while (py-val->lisp-bool ,test)
-	 do (tagbody
-	     :continue
-	      (setf .take-else. nil)
-	      ,suite)
-	 finally (when (and .take-else. ,else-suite)
-		   ,else-suite)))) 
+	 do (setf .take-else. nil)
+	    (tagbody
+	      (locally (declare (pydecl (:inside-loop t)))
+		,suite)
+	     :continue)
+	 finally (when .take-else.
+		   ,else-suite))
+    :break))
 
-(defmacro break-stmt ()
-  `(go :break))
+(defmacro break-stmt (&environment e)
+  (if (get-pydecl :inside-loop e)
+      `(go :break)
+    (py-raise 'SyntaxError "BREAK was found outside loop")))
 
 (defmacro continue-stmt ()
-  `(go :continue))
+  (if (get-pydecl :inside-loop e)
+      `(go :continue)
+    (py-raise 'SyntaxError "CONTINUE was found outside loop")))
 
 (defmacro return-stmt (val)
-  `(return-from :function-body ,val))
-       
+  (if (get-pydecl :inside-function e)
+      `(return-from :function-body ,val)
+    (py-raise 'SyntaxError "RETURN found outside function")))
+
 (defmacro yield-stmt ..)
 (defmacro try-except-stmt ..)
 (defmacro try-finally-stmt ..)
 (defmacro print-stmt ..)
 
 (defmacro global-stmt (names)
-  (if *inside-function-body*
-      (loop for n in names do (push n *function-globals*))
+  ;; GLOBAL statements are already determined and used at the moment a
+  ;; FUNCDEF-STMT is handled.
+  (unless (get-pydecl :inside-function e)
     (warn "Bogus `global' statement: not inside a function")))
    
 (defmacro exec-stmt ..)
@@ -457,3 +410,29 @@ where: PARAMS : the formal parameters
       
       (values params locals outer-scope globals))) )
 
+
+(defmacro with-py-error-handlers (&body body)
+  `(handler-bind
+       ((division-by-zero
+	 (lambda (c)
+	   (declare (ignore c))
+	   (py-raise 'ZeroDivisionError "Division or modulo by zero")))
+	
+	#+allegro
+	(excl:synchronous-operating-system-signal
+	 (lambda (c)
+	   (when (string= (slot-value c 'excl::format-control)
+			  "~1@<Stack overflow (signal 1000)~:@>")
+	     (py-raise 'RuntimeError "Stack overflow"))))
+	
+	#+allegro
+	(excl:interrupt-signal
+	 (lambda (c)
+	   (let ((fa (slot-value c 'excl::format-arguments)))
+	     (when (and (listp fa)
+			(string= (second fa) "Keyboard interrupt"))
+	       (py-raise 'KeyboardInterrupt "Keyboard interrupt")))))
+	
+	;; more?
+	)
+     ,@body))
