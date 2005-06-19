@@ -31,6 +31,8 @@
 		      (nconc (cdr declaration)
 			     (sys:declaration-information 'pydecl env)))))))
 
+;; Macrology to easy working with PYDECL context data.
+
 #+allegro
 (defun get-pydecl (var env)
   (cdr (assoc var (sys:declaration-information 'pydecl e) :test #'eq)))
@@ -54,6 +56,13 @@
 	      (+module+       (make-module :namespace module-scope))
 	      (+module-global-var-names+ (make-array ,(length gv) :initial-contents ',gv))
 	      (+module-global-var-vals+  (make-array ,(length gv) :initial-element :unbound)))
+	 
+	 ;; pre-set global variable names corresponding to built-ins
+	 (loop 
+	     for glob-var-name across +module-global-var-vals+
+	     for i from 0
+	     when (builtin-name-p glob-var-name)
+	     do (setf (aref +module-global-var-vals+ i) (builtin-name-value glob-var-name)))
 
 	 (with-pydecl ((:module-global-var-names ,(make-array (length gv) :initial-contents gv))
 		       (:module-lexical-visible-vars ())
@@ -93,14 +102,18 @@
 		(make-py-function
 		 :name ',(second name)
 		 :locals ',local-names
+		 
 		 :function (lambda ,simple-func-args
+			     
 			     (let ,(loop for loc in locals collect `(,loc :unbound))
 			       ,destruct-statement
-			       (with-pydecl ((:function-variables (:global ',global-names)
-								  (:closed-over ',closed-overs)
-								  (:local ',local-names))
-					     (:inside-function t))
-				 ,suite))))))
+			       
+			       (block :function-body
+				 (with-pydecl ((:function-variables (:global ',global-names)
+								    (:closed-over ',closed-overs)
+								    (:local ',local-names))
+					       (:inside-function t))
+				   ,suite)))))))
 	   (assign-expr .func. (,name)))))))
 
 (defmacro assign-expr (val targets &environment e)
@@ -190,6 +203,9 @@
 	     `((t ,else-clause)))))
 
 (defmacro for-in-stmt (target source suite else-suite)
+  ;; potential special cases:
+  ;;  - <dict>.{items,keys,values}()
+  ;;  - constant list/tuple/string
   `(tagbody
      (let* ((.take-else. t)
 	    (.f. (lambda (.x.)
@@ -244,20 +260,92 @@
   ;; FUNCDEF-STMT is handled.
   (unless (get-pydecl :inside-function e)
     (warn "Bogus `global' statement: not inside a function")))
-   
+
+(defmacro del-stmt (item)
+  (ecase (car item)
+    (tuple `(progn ,@(loop for x in (second item)
+			 collect `(del-stmt ,x))))
+    (subscription-expr `(py-del-attr ,@(cdr item)))
+    (identifier-expr (let* ((name (second item))
+			    (bi-name-p (builtin-name-p name))
+			    (bi-name-mod-ix (when bi-name
+					      (position name
+							(get-pydecl :module-global-var-names))))
+			    (mod-name-p (member name (get-pydecl :module-global-var-names))))
+		       
+		       (cond ((and (not (get-pydecl :inside-function))
+				   mod-name-p)
+			      `(setf (aref +module-global-var-vals+ ,bi-name-mod-ix)
+				 ,(if bi-name-p
+				      (builtin-name-value name)
+				    nil)))
+			     
+			     (XXX todo))))
+    (attributeref-expr `(py-del-attr ,@(cdr item)))))
+		    
 (defmacro exec-stmt ..)
 (defmacro assert-stmt ..)
 
-(defmacro binary-expr ..)
-(defmacro binary-lazy-expr ..)
-(defmacro unary-expr ..)
-(defmacro comparison-expr ..)
-(defmacro tuple-expr ..)
-(defmacro list-expr ..)
+(defmacro binary-expr (op left right)
+  `(let ((.left. ,left)
+	 (.right. ,right))
+     ,(let ((py-@ (todo op)))
+	(if (member op '(+ - * /))
+	    `(if (and (numberp .left.)
+		      (numberp .right.))
+		 (,op .left. .right.)
+	       (,py-@ .left. .right.))
+	  (,py-@ .left. .right.)))))
+
+       
+(defmacro binary-lazy-expr (op left right)
+  (ecase op
+    (or `(let ((.left. ,left))
+	   (if (py-val->lisp-bool .left.)
+	       .left
+	     (let ((.right. ,right))
+	       (if (py-val->lisp-bool .right.)
+		   .right.
+		 *py-false*)))))
+    
+    (and `(let ((.left. ,left))
+	    (if (py-val->lisp-bool .left.)
+		,right
+	      .left.)))))
+       
+(defmacro unary-expr (op item)
+  (ecase op
+    (+ `(let ((.item. ,item))
+	  (if (numberp .item.)
+	      .item.
+	    (py-+ .item.))))
+    (- `(let ((.item. ,item))
+	  (if (numberp .item.)
+	      (- .item.)
+	    (py-- .item.))))
+    (not `(todo))))
+	   
+(defmacro comparison-expr (cmp left right)
+  `(let ((.left. ,left)
+	 (.right. ,right))
+     (if (and (numberp .left.) (numberp .right.))
+	 (,cmp .left. .right)
+       ,(let ((py-@ (todo cmp)))
+	  `(,py-@ .left. .right.)))))
+	
+(defmacro tuple-expr (items)
+  `(make-tuple ,items)) 
+    
+(defmacro list-expr (items)
+  `(make-list ,items))
+
 (defmacro list-compr-expr ..)
 (defmacro dict-expr ..)
-(defmacro backticks-expr ..)
-(defmacro labmda-expr ..)
+
+(defmacro backticks-expr (item)
+  (py-repr ,item))
+   
+(defmacro lambda-expr ..)
 (defmacro call-expr ..)
 (defmacro subscription-expr ..)
 (defmacro attributeref-expr ..)
