@@ -77,9 +77,71 @@
 	       (second suite))
      (return-from :function-body :implicit-return))))
 
+(defun rewrite-generator-expr-ast (ast)
+  ;; rewrite:  (x*y for x in bar if y)
+  ;; into:     def f(src):  for x in src:  if y:  yield x*y
+  ;;           f(bar)
+  ;; values: (FUNCDEF ...)  (CALL-EXPR ..)
+  (assert (eq (car ast) 'generator-expr))
+  (destructuring-bind (item for-in/if-clauses) (cdr ast)
+  
+    (let ((first-for (pop for-in/if-clauses))
+	  (func-name '#:helper))
+      
+      (assert (eq (car first-for) 'gen-for-in))
+      
+      (let ((stuff (loop with res = `(yield-stmt ,item)
+		       for clause in (reverse for-in/if-clauses)
+		       do (setf res
+			    (ecase (car clause)
+			      (gen-for-in `(for-in-stmt
+					    ,(second clause) ,(third clause) ,res nil))
+			      (gen-if     `(if-stmt ((,(second clause) ,res)) nil))))
+		       finally (return res))))
+	
+	(values (rewrite-generator-funcdef-ast-w/o-params
+		 `(funcdef-stmt nil ,func-name
+				(((identifier-expr .first-source.)) nil nil nil)
+				(suite-stmt
+				 ((for-in-stmt ,(second first-for) .first-source.
+					       ,stuff nil))))
+		 :gen-maker-lambda-args '(.first-source.))
+		
+		(third first-for))))))
+
 (defun rewrite-generator-funcdef-ast (ast)
   (assert (eq (car ast) 'funcdef-stmt))
   (assert (funcdef-is-generator-p ast))
+  (destructuring-bind
+      (decorators fname args suite) (cdr ast)
+    (declare (ignore decorators fname suite))
+    (if (some #'identity args)
+	(rewrite-generator-funcdef-ast-w/params ast)
+      (rewrite-generator-funcdef-ast-w/o-params ast))))
+
+(defun rewrite-generator-funcdef-ast-w/params (ast)
+  (assert (eq (car ast) 'funcdef-stmt))
+  (assert (funcdef-is-generator-p ast))
+
+  (destructuring-bind
+      (decorators fname args suite) (cdr ast)
+    (declare (ignore suite))
+    
+    (assert (some #'identity args))
+    
+    `(funcdef ,decorators ,fname ,args
+	      (suite-stmt (funcall ,(rewrite-generator-funcdef-ast-w/o-params ast))))))
+  
+
+(defun rewrite-generator-funcdef-ast-w/o-params (ast &key (gen-maker-lambda-args nil))
+  (assert (eq (car ast) 'funcdef-stmt))
+  (assert (funcdef-is-generator-p ast))
+
+  #+(or)
+  (destructuring-bind
+      (decorators fname args suite) (cdr ast)
+    (declare (ignore decorators fname suite))
+    (assert (not (some #'identity args))))
   
   (let ((yield-counter 0)
 	(other-counter 0)
@@ -310,9 +372,8 @@
 	  (let ((walked-as-list (multiple-value-list (apply-splits (walk suite ()))))
 		(final-tag -1))
 	  
-	    `(lambda () ;; This is the function that returns a generator
+	    `(lambda ,gen-maker-lambda-args ;; This is the function that returns a generator
 	       (let ((.state. 0)
-		     (.generator-finished. nil)
 		     ,@(nreverse vars))
 		 
 		 (lambda ()

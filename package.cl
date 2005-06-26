@@ -1,11 +1,11 @@
 (when (eq *package* (find-package :python))
-  (error "load package.cl when you're in another *package* than :python!"))
+  (error "You must load PACKAGE.CL in another package than PYTHON, because ~
+          the PYTHON package will be deleted and then recreated."))
 
-(in-package :user) ;; needed?
+(in-package :user)
 
 (when (find-package :python)
   (delete-package :python))
-
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Package definitions
@@ -13,20 +13,36 @@
 (defpackage :python
   (:documentation "An implementation of the Python programming language.")
   (:use :common-lisp)
-  (:export :python-type :python-object
-	   :python-class :def-python-class :python-class-p
-	   :python-class-instance-p
-	   :python-function :make-function :python-function-p
-	   :python-unbound-method :make-unbound-method
-	   :python-bound-method :make-bound-method
-	   :python-none  :*None*
-	   :set-attribute :get-attribute
-	   :def-class-method :call :dir :dir2
-	   :test)
+  #+(or)(:export :python-type :python-object
+		 :python-class :def-python-class :python-class-p
+		 :python-class-instance-p
+		 :python-function :make-function :python-function-p
+		 :python-unbound-method :make-unbound-method
+		 :python-bound-method :make-bound-method
+		 :python-none  :*None*
+		 :set-attribute :get-attribute
+		 :def-class-method :call :dir :dir2
+		 :test)
   (:shadow ))
 
 (in-package :python)
 
+(defun compy ()
+  (with-compilation-unit ()
+    (dolist (f '("parser" "lexer" "pyprint" "walk" ;; AST generation and manipulation
+		 ;; classes" "exceptions" "pythonic" "functions" 
+		 ;; "methods" "magicmeths" "builtin-classes" "formatstring"
+		 ;; "call" "builtin-funcs" "builtin-types" "mathops"
+		 ;; "descriptors" "attributes" "modules" "pyeval"
+		 ;; "parsepython" "walk" "gener" "repl" "trace"
+		 ;; "bi-modules" "pyprint"
+		 ))
+      #+allegro(excl::compile-file-if-needed f)
+      #-allegro(compile-file (concatenate 'string f ".cl"))
+      (load f)))
+  (values))
+
+#+(or)
 (defun compy ()
   (with-compilation-unit ()
     (dolist (f '("classes" "exceptions" "pythonic" "functions" 
@@ -71,5 +87,6 @@
 ;;  Some of them aid debugging of Lisp or Python code, but slow down
 ;;  execution.
 
-(defvar *track-exception-stack* t) ;; slightly violates Python semantics
-
+(defvar *track-exception-stack* t)
+;; Slightly violates Python semantics, because exception names are
+;; evaluated immediately, not only in case an exception does happen.

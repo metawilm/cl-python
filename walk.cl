@@ -126,7 +126,13 @@ VALUE and TARGET context."
      `(dict ,(loop for (k . v) in (second form)
 		 collect (cons (funcall f k :value t)
 			       (funcall f v :value t)))))
-      
+    
+    (exec-stmt
+     (destructuring-bind (code globals locals) (cdr form)
+       `(exec-stmt ,(funcall f code    :value t)
+		   ,(when globals (funcall f globals :value t))
+		   ,(when locals (funcall f locals  :value t)))))
+    
     (for-in-stmt
      (assert (not (or value target)))
      (destructuring-bind (targets sources suite else-suite)
@@ -147,6 +153,15 @@ VALUE and TARGET context."
 		       ,*-arg
 		       ,**-arg)
 		      ,(funcall f suite))))
+    
+    (generator-expr `(generator-expr
+		      ,(funcall f (second form) :value t) ;; XXX value ok...?
+		      ,(loop for for/if in (third form) collect
+			     (ecase (car for/if)
+			       (gen-for-in `(gen-for-in
+					     ,(funcall f (second for/if) :target t)
+					     ,(funcall f (third  for/if) :value t)))
+			       (gen-if `(gen-if ,(funcall (second for/if) :value t)))))))
       
     (if-stmt
      (assert (not (or value target)))
@@ -181,12 +196,12 @@ VALUE and TARGET context."
     (lambda-expr
      (assert (not target))
      (destructuring-bind
-	 ((pos-a key-a *-a **-a) suite) (cdr form)
+	 ((pos-a key-a *-a **-a) expr) (cdr form)
        `(lambda-expr (,pos-a
 		      ,(mapcar (lambda (kv) (funcall f (cdr kv) :value t)) key-a)
 		      ,*-a
 		      ,**-a)
-		     ,(funcall f suite :value t))))
+		     ,(funcall f expr :value t))))
       
     ((list-expr tuple-expr)
      ;; the items within are a target if the list itself is
@@ -194,9 +209,9 @@ VALUE and TARGET context."
        ,(loop for x in (second form) collect
 	      (funcall f x :value value :target target))))
       
-    (list-compr-expr
+    (listcompr-expr
      (assert (not target))
-     `(list-compr-expr
+     `(listcompr-expr
        ,(funcall f (second form) :value t) ;; XXX value ok...?
        ,(loop for for/if in (third form) collect
 	      (ecase (car for/if)
@@ -251,7 +266,7 @@ VALUE and TARGET context."
     (try-except-stmt
      (assert (not (or value target)))
      (destructuring-bind
-	 (suite except-clauses else-clause) (cdr form)
+	 (suite except-clauses else-suite) (cdr form)
        `(try-except-stmt
 	 ,(funcall f suite)
 	 (,@(loop for (exc var handler-form) 
@@ -259,8 +274,8 @@ VALUE and TARGET context."
 		  `(,(when exc (funcall f exc :value t))
 		       ,(when var (funcall f var :target t))
 		     ,(funcall f handler-form))))
-	 ,(when else-clause
-	    (funcall f else-clause)))))
+	 ,(when else-suite
+	    (funcall f else-suite)))))
       
     (try-finally-stmt
      (assert (not (or value target)))

@@ -236,9 +236,9 @@
  (:comma--identifier*)
  (comma--identifier (|,| identifier) (`(identifier-expr ,$2)))
  
- (exec-stmt (|exec| expr                   ) ((list 'exec-stmt $1 $2)))
- (exec-stmt (|exec| expr |in| test         ) ((list 'exec-stmt $1 $2 $4)))
- (exec-stmt (|exec| expr |in| test |,| test) ((list 'exec-stmt $1 $2 $4 $6)))
+ (exec-stmt (|exec| expr                   ) ((list 'exec-stmt $2 nil nil)))
+ (exec-stmt (|exec| expr |in| test         ) ((list 'exec-stmt $2  $4 nil)))
+ (exec-stmt (|exec| expr |in| test |,| test) ((list 'exec-stmt $2  $4  $6)))
  
  (assert-stmt (|assert| test comma--test?)   ((list 'assert-stmt $2 $3)))
  (:comma--test?)
@@ -337,7 +337,7 @@
  (string+ (string) ($1))  ;; consecutive string literals are joined: "s" "b" => "sb"
  (string+ (string+ string) ((concatenate 'string $1 $2))) 
 
- (listmaker (test list-for) ((list 'list-compr-expr $1 $2)))
+ (listmaker (test list-for) ((list 'listcompr-expr $1 $2)))
  (listmaker (test comma--test* comma?) ((list 'list-expr (cons $1 $2))))
  (:comma--test*)
 
@@ -394,7 +394,7 @@
  (inheritance (                ) ('(tuple-expr nil)))
  (inheritance (|(| testlist |)|) ((if (eq (car $2) 'tuple-expr) $2 `(tuple-expr (,$2)))))
  
- (arglist () (`(nil nil nil nil))) ;; WWW
+ (arglist () (`(nil nil nil nil)))
  (arglist (argument--comma* arglist-2) ((loop with key-args
 					    for sublist on $1
 					    for item = (car sublist)
@@ -404,8 +404,12 @@
 						    (destructuring-bind (a *-a **-a) $2
 						      (when a
 							(ecase (car a)
-							  (:pos (nconc pos-args (list (second a))))
-							  (:key (nconc key-args (list (cdr a))))))
+							  (:pos (setf pos-args
+								  (nconc pos-args
+									 (list (second a)))))
+							  (:key (setf key-args
+								  (nconc key-args
+									 (list (cdr a)))))))
 						      (return (list pos-args key-args
 								    *-a **-a))))))
  (arglist-2 :or
