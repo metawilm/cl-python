@@ -8,8 +8,6 @@
 ;; "-stmt". There no is separate package for those symbols (should
 ;; there be?)
 
-
-
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; 
 ;; AST macros
@@ -21,7 +19,6 @@
 ;; The Python compiler uses its own kind of declaration to keep state
 ;; in generated code. The declaration is named PYDECL.
 
-#+allegro 
 (eval-when (:compile :load :eval) ;; ??
   (sys:define-declaration
       pydecl (&rest property-pairs) nil :declare
@@ -33,11 +30,9 @@
 
 ;; Macrology to easy working with PYDECL context data.
 
-#+allegro
 (defun get-pydecl (var env)
-  (cdr (assoc var (sys:declaration-information 'pydecl e) :test #'eq)))
+  (cdr (assoc var (sys:declaration-information 'pydecl env) :test #'eq)))
 
-#+allegro
 (defmacro with-pydecl (pairs &body body)
   `(locally (declare (pydecl ,@pairs))
      ,@body))
@@ -57,7 +52,7 @@
 	      (+module-global-var-names+ (make-array ,(length gv) :initial-contents ',gv))
 	      (+module-global-var-vals+  (make-array ,(length gv) :initial-element :unbound)))
 	 
-	 ;; pre-set global variable names corresponding to built-ins
+	 ;; set values of built-ins
 	 (loop 
 	     for glob-var-name across +module-global-var-vals+
 	     for i from 0
@@ -65,7 +60,7 @@
 	     do (setf (aref +module-global-var-vals+ i) (builtin-name-value glob-var-name)))
 
 	 (with-pydecl ((:module-global-var-names ,(make-array (length gv) :initial-contents gv))
-		       (:module-lexical-visible-vars ())
+		       (:lexically-visible-vars ())
 		       (:inside-function nil))
 	   ,@items
 	   +module+))))) ;; XXX if executing module failed, where to catch error?
@@ -87,7 +82,7 @@
     ;; functions). The other variables are globals.
 
     (multiple-value-bind (closed-over-names global-names)
-	(loop with lex-vars = (get-pydecl :module-lexical-visible-vars e)
+	(loop with lex-vars = (get-pydecl :lexically-visible-vars e)
 	    for os-name in outer-scope-names
 	    if (member os-name lex-vars) collect os-name into closed-overs
 	    else collect os-name into globals
@@ -133,7 +128,7 @@
 			`(setq ,name val)
 		      (let ((ix (position name (get-pydecl :module-global-var-names))))
 			(assert ix () "Variable ~A is global (?), but no ~
-                                            entry in :module-global-var-names ~A ?!"
+                                       entry in :module-global-var-names ~A ?!"
 				name (get-pydecl :module-global-var-names))
 			`(setf (svref +module-global-var-vals+ ,ix) val)))))
 		 
@@ -218,7 +213,8 @@
        (declare (dynamic-extent .f.))
        (map-over-py-object .f. ,source))
      
-     ,(when else-suite `(when .take-else. ,else-suite))
+     `(when (and .take-else. ,(not (null else-suite)))
+	,else-suite)
     :break))
 
 (defmacro while-stmt (test suite else-suite)
@@ -231,7 +227,7 @@
 	      (locally (declare (pydecl (:inside-loop t)))
 		,suite)
 	     :continue)
-	 finally (when .take-else.
+	 finally (when (and .take-else. ,(not (null else-suite)))
 		   ,else-suite))
     :break))
 
@@ -347,8 +343,12 @@
    
 (defmacro lambda-expr ..)
 (defmacro call-expr ..)
-(defmacro subscription-expr ..)
-(defmacro attributeref-expr ..)
+(defmacro subscription-expr (item subs)
+  `(py-subs ,item ,subs))
+	      
+(defmacro attributeref-expr (item attr)
+  `(py-attr ,item ,attr))
+
 (defmacro slice-expr ..)
 (defmacro generator-expr ..)
 
