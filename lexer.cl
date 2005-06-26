@@ -38,7 +38,7 @@ READ-CHAR."
 	  (when tokens-todo
 	    (let ((item (pop tokens-todo)))
 	      (when *lex-debug*
-		(format t "lexer returns: ~s  (from todo)~%" (car item)))
+		(format t "lexer returns: ~s  (from todo)~%" (second item)))
 	      (return-from lexer (apply #'values item))))
 
 	  (with-terminal-codes (python-grammar)

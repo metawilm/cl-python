@@ -1,27 +1,31 @@
 (in-package :python)
 
-;;; Walking the Python AST
+;;; Python AST code walker
 ;;; 
-;;; This module does not depend on other modules; it's working on ASTs
+;;; This module does not depend on other modules, as ASTs are
 ;;; represented by plain lists.
 
+
 (defun walk-py-ast (ast f &key (value nil) (target nil) (walk-lists-only t))
-  "Walk recursively through AST, calling F on each statement. F should
-return a (possibly new) form to walk through, derived in some way
-from the form it's given). The collected results are returned as a new AST.
+  (declare (optimize (debug 3)))
+  "Walk recursively through AST, calling F on each statement. F should have
+lambda list: (ast &key value target). F should return a new form to walk
+through, derived in some way from the form it's given. The collected results
+are returned as a new AST.
 
 When F returns two values and the second value is T, the form returned in
 the first value is considered the final form and it is not walked into; it
-is collected as-is.
+is inserted as-is in the result.
 
 The initial form is considered an expressions used for its value iff VALUE;
 it is considered an assignment target iff TARGET.
 
-If WALK-LISTS-ONLY, F is not called on numbers and strings."
+If WALK-LISTS-ONLY is false, F will also be called on numbers and strings.
+Normally, they are included as-is in the result."
 
-  ;; `file-input', the default top-level AST node representing a
-  ;; module, is evaluated in a non-value, non-target context. That
-  ;; seems a reasonable default choice for the keyword arguments.
+  ;; As `file-input', the default top-level AST node representing a
+  ;; module, is evaluated in a non-value non-target context, that
+  ;; context seems a reasonable default for the keyword arguments.
 
   (assert (or (listp ast) (null walk-lists-only)))
   
@@ -40,8 +44,9 @@ If WALK-LISTS-ONLY, F is not called on numbers and strings."
 		 (cond (final-p         ret-ast)
 		       
 		       ((or (listp ret-ast) (not walk-lists-only))
-			(apply #'ast-recurse-fun (lambda (ast &rest context)
-						   (walk-py-ast-1 ast f context))
+			(apply #'ast-recurse-fun
+			       (lambda (ast &key value target)
+				 (walk-py-ast-1 ast :value value :target target))
 			       ret-ast
 			       context))
 		       
@@ -52,23 +57,23 @@ If WALK-LISTS-ONLY, F is not called on numbers and strings."
 
 
 (defun ast-recurse-fun (f form &rest context &key value target)
-  "Given function F and ast FORM, walks into subforms of FORM in the given
+  "Given function F and a FORM (AST), walks into subforms of FORM in the given
 VALUE and TARGET context."
   (declare (optimize (debug 3)))
-  (assert (listp form))
-  (ecase (car form)
+  (assert (and form (listp form)))
+  (case (car form)
       
-    (assert
-	(assert (not (or value target)))
-	`(assert ,(funcall f (second form) :value t) ,(funcall f (third form))))
+    (assert-stmt
+     (assert (not (or value target)))
+     `(assert-stmt ,(funcall f (second form) :value t) ,(funcall f (third form))))
       
     (assign-expr
      (assert (not (or value target)))
      `(assign-expr ,(funcall f (second form) :value t)
 		   ,(mapcar (lambda (x) (funcall f x :target t)) (third form))))
       
-    (attributeref
-     `(attributeref ,(funcall f (second form)) ,(funcall f (third form))))
+    (attributeref-expr
+     `(attributeref-expr ,(funcall f (second form)) ,(funcall f (third form))))
       
     (augassign-expr
      (assert (not (or value target)))
@@ -76,133 +81,122 @@ VALUE and TARGET context."
 		      ,(funcall f (third form) :value t :target t) ;; both v,tg
 		      ,(funcall f (fourth form))))
       
-    (backticks
+    (backticks-expr
      (assert (not target))
      `(backticks ,(funcall f (second form) :value t)))
       
-    ((binary binary-lazy)
+    ((binary-expr binary-lazy-expr)
      (assert (not target))
      `(,(first form) ,(second form)
 		     ,(funcall f (third form) :value t)
 		     ,(funcall f (fourth form) :value t)))
       
-    ((break continue global identifier pass) 
+    ((break-stmt continue-stmt global-stmt identifier-expr pass-stmt) 
      form)
       
-    (call  
+    (call-expr
      (assert (not target))
-     `(call ,(funcall f (second form) :value t)
-	    ,(loop for arg in (third form)
-		 collect (ecase (first arg)
-			   ((pos * **)
-			    `(,(first arg) ,(funcall f (second arg) :value t)))
-			     
-			   (key  ;; in a call with key args, the key names are not targets
-			    `(key ,(second arg)
-				  ,(funcall f (third arg) :value t)))))))
+     (destructuring-bind (primary (p-a k-a *-a **-a)) (cdr form)
+       `(call-expr ,(funcall f primary :value t)
+		   ,(mapcar (lambda (pos-arg) (funcall f pos-arg :value t)) p-a)
+		   ,(mapcar (lambda (kv) (funcall f (cdr kv) :value t)) k-a)
+		   ,(when *-a (funcall f *-a :value t))
+		   ,(when **-a (funcall f **-a :value t)))))
       
-    (classdef 
+    (classdef-stmt 
      (assert (not (or target value)))
      (destructuring-bind (cname inheritance suite) (cdr form)
        (assert (eq (car inheritance) 'tuple))
-       `(classdef ,(funcall f cname :target t)
-		  ,(funcall f inheritance :value t)
-		  ,(funcall f suite))))
+       `(classdef-stmt ,(funcall f cname :target t)
+		       ,(funcall f inheritance :value t)
+		       ,(funcall f suite))))
       
-    (comparison  
+    (comparison-expr  
      (assert (not target))
-     `(comparison ,(second form)
-		  ,(funcall f (third form) :value t)
-		  ,(funcall f (fourth form) :value t)))
+     `(comparison-expr ,(second form)
+		       ,(funcall f (third form) :value t)
+		       ,(funcall f (fourth form) :value t)))
       
-    (del
+    (del-stmt
      (assert (not (or target value)))
-     `(del ,(funcall f (second form) :target t)))
+     `(del-stmt ,(funcall f (second form) :target t)))
       
-    (dict
+    (dict-expr
      (assert (not target))
      `(dict ,(loop for (k . v) in (second form)
 		 collect (cons (funcall f k :value t)
 			       (funcall f v :value t)))))
       
-    (file-input
-     (assert (not (or value target)))
-     `(file-input ,(mapcar (lambda (x) (funcall f x)) (second form))))
-      
-    (for-in
+    (for-in-stmt
      (assert (not (or value target)))
      (destructuring-bind (targets sources suite else-suite)
 	 (cdr form)
-       `(for-in ,(funcall f targets :target t)
-		,(funcall f sources :value t)
-		,(funcall f suite)
-		,(when else-suite (funcall f else-suite)))))
+       `(for-in-stmt ,(funcall f targets :target t)
+		     ,(funcall f sources :value t)
+		     ,(funcall f suite)
+		     ,(when else-suite (funcall f else-suite)))))
       
-    (funcdef
+    (funcdef-stmt
      (assert (not (or target value)))
-     (destructuring-bind (fname (pos-key-params *-param **-param) suite)
+     (destructuring-bind (decorators fname (pos-args key-args *-arg **-arg) suite)
 	 (cdr form)
-       `(funcdef ,(funcall f fname :target t)
-		 (,(loop for p in pos-key-params
-		       if (consp p) ;; keyword
-		       collect (cons (car p) (funcall f (cdr p) :value t))
-		       else collect p) ;; positional
-		   ,*-param
-		   ,**-param)
-		 ,(funcall f suite))))
+       `(funcdef-stmt ,decorators ;; decorators: TODO
+		      ,(funcall f fname :target t)
+		      (,pos-args
+		       ,(mapcar (lambda (kv) (funcall f (cdr kv) :value t)) key-args)
+		       ,*-arg
+		       ,**-arg)
+		      ,(funcall f suite))))
       
-    (if
-	(assert (not (or value target)))
-	(destructuring-bind
-	    (clauses else-suite) (cdr form)
-	  `(if ,(loop for (test suite) in clauses
-		    collect (list (funcall f test :value t)
-				  (funcall f suite)))
-	       ,(when else-suite (funcall f else-suite)))))
-      
-    (import
+    (if-stmt
      (assert (not (or value target)))
-     `(import ,(loop for clause in (second form) collect
-		     (ecase (first clause)
-		       (as `(as ,(second clause)
-				,(funcall f (third clause)
-					  :target t)))
-		       (not-as  ;; TODO: attributeref
-			(error
-			 "import walk not-as: todo"))))))
+     (destructuring-bind
+	 (clauses else-suite) (cdr form)
+       `(if-stmt ,(loop for (test suite) in clauses
+		      collect (list (funcall f test :value t)
+				    (funcall f suite)))
+		 ,(when else-suite (funcall f else-suite)))))
       
-    (import-from
+    (import-stmt
+     (assert (not (or value target)))
+     `(import-stmt ,(loop for clause in (second form) collect
+			  (ecase (first clause)
+			    (as `(as ,(second clause)
+				     ,(funcall f (third clause)
+					       :target t)))
+			    (not-as  ;; TODO: attributeref
+			     (error
+			      "import walk not-as: todo"))))))
+      
+    (import-from-stmt
      (assert (not (or value target)))
      ;; Because of the special machinery behind `import',
      ;; don't treat the source package name as value. XXX
-     `(import-from ,(second form)
-		   ,(loop for (as src dest) in (third form)
-			do (assert (eq as 'as))
-			   (assert (eq (first dest) 'identifier))
-			collect `(as ,src ,(funcall f dest :target t)))))
+     `(import-from-stmt ,(second form)
+			,(loop for (as src dest) in (third form)
+			     do (assert (eq as 'as))
+				(assert (eq (first dest) 'identifier))
+			     collect `(as ,src ,(funcall f dest :target t)))))
       
-    (lambda
-	(assert (not target))
-      (destructuring-bind
-	  ((pos-key-params *-param **-param) suite) (cdr form)
-	`(lambda (,(loop for p in pos-key-params
-		       if (consp p) collect
-			 (cons (car p)
-			       (funcall f (cdr p) :value t))
-		       else collect p) ;; positional
-		   ,*-param
-		   ,**-param)
-	   ,(funcall f suite :value t))))
+    (lambda-expr
+     (assert (not target))
+     (destructuring-bind
+	 ((pos-a key-a *-a **-a) suite) (cdr form)
+       `(lambda-expr (,pos-a
+		      ,(mapcar (lambda (kv) (funcall f (cdr kv) :value t)) key-a)
+		      ,*-a
+		      ,**-a)
+		     ,(funcall f suite :value t))))
       
-    ((list tuple)
-     ;; the items within are target if the list itself is
+    ((list-expr tuple-expr)
+     ;; the items within are a target if the list itself is
      `(,(first form)
        ,(loop for x in (second form) collect
 	      (funcall f x :value value :target target))))
       
-    (list-compr
+    (list-compr-expr
      (assert (not target))
-     `(list-compr
+     `(list-compr-expr
        ,(funcall f (second form) :value t) ;; XXX value ok...?
        ,(loop for for/if in (third form) collect
 	      (ecase (car for/if)
@@ -213,53 +207,52 @@ VALUE and TARGET context."
 		(list-if
 		 `(list-if
 		   ,(funcall (second for/if) :value t)))))))
+    
+    (module-stmt
+     (assert (not (or value target)))
+     `(module-stmt ,(mapcar (lambda (x) (funcall f x)) (second form))))
       
-    (print
+    (print-stmt
      (assert (not (or target value)))
-     `(print ,(loop for x in (second form)
-		  collect (funcall f x :value t))
-	     ,(third form)))
-      
-    (print->>      
-     (assert (not (or target value)))
-     `(print->> ,(funcall f (second form) :value t)
-		,(loop for x in (third form)
-		     collect (funcall f x :value t))
-		,(fourth form)))
-      
-    (raise
+     (destructuring-bind (dest items comma?) (cdr form)
+       `(print-stmt 
+	 ,(when dest (funcall f dest :value t))
+	 ,(mapcar (lambda (x) (funcall f x :value t)) items)
+	 ,comma?)))
+    
+    (raise-stmt
      (assert (not (or target value)))
      (destructuring-bind (exc var tb) (cdr form)
-       `(raise ,(when exc (funcall f exc :value t))
-	       ,(when var (funcall f var :value t))
-	       ,(when tb  (funcall f var :value t)))))
+       `(raise-stmt ,(when exc (funcall f exc :value t))
+		    ,(when var (funcall f var :value t))
+		    ,(when tb  (funcall f var :value t)))))
       
-    (return
-      (assert (not (or target value)))
-      `(return ,(when (second form)
-		  (funcall f (second form) :value t))))
+    (return-stmt
+     (assert (not (or target value)))
+     `(return-stmt ,(when (second form)
+		      (funcall f (second form) :value t))))
       
-    (slice
+    (slice-expr
      (assert (not target))
      (destructuring-bind (start stop step) (cdr form)
-       `(slice ,(when start (funcall f start :value t))
-	       ,(when stop  (funcall f stop :value t))
-	       ,(when step  (funcall f step :value t)))))
+       `(slice-expr ,(when start (funcall f start :value t))
+		    ,(when stop  (funcall f stop  :value t))
+		    ,(when step  (funcall f step  :value t)))))
       
-    (subscription
-     `(subscription ,(funcall f (second form) :value t)
-		    ,(funcall f (third form)  :value t)))
+    (subscription-expr
+     `(subscription-expr ,(funcall f (second form) :value t)
+			 ,(funcall f (third form)  :value t)))
       
-    (suite
+    (suite-stmt
      (assert (not (or value target)))
-     `(suite ,(loop for x in (second form)
-		  collect (funcall f x))))
+     `(suite-stmt ,(loop for x in (second form)
+		       collect (funcall f x))))
       
-    (try-except
+    (try-except-stmt
      (assert (not (or value target)))
      (destructuring-bind
 	 (suite except-clauses else-clause) (cdr form)
-       `(try-except
+       `(try-except-stmt
 	 ,(funcall f suite)
 	 (,@(loop for (exc var handler-form) 
 		in except-clauses collect
@@ -269,26 +262,30 @@ VALUE and TARGET context."
 	 ,(when else-clause
 	    (funcall f else-clause)))))
       
-    (try-finally
+    (try-finally-stmt
      (assert (not (or value target)))
      (destructuring-bind (try-suite finally-suite) (cdr form)
-       `(try-finally
+       `(try-finally-stmt
 	 ,(funcall f try-suite) ,(funcall f finally-suite))))
       
-    (unary
+    (unary-expr
      (assert (not target))
-     `(unary ,(second form) ,(funcall f (third form) :value t)))
+     `(unary-expr ,(second form) ,(funcall f (third form) :value t)))
       
-    (while
-	(assert (not (or value target)))
-      (destructuring-bind (test suite else-suite) (cdr form)
-	`(while ,(funcall f test :value t)
-	   ,(funcall f suite)
-	   ,(when else-suite (funcall f else-suite)))))
-      
-    (yield
+    (while-stmt
      (assert (not (or value target)))
-     `(yield ,(funcall f (second form) :value t)))))
+     (destructuring-bind (test suite else-suite) (cdr form)
+       `(while-stmt ,(funcall f test :value t)
+		    ,(funcall f suite)
+		    ,(when else-suite (funcall f else-suite)))))
+      
+    (yield-stmt
+     (assert (not (or value target)))
+     `(yield-stmt ,(funcall f (second form) :value t)))
+    
+    (t
+     (warn "WALK: assuming ~S is a Lisp form: not walked into." form)
+     form)))
 
 
 
@@ -339,7 +336,7 @@ VALUE and TARGET context."
      (with-sub-ast (cls-ast 'classdef ast (:same-namespace t ...)) ...)
      (with-sub-ast ((expr-ast &key value target) '(binary unary) ast
                        (:same-namespace t :recurse t)) ...)"
-  ;; XXX maybe there are better ways to deal with the various target forms
+  ;; XXX maybe TARGET should be structured differently?
   (let* ((dummy '#:dummy)
 	 (target (cond ((symbolp target)          `(,target &rest ,dummy))
 		       ((= (length target) 1)     `(,(car target) &rest ,dummy))
@@ -355,7 +352,8 @@ VALUE and TARGET context."
 			`(,(car target) &key ,@(cddr target)
 					,@(unless (member '&allow-other-keys (cddr target))
 					    '(&allow-other-keys))))
-		       (t (error "Malformed with-sub-ast target variable(s) (got: ~A)" target)))))
+		       (t (error "Malformed with-sub-ast target variable(s) (got: ~A)"
+				 target)))))
     
     `(map-sub-ast (lambda ,target
 		    ,@(when (member dummy target) 
@@ -364,6 +362,19 @@ VALUE and TARGET context."
 		  ,ast
 		  :nodes ,nodes ,@options-list)))
 
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Walker applications
+
+(defun walk-print (ast &rest walk-options)
+  (apply #'walk-py-ast
+	 ast
+	 (lambda (ast &key value target)
+	   (format t "> ~A ~@[[value]~] ~@[[target]~]~%" ast value target)
+	   ast)
+	 walk-options))
+
+	       
 
 #+(or)
 (defun guess-annotate-class-attributes (ast)
@@ -434,5 +445,3 @@ VALUE and TARGET context."
 		     form)))))
 	    form))))
      form)))
-
-
