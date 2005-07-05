@@ -43,28 +43,34 @@
 
 (defmacro assert-stmt (break "todo: assert"))
 
+
 (defmacro assign-expr (val targets &environment e)
-  
+
   (flet ((assign-one (tg)
 	   (let ((context (get-pydecl :context e))
 		 (kind (car tg)))
 	     (ecase kind
 	       
 	       (identifier-expr
-		(let ((module-set
-		       (let ((ix (gethash name (get-pydecl :mod-globals-names-ht e))))
-			 (if ix
-			     `(setf (svref +mod-globals-values+ ,ix) .val.)
-			   `(setf (gethash ,name +mod-dyn-globals+) .val.))))
-		      (local-set `(setf ,name .val.))
-		      (class-set `(setf (gethash ,name +cls-namespace+) .val.)))
-		  
+		(let* ((name (second tg))
+		       (module-set (let ((ix (gethash name (get-pydecl :mod-globals-names-ht e))))
+				     (if ix
+					 `(setf (svref +mod-globals-values+ ,ix) .val.)
+				       `(setf (gethash ,name +mod-dyn-globals+) .val.))))
+		       (local-set `(setf ,name .val.))
+		       (class-set `(setf (gethash ,name +cls-namespace+) .val.)))
+		     
 		  (ecase context
-		    (:module    module-set)
+		    
+		    (:module    (if (member name (get-pydecl :lexically-visible-vars e)) ;; in exec-stmt
+				    local-set
+				  module-set))
+		    
 		    (:function  (if (or (member name (get-pydecl :func-globals e))
 					(not (member name (get-pydecl :lexically-visible-vars e))))
 				    module-set
 				  local-set))
+		    
 		    (:class     (if (member name (get-pydecl :class-globals e))
 				    module-set
 				  class-set)))))
@@ -160,8 +166,8 @@
       
       (ecase (second primary)
 	
-	(locals `(let ((primary ,primary))
-		   (if (eq primary :the-locals-function-TODO)
+	(locals `(let ((.primary. ,primary))
+		   (if (eq .primary. :the-locals-function-TODO)
 		       (cond (,(or (first args) (second args))
 			      (error "LOCALS() should be called without ~
                                       args (got: ~S)" args))
@@ -169,10 +175,10 @@
 			      (warn "Sorry, args *POS and **KW for LOCALS() ~
                                      not allowed (todo) (got: ~S)" args))
 			     (t (.locals.)))
-		     (py-call primary ,args))))
+		     (py-call .primary. ,args))))
 	
-	(globals `(let ((primary ,primary))
-		    (if (eq primary :the-globals-function-TODO)
+	(globals `(let ((.primary. ,primary))
+		    (if (eq .primary. :the-globals-function-TODO)
 			(cond (,(or (first args) (second args))
 			       (error "GLOBALS() should be called without ~
                                        args (got: ~S)" args))
@@ -180,10 +186,10 @@
 			       (warn "Sorry, args *POS and **KW for GLOBALS() ~
                                       not allowed (todo) (got: ~S)" args))
 			      (t (.globals.)))
-		      (py-call primary ,args))))
+		      (py-call .primary. ,args))))
 	
-	(eval `(let ((primary ,primary))
-		 (if (eq primary :the-eval-function-TODO)
+	(eval `(let ((.primary. ,primary))
+		 (if (eq .primary. :the-eval-function-TODO)
 		     (cond (,(and (not (<= 1 (length (first args)) 3))
 				  (not (third args)))
 			    (error "EVAL() should be called with 1 ~
@@ -196,7 +202,7 @@
 				`(py-eval ,(first pos-args)
 					  ,(or (second pos-args) `(.globals.))
 					  ,(or (third pos-args)  `(.locals.))))))
-		   (py-call primary ,args)))))
+		   (py-call .primary. ,args)))))
     
     `(py-call ,primary ,args)))
 
@@ -260,11 +266,16 @@
                                                   it is unbound [dyn class]" name))))
        
        (ecase context
-	 (:module    module-del)
+	 
+	 (:module    (if (member name (get-pydecl :lexically-visible-vars e))
+			 local-del
+		       module-del))
+	 
 	 (:function  (if (or (member name (get-pydecl :func-globals e))
 			     (not (member name (get-pydecl :lexically-visible-vars e))))
 			 module-del
 		       local-del))
+	 
 	 (:class     (if (member name (get-pydecl :class-globals e))
 			 module-del
 		       class-del)))))
@@ -274,8 +285,21 @@
 (defmacro dict-expr (alist)
   `(make-dict ,alist))
 
+
 (defmacro exec-stmt (code globals locals)
-  `(py-exec ,code ,(or globals `(.globals.)) ,(or locals  `(.locals.))))
+  ;; XXX TODO: also allow code object etc as CODE
+  
+  `(let ((ast (let ((ast (parse-python-string code)))
+		(assert (eq (car ast) 'module-stmt))
+		ast))
+	 (locals-ht  (py-convert-to-hashtable ,(or locals  `(.locals.))))
+	 (globals-ht (py-convert-to-hashtable ,(or globals `(.globals.)))))
+     
+     (with-pydecl ((:exec-mod-globals-ht globals-ht)
+		   (:exec-mod-locals-ht  locals-ht))
+
+       (eval ast))))
+	 
 
 (defmacro for-in-stmt (target source suite else-suite)
   ;; potential special cases:
@@ -333,7 +357,7 @@
 			       
 			       (block :function-body
 				 
-				 ;; The `locals' function causes all local variables to be
+				 ;; The `locals' function forces all local variables to be
 				 ;; lexically visible all the time.
 				 (flet ((.locals. ()
 					  (loop
@@ -358,6 +382,10 @@
 
 
 (defmacro generator-expr (item for-in/if-clauses)
+
+  ;; XXX should this take place before these AST macros run? it
+  ;; introduces a new funcdef-stmt...
+
   (multiple-value-bind (gen-maker-lambda-one-arg initial-source)
       (rewrite-generator-expr-ast `(generator-expr ,item ,for-in/if-clauses))
     `(funcall ,gen-maker-lambda-one-arg ,initial-source)))
@@ -370,19 +398,26 @@
 
 (defmacro identifier-expr (name &environment e)
   (assert (symbolp name))
+  
   (let ((module-lookup (let ((ix (gethash name (get-pydecl :mod-globals-names-ht e))))
 			 (if ix
 			     `(svref +mod-globals-values+ ix)
 			   `(or (gethash ,name +mod-dyn-globals+)
 				(py-raise 'NameError "No variable with name ~A" ,name))))))
-    
     (ecase (get-pydecl :context e)
-      (:module     module-lookup)
+       
+      (:module     (if (member name (get-pydecl :lexically-visible-vars e)) ;; in exec-stmt
+		       name
+		     module-lookup))
+	       
       (:function   (if (member name (get-pydecl :lexically-visible-vars e))
 		       name
 		     module-lookup))
+	       
       (:class      `(or (gethash ,name +cls-namespace+)
-			,module-lookup)))))
+			,(if (member name (get-pydecl :lexically-visible-vars e))
+			     name
+			   module-lookup))))))
 
 (defmacro if-stmt (if-clauses else-clause)
   `(cond ,@(loop for (cond body) in if-clauses
@@ -412,7 +447,8 @@
 (defmacro list-expr (items)
   `(make-list ,items))
 
-(defmacro module-stmt (items)
+
+(defmacro module-stmt (items &environment e)
   
   ;; A module is translated into one lambda that creates and returns a
   ;; module object. Executing the lambda will create a module object
@@ -420,54 +456,71 @@
   ;; 
   ;; Functions, classes and variables inside the module are available
   ;; as attributes of the module object.
+  ;; 
+  ;; pydecl: :exec-mod-locals-ht and :exec-mod-globals-ht are
+  ;;         hash-tables containing global and local scopes (if inside
+  ;;         exec-stmt)
   
-  
-  (let ((gv (module-global-vars items)))
+  (let* ((ast-globals  (module-items-global-vars items))
+	 (exec-globals (get-pydecl :exec-mod-globals-ht e))
+	 (exec-locals  (get-pydecl :exec-mod-locals-ht  e))
+	 (gv           (union ast-globals exec-globals)))
     
     `(lambda ()
        (let* ((+mod-globals-names+    (make-array ,(length gv) :initial-contents ',gv))
 	      (+mod-globals-names-ht+ (let ((ht (make-hash-table :test #'eq)))
-					(loop for n in gv and for i from 0
-					    do (setf (gethash n ht) i)
-					       (assert (eq (aref +mod-globals-names+ i) n)))
+					(loop for name in gv and for i from 0
+					    do (setf (gethash name ht) i)
+					       (assert (eq (aref +mod-globals-names+ i) name)))
 					ht))
-	      (+mod-globals-values+ (make-array ,(length gv) :initial-element :unbound))
-	      (+mod-dyn-globals+ nil) ;; hash-table (symbol -> val) dynamically added attr 
-	      (+mod+                   (make-module
-					   :global-var-names  +mod-globals-names+
-					   :global-var-values +mod-globals-values+
-					   :namespace module-scope)))
+	      (+mod-globals-values+   (make-array ,(length gv) :initial-element :unbound))
+	      (+mod-dyn-globals+ nil) ;; hash-table (symbol -> val) dynamically added mod vars 
+	      (+mod+                  (make-module
+				       :global-var-names  +mod-globals-names+
+				       :global-var-values +mod-globals-values+
+				       :namespace module-scope)))
 	 
+
 	 ;; Set values of module-level variables with names
 	 ;; corresponding to built-in names (like `len')
-	 (loop 
-	     for glob-var-name across +module-global-var-values+ and for i from 0
-	     when (builtin-name-p glob-var-name)
-	     do (setf (aref +module-global-var-values+ i) 
-		  (builtin-name-value glob-var-name)))
+	 
+	 (loop for glob-var-name across +module-global-var-values+ and for i from 0
+	     do (setf (aref +module-global-var-values+ i)
+		  (or (and exec-globals
+			   (gethash glob-var-name exec-globals))
+		      (and (builtin-name-p glob-var-name)
+			   (builtin-name-value glob-var-name)))))
 
-	 (with-pydecl ((:module-global-var-names ,(make-array (length gv) :initial-contents gv))
+
+	 (with-pydecl ((:mod-globals-names ,(make-array (length gv) :initial-contents gv))
 		       (:mod-globals-names-ht ,(let ((ht (make-hash-table :test #'eq)))
-						 (loop for n in gv and for i from 0
-						     do (setf (gethash n ht) i)
-							(assert (eq (aref +mod-globals-names+ i) n)))
+						 (loop for name in gv and for i from 0
+						     do (setf (gethash name ht) i)
+							(assert (eq (aref +mod-globals-names+ i) name)))
 						 ht))
-		       (:lexically-visible-vars ())
+		       (:lexically-visible-vars ,(and exec-locals
+						      (loop for k being the hash-key in exec-locals
+							  collect k)))
 		       (:context :module))
 	   
 	   (flet ((.globals. ()
 		    (loop
 			for glob-name across +mod-globals-names+
-			for glob-val across +mod-globals-values+
+			for glob-val  across +mod-globals-values+
 			unless (eq glob-val :unbound)
 			collect (cons glob-name glob-val) into list
 			finally (maphash (lambda (k v) (push (cons k v) list))
 					 +mod-dyn-globals+)
 				(return (make-py-dict list)))))
-	     ,@items
+	     
+	     (let ,(when exec-locals
+		     (loop for k being the hash-key in exec-locals using (hash-value v)
+			 collect `(,k ,v)))
+	       
+	       ,@items)))
 	   
-	    ;; XXX if executing module failed, where to catch error?
-	   +module+))))))
+	 ;; XXX if executing module failed, where to catch error?
+	 +mod+))))
 
 (defmacro print-stmt ..)
 
