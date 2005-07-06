@@ -120,6 +120,17 @@
       (rewrite-generator-funcdef-ast-w/o-params ast))))
 
 (defun rewrite-generator-funcdef-ast-w/params (ast)
+  
+  ;; Rewrite so that the generator takes no arguments:
+  ;;
+  ;;   def f(a,b):         def f(a,b):
+  ;;     ..yield..   ==>     def g():
+  ;;                           ..yield..
+  ;;                         return g()
+  ;; 
+  ;; XXX this is maybe wrong: when assignment to formal arg (here: a
+  ;; or b) happens in ..yield..
+  
   (assert (eq (car ast) 'funcdef-stmt))
   (assert (funcdef-is-generator-p ast))
 

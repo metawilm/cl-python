@@ -173,7 +173,7 @@
                                       args (got: ~S)" args))
 			     (,(some #'identity args)
 			      (warn "Sorry, args *POS and **KW for LOCALS() ~
-                                     not allowed (todo) (got: ~S)" args))
+                                     not allowed (TODO) (got: ~S)" args))
 			     (t (.locals.)))
 		     (py-call .primary. ,args))))
 	
@@ -184,7 +184,7 @@
                                        args (got: ~S)" args))
 			      (,(some #'identity args)
 			       (warn "Sorry, args *POS and **KW for GLOBALS() ~
-                                      not allowed (todo) (got: ~S)" args))
+                                      not allowed (TODO) (got: ~S)" args))
 			      (t (.globals.)))
 		      (py-call .primary. ,args))))
 	
@@ -197,7 +197,7 @@
 			   (,(and (<= (length (first args)) 3)
 				  (or (third args) (fourth args)))
 			    (error "Sorry, args *POS and **KW for EVAL() ~
-                                    not allowed (todo) (got: ~S)" args))
+                                    not allowed (TODO) (got: ~S)" args))
 			   (t (let ((pos-args (first args)))
 				`(py-eval ,(first pos-args)
 					  ,(or (second pos-args) `(.globals.))
@@ -321,64 +321,75 @@
 	,else-suite)
     :break))
 
+
 (defmacro funcdef-stmt (decorators
 			name (&whole formal-args pos-args key-args *-arg **-arg)
 			suite
 			&environment e)
   
   (assert (eq (car name) 'identifier))
-  
-  (multiple-value-bind (arg-names local-names outer-scope-names global-names)
-      (funcdef-vars params suite)
-    
-    ;; Determine closed-over variables (present as local in enclosing
-    ;; functions). The other variables are globals.
 
-    (multiple-value-bind (closed-over-names global-names)
-	(loop with lex-vars = (get-pydecl :lexically-visible-vars e)
-	    for os-name in outer-scope-names
-	    if (member os-name lex-vars) collect os-name into closed-overs
-	    else collect os-name into globals
-	    finally (return (values closed-overs globals)))
+  (multiple-value-bind (pos-args destruct-form)
+      (loop
+	  with params and destructs ;; replace:  def f( (x,y), z):  ..
+	  for pa in pos-args        ;;      by:  def f( _tmp , z):  (x,y) = _tmp; ..
+	  do (ecase (car pa)
+	       (tuple-expr (let ((tmp-var `(identifier ,(intern (format nil "~A-tmp-arg" (cdr pa))))))
+			     (push tmp-var params)
+			     (push `(assign-expr ,tmp-var (,pa)) destructs)))
+	       (identifier-expr (push pa params)))
+	     
+	  finally (return (values (nreverse params)
+				  `(progn ,@(nreverse destructs)))))
+    
+    (multiple-value-bind (arg-names local-names outer-scope-names global-names)
+	(funcdef-vars params suite)
+    
+      ;; Determine closed-over variables (present as local in enclosing
+      ;; functions). The other variables are globals.
+
+      (multiple-value-bind (closed-over-names global-names)
+	  (loop with lex-vars = (get-pydecl :lexically-visible-vars e)
+	      for os-name in outer-scope-names
+	      if (member os-name lex-vars) collect os-name into closed-overs
+	      else collect os-name into globals
+	      finally (return (values closed-overs globals)))
       
-      (multiple-value-bind (simple-func-args destruct-statement)
-	  ;; replace: def f( (x,y), z):  ..
-	  ;;; by:     def f( _tmp , z):  (x,y) = _tmp; ..
-	  (simplify-arguments formal-args)
-	
-	`(let ((.func.
-		(make-py-function
-		 :name ',(second name)
-		 :locals ',local-names
-		 :function (lambda ,simple-func-args
-			     
-			     (let ,(loop for loc in locals collect `(,loc :unbound)
-			       ,destruct-statement
-			       
-			       (block :function-body
-				 
-				 ;; The `locals' function forces all local variables to be
-				 ;; lexically visible all the time.
-				 (flet ((.locals. ()
-					  (loop
-					      for loc-name in ',local-names
-					      for loc-val in (list ,@local-names)
-					      unless (eq loc-val :unbound)
-					      collect (cons loc-name loc-val) into list
-					      finally (return (make-py-dict list)))))
-				   
-				   (with-pydecl ((:func-globals ',global-names)
-						 (:context :function)
-						 (:lexically-visible-vars
-						  (nconc ,local-names
-							 (get-pydecl :lexically-visible-vars e))))
-				     
-				     ,suite)))))))))
-	   
-	   ,(unless (eq (second name) :lambda)
-	      `(assign-expr .func. (,name)))
-	   
-	   .func.)))))
+	(let ((func-body (make-py-arg-function
+			  (,pos-args ,key-args ,*-arg ,**-arg)
+			  
+			  (let ,(loop for loc in locals collect `(,loc :unbound))
+			    ,destruct-form
+			  
+			    (block :function-body
+		  
+			      ;; The `locals' function forces all local variables to be
+			      ;; lexically visible all the time.
+			      (flet ((.locals. ()
+				       (loop
+					   for loc-name in ',local-names
+					   for loc-val in (list ,@local-names)
+					   unless (eq loc-val :unbound)
+					   collect (cons loc-name loc-val) into list
+					   finally (return (make-py-dict list)))))
+			      
+				(with-pydecl ((:func-globals ',global-names)
+					      (:context :function)
+					      (:lexically-visible-vars
+					       (nconc ,local-names
+						      (get-pydecl :lexically-visible-vars e))))
+				
+				  ,suite)))))))))
+    
+      `(let ((.func. (make-py-function
+		      :name ',(second name)
+		      :locals ',local-names
+		      :function func-body)))
+	 
+	 ,(unless (eq (second name) :lambda)
+	    `(assign-expr .func. (,name)))
+	 
+	 .func.))))
 
 
 (defmacro generator-expr (item for-in/if-clauses)

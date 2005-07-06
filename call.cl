@@ -378,7 +378,8 @@
 
 
 (defmacro make-py-arg-function ((pos-args key-args *-arg **-arg) &body body)
-  ;; assumes values for key-args are already evaluated XXX
+  ;; Non-consing argument parsing, except when *-arg or **-arg present.
+  
   (let* ((pos-key-arg-names (append pos-args (mapcar #'first key-args)))
 	 (num-pos-args (length pos-args))
 	 (num-key-args (length key-args))
@@ -447,13 +448,19 @@
 			       `(push (cons key val) for-**)
 			     `(break "Got unknown keyword arg and no **-arg: ~A ~A" key val))))
 	     
+	     ;; Ensure all positional arguments covered
+	     
 	     (loop for i fixnum from num-filled-by-pos-args below ,num-pos-args
 		 unless (svref arg-val-vec i)
 		 do (break "Positional arg ~A has no value" (svref ,arg-name-vec i)))
 	     
+	     ;; Use default values for missing keyword arguments
+	     
 	     (loop for i fixnum from ,num-pos-args below ,num-pos-key-args
 		 unless (svref arg-val-vec i)
 		 do (setf (svref arg-val-vec i) (svref key-arg-default-values (- i ,num-pos-args))))
+	     
+	     ;; Initialize local variables
 	     
 	     (let (,@(loop for p in pos-key-arg-names and i from 0
 			 collect `(,p (svref arg-val-vec ,i)))  ;; XXX p = (identifier ..) ?
@@ -461,3 +468,7 @@
 		   ,@(when **-arg `((,**-arg for-**))))
 	       
 	       ,@body)))))))
+
+
+
+
