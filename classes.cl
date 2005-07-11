@@ -183,16 +183,92 @@
 (defmethod make-class-method ((f function))
   (make-instance 'py-class-method :func f))
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; 
-;; Getting attributes
-;; 
 
-(defun py-attr-get (x attr)
-  "Returns NIL if attribute lookup failed; otherwise the resulting object (bound
-to X if appropriate)."
-  ;; TODO: macro, so py-attr-get-1 macro can do its optimization.
-  (multiple-value-bind (res kind)
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Attributes: getting, setting, deleting
+
+(defun py-attr (primary attr)
+  (if (typep primary (load-time-value (find-class 'user-object)))
+      (py-attr-user-object primary attr :perhaps nil)
+    (let ((boalf (builtin-object-attr-lookup-fun attr)))
+      (if boalf
+	  (funcall boalf primary)
+	(py-raise 'AttributeError
+		  "Object ~S has no attribute ~S" primary attr)))))
+
+(define-compiler-macro py-attr (&whole whole primary attr)
+  ;; Move lookup of builtin-object-attr-lookup-fun to compile-time
+  (if (and (listp attr) 
+	   (= (length attr) 2)
+	   (eq (first attr) 'quote)
+	   (symbolp (second attr)))
+      
+      (let* ((attr-name (second attr))
+	     (bi-attr-p (builtin-attr-p attr))
+	     (boalf     (and bi-attr-p (builtin-object-attr-lookup-fun attr-name))))
+	
+	`(let ((.primary. ,primary))
+	   (if (typep primary (load-time-value (find-class 'user-object)))
+	       (py-attr-user-object .primary. ,attr-name ,bi-attr-p ,boalf)
+	     ,(if boalf
+		  `(funcall ,boalf .primary.)
+		`(py-raise 'AttributeError
+			   "Object ~S has no attribute ~S" .primary. ,attr-name)))))
+    whole))
+
+
+(defun py-attr-user-object (x attr bi-attr-p bi-attr-fun)
+  "Returns NIL if attribute lookup failed; otherwise the resulting object,
+perhaps bound to X."
+
+  ;; ATTR        : a symbol
+  ;; BI-ATTR-P   : t | nil | :perhaps
+  ;; BI-ATTR-FUN : a function, if (EQ BI-ATTR-P T), otherwise NIL
+  
+  (multiple-value-bind (val kind)
+      (py-attr-user-object-1 x attr)
+    
+    (cond (val              (values val kind))
+	  ((eq bi-attr-p t) (funcall bi-attr-fun x))
+	  ((eq bi-attr-p :perhaps) (let ((f (builtin-object-attr-lookup-fun attr)))
+				     (when f (funcall f x))))
+	  (t (break :unexpected)))))
+
+
+
+;; XXX all modules and functions are of type user-object
+;; maybe user-object represents here `object with dynamic attributes/methods' ?
+
+(defgeneric py-attr-user-object-1 (x attr bi-attr-p bi-attr-fun)
+  (:method ((x py-module)   attr)  (module.__getattribute__ x attr))
+  (:method ((x py-function) attr)  (function.__getattribute__ x attr))
+  
+  (:method ((x py-type)     attr)
+	   ;; X is a class. Its metaclass determines attribute lookup
+	   ;; behaviour.
+	   (let ((metaclass (class-of x)))
+	     (if (eq metaclass (load-time-value
+				(find-class 'py-type)))
+		 (metatype.__getattribute__ x attr)
+	       
+	       ;; call (metatype.__getattribute__ x attr)
+	       (break :todo))))
+  
+  (:method ((x py-meta-type) attr)
+	   ;; X is a metaclass. The metaclass of X is always class py-type
+	   (metatype.__getattribute__ x attr))
+	   
+  (:method 
+   
+  (:method ((x user-object) meth)
+	   (ns-lookup (etypecase x
+			(py-type      (py-type-namespace x))
+			(py-meta-type (py-meta-type-namespace x)))
+		      meth)))
+
+	    
+
+	   (multiple-value-bind (res kind)
       (py-attr-get-1 x attr)
     (when res
       (ecase kind
@@ -209,9 +285,43 @@ to X if appropriate)."
 						       :method res)))))))
 
 
+(defgeneric maybe-__get__ (obj instance class)
+  ;; Maybe do obj.__get__(inst, cls)
+  (:method ((obj user-object) instance class)
+	   (let ((get-meth (user-object-class-method obj '__get__)))
+	     (if get-meth
+		 (funcall get-meth obj instance (or class (class-of obj)))
+	       obj)))
+  (:method (obj instance class)
+	   obj))
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; 
+;; (py-call primary args)
+
+(defun py-call (primary args)
+  (py-call-1 primary args))
+
+(define-compiler-macro py-call (&whole whole primary args)
+  (cond ((and (listp primary)
+	      (eq (car primary) 'py-attr))
+	 ;; (py-call (py-attr x attr) args)
+	 ;; Skip binding of attribute
+	 :todo)
+	
+	;; more optimizations here...
+	
+	(t whole)))
+       
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+
+
+
 (defun py-attr-call (x attr &rest args)
-  "Returns NIL if attribute lookup failed; otherwise returns the values returned
-by the call."
+  "Returns NIL if attribute lookup failed; otherwise returns the values
+returned by the call."
   ;; TODO: macro, so py-attr-get-1 macro can do its optimization.
   (multiple-value-bind (res kind)
       (py-attr-get-1 x attr)
@@ -231,91 +341,37 @@ by the call."
 	       (:class-method-got-class    (apply #'funcall res x args))
 	       (:class-method-got-instance (apply #'funcall res (class-of x) args)))))))
 
-(defgeneric py-attr-get-1 (x attr)
-  (:documentation "Returns attribute ATTR of object X, or NIL if no such attribute.")
-  (:method ((x py-user-object) (attr symbol))
-	   (py-attr-get-user-object x attr (bi-attr-fun attr)))
-  
-  (:method (x (attr symbol))
-	   (let ((af (bi-attr-fun attr)))
-	     (if af
-		 (py-attr-bi-attr x attr af)
-	       (return-from py-attr-get-1 nil))))) ;; no built-in class with this attr
 
 #+(or)
-(define-compiler-macro py-attr-get-1 (&whole form x attr)
-  ;; Move check of whether ATTR can refer to a built-in attribute to
-  ;; compile-time.
-  (if (and (listp attr)
-	   (= (length attr) 2)
-	   (eq (first attr) 'quote)
-	   (symbolp (second attr)))
-    
-      (let ((af (bi-attr-fun (second attr))))
-	(if af
-	    `(py-attr-bi-attr ,x ,attr ,af)
-	  
-	  (let ((g (gensym "x")))
-	    `(let ((,g ,x))
-	       (if (typep ,g ,(load-time-value (find-class 'user-object)))
-		   (py-attr-get-user-object ,g ,attr)
-		 nil)))))
-    
-    form))
+
 
 (defgeneric user-object-class-method (x meth)
-  (:method ((x user-object) meth)
-	   (ns-lookup (etypecase x
-			(py-type      (py-type-namespace x))
-			(py-meta-type (py-meta-type-namespace x)))
-		      meth)))
 
-(defgeneric maybe-__get__ (obj instance class)
-  ;; Maybe do obj.__get__(inst, cls)
-  (:method ((obj user-object) instance class)
-	   (let ((get-meth (user-object-class-method obj '__get__)))
-	     (if get-meth
-		 (funcall get-meth obj instance (or class (class-of obj)))
-	       obj)))
-  (:method (obj instance class)
-	   obj))
 
-(defgeneric bi-attr-fun (attr)
-  (:documentation "Returns #'py-bi-attr:<attr> or NIL.")
+
+
+(defgeneric builtin-object-attr-lookup-fun (attr)
+  (:documentation "Returns a function (lambda (x) (look ATTR of built-in object X))")
   
   (:method ((attr string))
 	   (let ((sym (find-symbol attr 'py-bi-attr)))
-	     (when sym
-	       (assert (fboundp sym))
-	       (symbol-function sym))))
+	     (if sym
+		 (progn (assert (fboundp sym))
+			(symbol-function sym))
+	       nil)))
   
   (:method ((attr symbol))
-	   (bi-attr-fun (symbol-name attr))))
+	   (builtin-object-attr-lookup-fun (symbol-name attr))))
 
 (defgeneric bi-attr-p (attr)
   (:documentation "Can ATTR refer to a built-in attribute?")
   (:method ((attr symbol))
 	   (bi-attr-p (symbol-name attr)))
   (:method ((attr string))
-	   (not (null (find-symbol attr 'py-bi-attr)))))
+	   (let ((sym (find-symbol attr 'py-bi-attr)))
+	     (when sym (assert (fboundp sym)))
+	     (and sym t))))
 
-
-
-(defun py-attr-get-user-object (x attr bi-attr-fun)
-  "X is a user-defined object. BI-ATTR-FUN must be a function iff ATTR might
-refer to a built-in attribute, otherwise BI-ATTR-FUN should be NIL."
-  (check-type x user-object)
-  'todo)
-
-
-(defgeneric py-attr-bi-attr (x attr bi-attr-fun)
-  (:documentation "Get ATTR of X, where ATTR might refer to a built-in attribute
-(i.e. some built-in classes do have an attribute called ATTR)")
-  
-  (:method ((x py-user-object) (attr symbol) (bi-attr-fun function))
-	   (py-attr-get-user-object x attr bi-attr-fun))
-  (:method (x (attr symbol) (bi-attr-fun function))
-	   (funcall bi-attr-fun x)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; 
@@ -351,7 +407,7 @@ refer to a built-in attribute, otherwise BI-ATTR-FUN should be NIL."
 ;; Built-in attributes
 ;; 
 
-(defclass py-bi-attr-gf (standard-generic-function)
+(defclass py-attr-gf (standard-generic-function)
   ())
 
 (defmethod no-applicable-method ((g py-bi-attr-gf) &rest args)
