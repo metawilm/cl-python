@@ -73,12 +73,12 @@ VALUE and TARGET context."
 		   ,(mapcar (lambda (x) (funcall f x :target t)) (third form))))
       
     (attributeref-expr
-     `(attributeref-expr ,(funcall f (second form)) ,(funcall f (third form))))
+     `(attributeref-expr ,(funcall f (second form)) ,(third form))) ;; don't recurse on attr name
       
     (augassign-expr
      (assert (not (or value target)))
      `(augassign-expr ,(second form)
-		      ,(funcall f (third form) :value t :target t) ;; both v,tg
+		      ,(funcall f (third form) :value t :target t) ;; is both v and tg
 		      ,(funcall f (fourth form))))
       
     (backticks-expr
@@ -146,7 +146,8 @@ VALUE and TARGET context."
      (assert (not (or target value)))
      (destructuring-bind (decorators fname (pos-args key-args *-arg **-arg) suite)
 	 (cdr form)
-       `(funcdef-stmt ,decorators ;; decorators: TODO
+       `(funcdef-stmt ,(loop for deco in decorators
+			   collect (funcall f deco :value t))
 		      ,(funcall f fname :target t)
 		      (,pos-args
 		       ,(mapcar (lambda (kv) (funcall f (cdr kv) :value t)) key-args)

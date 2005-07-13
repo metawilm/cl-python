@@ -376,8 +376,7 @@
      (funcall f 1 2 3 4 5)
      (funcall f 1 2 3 'd 23))))
 
-
-(defmacro py-arg-function ((pos-args key-args *-arg **-arg) &body body)
+(defmacro py-arg-function-1 ((pos-args key-args *-arg **-arg) &body body)
   ;; Non-consing argument parsing, except when *-arg or **-arg present.
   
   (let* ((pos-key-arg-names (append pos-args (mapcar #'first key-args)))
@@ -475,8 +474,3 @@
 		   ,@(when **-arg `((,**-arg for-**))))
 	       
 	       ,@body)))))))
-
-
-
-
-

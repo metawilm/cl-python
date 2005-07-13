@@ -99,8 +99,8 @@
  (file-input (file-input stmt) ((cons $2 $1)))
 
  (:decorator*)
- (decorator (|@| dotted-name                 newline) ((list 'decorator $2 nil)))
- (decorator (|@| dotted-name |(| arglist |)| newline) ((list 'decorator $2 $4)))
+ (decorator (|@| dotted-name                 newline) ($2))
+ (decorator (|@| dotted-name |(| arglist |)| newline) ((list 'call-expr $2 $4)))
 
  (funcdef (decorator* |def| identifier |(| parameters |)| |:| suite)
 	  (`(funcdef-stmt ,$1 (identifier-expr ,$3) ,$5 ,$8)))
@@ -225,7 +225,7 @@
  (dotted-as-name (dotted-name |as| identifier) (`(as ,$1 (identifier-expr ,$3))))
  
  (dotted-name (identifier dot--name*) ((if $2
-					   `(dotted (identifier-expr ,$1) ,@$2)
+					   `(attributeref-expr (identifier-expr ,$1) ,@$2)
 					 `(identifier-expr ,$1))))
  (:dot--name*)
  (dot--name (|.| identifier) (`(identifier-expr ,$2)))

@@ -156,64 +156,62 @@
       `(go :break)
     (py-raise 'SyntaxError "BREAK was found outside loop")))
 
-(defmacro call-expr (primary args &environment e)
-  ;; todo: rework *-arg and **-arg
+(defmacro call-expr (primary (&rest orig-args pos-args kwd-args *-arg **-arg) &environment e)
   
-  ;; For complete Python semantics, we should check in every call if
-  ;; the function being called is fbuilt-in function EVAL, LOCALS or
-  ;; GLOBALS, because they possibly access the variable scope of the
-  ;; caller.
-  ;; 
-  ;; However, as there is no need for calling such a function by an
-  ;; alias, for efficiency we'll only check for these special cases if
-  ;; the thing being called has name EVAL, LOCALS or GLOBALS.
-  
-  (with-fresh (prim)
-    (if (and (listp primary)
-	     (eq (first primary) 'identifier)
-	     (member (second primary) '(locals globals eval)))
-	
-	(ecase (second primary)
-	
-	  (locals `(let ((,prim ,primary))
-		     (if (eq ,prim :the-locals-function-TODO)
-			 (cond (,(or (first args) (second args))
-				(error "LOCALS() should be called without ~
-                                      args (got: ~S)" args))
-			       (,(some #'identity args)
-				(warn "Sorry, args *POS and **KW for LOCALS() ~
-                                     not allowed (TODO) (got: ~S)" args))
-			       (t (.locals.)))
-		       (py-call ,prim ,args))))
-	
-	  (globals `(let ((,prim ,primary))
-		      (if (eq ,prim :the-globals-function-TODO)
-			  (cond (,(or (first args) (second args))
-				 (error "GLOBALS() should be called without ~
-                                       args (got: ~S)" args))
-				(,(some #'identity args)
-				 (warn "Sorry, args *POS and **KW for GLOBALS() ~
-                                      not allowed (TODO) (got: ~S)" args))
-				(t (.globals.)))
-			(py-call ,prim ,args))))
-	
-	  (eval `(let ((,prim ,primary))
-		   (if (eq ,prim :the-eval-function-TODO)
-		       (cond (,(and (not (<= 1 (length (first args)) 3))
-				    (not (third args)))
-			      (error "EVAL() should be called with 1 ~
-                                    to 3 positional args (got: ~S)" args))
-			     (,(and (<= (length (first args)) 3)
-				    (or (third args) (fourth args)))
-			      (error "Sorry, args *POS and **KW for EVAL() ~
-                                    not allowed (TODO) (got: ~S)" args))
-			     (t (let ((pos-args (first args)))
-				  `(py-eval ,(first pos-args)
-					    ,(or (second pos-args) `(.globals.))
-					    ,(or (third pos-args)  `(.locals.))))))
-		     (py-call ,prim ,args))))))
-    
-    `(py-call ,primary ,args)))
+  ;; For complete Python semantics, we check for every call if the
+  ;; function being called is one of the built-in functions EVAL,
+  ;; LOCALS or GLOBALS, because they access the variable scope of the
+  ;; _caller_ (which is ugly).
+
+  `(block :call-expr
+     (let ((prim ,primary))
+       
+       ;; This clause is the common case. Is it indeed most efficient
+       ;; to have this as first test?
+       
+       (unless (member prim '(:the-locals-function-TODO 
+			      :the-globals-function-TODO
+			      :the-eval-function-TODO)
+		       :test #'eq)
+	 (return-from call-expr (py-call prim ,orig-args)))
+       
+       (return-from :call-expr
+	 (cond ((eq prim :the-locals-function-TODO)
+		(if (and ,(not (or pos-args kwd-args))
+			 ,(or (null *-arg)  `(null (py-iterate->lisp-list ,*-arg)))
+			 ,(or (null **-arg) `(null (py-mapping->lisp-list ,**-arg))))
+		    (.locals.)
+		  (py-raise 'TypeError
+			    "locals() must be called without args (got: ~A ~A ~A ~A)"
+			    ,pos-args ,kwd-args ,*-arg ,**-arg)))
+
+	       ((eq prim :the-globals-function-TODO)
+		(if (and ,(not (or pos-args kwd-args))
+			 ,(or (null *-arg)  `(null (py-iterate->lisp-list ,*-arg)))
+			 ,(or (null **-arg) `(null (py-mapping->lisp-list ,**-arg))))
+		    (.globals.)
+		  (py-raise 'TypeError
+			    "globals() must be called without args (got: ~A ~A ~A ~A)"
+			    ,pos-args ,kwd-args ,*-arg ,**-arg)))
+	     
+
+	       ((eq prim :the-eval-function-TODO)
+		(let ((args (nconc (list ,@pos-args)
+				   ,(when *-arg `(py-iterate->lisp-list ,*-arg)))))
+		  (if (and ,(null kwd-args)
+			   ,(or (null **-arg)
+				`(null (py-mapping->lisp-list ,**-arg)))
+			   (<= 1 (length args) 3))
+		    
+		      `(py-eval ,(first pos-args)
+				(or (second pos-args) (.globals.))
+				(or (third  pos-args) (.locals.)))
+		  
+		    (py-raise 'TypeError
+			      "eval() must be called with 1 to 3 pos args (got: ~A ~A ~A ~A)"
+			      ,pos-args ,kwd-args ,*-arg ,**-arg))))
+	     
+	       (t (break :unexpected)))))))
 
 
 (defmacro classdef-stmt (name inheritance suite)
@@ -333,80 +331,80 @@
 			suite
 			&environment e)
   
-  (assert (eq (car name) 'identifier))
-
-
-  ;; Replace "def f( (x,y), z):  .." by "def f( _tmp , z):  (x,y) = _tmp; ..".
+  (assert (or (eq name :lambda)
+	      (eq (car name) 'identifier)))
   
-  (multiple-value-bind (pos-args destruct-form)
-      (loop with params and destructs
-	  for pa in pos-args
-	  do (ecase (car pa)
-	       (tuple-expr (let ((tmp-var `(identifier ,(intern (format nil "~A-tmp-arg" (cdr pa))))))
-			     (push tmp-var params)
-			     (push `(assign-expr ,tmp-var (,pa)) destructs)))
-	       (identifier-expr (push pa params)))
-	  finally (return (values (nreverse params)
-				  `(progn ,@(nreverse destructs)))))
-    
-    (multiple-value-bind (arg-names local-names outer-scope-names global-names)
-	(funcdef-vars params suite)
-    
-      ;; Determine closed-over variables (present as local in enclosing
-      ;; functions). The other variables are globals.
-      (multiple-value-bind (closed-over-names global-names)
-	  (loop with lex-vars = (get-pydecl :lexically-visible-vars e)
-	      for os-name in outer-scope-names
-	      if (member os-name lex-vars) collect os-name into closed-overs
-	      else collect os-name into globals
-	      finally (return (values closed-overs globals)))
-
-	;; For debugging it might be useful
-	(declare (ignore closed-over-names))
+  ;; Replace "def f( (x,y), z):  .." by "def f( _tmp , z):  (x,y) = _tmp; ..".
+  ;; This shadows POS-ARGS from the lambda list above.
+  
+  (let ((all-pos-arg-names (loop with todo = pos-args and res = ()
+			       while todo
+			       do (let ((x (pop todo)))
+				    (etypecase x
+				      (symbol (push x res))
+				      (list   (setf todo (nconc todo x)))))
+			       finally (return res))))
 	
+    (multiple-value-bind (formal-pos-args pos-arg-destruct-form)
+	(loop with params = () and destructs = ()
+	    for pa in pos-args
+	    do (ecase (car pa)
+		 (tuple-expr (let ((tmp-var `(identifier
+					      ,(make-symbol (format nil "~A" (cdr pa))))))
+			       (push tmp-var params)
+			       (push `(assign-expr ,tmp-var (,pa)) destructs)))
+		 (identifier-expr (push pa params)))
+	    finally (return (values (nreverse params)
+				    `(progn ,@(nreverse destructs)))))
+      
+      (multiple-value-bind (func-explicit-globals func-locals)
+	  (funcdef-globals-and-locals (cons all-pos-arg-names (cdr formal-args)) suite)
+    
 	;; When a method is defined in a class namespace, the default
 	;; argument values are evaluated at function definition time
-	;; in the class namespace. The expansion from macro
-	;; PY-ARG-FUNCTION does that.
-		
-	(let ((func-lambda
-	       (py-arg-function
-		(,pos-args ,key-args ,*-arg ,**-arg)
-			  
-		(let ,(loop for loc in locals collect `(,loc :unbound))
-		  ,destruct-form
-		  
-		  (block :function-body
-		    
-		    ;; The `locals' function is the reason all local
-		    ;; variables are lexically visible all the time.
-		    (flet ((.locals. ()
-			     (loop
-				 for loc-name in ',local-names
-				 for loc-val in (list ,@local-names)
-				 unless (eq loc-val :unbound)
-				 collect (cons loc-name loc-val) into list
-				 finally (return (make-py-dict list)))))
-		      
-		      (with-pydecl ((:func-globals ',global-names)
-				    (:context :function)
-				    (:lexically-visible-vars
-				     (nconc ,local-names
-					    (get-pydecl :lexically-visible-vars e))))
-			
-			,suite)))))))))
-
-      (with-fresh (func)
-	`(let ((,func (make-py-function
-		       :name ',(second name)
-		       :locals ',local-names
-		       :function func-lambda)))
-	 
-	   ,(unless (eq (second name) :lambda)
-	      `(assign-expr ,func (,name)))
+	;; in the class namespace. Macro PY-ARG-FUNCTION ensures this.
+	
+	`(let ((func-lambda
+		(py-arg-function
+		 (,formal-pos-args ,key-args ,*-arg ,**-arg)
+		 
+		 (let ,(loop for loc in func-locals collect `(,loc :unbound))
+		   ,pos-arg-destruct-form
+		   
+		   (block :function-body
+		     
+		     (flet ((.locals. ()
+			      (loop
+				  for loc-name in ',func-locals
+				  for loc-val in (list ,@func-locals)
+				  unless (eq loc-val :unbound)
+				  collect (cons loc-name loc-val) into res
+				  finally (return (make-py-dict res)))))
+		       
+		       (with-pydecl ((:func-explicit-globals ',func-explicit-globals)
+				     (:context :function)
+				     (:lexically-visible-vars
+				      (nconc (list ,@func-locals)
+					     (get-pydecl :lexically-visible-vars e))))
+			 
+			 ,suite)))))))
 	   
-	   ,func)))))
-
+	   
+	   ,(if (eq name :lambda)
+		
+		`func-lambda
+	      
+	      (with-fresh (func)
+		`(let ((,func (make-py-function :name ',(second name)
+						:function func-lambda)))
+		   
+		   ,(let ((art-deco (loop with res = ,func
+					for deco in (nreverse decorators)
+					do (setf res `(call-expr ,deco ((,res) () nil nil)))
+					finally (return res))))
+		      
+		      `(assign-expr ,art-deco (,name)))))))))))
+      
 
 (defmacro generator-expr (item for-in/if-clauses)
 
@@ -460,8 +458,9 @@
 (defmacro import-from-stmt ..)
 
 (defmacro lambda-expr (args expr)
-  ;; XXX represented by regular python functions for now
-  `(funcdef-stmt nil (identifier :lambda) ,args (suite-stmt ((return-stmt ,expr)))))
+  ;; XXX maybe the resulting LAMBDA results in more code than
+  ;; necessary for just one expression.
+  `(funcdef-stmt nil :lambda ,args (suite-stmt ((return-stmt ,expr)))))
 
 (defmacro listcompr-expr (item for-in/if-clauses)
   (with-fresh (vec)
@@ -663,232 +662,130 @@
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; 
-;; Keep track of built-in names shadowed by the user.
-;; 
-
-(defvar *builtin-ix-hash* (make-hash-table :test 'eq))
-(defvar *builtin-ix-fixed* nil)
-(defvar *num-builtins* 0)
-(defvar *ever-shadowed-builtins* nil)
-
-(defgeneric get-builtin-ix (bi-name)
-  (:method ((bi-name symbol)) (gethash bi-name *builtin-ix-hash*)))
-
-(defgeneric add-builtin-ix (bi-name)
-  (:method ((bi-name symbol)) 
-	   (when *builtin-ix-fixed* 
-	     (error "builtin-ix is fixed already"))
-	   (let ((ix (gethash bi-name *builtin-ix-fixed*)))
-	     (if ix 
-		 (progn (warn "built-in ~A was already registered" bi-name)
-			ix)
-	       (prog1 *num-builtins*
-		 (setf (gethash bi-name *builtin-ix-hash*) *num-builtins*)
-		 (incf *num-builtins*))))))
-
-(defgeneric builtin-overridden-flag (bi-name)
-  (:method ((bi-name symbol))
-	   (unless *ever-shadowed-builtins*
-	     (error "builtin-ix is not fixed yet (call BUILTIN-IX-FIXED first)"))
-	   (let ((ix (or (gethash bi-name *builtin-ix-hash*)
-			 (error "not registered as a built-in: ~A" bi-name))))
-	     (aref *ever-shadowed-builtins* ix))))
-
-(defgeneric (setf builtin-overridden-flag) (bi-name new-val)
-  (:method ((bi-name symbol) &optional (value 1))
-	   (unless *ever-shadowed-builtins*
-	     (error "builtin-ix is not fixed yet (call BUILTIN-IX-FIXED first)"))
-	   (setf (aref *ever-shadowed-builtins*
-		       (or (gethash bi-name *builtin-ix-hash*)
-			   (error "not registered as a built-in: ~A" bi-name))) new-val)))
-
-(defun fix-builtin-ix ()
-  (if *builtin-ix-fixed*
-      (warn "builtin-ix was already fixed")
-    (setf *builtin-ix-fixed* t
-	  *ever-shadowed-builtins* (make-array *num-builtins*
-					       :element-type 'bit :initial-element 0))))
-
-(defun builtin-ix-fixed-p ()
-  *builtin-ix-fixed*)
+;; Helper functions for the compiler, that preprocess or analyze AST.
 
 
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-#|
-(destructuring-bind (&key entry-assumed exit-set)
-    (referenced-vars-simple ast :assumed '(x y))
-  )
-  
-(referenced-variables (ast)
-		      |#	      
-
-
-
-(defun annotate-ast (ast)
-  (walk-py-ast ast #'annotate-ast-1))
-
-(defun annotate-ast-1 (ast &key value target)
-  (case (car ast)
-    (funcdef (annotate-function ast))
-    (class   (annotate-class ast))
-    (lambda  (annotate-function ast :lambda t))))
-
-(defun annotate-function (ast &key lambda)
-  ;; ignore lambda for now
-  (multiple-value-bind (params locals globals)
-      (function-get-locals-globals suite params)
-    
-	))
-
-(defun function-params (args)
-  (destructuring-bind (pos-params key-params *-param **-param) args
-    (let ((params (append (mapcar #'first key-params)
-			  (when *-param (list *-param)) 
-			  (when **-param (list **-param)))))
-      
-      (labels ((collect-pos-arg-params (list &optional (acc ()))
-		 (loop for x in list
-		     if (symbolp x) (push x params)
-		     else (pos-arg-params x))))
-	(collect-pos-arg-params))
-      params)))
-
-  
-(defun function-vars (args suite)
-  "Given AGS and SUITE (or EXPR) of a FUNCDEF-STMT or LAMBDA-EXPR, return values:
-     PARAMS LOCALS OUTER-SCOPE GLOBALS
-   where: PARAMS : the formal parameters
-          LOCALS : the local variables
-          OUTER-SCOPES : the variables to be found in an enclosing scope 
-                        (possibly the global module namespace)
-          GLOBALS : the variables to be found in the global module namespace."
-  
-  (let ((params (function-params args))
-	(locals ())
-	(globals ())
-	(outer-scope ()))
-    
-    (with-sub-ast ((form &key value target) t suite (:walk-lists-only t))
-      (case (car form)
-
-	(funcdef-stmt  (destructuring-bind (dec fname args suite) (cdr form)
-			 (multiple-value-bind (f-params f-locals f-outer-scopes f-globals)
-			     (function-vars args expr)
-			   
-			   (declare (ignore f-locals))
-			   
-			   ;; If an f-param is also a global in the current namespace
-			   ;; (in which the funcdef resides), that's a syntax error.
-			   ;; This is only a partial check (the global stmt may be
-			   ;; lexically below the inner funcdef).
-			   
-			   (loop for p in f-params
-			       when (member p globals) 
-			       do (error "SyntaxError: inner function param ~A may not be ~
-                                              declared `global' in an outer namespace" p))
-			   
-			   ;; A `global' declaration in the surrounding function body namespace
-			   ;; is effective inside inner functions, too.
-			   ;; 
-			   ;; Because of that, an f-local might actually be a global, if it is
-			   ;; declared global in the current namespace. This mislabeling is
-			   ;; not a problem.
-			   
-			   (loop for x in f-outer-scopes
-			       unless (or (member x f-locals)
-					  (member x f-outer-scopes)
-					  (member x f-globals))
-			       do (push x outer-scopes))
-			   
-			   (loop for x in f-outer-scopes
-			       unless (or (member x locals)
-					  (member x outer-scopes)
-					  (member x globals))
-			       do (push x outer-scopes))))
+#+(or)
+(defun rewrite-name-binding-statements (ast)
+  "Rewrite FUNCDEF-STMT and CLASSDEF-STMT so they become (ASSIGN-EXPR ...).
+Returns the new AST."
+  (walk-py-ast
+   ast
+   (lambda (x &key target value)
+     (ecase (car x)
+       
+       (funcdef-stmt (destructuring-bind
+			 (decorators fname args suite) (cdr form)
+		       (declare (ignore args suite))
 		       
-		       (values nil t))
-	
-	(classdef-stmt (destructuring-bind ((identifier cname) inheritance suite) (cdr form)
-			 (assert (eq identifier 'identifier))
-			     
-			 ;; The class name is always a local.
-			 (when (member cname globals)
-			   (error "SyntaxError: class name ~A may not be declared `global'"
-				  name))
-			     
-			 (pushnew cname locals)
-			 
-			 ;; The variables introduced in the class body are private to the
-			 ;; class. They are not part of the lexical environment in which
-			 ;; the methods of the class (the funcdefs inside the classdef)
-			 ;; are run. Therefore the body of the classdef can be skipped.
-			 
-			 ))
-	    
-	(lambda-expr (destructuring-bind (args expr) (cdr form)
-		       (multiple-value-bind (l-params l-locals l-outer-scopes l-globals)
-			   (function-vars args expr)
-			 (declare (ignore l-locals))
-			 
-			 ;; A lambda contains no STMTs, and especially no GLOBAL-STMT
-			 (assert (null l-globals)) 
-			 
-			 
-			 ;; If an l-param is also a global in the current namespace
-			 ;; (in which the funcdef resides), that's a syntax error.
-			 ;; This is only a partial check (the global stmt may be
-			 ;; lexically below the inner lambda).
-			 
-			 (loop for p in l-params
-			     when (member p globals) 
-			     do (error "SyntaxError: inner lambda param ~A may not be ~
-                                            declared `global' in an outer namespace" p))
-			 
-			 ;; A `global' declaration in the surrounding function
-			 ;; body namespace is effective inside the lambda too.
-			 (loop for x in l-outer-scopes
-			     unless (or (member x locals)
-					(member x outer-scopes)
-					(member x globals))
-			     do (push x outer-scopes))))
-		     
-		     (values nil t))
-	
-	(identifier-expr (let ((name (second form)))
-			   (when value
-			     (unless (or (member name params)
-					 (member name locals)
-					 (member name globals))
-			       (pushnew name outer-scope)))
-			   
-			   (when target
-			     (when (member name outer-scope)
-			       (error "SyntaxError: local variable ~A referenced before ~
+		       `(assign-expr (loop with res = `(funcdef-expr ,@(cdr form))
+					 for deco in (nreverse decorators)
+					 do (setf res `(call-expr ,deco ((,res) () nil nil)))
+					 finally (return res))
+				     ((identifier-expr ,fname)))))
+       
+       (classdef-stmt (destructuring-bind
+			  (cname inheritance suite) (cdr form)
+			xxxx))))
+   :walk-lists-only t))
+
+
+(defun ast-vars (ast &key params locals declared-globals outer-scope)
+  ;; Returns: LOCALS, DECLARED-GLOBALS, OUTER-SCOPE
+  ;; which are lists of symbols denoting variable names.
+  
+  (labels ((recurse (ast)
+	     (with-sub-ast ((form &key value target) t ast (:walk-lists-only t))
+	       (case (car form)
+		 
+		 (identifier-expr (let ((name (second form)))
+				    
+				    (when value
+				      (unless (or (member name params)
+						  (member name locals)
+						  (member name declared-globals))
+					(pushnew name outer-scope)))
+				    
+				    (when target
+				      (when (member name outer-scope)
+					(error "SyntaxError: local variable ~A referenced before ~
                                            assignment" name))
-			     (unless (or (member name params)
-					 (member name locals)
-					 (member name globals))
-			       (pushnew name locals))))
-			 (values nil t))
-	
-	(global-stmt (dolist (name (second form))
-		       (cond ((member name params)
-			      (error "SyntaxError: function param ~A declared `global'"
-				     name))
-			     
-			     ((or (member name locals) (member name outer-scope))
-			      (error "SyntaxError: variable ~A used before declared `global'"
-				     name))
-			     
-			     (t (pushnew name globals))))
-		     
-		     (values nil t))
-	
-	(t form)))
+				      (unless (or (member name params)
+						  (member name locals)
+						  (member name declared-globals))
+					(pushnew name locals)))
+				    (values nil t)))
+
+	     
+		 (global-stmt (dolist (name (second form))
+				(cond ((member name params)
+				       (error "SyntaxError: function param ~A declared `global'"
+					      name))
+				      
+				      ((or (member name locals) (member name outer-scope))
+				       (error "SyntaxError: variable ~A used before being ~
+                                          declared `global'" name))
+				      
+				      (t (pushnew name declared-globals))))
+			      (values nil t))
+	     
+	     
+		 (funcdef-stmt  (destructuring-bind (decorators fname args suite) (cdr form)
+				  (declare (ignore args suite))
+
+				  (assert (eq (car fname) 'identifier))
+				  
+				  (when (member fname declared-globals)
+				    (error "SyntaxError: inner function name ~A declared global"
+					   fname))
+				  
+				  (pushnew fname locals)
+				
+				  (loop for deco in decorators do (recurse deco))
+				  (loop for (name def-val) in (second args)
+				      do (recurse def-val)))
+				(values nil t))
+		 
+		 
+		 (classdef-stmt (destructuring-bind
+				    ((identifier cname) inheritance suite) (cdr form)
+				  (assert (eq identifier 'identifier))
+				  
+				  ;; The class name is always a local.
+				  (when (member cname globals)
+				    (error "SyntaxError: class name ~A may not be ~
+                                            declared `global'" name))
+				  
+				  (pushnew cname locals)
+				  
+				  (loop for inh in in heritance do (recurse inh)))
+				(values nil t))
+	       
+		 (lambda-expr (values nil t)) ;; skip
+		 
+		 (t form)))))
     
-    (values params locals outer-scope globals)))
+    (recurse ast)
+    (values locals declared-globals outer-scope)))
+
+
+  
+(defun funcdef-globals-and-locals (args suite)
+  "Given FUNCDEF ARGS and SUITE (or EXPR), return DECLARED-GLOBALS, LOCALS."
+  
+  (destructuring-bind (linearized-pos-args kwd-args *-arg **-arg) args
+    
+    (assert (not (some #'listp linearized-pos-args)))
+    
+    (let ((params (let ((x (append linearized-pos-args (mapcar #'first kwd-arg))))
+		    (when *-arg  (push *-arg  x))
+		    (when **-arg (push **-arg x))
+		    x)))
+      
+      (multiple-value-bind
+	  (locals declared-globals outer-scopes) (ast-vars suite :params params)
+	
+	(values declared-globals locals)))))
 
 
 (defmacro with-py-error-handlers (&body body)
