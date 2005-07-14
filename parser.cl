@@ -92,7 +92,7 @@
 
 (python-prods
 
- (python-grammar (file-input) ((list 'module-stmt (nreverse $1))))
+ (python-grammar (file-input) (`(module-stmt (suite-stmt ,(nreverse $1)))))
 
  (file-input () ())
  (file-input (file-input newline) ($1))

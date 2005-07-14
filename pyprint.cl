@@ -204,7 +204,7 @@
 						   (second clause) (third clause)))
 			      (list-if     (format stream " if ~A" (second clause)))))
 		     (format stream "]"))
-    (module-stmt  (format stream "~{~A~%~}" (second x)))    
+    (module-stmt  (format stream "~A" (second x)))
     (pass-stmt    (format stream "pass"))
     
     (print-stmt (destructuring-bind (dest items comma?) (cdr x)

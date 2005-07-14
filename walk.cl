@@ -226,7 +226,7 @@ VALUE and TARGET context."
     
     (module-stmt
      (assert (not (or value target)))
-     `(module-stmt ,(mapcar (lambda (x) (funcall f x)) (second form))))
+     `(module-stmt ,(funcall (second form))))
       
     (print-stmt
      (assert (not (or target value)))
@@ -359,11 +359,11 @@ VALUE and TARGET context."
 		       ((>= (length target) 1)
 			(assert (eq (second target) '&key) ()
 			  "form: (var) or (var &key ...) where possible keywords are ~
-                           :value and :target  (got: ~A)" target)
+                           'value and 'target  (got: ~A)" target)
 			(assert (every (lambda (kw)
-					 (member kw '(:value :target &allow-other-keys)))
+					 (member kw '(value target &allow-other-keys)))
 				       (cddr target))
-			    () "Got invalid keyword (only :value and :target are supported) ~
+			    () "Got invalid keyword (only 'value and 'target are supported) ~
                                 (got: ~A)" (cddr target))
 			`(,(car target) &key ,@(cddr target)
 					,@(unless (member '&allow-other-keys (cddr target))
