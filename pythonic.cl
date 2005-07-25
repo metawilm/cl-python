@@ -1,134 +1,12 @@
 (in-package :python)
 
-;; Pythonic:  some nice macros to do Pythonic things
+;;; Pythonic: some utility functions to do Pythonic things
 
-
-#+(or)
-(defmacro py-raise (exc-type string &rest format-args)
-  "Raise Python exception of type EXC-TYPE, ~@
-   where STRING with FORMAT-ARGS is the exception argument."
-  `(error ,exc-type :args (format nil ,string ,@format-args)))
 
 (defun py-raise (exc-type string &rest format-args)
+  "Raise a Python exception with given format string"
   (error exc-type :args (apply #'format nil string format-args)))
 
-;; XXX All uses of PY-ITERATE should be changed to use GET-PY-ITERATE-FUN instead.
-;; There's no need for this macro, and this macro is even incorrect in that it calls __iter__.
-
-(defun make-py-iterator-for-object (object)
-  (let ((f (get-py-iterate-fun object)))
-    (make-iterator-from-function f)))
-
-
-;; macro
-
-#+(or) ;; needs work; maybe not needed anyway?
-(defmacro foreach-in-object ((item object) &body body)
-  "Returns if there were any items in OBJECT (generalizes boolean)"
-  (let ((object '#:object))
-    `(block foreach-in-object
-     
-       (when (let ((kl (class-of ,object)))
-	       (or (eq kl (find-class 'py-tuple))
-		   (eq kl (find-class 'py-list))))
-	 (let ((lst (slot-value object list)))
-	   (return-from foreach-in-object
-	     (if lst
-		 (progn (dolist (,item lst)
-			  ,@body)
-			t)
-	       nil))))
-       
-       ;; Using __iter__ is the prefered way.
-       (multiple-value-bind (iter-meth found)
-	   (getattr-of-class ,object '__iter__)
-	 
-	 (if found
-	     
-	     (let* ((iterator (py-call iter-meth (list object)))
-		    (next-meth (getattr-of-class iterator 'next)))
-	       
-	       ;; One could argue that looking up the `next' method should
-	       ;; only happen when the first value is requested. Doing it
-	       ;; earlier, as it is now, will detect the error below sooner.
-	       
-	       (unless next-meth
-		 (py-raise 'TypeError "Got invalid iterator (no `next' method): ~A" iterator))
-	       
-	       
-	       (labels ((get-next-val-fun ()
-			  (handler-case (values (py-call next-meth (list iterator)))
-			    (StopIteration () (values nil nil))
-			    (:no-error (val)  (values val t)))))
-		 (lambda () (get-next-val-fun))))
-      
-	   ;; Fall-back: __getitem__ with successive integers, starting from 0.
-	   ;; 
-	   ;; There is the theoretical possibility that the object's class,
-	   ;; or just the __getitem__ method, is changed or removed while
-	   ;; we do this iteration.  By storing the __getitem__ method we
-	   ;; evade that; however, it might be semantically wrong,
-	   ;; theoretically speaking.
-      
-	   (multiple-value-bind (getitem-meth found)
-	       (getattr-of-class object '__getitem__)
-	     (if found
-
-		 (let ((index 0))
-		   (labels ((get-next-val-fun ()
-			      (handler-case (py-call getitem-meth (list object index))
-				(IndexError () (values nil nil))  ;; even ok if index = 0 (empty sequence)
-				(:no-error (val)
-				  (incf index)
-				  (values val t)))))
-		     (lambda () (get-next-val-fun))))
-	  
-	       ;; If nothing works...
-	  
-	       (py-raise 'TypeError
-			 "Iteration over non-sequence (got: ~A)" object))))))))
-
-
-;; fun
-
-(defgeneric py-iterate-n-values (object n &key error)
-  (:documentation 
-   "Return N values from iterable Python object in the form of a Lisp vector.
-   If ERROR, than when there are more values in the object, an error of type
-   TypeError is raised; if not ERROR, NIL is returned in that situation."))
-
-(eval-when (:execute) ;; TODO: change source code loading order and remove EVAL-WHEN
-  (defmethod py-iterate-n-values ((x py-list/tuple) (n fixnum) &key (error t))
-    (assert (> n 0))
-    (with-slots (vec) x
-      (if (= (length vec) n)
-	  vec
-	(when error
-	  (py-raise 'ValueError "Wanted ~A values from iterable ~A, but got ~A"
-		    n x (length vec)))))))
-
-(defmethod py-iterate-n-values (x (n fixnum) &key (error t))
-  (assert (> n 0))
-  (let* ((f (get-py-iterate-fun x))
-	 (vec (make-array n)))
-    (declare (dynamic-extent vec))
-    (loop with val = (funcall f)
-	for i from 0 below n
-	do (if val
-	       (setf (aref vec i) val
-		     val (funcall f))
-	     (if error
-		 (py-raise 'ValueError
-			   "Wanted ~A values from iterable, but got less: ~A"
-			   n i)
-	       (return-from py-iterate-n-values nil)))
-	finally
-	  (let ((v (funcall f)))
-	    (when v
-	      (py-raise 'ValueError
-			"Wanted ~A values from iterable ~A, but got 1 more already: ~A"
-			n x v)))
-	  (return vec))))
 
 (defmethod get-py-iterate-fun (object)
   "Return a function that when called returns VAL, T, where VAL is the next value ~@
@@ -197,10 +75,56 @@
 (defmethod map-over-py-object (fun object)
   "Iterate over OBJECT, calling Lisp function FUN on each value. Returns nothing."
   (loop with f = (get-py-iterate-fun object)
-      with val = (funcall f)
-      while val do (funcall fun val)
-		   (setf val (funcall f)))
+      for val = (funcall f)
+      while val do (funcall fun val))
   (values))
+
+
+(defun make-py-iterator-for-object (object)
+  (let ((f (get-py-iterate-fun object)))
+    (make-iterator-from-function f)))
+
+(defgeneric py-iterate-n-values (object n &key error)
+  (:documentation 
+   "Return N values from iterable Python object in the form of a Lisp vector.
+   If ERROR, than when there are more values in the object, an error of type
+   TypeError is raised; if not ERROR, NIL is returned in that situation."))
+
+#+(or) ;; needed?
+(eval-when (:execute) ;; TODO: change source code loading order and remove EVAL-WHEN
+  (defmethod py-iterate-n-values ((x py-list/tuple) (n fixnum) &key (error t))
+    (assert (> n 0))
+    (with-slots (vec) x
+      (if (= (length vec) n)
+	  vec
+	(when error
+	  (py-raise 'ValueError "Wanted ~A values from iterable ~A, but got ~A"
+		    n x (length vec)))))))
+
+(defmethod py-iterate-n-values (x (n fixnum) &key (error t))
+  (assert (> n 0))
+  (let* ((f (get-py-iterate-fun x))
+	 (vec (make-array n)))
+    (declare (dynamic-extent vec))
+    (loop with val = (funcall f)
+	for i from 0 below n
+	do (if val
+	       (setf (aref vec i) val
+		     val (funcall f))
+	     (if error
+		 (py-raise 'ValueError
+			   "Wanted ~A values from iterable, but got less: ~A"
+			   n i)
+	       (return-from py-iterate-n-values nil)))
+	finally
+	  (let ((v (funcall f)))
+	    (when v
+	      (py-raise 'ValueError
+			"Wanted ~A values from iterable ~A, but got 1 more already: ~A"
+			n x v)))
+	  (return vec))))
+
+
 
 (defmacro ensure-py-type (vars cl-type err-str)
   "Ensure that all vars in VARS are a designator for CL-TYPE, if so SETF all vars

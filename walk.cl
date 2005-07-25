@@ -14,14 +14,13 @@ through, derived in some way from the form it's given. The collected results
 are returned as a new AST.
 
 When F returns two values and the second value is T, the form returned in
-the first value is considered the final form and it is not walked into; it
-is inserted as-is in the result.
+the first value is considered the final form and it is not walked into, but
+it is inserted as-is in the result.
 
-The initial form is considered an expressions used for its value iff VALUE;
-it is considered an assignment target iff TARGET.
+The initial form AST is considered an expressions used for its value iff 
+VALUE; it is considered an assignment target iff TARGET.
 
-If WALK-LISTS-ONLY is false, F will also be called on numbers and strings.
-Normally, they are included as-is in the result."
+Unless WALK-LISTS-ONLY, F will also be called on numbers and strings."
 
   ;; As `file-input', the default top-level AST node representing a
   ;; module, is evaluated in a non-value non-target context, that
@@ -309,79 +308,77 @@ VALUE and TARGET context."
 ;; 
 ;; Handy functions for dealing with ASTs
 
-(defun map-sub-ast (func ast &key (nodes t) not-inside (recurse t)
-				  (same-namespace nil) (check-self t))
-  
-  ;;  FUNC         : function of three args: (AST &key VALUE TARGET)
-  ;;  AST          : Python AST, which is a list
+(defun walk-py-ast-subset (ast f &key (nodes t) (recurse-matches t)
+				      (same-namespace nil) (match-initial t))
+  ;; FUNC : function of three args: (ast &key value target)
+  ;; AST  : Python AST, a list
   ;;  
-  ;; :NODES        : a symbol or a list of symbols, or T for all
-  ;; :NOT-INSIDE   : designator for a list of symbols
-  ;;                 (initial AST arg is not checked against this)
-  ;; :RECURSE      : recurse into returned forms?
-  ;; :SAME-NAMESPACE T <->  :not-inside '(classdef funcdef lambda) [eval]
-  ;; :CHECK-SELF : return initial AST arg if it matches?
+  ;; :NODES           : a list of symbols, or T for all
+  ;; :RECURSE-MATCHES : recurse into returned forms?
+  ;; :SAME-NAMESPACE  : don't recurse into CLASSDEF, FUNCDEF and LAMBDA
+  ;; :MATCH-INITIAL   : return initial AST arg if it matches?
   
   (check-type ast list) ;; number, string?
-  
-  (if (symbolp nodes)
-      (setf nodes (list nodes))
+  (unless (eq nodes t)
     (check-type nodes list))
-  
-  (when same-namespace
-    (setf not-inside (append `(list 'classdef 'funcdef 'lambda) not-inside)))
 
   (let ((initial-ast ast))
-    (walk-py-ast ast
-		 (lambda (ast &rest context)
-		   (let* ((is-match (and (or check-self (not (eq initial-ast ast)))
-					 (or (eq nodes t) (member (car ast) nodes))))
-			  (do-recurse (and (or (not is-match) recurse)
-					   (not (member (car ast) not-inside)))))
-		     (when is-match
-		       (apply #'funcall func ast context))
+    (flet ((ast-matches (ast)
+	     (and (or match-initial
+		      (not (eq ast initial-ast)))
+		  (or (eq nodes t)
+		      (member (car ast) nodes)))))
+      
+      (walk-py-ast ast
+		   (lambda (ast &key value target)
 		     
-		     (if do-recurse
-			 ast
-		       (values nil t)))) ;; nil is the final value for the walker
-		 :walk-lists-only t)))
+		     (cond ((and same-namespace (eq (car ast) 'funcdef-stmt))
+			    (when (ast-matches ast)
+			      (let ((id-name (third ast)))
+				(funcall f id-name :target t)))
+			    (values nil t))
+			   
+			   ((and same-namespace (eq (car ast) 'classdef-stmt))
+			    (when (ast-matches ast)
+			      (funcall ast))
+			    (let ((id-name (second ast)))
+			      (when (ast-matches id-name)
+				(funcall f id-name :target t)))
+			    (values nil t))
+			   
+			   ((and same-namespace (eq (car ast) 'lambda-expr))
+			    (when (ast-matches ast)
+			      (funcall f ast :value t))
+			    (values nil t))
+			   
+			   ((ast-matches ast)
+			    (funcall f ast :value value :target target)
+			    (if recurse-matches
+				ast
+			      (values nil t)))
+			   
+			   (t ast)))
+		   :walk-lists-only t))))
 
 
-(defmacro with-sub-ast ((target nodes ast &optional options-list) &body body)
-  "Examples:
-     (with-sub-ast (cls-ast 'classdef ast (:same-namespace t ...)) ...)
-     (with-sub-ast ((expr-ast &key value target) '(binary unary) ast
+(defmacro with-py-ast-nodes ((target nodes ast &optional options-list) &body body)
+  "Example: (with-sub-ast ((form &key value target) '(binary unary) ast
                        (:same-namespace t :recurse t)) ...)"
-  ;; XXX maybe TARGET should be structured differently?
-  (let* ((dummy '#:dummy)
-	 (target (cond ((symbolp target)          `(,target &rest ,dummy))
-		       ((= (length target) 1)     `(,(car target) &rest ,dummy))
-		       ((>= (length target) 1)
-			(assert (eq (second target) '&key) ()
-			  "form: (var) or (var &key ...) where possible keywords are ~
-                           'value and 'target  (got: ~A)" target)
-			(assert (every (lambda (kw)
-					 (member kw '(value target &allow-other-keys)))
-				       (cddr target))
-			    () "Got invalid keyword (only 'value and 'target are supported) ~
-                                (got: ~A)" (cddr target))
-			`(,(car target) &key ,@(cddr target)
-					,@(unless (member '&allow-other-keys (cddr target))
-					    '(&allow-other-keys))))
-		       (t (error "Malformed with-sub-ast target variable(s) (got: ~A)"
-				 target)))))
-    
-    `(map-sub-ast (lambda ,target
-		    ,@(when (member dummy target) 
-			`((declare (ignore ,dummy))))
-		    ,@body)
-		  ,ast
-		  :nodes ,nodes ,@options-list)))
+  (assert (and (listp target) 
+	       (= (length target) 4)
+	       (eq (second target) '&key)
+	       (member (cddr target) '((target value) (value target)) :test #'equal)) ()
+    "WITH-SUB-AST: the TARGET should be: (form &key value target) (got: ~A)" target)
+  
+  `(walk-py-ast-subset ,ast
+		       (lambda ,target ,@body)
+		       :nodes ,nodes ,@options-list))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Walker applications
 
+#+(or)
 (defun walk-print (ast &rest walk-options)
   (apply #'walk-py-ast
 	 ast

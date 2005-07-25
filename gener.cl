@@ -81,12 +81,13 @@
   ;; rewrite:  (x*y for x in bar if y)
   ;; into:     def f(src):  for x in src:  if y:  yield x*y
   ;;           f(bar)
-  ;; values: (FUNCDEF ...)  (CALL-EXPR ..)
+  ;; values: (FUNCDEF ...)  bar
   (assert (eq (car ast) 'generator-expr))
   (destructuring-bind (item for-in/if-clauses) (cdr ast)
   
     (let ((first-for (pop for-in/if-clauses))
-	  (func-name '#:helper))
+	  (func-name '#:generator-expr-helper)
+	  (first-source '#:first-source))
       
       (assert (eq (car first-for) 'gen-for-in))
       
@@ -101,11 +102,11 @@
 	
 	(values (rewrite-generator-funcdef-ast-w/o-params
 		 `(funcdef-stmt nil ,func-name
-				(((identifier-expr .first-source.)) nil nil nil)
+				(((identifier-expr ,first-source)) nil nil nil)
 				(suite-stmt
-				 ((for-in-stmt ,(second first-for) .first-source.
+				 ((for-in-stmt ,(second first-for) ,first-source
 					       ,stuff nil))))
-		 :gen-maker-lambda-args '(.first-source.))
+		 :gen-maker-lambda-args `(,first-source))
 		
 		(third first-for))))))
 
@@ -392,7 +393,7 @@
 		   ;; called to return the values
 		   
 		   (macrolet ((generator-finished ()
-				`(progn (setf .state. ,final-tag)
+				'(progn (setf .state. ,final-tag)
 					(go ,final-tag))))
 		   
 		     (block :function-body
@@ -487,5 +488,5 @@ def f():
     return
   except:
     pass"))
-	 (funcdef (caadr ast)))
+	 (funcdef (car (second (second ast)))))
     (rewrite-generator-funcdef-ast funcdef)))
