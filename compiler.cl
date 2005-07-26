@@ -59,16 +59,16 @@
 		  (let ((name (second tg)))
 		    
 		    (flet ((module-set ()
-			     (let ((ix (gethash name (get-pydecl :mod-globals-names-ht e))))
+			     (let ((ix (position name (get-pydecl :mod-globals-names e))))
 			       (if ix
 				   `(setf (svref +mod-globals-values+ ,ix) ,val)
-				 `(setf (gethash ,name +mod-dyn-globals+) ,val))))
+				 `(setf (gethash ',name +mod-dyn-globals+) ,val))))
 			   
 			   (local-set ()
 			     `(setf ,name ,value))
 			   
 			   (class-set ()
-			       `(setf (gethash ,name +cls-namespace+) ,val)))
+			       `(setf (gethash ',name +cls-namespace+) ,val)))
 		    
 		      (ecase context
 			
@@ -212,7 +212,7 @@
      (with-pydecl ((:context :class)
 		   (:classdef-scope-globals ',(classdef-globals suite)))
        ,suite)
-     (make-py-class :name ,(second name)
+     (make-py-class :name ',(second name)
 		    :namespace +cls-namespace+
 		    :supers ,inheritance)))
 
@@ -244,28 +244,28 @@
        
        (flet ((module-del ()
 		;; reset module-level vars with built-in names to their built-in value
-		(let ((ix (gethash name (get-pydecl :mod-globals-names-ht e))))
+		(let ((ix (position name (get-pydecl :mod-globals-names e))))
 		  (if ix
 		      `(let ((old-val (svref +mod-globals-values+ ,ix)))
 			 (if (eq old-val :unbound)
 			     (py-raise 'NameError "Cannot delete variable ~A: ~
-                                                   it is unbound [static global]" name)
+                                                   it is unbound [static global]" ',name)
 			   (setf (svref +mod-globals-values+ ,ix) 
 			     ,(if (builtin-name-p name)
 				  (builtin-name-value name)
 				:unbound))))
 		    `(or (remhash ,name +mod-dyn-globals+)
 			 (py-raise 'NameError "Cannot delete variable ~A: ~
-                                               it is unbound [dyn global]" name)))))
+                                               it is unbound [dyn global]" ',name)))))
 	      
 	      (local-del () `(if (eq ,name :unbound)
 				 (py-raise 'NameError "Cannot delete variable ~A: ~
-                                                       it is unbound [local]" name)
+                                                       it is unbound [local]" ',name)
 			       (setf ,name :unbound)))
 	      
 	      (class-del () `(or (remhash ,name +cls-namespace+)
 				 (py-raise 'NameError "Cannot delete variable ~A: ~
-                                                       it is unbound [dyn class]" name))))
+                                                       it is unbound [dyn class]" ',name))))
 	 
 	 (ecase context
 	 
@@ -419,11 +419,11 @@
   (assert (symbolp name))
   
   (flet ((module-lookup ()
-	   (let ((ix (gethash name (get-pydecl :mod-globals-names-ht e))))
+	   (let ((ix (position name (get-pydecl :mod-globals-names e))))
 	     (if ix
 		 `(svref +mod-globals-values+ ,ix)
 	       `(or (gethash ,name +mod-dyn-globals+)
-		    (py-raise 'NameError "No variable with name ~A" ,name))))))
+		    (py-raise 'NameError "No variable with name ~A" ',name))))))
     
     (ecase (get-pydecl :context e)
        
@@ -435,7 +435,7 @@
 		       name
 		     (module-lookup)))
 	       
-      (:class      `(or (gethash ,name +cls-namespace+)
+      (:class      `(or (gethash ',name +cls-namespace+)
 			,(if (member name (get-pydecl :lexically-visible-vars e))
 			     name
 			   (module-lookup)))))))
@@ -496,21 +496,12 @@
     ;;`(excl:named-function module-stmt-lambda
     ;;   (lambda ()
     `(let* ((+mod-globals-names+    (make-array ,(length gv) :initial-contents ',gv))
-	    #+(or)(+mod-globals-names-ht+ (let ((ht (make-hash-table :test #'eq)))
-					    (loop for name in ',gv and i from 0
-						do (setf (gethash name ht) i)
-						   (assert (eq (aref +mod-globals-names+ i)
-							       name)))
-					    ht))
-	   (+mod-globals-values+   (make-array ,(length gv) :initial-element :unbound))
-	   (+mod-dyn-globals+      nil) ;; hash-table (symbol -> val) of dynamically added vars 
-	   (+mod+                  (make-module
-				    :globals-names  +mod-globals-names+
-				    :globals-values +mod-globals-values+
-				    :dyn-globals +mod-dyn-globals+)))
+	    (+mod-globals-values+   (make-array ,(length gv) :initial-element :unbound))
+	    (+mod-dyn-globals+      nil) ;; hash-table (symbol -> val) of dynamically added vars 
+	    (+mod+                  (make-module :globals-names  +mod-globals-names+
+						 :globals-values +mod-globals-values+
+						 :dyn-globals    +mod-dyn-globals+)))
        
-       (declare (ignorable +mod-globals-names-ht+))
-
        ;; Set values of module-level variables with names
        ;; corresponding to built-in names (like `len')
        
@@ -522,34 +513,26 @@
 				    (t
 				     :unbound))
 		    unless (eq val :unbound)
-		    collect `(setf (aref +mod-globals-values+ ,i) ,val)))
+		    collect `(setf (svref +mod-globals-values+ ,i) ,val)))
 
       ;; Same context as +...+ vars above
       (with-pydecl
 	  ((:mod-globals-names    ,(make-array (length gv) :initial-contents gv))
-	   (:mod-globals-names-ht ,(let ((ht (make-hash-table :test #'eq)))
-				     (loop for name in gv and i from 0
-					 do (setf (gethash name ht) i))
-				     ht))
 	   (:lexically-visible-vars ,(when exec-locals
 				       (loop for k being the hash-key in exec-locals
 					   collect k)))
 	   (:context :module))
 	   
-	(flet ((.globals. ()
-		 (make-py-dict (loop
-				   for glob-name across +mod-globals-names+
-				   for glob-val  across +mod-globals-values+
-				   unless (eq glob-val :unbound)
-				   collect (cons glob-name glob-val) into list
-				   finally (maphash (lambda (k v) (push (cons k v) list))
-						    +mod-dyn-globals+)
-					   (return list)))))
-	  (let ,(when exec-locals
-		  (loop for k being the hash-key in exec-locals using (hash-value v)
-		      collect `(,k ,v)))
+	(flet ((.globals. () (module-stmt-make-globals-dict
+			      +mod-globals-names+ +mod-globals-values+ +mod-dyn-globals+)))
+	  
+	  ,(if exec-locals
 	       
-	    ,suite)))
+	       `(let ,(loop for k being the hash-key in exec-locals using (hash-value v)
+			  collect `(,k ,v))
+		  ,suite)
+	     
+	     suite)))
 	   
       ;; XXX if executing module failed, where to catch error?
       +mod+)))
@@ -669,7 +652,6 @@
 ;; 
 ;; Helper functions for the compiler, that preprocess or analyze AST.
 
-
 #+(or)
 (defun rewrite-name-binding-statements (ast)
   "Rewrite FUNCDEF-STMT and CLASSDEF-STMT so they become (ASSIGN-EXPR ...).
@@ -714,7 +696,7 @@ Returns the new AST."
 				    (when target
 				      (when (member name outer-scope)
 					(error "SyntaxError: local variable ~A referenced before ~
-                                           assignment" name))
+                                                assignment" name))
 				      (unless (or (member name params)
 						  (member name locals)
 						  (member name declared-globals))
@@ -806,6 +788,12 @@ Returns the new AST."
     #+(or)(warn "module vars: ~A" `(:l ,locals :dg ,declared-globals :os ,outer-scope))
     (union (union locals declared-globals) outer-scope))) ;; !?
 
+(defun module-stmt-make-globals-dict (names-vec values-vec dyn-globals-ht)
+  (make-py-dict
+   (nconc (loop for name across names-vec and val across values-vec
+	      unless (eq val :unbound) collect (cons name val))
+	  (loop for k being the hash-key in dyn-globals-ht using (hash-value v)
+	      collect (cons k v)))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Pythonic (copied)
@@ -874,6 +862,15 @@ print len"))
     (prin1 me)
     (let ((f (compile nil `(lambda () ,ast))))
       (format t "f: ~S~%" f)
-      (funcall f))))
+      (format t "funcall result: ~S" (funcall f))
+      me)))
 
 ;; XXX: accept ; as delimiter of statements in grammar
+
+
+
+
+
+
+
+
