@@ -7,7 +7,8 @@
 ;; py-meta-type.
 
 (defclass py-meta-type (standard-class)
-  ((namespace :initarg :namespace :accessor py-meta-type-namespace))
+  ((dict :initarg :dict :accessor py-class-dict)
+   (mro  :initarg :mro  :accessor py-class-mro))
   ())
 
 (defmethod make-instance
@@ -15,32 +16,34 @@
   ;; Create a new Python metatype
   ...)
 
-(defmethod compute-slots ((cls py-meta-type) &rest initargs)
-  ;; Determine the slots of a Python metaclass
-  ...)
-
-(defmethod initialize-instance ((cls py-meta-type) &rest initargs)
-  ;; Initialize a Python metatype
-  ...)
-
-(defmethod slot-value-using-class ((x (eql (find-class 'py-meta-type))) instance slot-name)
-  ;; Get attribute of an instance of a Python metatype
-  (py-attr-get instance slot-name))
-
-(defmethod (setf slot-value-using-class)
-    (new-value (cls (eql (find-class 'py-meta-type))) instance slot-name)
-  ;; Set attribute value of a Python metatype
-  (py-attr-set instance slot-name new-value))
-
-(defmethod slot-boundp-using-class
-    ((cls (eql (find-class 'py-meta-type))) instance slot-name)
-  ;; Does a Python metatype have the attribute?
-  (not (null (py-attr-get instance slot-name))))
-
-(defmethod slot-makunbound-using-class
-    ((cls (eql (find-class 'py-meta-type))) instance slot-name)
-  ;; Remove attribute of a Python metatype
-  (py-attr-del instance slot-name))
+#+(or)
+(progn ;; use regular slots
+  (defmethod compute-slots ((cls py-meta-type) &rest initargs)
+    ;; Determine the slots of a Python metaclass
+    ...)
+  
+  (defmethod initialize-instance ((cls py-meta-type) &rest initargs)
+    ;; Initialize a Python metatype
+    ...)
+  
+  (defmethod slot-value-using-class ((x (eql (find-class 'py-meta-type))) instance slot-name)
+    ;; Get attribute of an instance of a Python metatype
+    (py-attr-get instance slot-name))
+  
+  (defmethod (setf slot-value-using-class)
+      (new-value (cls (eql (find-class 'py-meta-type))) instance slot-name)
+    ;; Set attribute value of a Python metatype
+    (py-attr-set instance slot-name new-value))
+  
+  (defmethod slot-boundp-using-class
+      ((cls (eql (find-class 'py-meta-type))) instance slot-name)
+    ;; Does a Python metatype have the attribute?
+    (not (null (py-attr-get instance slot-name))))
+  
+  (defmethod slot-makunbound-using-class
+      ((cls (eql (find-class 'py-meta-type))) instance slot-name)
+    ;; Remove attribute of a Python metatype
+    (py-attr-del instance slot-name)))
 
 
 ;; A class for Python classes
@@ -48,10 +51,13 @@
 ;; These are instances of python-meta-type
 
 (defclass py-type (standard-class)
-  ((namespace :initarg :namespace :accessor py-type-namespace)
-   (slots     :initarg :slots     :accessor py-type-slots))
+  ((dict :initarg :dict :accessor py-class-dict)
+   (mro  :initarg :mro  :accessor py-class-mro)
+   (builtin-superclass :initarg :bi-super :accessor py-class-builtin-superclass))
   (:metaclass py-meta-type))
 
+
+  
 (defmethod make-instance ((cls py-meta-type) &rest initargs)
   ;; Create a new Python class that has CLS as metaclass
   ...)
@@ -60,39 +66,45 @@
   ;; Compute CPL of new Python class
   ...)
 
+(defmethod allocate-instance ((cls py-type) &rest initargs) 
+  ;; __new__
+  )
+
 (defmethod initialize-instance ((cls py-type) &rest initargs)
   ;; Initialize a Python class
   ;;  - call __init__ method
   ...)
 
-(defmethod compute-slots ((cls py-type))
-  ;; Determine the slots of a Python class
-  ;;  - take into account value of SLOTS slot. 
-  ...)
+#+(or)
+(progn 
+  (defmethod compute-slots ((cls py-type))
+    ;; Determine the slots of a Python class
+    ;;  - take into account value of SLOTS slot. 
+    ...)
 
-(defmethod slot-value-using-class ((cls py-meta-type) instance slot-name)
-  ;; Get attribute of a Python class
-  (py-attr-get instance slot-name))
+  (defmethod slot-value-using-class ((cls py-meta-type) instance slot-name)
+    ;; Get attribute of a Python class
+    (py-attr-get instance slot-name))
 
-(defmethod (setf slot-value-using-class)
-    (new-value (cls py-meta-type) instance slot-name)
-  ;; Set atttribute value of a Python class
-  (py-attr-set instance slot-name new-value))
+  (defmethod (setf slot-value-using-class)
+      (new-value (cls py-meta-type) instance slot-name)
+    ;; Set atttribute value of a Python class
+    (py-attr-set instance slot-name new-value))
 
-(defmethod slot-boundp-using-class ((x py-meta-type) instance slot-name)
-  ;; Does instance have the attribute?
-  (not (null (py-attr-get instance slot-name))))
+  (defmethod slot-boundp-using-class ((x py-meta-type) instance slot-name)
+    ;; Does instance have the attribute?
+    (not (null (py-attr-get instance slot-name))))
 
-(defmethod slot-makunbound-using-class ((x py-meta-type) instance slot-name)
-  ;; Remove attribute of a Python class
-  (py-attr-del instance slot-name))
+  (defmethod slot-makunbound-using-class ((x py-meta-type) instance slot-name)
+    ;; Remove attribute of a Python class
+    (py-attr-del instance slot-name)))
 
 
 ;; Regular Python classes are instances of python-type (or a subclass
 ;; thereof)
 
 (defclass py-object (standard-object)
-  ()
+  ((dict :initarg :dict :initform (make-hash-table :test #'eq) :accessor py-instance-dict))
   (:metaclass py-type))
 
 (defmethod make-instance ((cls py-type) &rest initargs)
@@ -104,22 +116,24 @@
   ;; Initialize a Python object (an instance of a Python class)
   ...)
 
-(defmethod slot-value-using-class ((x py-type) instance slot-name)
-  ;; Get attribute of an instance of a Python class
-  (py-attr-get instance slot-name))
+#+(or)
+(progn
+  (defmethod slot-value-using-class ((x py-type) instance slot-name)
+    ;; Get attribute of an instance of a Python class
+    (py-attr-get instance slot-name))
 
-(defmethod (setf slot-value-using-class)
-    (new-value (x py-type) instance slot-name)
-  ;; Set atttribute value of an instance of a Python class
-  (py-attr-set instance slot-name new-value))
+  (defmethod (setf slot-value-using-class)
+      (new-value (x py-type) instance slot-name)
+    ;; Set atttribute value of an instance of a Python class
+    (py-attr-set instance slot-name new-value))
 
-(defmethod slot-boundp-using-class ((x py-type) instance slot-name)
-  ;; Does instance have the attribute?
-  (not (null (py-attr-get instance slot-name))))
+  (defmethod slot-boundp-using-class ((x py-type) instance slot-name)
+    ;; Does instance have the attribute?
+    (not (null (py-attr-get instance slot-name))))
 
-(defmethod slot-makunbound-using-class ((x py-type) instance slot-name)
-  ;; Remove attribute of an instance of a Python class
-  (py-attr-del instance slot-name))
+  (defmethod slot-makunbound-using-class ((x py-type) instance slot-name)
+    ;; Remove attribute of an instance of a Python class
+    (py-attr-del instance slot-name)))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -128,24 +142,16 @@
 
 (defclass py-function (standard-generic-function)
   ;; MOP:FUNCALLABLE-STANDARD-CLASS has :name initarg
-  ((formal-args-etc)
-   (inlined-builtins))
+  ((dict :initform nil))
   (:metaclass mop:funcallable-standard-class))
 
-
-(defmethod py-update-compiled-function ((x py-function))
-  'todo)
-
-(defmethod update-instance-for-redefined-class :after
-	   ((x py-function) added-slots discarded-slots property-list &rest initargs)
-  (declare (ignore added-slots discarded-slots property-list initargs))
-  (py-update-compiled-function x))
+(defmethod make-py-function ((name symbol) (f function))
+  (let ((x (make-instance 'py-function :name name)))
+    (mop:set-funcallable-instance-function x f)
+    x))
 
 
-
-(defmethod initialize-instance :after ((x py-function) &rest initargs)
-  (mop:set-funcallable-instance-function x (lambda (&rest r) r)))
-
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defclass py-method (py-object)
   ((func :initarg :func :accessor py-method-func))
@@ -184,46 +190,230 @@
   (make-instance 'py-class-method :func f))
 
 
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; The objects in Python world are  are either "core objects" (represented directly as Lisp
+;; object) or "user objects" (represented as instance of a Python
+;; class)
+
+
+(defgeneric py-lisp-object-p (x) ;; represented as lisp object; subclassable
+  (:method ((x number)) t)
+  (:method ((x string)) t)
+  (:method ((x vector)) t)
+  (:method ((x list))   t)
+  (:method ((x t))     nil))
+
+(defgeneric py-core-object-p (x) ;; represented as python class instance; not subclassable
+  (:method ((x py-module))   t)
+  (:method ((x py-function)) t)
+  (:method ((x py-property)) t)
+  (:method ((x py-super))    t)
+  (:method ((x py-xrange))   t))   ;; not: py-file
+
+(defmethod py-user-object-p (x) ;; represented as python class instance; subclassable
+  (and (not (py-lisp-object-p x))
+       (not (py-core-object-p x))))
+
+
+(defgeneric py-class-of (x)
+  (:method ((x integer)) (load-time-value (find-class 'py-integer)))
+  (:method ((x real))    (load-time-value (find-class 'py-float  )))
+  (:method ((x complex)) (load-time-value (find-class 'py-complex)))
+  (:method ((x string))  (load-time-value (find-class 'py-string )))
+  (:method ((x vector))  (load-time-value (find-class 'py-list   )))
+  (:method ((x list))    (load-time-value (find-class 'py-tuple  )))
+  (:method ((x class))   (if (eq x (load-time-value
+				    (find-class 'py-type))) ;; py-type is its own class
+			     x
+			   (class-of x)))
+  (:method ((x t))       (class-of x)))
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Initialize the dict of class PY-TYPE.
+
+(defvar *py-type-attr* '((__name__ #'py-type.__name__)
+			 (__file__ #'py-type.__file__)
+			 (__getattribute__ #'py-type.__getattribute__)))
+
+(defun initialize-py-type-dict ()
+  (setf (py-class-dict (find-class 'py-type)) (make-attr-ht *py-type-attr*)))
+
+(defun make-attr-ht (kv)
+  (loop with ht = (make-hash-table :test #'eq)
+      for (key val) in kv do (setf (gethash key ht) val)
+      finally (return ht)))
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Attributes: getting, setting, deleting
 
-(defun py-attr (primary attr)
-  (if (typep primary (load-time-value (find-class 'user-object)))
-      (py-attr-user-object primary attr :perhaps nil)
-    (let ((boalf (builtin-object-attr-lookup-fun attr)))
-      (if boalf
-	  (funcall boalf primary)
-	(py-raise 'AttributeError
-		  "Object ~S has no attribute ~S" primary attr)))))
+(defvar *integer-attr-ht*)
+(defvar *real-attr-ht*)
+(defvar *number-attr-ht*)
+(defvar *complex-attr-ht*)
+(defvar *string-attr-ht*)
+(defvar *list-attr-ht*)
+(defvar *tuple-attr-ht*)
 
+(defgeneric py-attr (x attr)
+  
+  (:method ((x integer) attr) (maybe-make-bound-method
+			       x (or (gethash attr *integer-attr-ht*)
+				     (gethash attr *real-attr-ht*)
+				     (gethash attr *number-attr-ht*))))
+  
+  (:method ((x real)    attr) (maybe-make-bound-method
+			       x (or (gethash attr *real-attr-ht*)
+				     (gethash attr *number-attr-ht*))))
+  
+  (:method ((x complex) attr) (case attr
+				(real (realpart x))
+				(imag (imagpart x))
+				(conjugate (conjugate x))
+				(t (maybe-make-bound-method
+				    x (gethash attr *number-attr-ht*)))))
+  
+  (:method ((x string) attr) (maybe-make-bound-method
+			      x (gethash attr *string-attr-ht*)))
+  
+  (:method ((x vector) attr) (maybe-make-bound-method
+			      x (gethash attr *list-attr-ht*)))
+  
+  (:method ((x list)   attr) (maybe-make-bound-method
+			      x (gethash attr *tuple-attr-ht*)))
+  
+  (:method ((x py-module)   attr) (gethash attr (py-module-dict x)))
+  (:method ((x py-function) attr) (gethash attr (py-function-dict x)))
+  
+  (t (py-call (py-attr-class x '__getattribute__ t) x attr)))
+
+(defun maybe-make-bound-method (x meth)
+  (typecase meth
+    (py-attribute (funcall attr x))
+    (function     (make-bound-method :self x :func attr))
+    (t            meth)))
+  
+(defun py-call-ht-attr (x attr ht)
+  (let ((val (gethash attr ht)))
+    (when val
+      (py-call val x)))) ;; or funcall, if that works for static methods etc
+
+
+(defun py-attr-class (x attr &optional assert-exist-p)
+  "The value of attribute of X, that should be in its class-dict, or NIL"
+  (or (gethash (py-class-dict (py-class-of x)) attr)
+      (when assert-exist-p
+	(error "Class ~A has no attribute ~A, but it should have."))))
+
+
+(defvar *__getattribute__-level* 0)
+
+(defun py-type.__getattribute__ (x attr)
+  (if (= *__getattribute__-level* 0)
+      
+      (let ((*__getattribute__-level* 1))
+	(py-attr x attr))
+    
+    (progn (assert (not (py-core-object-p x))) ;; core and lisp objects are
+	   (assert (not (py-lisp-object-p x))) ;; handled in py-attr
+	   
+	   (cond ((typep x 'class)
+		  (assert (or (subtypep x (find-class 'py-type))
+			      (subtypep x (find-class 'py-object))))
+		  ;; x is one of:
+		  ;;  1) class `type'
+		  ;;  2) a user-defined metatype that is a subtype of `type'
+		  ;;  3) class `object'
+		  ;;  4) a user-defined subclass of `object'
+		  
+		  (loop for cls in (py-class-mro x)
+		      for val = (gethash attr (py-class-dict cls))
+		      when val
+		      do (return-from py-type.__getattribute__ val)))
+		 
+		 (t 
+		  ;; not a class, but only a class instance
+		  (assert (typep x (find-class 'py-object)))
+		  ;; xxx check here for __getattribute__, __getattr__ etc
+		  (or (gethash attr (py-instance-dict x))
+		      (let ((cls (py-class-of x)))
+			(or (loop for cls in (py-class-mro cls)
+				for val = (gethash attr (py-class-dict cls))
+				when val do (return-from py-type.__getattribute__ 
+					      (maybe-make-bound-method x val)))
+			    (let ((bi-cls (py-class-builtin-superclass cls)))
+			      (when bi-cls
+				(let ((*__getattribute__-level* 0))
+				  (maybe-make-bound-method x (py-attr bi-cls attr)))))))))))))
+
+(defvar *number-attr* ((__new__     (make-static-method #'number-__new__))
+		       (__hash__    #'number.__hash__)
+		       (__repr__    #'number.__repr__)
+		       (__nonzero__ #'number.__nonzero__)
+		       (__neg__     #'number.__neg__)
+		       (__pos__     #'number.__pos__)
+		       (__abs__     #'number.__abs__)))
+
+(defvar *complex-attr* ((real #'complex.real)
+			(imag #'complex.imag)))
+
+
+(setf *number-attr-ht* (make-attr-ht *number-attr*))
+
+
+
+
+
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+;; Optimize attribute lookup when the name of the attribute is
+;; recognized as a built-in attribute/method.
+;; 
+;; The lookup of builtin-object-attr-lookup-fun is moved to
+;; compile-time.
+
+#+(or)
+(if (py-user-object-p primary)
+    (py-attr-user-object primary attr :perhaps nil)
+  (let ((boalf (builtin-object-attr-lookup-fun attr)))
+    (if boalf
+	(funcall boalf primary)
+      (py-raise 'AttributeError "Object ~S has no attribute ~S" primary attr))))
+
+#+(or) ;; not yet
 (define-compiler-macro py-attr (&whole whole primary attr)
-  ;; Move lookup of builtin-object-attr-lookup-fun to compile-time
-  (if (and (listp attr) 
+  
+  (if (and (listp attr)
 	   (= (length attr) 2)
-	   (eq (first attr) 'quote)
+	   (eq (first attr) 'quote) 
 	   (symbolp (second attr)))
       
       (let* ((attr-name (second attr))
 	     (bi-attr-p (builtin-attr-p attr))
 	     (boalf     (and bi-attr-p (builtin-object-attr-lookup-fun attr-name))))
 	
-	`(let ((.primary. ,primary))
-	   (if (typep primary (load-time-value (find-class 'user-object)))
-	       (py-attr-user-object .primary. ,attr-name ,bi-attr-p ,boalf)
+	`(let ((primary ,primary))
+	   (if (py-user-object-p primary)
+	       (py-attr-user-object primary ,attr-name ,bi-attr-p ,boalf)
 	     ,(if boalf
-		  `(funcall ,boalf .primary.)
+		  `(funcall ,boalf primary)
 		`(py-raise 'AttributeError
-			   "Object ~S has no attribute ~S" .primary. ,attr-name)))))
+			   "Object ~S has no attribute ~S [builtin, no boalf]"
+			   primary ',attr-name)))))
     whole))
 
-
+#+(or)
 (defun py-attr-user-object (x attr bi-attr-p bi-attr-fun)
-  "Returns NIL if attribute lookup failed; otherwise the resulting object,
-perhaps bound to X."
+  "Lookup attribute ATTR of the user-object X. Returns NIL if attribute lookup
+failed; otherwise the resulting object (perhaps bound to X)."
 
   ;; ATTR        : a symbol
   ;; BI-ATTR-P   : t | nil | :perhaps
-  ;; BI-ATTR-FUN : a function, if (EQ BI-ATTR-P T), otherwise NIL
+  ;; BI-ATTR-FUN : a function if (EQ BI-ATTR-P T), otherwise NIL
   
   (multiple-value-bind (val kind)
       (py-attr-user-object-1 x attr)
@@ -239,16 +429,16 @@ perhaps bound to X."
 ;; XXX all modules and functions are of type user-object
 ;; maybe user-object represents here `object with dynamic attributes/methods' ?
 
+#+(or)
 (defgeneric py-attr-user-object-1 (x attr bi-attr-p bi-attr-fun)
-  (:method ((x py-module)   attr)  (module.__getattribute__ x attr))
-  (:method ((x py-function) attr)  (function.__getattribute__ x attr))
+  (:method ((x py-module)   attr) (module.__getattribute__ x attr))
+  (:method ((x py-function) attr) (function.__getattribute__ x attr))
   
   (:method ((x py-type)     attr)
 	   ;; X is a class. Its metaclass determines attribute lookup
 	   ;; behaviour.
 	   (let ((metaclass (class-of x)))
-	     (if (eq metaclass (load-time-value
-				(find-class 'py-type)))
+	     (if (eq metaclass (load-time-value (find-class 'py-type)))
 		 (metatype.__getattribute__ x attr)
 	       
 	       ;; call (metatype.__getattribute__ x attr)
@@ -284,7 +474,7 @@ perhaps bound to X."
 	       (:class-method-got-instance (make-bound-method :instance (class-of x)
 						       :method res)))))))
 
-
+#+(or)
 (defgeneric maybe-__get__ (obj instance class)
   ;; Maybe do obj.__get__(inst, cls)
   (:method ((obj user-object) instance class)
@@ -346,7 +536,7 @@ returned by the call."
 
 
 (defgeneric user-object-class-method (x meth)
-
+  todo)
 
 
 
@@ -415,14 +605,14 @@ returned by the call."
   nil)
 
 
-;; The following py-bi-attr:<ATTR-NAME>(x, attr) functions return:
+;; The following py-bi-attr:<ATTR-NAME>(x, attr) functions return one of:
 ;;   
 ;;   NIL                   -- if the lookup failed
 ;;   FUNC :unbound-method  -- if the result is a unbound method (bound to class of X)
 ;;   FUNC :bound-method    -- if the result is a bound method (bound to X)
 ;; 
-;; The (un)bound method is not created here, as the caller may be able
-;; to continue without needing the (un)bound method object.
+;; The (un)bound method is not created immediately, as the caller may
+;; be able to continue without creating the (un)bound method object.
 
 
 ;; `__getattribute__' intercepts all attribute lookups

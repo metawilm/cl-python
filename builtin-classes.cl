@@ -1,8 +1,17 @@
 (in-package :python)
 
+;;; Built-in classes and their methods
+
 (declaim (optimize (debug 3)))
 
-;;; Built-in classes and their methods
+
+(defmethod py-number.__getattribute__ (x attr)
+  ..)
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;; OLD ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 
 ;; XXX todo:  eval-for-in calls __iter__

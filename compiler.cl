@@ -819,16 +819,16 @@ Returns the new AST."
 	#+allegro
 	(excl:synchronous-operating-system-signal
 	 (lambda (c)
-	   (when (string= (slot-value c 'excl::format-control)
+	   (when (string= (simple-condition-format-control c)
+			  #+(or)(slot-value c 'excl::format-control)
 			  "~1@<Stack overflow (signal 1000)~:@>")
 	     (py-raise 'RuntimeError "Stack overflow"))))
 	
 	#+allegro
 	(excl:interrupt-signal
 	 (lambda (c)
-	   (let ((fa (slot-value c 'excl::format-arguments)))
-	     (when (and (listp fa)
-			(string= (second fa) "Keyboard interrupt"))
+	   (let ((fa (simple-condition-format-arguments c)))
+	     (when (string= (second fa) "Keyboard interrupt")
 	       (py-raise 'KeyboardInterrupt "Keyboard interrupt")))))
 	
 	;; more?

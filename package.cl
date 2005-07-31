@@ -29,7 +29,7 @@
 
 (defun compy ()
   (with-compilation-unit ()
-    (dolist (f '("parser" "lexer" "pyprint" "walk" ;; AST generation and manipulation
+    (dolist (f '("parser" "lexer" "pyprint" "walk" "gener" ;; AST generation and manipulation
 		 ;; classes" "exceptions" "pythonic" "functions" 
 		 ;; "methods" "magicmeths" "builtin-classes" "formatstring"
 		 ;; "call" "builtin-funcs" "builtin-types" "mathops"
