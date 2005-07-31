@@ -376,29 +376,40 @@
      (funcall f 1 2 3 4 5)
      (funcall f 1 2 3 'd 23))))
 
-(defmacro py-arg-function-1 ((pos-args key-args *-arg **-arg) &body body)
-  ;; Non-consing argument parsing, except when *-arg or **-arg present.
-  
-  (let* ((pos-key-arg-names (append pos-args (mapcar #'first key-args)))
-	 (num-pos-args (length pos-args))
+(defmacro py-arg-function ((pos-args key-args *-arg **-arg) &body body)
+  ;; Non-consing argument parsing! (except when *-arg or **-arg present)
+  ;; 
+  ;; XXX todo: the generated code can be cleaned up a bit when there
+  ;; are no arguments (currently zero-length vectors are created).
+    
+  (let* ((num-pos-args (length pos-args))
 	 (num-key-args (length key-args))
-	 (key-arg-default-asts (mapcar #'second key-args))
 	 (num-pos-key-args  (+ num-pos-args num-key-args))
-	 (arg-name-vec (make-array num-pos-key-args :initial-contents pos-key-arg-names))
-	 (arg-kwname-vec
-	  (make-array num-pos-key-args
-		      :initial-contents (loop for x across arg-name-vec
-					    collect (intern x #.(find-package :keyword)))))
-	 (key-arg-defaults (make-array num-key-args)))
+	 
+	 
+	 (pos-key-arg-names (append pos-args (mapcar #'first key-args)))
+	 (key-arg-default-asts (mapcar #'second key-args))
+	 (arg-name-vec (when (> num-pos-key-args 0)
+			 (make-array num-pos-key-args :initial-contents pos-key-arg-names)))
+	 
+	 (arg-kwname-vec (when (> num-pos-key-args 0)
+			   (make-array
+			    num-pos-key-args
+			    :initial-contents (loop for x across arg-name-vec
+						  collect (intern x #.(find-package :keyword))))))
+	 (key-arg-defaults (unless (= num-key-args 0)
+			     (make-array num-key-args))))
     
     `(locally (declare (optimize (speed 3) (safety 1) (debug 3)))
-       (let ((key-arg-default-values ,key-arg-defaults))
-
+       (let (,@(when key-args
+		`((key-arg-default-values ,key-arg-defaults))))
+	 
 	 ;; Evaluate default argument values outside the lambda, at
 	 ;; function definition time.
-	 (progn ,@(loop for i from 0 below num-key-args
-		      collect `(setf (svref key-arg-default-values ,i)
-				 ,(nth i key-arg-default-asts))))
+	 ,@(when key-args
+	     `((progn ,@(loop for i from 0 below num-key-args
+			    collect `(setf (svref key-arg-default-values ,i)
+				       ,(nth i key-arg-default-asts))))))
 	 
 	 (lambda (&rest %args)
 	   (declare (dynamic-extent %args))
@@ -410,62 +421,78 @@
 	   ;; and if there are more pos_i args then pos-args, then the
 	   ;; remaining ones are assigned to the key-args.
 	   
-	   (let* ((arg-val-vec (make-array ,num-pos-key-args))
-		  (num-filled-by-pos-args 0)
+	   (let* (,@(when (> num-pos-key-args 0) `((arg-val-vec (make-array ,num-pos-key-args))))
+		  ,@(when (> num-pos-key-args 0) `((num-filled-by-pos-args 0)))
 		  ,@(when **-arg `((for-** ())))
 		  ,@(when *-arg `((for-* ()))))
 	     	     
-	     (declare (dynamic-extent arg-val-vec)
-		      (type (integer 0 ,num-pos-key-args) num-filled-by-pos-args))
+	     ,@(when (> num-pos-key-args 0)
+		 `((declare (dynamic-extent arg-val-vec)
+			    (type (integer 0 ,num-pos-key-args) num-filled-by-pos-args))))
 	     
-	     (loop until (or (= num-filled-by-pos-args ,(if *-arg num-pos-args num-pos-key-args))
-			     (symbolp (car %args))) ;; the empty list NIL is a symbol, too
-		 do (setf (svref arg-val-vec num-filled-by-pos-args) (pop %args))
-		    (incf num-filled-by-pos-args))
+	     ;; Spread supplied positional args over pos-args and *-arg
+	     
+	     ,@(when (> num-pos-key-args 0)
+		 `((loop 
+		       until (or (= num-filled-by-pos-args ,(if *-arg num-pos-args num-pos-key-args))
+				 (symbolp (car %args))) ;; the empty list NIL is a symbol, too
+		       do (setf (svref arg-val-vec num-filled-by-pos-args) (pop %args))
+			  (incf num-filled-by-pos-args))))
 
 	     ;; Collect remaining pos-arg in *-arg, if present 
 	     
 	     (unless (symbolp (car %args))
 	       ,(if *-arg
-		    `(loop until (symbolp (car %args)) do (push (pop %args) for-*))
+		    `(loop until (symbolp (car %args))
+			 do (push (pop %args) for-*))
 		  `(break "Too many pos args")))
 	     
 	     (assert (symbolp (car %args)))
-	     
-	     #+(or) ;; array is already filled with NILs
-	     (loop for non-assigned-arg-i fixnum from num-filled-by-pos-args below ,num-pos-key-args
-		 do (setf (svref arg-val-vec non-assigned-arg-i) nil))
 	     
 	     ;; All remaining arguments are keyword arguments;
 	     ;; they have to be matched to the remaining pos and
 	     ;; key args by name.
 	     ;; 
-	     ;; Assumption: arg list has well-formed key/val pairs
+	     
 	     (when %args
 	       (loop
 		   for key = (pop %args)
 		   for val = (pop %args)
 		   while key
-		   do (loop for i fixnum from num-filled-by-pos-args below ,num-pos-key-args
-			  when (or (eq (svref ,arg-name-vec i) key)
-				   (eq (svref ,arg-kwname-vec i) key))
-			  do (setf (svref arg-val-vec i) val)
-			     (return)
-			  finally
-			    ,(if **-arg
-				 `(push (cons key val) for-**)
-			       `(break "Got unknown keyword arg and no **-arg: ~A ~A" key val)))))
+		   do
+		     (when (member key '(:* :**))
+		       (break "* and ** args in a call not handled yet, sorry"))
+		     
+		     ,(cond ((> num-pos-key-args 0)
+			     `(loop for i fixnum from num-filled-by-pos-args below ,num-pos-key-args
+				  when (or (eq (svref ,arg-name-vec i) key)
+					   (eq (svref ,arg-kwname-vec i) key))
+				  do (setf (svref arg-val-vec i) val)
+				     (return)
+				  finally 
+				    ,(if **-arg
+					 `(push (cons key val) for-**)
+				       `(break "Got unknown keyword arg and no **-arg: ~A ~A"
+					       key val))))
+			    (**-arg
+			     ;; this reconsing is necessary as **-arg might not have dynamic extent
+			     `(push (cons key val) for-**))
+			    
+			    (t `(break "Got unknown keyword arg and no **-arg: ~A ~A"
+				       key val)))))
 	     
 	     ;; Ensure all positional arguments covered
-	     (loop for i fixnum from num-filled-by-pos-args below ,num-pos-args
-		 unless (svref arg-val-vec i)
-		 do (break "Positional arg ~A has no value" (svref ,arg-name-vec i)))
+	     ,@(when (> num-pos-args 0)
+		 `((loop for i fixnum from num-filled-by-pos-args below ,num-pos-args
+		       unless (svref arg-val-vec i)
+		       do (break "Positional arg ~A has no value" (svref ,arg-name-vec i)))))
 	     
 	     ;; Use default values for missing keyword arguments (if any)
-	     (loop for i fixnum from ,num-pos-args below ,num-pos-key-args
-		 unless (svref arg-val-vec i)
-		 do (setf (svref arg-val-vec i)
-		      (svref key-arg-default-values (- i ,num-pos-args))))
+	     ,@(when key-args
+		 `((loop for i fixnum from ,num-pos-args below ,num-pos-key-args
+		       unless (svref arg-val-vec i)
+		       do (setf (svref arg-val-vec i)
+			    (svref key-arg-default-values (- i ,num-pos-args))))))
 	     
 	     ;; Initialize local variables
 	     (let (,@(loop for p in pos-key-arg-names and i from 0

@@ -160,7 +160,7 @@
     (py-raise 'SyntaxError "BREAK was found outside loop")))
 
 
-(defmacro call-expr (primary (&whole orig-args pos-args kwd-args *-arg **-arg))
+(defmacro call-expr (primary (&whole all-args pos-args kwd-args *-arg **-arg))
   
   ;; For complete Python semantics, we check for every call if the
   ;; function being called is one of the built-in functions EVAL,
@@ -175,8 +175,7 @@
 		     ,(or (null **-arg) `(null (py-mapping->lisp-list ,**-arg))))
 		(.locals.)
 	      (py-raise 'TypeError
-			"locals() must be called without args (got: ~A ~A ~A ~A)"
-			,pos-args ,kwd-args ,*-arg ,**-arg)))
+			"locals() must be called without args (got: ~A)" ',all-args)))
 
 	   ((eq prim :the-globals-function-TODO)
 	    (if (and ,(not (or pos-args kwd-args))
@@ -184,9 +183,7 @@
 		     ,(or (null **-arg) `(null (py-mapping->lisp-list ,**-arg))))
 		(.globals.)
 	      (py-raise 'TypeError
-			"globals() must be called without args (got: ~A ~A ~A ~A)"
-			,pos-args ,kwd-args ,*-arg ,**-arg)))
-	   
+			"globals() must be called without args (got: ~A)" ',all-args)))
 
 	   ((eq prim :the-eval-function-TODO)
 	    (let ((args (nconc (list ,@pos-args)
@@ -196,16 +193,23 @@
 			    `(null (py-mapping->lisp-list ,**-arg)))
 		       (<= 1 (length args) 3))
 		  
-		  `(py-eval ,(first pos-args)
-			    (or (second pos-args) (.globals.))
-			    (or (third  pos-args) (.locals.)))
+		  (py-eval ,(first pos-args)
+			   (or ,(second pos-args) (.globals.))
+			   (or ,(third  pos-args) (.locals.)))
 		
 		(py-raise 'TypeError
-			  "eval() must be called with 1 to 3 pos args (got: ~A ~A ~A ~A)"
-			  ,pos-args ,kwd-args ,*-arg ,**-arg))))
+			  "eval() must be called with 1 to 3 pos args (got: ~A)" ',all-args))))
 	   
-	   (t (return-from call-expr (py-call prim ,orig-args))))))
-
+	   (t (py-call prim
+		       ,@pos-args 
+		       ,@(loop for ((i-e key) val) in kwd-args
+			     do (assert (eq i-e 'identifier-expr))
+				;; XXX tuples?
+				
+			     collect (intern (symbol-name key) :keyword)
+			     collect val)
+		       ,@(when *-arg `((:* ,*-arg)))
+		       ,@(when **-arg `((:** ,**-arg))))))))
 
 (defmacro classdef-stmt (name inheritance suite)
   `(let ((+cls-namespace+ (make-hash-table :test #'eq)))
@@ -326,7 +330,7 @@
 			suite)
   
   (assert (or (eq name :lambda) 
-	      (and (listp name) (eq (car name) 'identifier))))
+	      (and (listp name) (eq (car name) 'identifier-expr))))
   
   ;; Replace "def f( (x,y), z):  .." by "def f( _tmp , z):  (x,y) = _tmp; ..".
   ;; Shadows original POS-ARGS.
@@ -349,7 +353,8 @@
 			       (push `(assign-expr ,tmp-var (,pa)) destructs)))
 		 (identifier-expr (push pa params)))
 	    finally (return (values (nreverse params)
-				    `(progn ,@(nreverse destructs)))))
+				    (when destructs
+				      `(progn ,@(nreverse destructs))))))
       
       (multiple-value-bind (func-explicit-globals func-locals)
 	  (funcdef-globals-and-locals (cons all-pos-arg-names (cdr formal-args)) suite)
@@ -363,17 +368,22 @@
 		 (,formal-pos-args ,key-args ,*-arg ,**-arg)
 		 
 		 (let ,(loop for loc in func-locals collect `(,loc :unbound))
-		   ,pos-arg-destruct-form
+		   
+		   ,@(when pos-arg-destruct-form
+		       `(,pos-arg-destruct-form))
 		   
 		   (block :function-body
 		     
 		     (flet ((.locals. ()
-			      (make-py-dict
-			       (delete-if (lambda (x) (eq (cdr x) :unbound))
-					  (mapcar #'cons ',func-locals (list ,@func-locals))))))
-		       
+			      ,(when func-locals
+				 `(make-py-dict
+				   (delete-if (lambda (x) (eq (cdr x) :unbound))
+					      (mapcar #'cons ',func-locals
+						      (list ,@func-locals)))))))
+			    
 		       (with-pydecl ((:funcdef-scope-globals ',func-explicit-globals)
 				     (:context :function)
+				     (:inside-function t)
 				     (:lexically-visible-vars
 				      (nconc (list ,@func-locals)
 					     (get-pydecl :lexically-visible-vars e))))
@@ -457,7 +467,9 @@
 (defmacro lambda-expr (args expr)
   ;; XXX maybe the resulting LAMBDA results in more code than
   ;; necessary for the just one expression it contains.
-  `(funcdef-stmt nil :lambda ,args (suite-stmt ((return-stmt ,expr)))))
+  
+  `(funcdef-stmt nil :lambda ,args (suite-stmt (,expr))))
+  
 
 (defmacro listcompr-expr (item for-in/if-clauses)
   (with-fresh (vec)
@@ -505,15 +517,16 @@
        ;; Set values of module-level variables with names
        ;; corresponding to built-in names (like `len')
        
-       (progn ,@(loop for glob-var-name in gv and i from 0
-		    for val = (cond (exec-globals
-				     (gethash glob-var-name exec-globals))
-				    ((builtin-name-p glob-var-name)
-				     (builtin-name-value glob-var-name))
-				    (t
-				     :unbound))
-		    unless (eq val :unbound)
-		    collect `(setf (svref +mod-globals-values+ ,i) ,val)))
+       ,@(when gv
+	   `((progn ,@(loop for glob-var-name in gv and i from 0
+			  for val = (cond (exec-globals
+					   (gethash glob-var-name exec-globals))
+					  ((builtin-name-p glob-var-name)
+					   (builtin-name-value glob-var-name))
+					  (t
+					   :unbound))
+			  unless (eq val :unbound)
+			  collect `(setf (svref +mod-globals-values+ ,i) ,val)))))
 
       ;; Same context as +...+ vars above
       (with-pydecl
@@ -555,7 +568,9 @@
   `(py-subs ,item ,subs))
 
 (defmacro suite-stmt (stmts)
-  `(progn ,@stmts))
+  (if (null (cdr stmts))
+      (car stmts)
+    `(progn ,@stmts)))
 
 (defmacro raise-stmt (exc var tb)
   `(py-raise ,exc ,var ,tb))
@@ -685,6 +700,53 @@ Returns the new AST."
 	     (with-py-ast-nodes ((form &key value target) t ast)
 	       (case (car form)
 		 
+		 (classdef-stmt (destructuring-bind
+				    ((identifier cname) inheritance suite) (cdr form)
+				  (declare (ignore suite))
+
+				  (assert (eq identifier 'identifier-expr))
+
+				  ;; The class name is always a local.
+				  (when (member cname declared-globals)
+				    (error "SyntaxError: class name ~A may not be ~
+                                            declared `global'" cname))
+				  
+				  (pushnew cname locals)
+				  
+				  (loop for x in inheritance do (recurse x)))
+				(values nil t))
+		 
+		 (funcdef-stmt  (destructuring-bind (decorators fname args suite) (cdr form)
+				  (declare (ignore suite))
+				  (assert (eq (car fname) 'identifier-expr))
+				  
+				  (when (member fname declared-globals)
+				    (error "SyntaxError: inner function name ~A declared global"
+					   fname))
+				  
+				  (pushnew (second fname) locals)
+				
+				  (loop for deco in decorators do (recurse deco))
+				  (loop for (nil def-val) in (second args)
+				      do (recurse def-val)))
+				(values nil t))
+		 
+		 (global-stmt (dolist (name (second form))
+				(cond ((member name params)
+				       (error "SyntaxError: function param ~A declared `global'"
+					      name))
+				      
+				      ((or (member name locals) (member name outer-scope))
+				       (error "SyntaxError: variable ~A used before being ~
+                                          declared `global'" name))
+				      
+				      (t (pushnew name declared-globals))))
+			      (values nil t))
+	     
+		 
+	       
+		 (lambda-expr (values nil t)) ;; skip
+		 
 		 (identifier-expr (let ((name (second form)))
 				    
 				    (when value
@@ -702,54 +764,6 @@ Returns the new AST."
 						  (member name declared-globals))
 					(pushnew name locals)))
 				    (values nil t)))
-
-	     
-		 (global-stmt (dolist (name (second form))
-				(cond ((member name params)
-				       (error "SyntaxError: function param ~A declared `global'"
-					      name))
-				      
-				      ((or (member name locals) (member name outer-scope))
-				       (error "SyntaxError: variable ~A used before being ~
-                                          declared `global'" name))
-				      
-				      (t (pushnew name declared-globals))))
-			      (values nil t))
-	     
-	     
-		 (funcdef-stmt  (destructuring-bind (decorators fname args suite) (cdr form)
-				  (declare (ignore suite))
-
-				  (assert (eq (car fname) 'identifier))
-				  
-				  (when (member fname declared-globals)
-				    (error "SyntaxError: inner function name ~A declared global"
-					   fname))
-				  
-				  (pushnew fname locals)
-				
-				  (loop for deco in decorators do (recurse deco))
-				  (loop for (nil def-val) in (second args)
-				      do (recurse def-val)))
-				(values nil t))
-		 
-		 
-		 (classdef-stmt (destructuring-bind
-				    ((identifier cname) inheritance suite) (cdr form)
-				  (declare (ignore suite))
-				  (assert (eq identifier 'identifier))
-				  
-				  ;; The class name is always a local.
-				  (when (member cname declared-globals)
-				    (error "SyntaxError: class name ~A may not be ~
-                                            declared `global'" cname))
-				  
-				  (pushnew cname locals)
-				  
-				  (loop for x in inheritance do (recurse x)))
-				(values nil t))
-	       
-		 (lambda-expr (values nil t)) ;; skip
 		 
 		 (t form)))))
     
@@ -800,7 +814,19 @@ Returns the new AST."
 
 (defun py-raise (exc-type string &rest format-args)
   "Raise a Python exception with given format string"
-  (error exc-type :args (apply #'format nil string format-args)))
+  (if (find-class exc-type)
+      (error exc-type :args (apply #'format nil string format-args))
+    (apply #'error string format-args)))
+
+
+(defclass SyntaxError (condition)
+  ((args :initarg :args :documentation "Exception arguments (as tuple)")))
+
+(defmethod print-object ((x SyntaxError) stream)
+  (format stream "~A" (class-name (class-of x)))
+  (when (slot-boundp x 'args)
+    (format stream ": ~A" (slot-value x 'args))))
+
 
 (defun lookup-inplace-op-func (op)
   (break "lookup-inplace-op-func: ~A" op))
@@ -853,24 +879,12 @@ Returns the new AST."
 
   ;; 'len' is a shadowed built-in. Before the first assignment, and
   ;; after deleting it, that variable has its built-in value.
-  (let* ((ast (parse-python-string "a = 3
-len = 4
-print 'a+len =', a+len
-del len
-print len"))
+  (let* ((ast (parse-python-string "def f(): return 42"))
 	 (me (macroexpand ast)))
     (prin1 me)
     (let ((f (compile nil `(lambda () ,ast))))
       (format t "f: ~S~%" f)
-      (format t "funcall result: ~S" (funcall f))
-      me)))
+      ;;(format t "funcall result: ~S" (funcall f))
+      nil)))
 
 ;; XXX: accept ; as delimiter of statements in grammar
-
-
-
-
-
-
-
-

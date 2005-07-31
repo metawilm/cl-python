@@ -98,7 +98,8 @@ VALUE and TARGET context."
      (destructuring-bind (primary (p-a k-a *-a **-a)) (cdr form)
        `(call-expr ,(funcall f primary :value t)
 		   ,(mapcar (lambda (pos-arg) (funcall f pos-arg :value t)) p-a)
-		   ,(mapcar (lambda (kv) (funcall f (cdr kv) :value t)) k-a)
+		   ,(mapcar (lambda (kv) (list (first kv) (funcall f (second kv) :value t)))
+			    k-a)
 		   ,(when *-a (funcall f *-a :value t))
 		   ,(when **-a (funcall f **-a :value t)))))
       

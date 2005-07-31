@@ -5,7 +5,10 @@
 
 (defun py-raise (exc-type string &rest format-args)
   "Raise a Python exception with given format string"
-  (error exc-type :args (apply #'format nil string format-args)))
+  (if (find-class exc-type)
+      (error exc-type :args (apply #'format nil string format-args))
+    (apply #'error string format-args)))
+  
 
 
 (defmethod get-py-iterate-fun (object)
