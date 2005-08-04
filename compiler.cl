@@ -1,5 +1,9 @@
 (in-package :python)
 
+;;; Python compiler
+
+;; Translates a Python module AST into a Lisp function.
+;; 
 ;; Each node in the s-expression returned by the
 ;; parse-python-{file,string} corresponds to a macro defined below
 ;; that generates the corresponding Lisp code.
@@ -35,6 +39,19 @@
 	     collect `(,x (make-symbol ,(symbol-name x))))
      ,@body))
 
+
+;; Compiler optimization options
+
+(defvar *py-comp-opt* (copy-tree (:include-line-numbers t) ;; XXX todo: line numbers
+				 (:inline-number-math nil)))
+
+(defun py-comp-opt (x)
+  (assert (member x *py-comp-opt* :key #'car))
+  (cdr (assoc x *py-comp-opt*)))
+
+(defun (setf py-comp-opt) (val x)
+  (assert (member x *py-comp-opt* :key #'car))
+  (setf (cdr (assoc x *py-comp-opt*)) val))
 
 ;; The AST node macros
 
@@ -131,7 +148,9 @@
 	 (right ,right))
      
      ,(let ((py-@ (get-op-func-todo op)))
-	(if (member op '(+ - * /))
+	
+	(if (and (py-comp-opt :inline-number-math)
+		 (member op '(+ - * /)))
 	    
 	    `(if (and (numberp left) (numberp right))
 		 (,op left right)
@@ -208,7 +227,13 @@
 				
 			     collect (intern (symbol-name key) :keyword)
 			     collect val)
-		       ,@(when *-arg `((:* ,*-arg)))
+		       
+		       ;; Because the * and ** arg may contain a huge
+		       ;; number of items, larger then max num of
+		       ;; lambda args, supply them using special :*
+		       ;; and :** keywords.
+		       
+		       ,@(when *-arg  `((:* ,*-arg)))
 		       ,@(when **-arg `((:** ,**-arg))))))))
 
 (defmacro classdef-stmt (name inheritance suite)
@@ -316,12 +341,12 @@
        (let* ((,f (lambda (,x)
 		    (assign-expr ,x (,target))
 		    (tagbody 
-		      (locally (declare (pydecl (:inside-loop t)))
+		      (with-pydecl ((:inside-loop t))
 			,suite)
 		     :continue))))
 	 (declare (dynamic-extent ,f))
 	 (map-over-py-object ,f ,source))
-       ,else-suite
+       ,@(when else-suite `(,else-suite))
       :break)))
 
 
@@ -403,7 +428,7 @@
 					finally (return res))))
 		      
 		      `(assign-expr ,art-deco (,name)))))))))))
-      
+
 
 (defmacro generator-expr (item for-in/if-clauses)
 
@@ -537,6 +562,7 @@
 	   (:context :module))
 	   
 	(flet ((.globals. () (module-stmt-make-globals-dict
+			      ;; Updating this dicts should modify the globals.
 			      +mod-globals-names+ +mod-globals-values+ +mod-dyn-globals+)))
 	  
 	  ,(if exec-locals
@@ -651,7 +677,7 @@
 	   do (when ,take-else
 		(setf ,take-else nil))
 	      (tagbody
-		(locally (declare (pydecl (:inside-loop t)))
+		(with-pydecl ((:inside-loop t))
 		  ,suite)
 	       :continue)
 	   finally (when (and ,take-else ,(and else-suite t))
