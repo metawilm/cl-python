@@ -138,7 +138,7 @@
 #+(or);; attributs classes should go via metatype, not directly like this
 (defmethod py-attr ((x py-dict-mixin) attr)
   (if (typep x 'class)
-      (py-recursive-class-dict-lookup x attr)
+      (recursive-class-dict-lookup x attr)
     (dict-get x attr)))
 
 #+(or)
@@ -156,6 +156,7 @@
 
 (defclass py-core-object (py-object) ())
 (defclass py-core-type   (py-type)   ())
+
 
 ;; Function (Core object)
 
@@ -178,6 +179,7 @@
   (if (none-p obj)
       (make-instance 'unbound-method :func func :class class)
     (make-instance 'bound-method :func func :instance obj)))
+
 
 ;; Method (Core object)
 
@@ -206,14 +208,20 @@
   (:metaclass py-core-type))
 
 
-(defclass py-none (py-core-object)
-  ()
-  (:metaclass py-core-type))
+;; None
 
-(defvar *the-none-value* (make-instance 'py-none))
+(defclass py-none (py-core-object) () (:metaclass py-core-type))
+(defvar *the-none* (make-instance 'py-none))
+(defun none-p (x) (eq x *the-none*))
 
-(defun none-p (x)
-  (eq x *the-none-value*))
+;; Ellipsis
+
+(defclass py-ellipsis (py-core-type) () (:metaclass py-core-type))
+(defvar *the-ellipsis* (make-instance 'py-ellipsis))
+
+;; NotImlemented
+(defclass py-notimplemented (py-core-type) () (:metaclass py-core-type))
+(defvar *the-notimplemented* (make-instance 'py-notimplemented))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -256,7 +264,7 @@
 	     (when getattr-meth (setf __getattr__ getattr-meth))))
 
     (flet ((bind-val (val)
-	     (let ((get-meth (py-recursive-class-dict-lookup
+	     (let ((get-meth (recursive-class-dict-lookup
 			      (py-class-of val) '__get__)))
 	       (py-call get-meth x x.class))))
 
@@ -286,7 +294,7 @@
 	      ;; Give up.
 	      (t (error "No such attribute: ~A . ~A" x attr)))))))
 
-(defmethod py-recursive-class-dict-lookup ((cls class) attr)
+(defmethod recursive-class-dict-lookup ((cls class) attr)
   ;; Look for ATTR in class CLS and all its superclasses.
   ;; and finally (which is in this implementation not a superclass of a class).
   (loop for c in (mop:class-precedence-list cls)
@@ -396,6 +404,9 @@
 
 (def-proxy-class py-int (py-real))
 
+(defvar *the-true* 1)
+(defvar *the-false* 0)
+
 (def-py-method py-int.__new__ :static-method (cls &optional (arg 0))
 	       (if (eq cls (find-class 'py-int))
 		   arg
@@ -478,10 +489,255 @@
   ;; where the accent after xxx in __xxx'__ means that the method from
   ;; the class is used, not an instance attribute (if it would exist)
   
-  (let* ((ga-meth  (py-recursive-class-dict-lookup (py-class-of x) '__getattribute__)))
-    (py-call ga x attr)))
+  (let ((ga-meth  (recursive-class-dict-lookup (py-class-of x) '__getattribute__)))
+    (py-call ga-meth x attr)))
 
 
 
 (defgeneric py-call (f &rest args)
   (:method ((f function) &rest args) (apply f args)))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+;;; Math ops:  + - << ~  (etc)  and inplace variants:  += -= <<= ~=  (etc)
+
+;; a + b   ->  (py-+ a b)   ->  a.__add__(b) or b.__radd__(a)
+;; 
+;; x += y  ->  (py-+= x y)  ->  x.__iadd__(y)
+;;                              fallback: x = x.__add__(y)
+;; 
+;; The fall-back is not part of the py-+= function, because it
+;; operates on /places/, while the function only tries the in-place
+;; operation on a /value/.
+;; 
+;; The return value of py-+= indicates whether the in-place method
+;; __iadd__ was found.
+
+(defun raise-invalid-operands (operation left &optional right)
+  ;; XXX merge into one pretty printer string
+  ;; XXX TypeError
+  (error (if right
+	     (format nil "Invalid operands for operation ~A: ~A and ~A"
+		     operation left right)
+	   (format nil "Invalid operand for operation ~A: ~A" operation left))))
+
+(defvar *binary-op-funcs-ht* (make-hash-table :test #'eq))
+(defvar *binary-iop-funcs-ht* (make-hash-table :test #'eq))
+
+(defun get-binary-op-func (op) (gethash op *binary-op-funcs-ht*))
+(defun get-binary-iop-func (iop) (gethash iop *binary-iop-funcs-ht*))
+
+(defmacro def-math-func (op-syntax op-func l-meth r-meth iop-syntax iop-func i-meth)
+  `(progn
+     
+     (defgeneric ,op-func (x y)
+       (:method ((x t) (y t))
+		(let* ((x.class (py-class-of x))
+		       (y.class (py-class-of y))
+		       (y-sub-of-x (and (not (eq x.class y.class))
+					(subtypep y.class x.class))))
+		  
+		  (loop
+		      with try-right = y-sub-of-x
+		      with finish = nil
+		      do (let* ((op-meth (recursive-class-dict-lookup
+					  (if try-right y.class x.class)
+					  (if try-right ',r-meth ',l-meth)))
+				(res (and op-meth 
+					  (py-call op-meth
+						   (if try-right y x)
+						   (if try-right x y)))))
+			   (when (and res
+				      (not (eq res (load-time-value *the-notimplemented*))))
+			     (return res)))
+			 
+			 (if finish
+			     (raise-invalid-operands ',op-syntax x y)
+			   (setf try-right (not try-right)
+				 finish t))))))
+     
+     (setf (gethash ',op-syntax *binary-op-funcs-ht*) (function ,op-func))
+     
+     (defgeneric ,iop-func (x val)
+       (:method ((x t) (val t))
+		(let* ((iop-meth (recursive-class-dict-lookup (py-class-of x) ',i-meth))
+		       (res (and iop-meth 
+				 (py-call iop-meth x val))))
+		  (and iop-meth
+		       (not (eq res (load-time-value *the-notimplemented*)))))))
+     
+     (setf (gethash ',iop-syntax *binary-iop-funcs-ht*) (function ,iop-func))))
+
+
+;; /t/ is not Python syntax, but a hack to support __future__ feature
+;; `true division'
+(def-math-func +   py-+    __add__      __radd__       +=   py-+=   __iadd__      )
+(def-math-func -   py--    __sub__      __rsub__       -=   py--=   __isub__      )
+(def-math-func *   py-*    __mul__      __rmul__       *=   py-*=   __imul__      )
+(def-math-func /t/ py-/t/  __truediv__  __rtruediv__   /t/  py-/t/= __itruediv__  )
+(def-math-func //  py-//   __floordiv__ __rfloordiv__  //=  py-//=  __ifloordiv__ ) 
+(def-math-func /   py-/    __div__      __rdiv__       /=   py-/=   __idiv__      )
+(def-math-func %   py-%    __mod__      __rmod__       %=   py-%=   __imod__      )
+(def-math-func <<  py-<<   __lshift__   __rlshift__    <<=  py-<<=  __ilshift__   )
+(def-math-func >>  py->>   __rshift__   __rrshift__    >>=  py->>=  __irshift__   )
+(def-math-func &   py-&    __and__      __rand__       &=   py-&=   __iand__      )
+(def-math-func \|  py-\|   __or__       __ror__        \|=  py-\|=  __ior__       )
+(def-math-func ^   py-^    __xor__      __rxor__       ^=   py-^=   __ixor__      )
+
+;; a**b (to-the-power) is a special case:
+;;   
+;; - method __pow__ takes an optional third argument: the c in
+;;   (a**b)%c that argument can be supplied using the built-in
+;;   function POW, but not syntactically using **
+;;  
+;; - there are no __rpow__ methods
+;;   
+;; - so, this function py-** always gets 2 arguments when called for
+;;   the a**b syntax, but may have a third argument when called for
+;;   the built-in function POW.
+
+(defun py-** (x y &optional z)
+  (let* ((x.class (py-class-of x))
+	 (op-meth (recursive-class-dict-lookup x.class '__pow__))
+	 (res (and op-meth (if z
+			       (py-call op-meth x y z)
+			     (py-call op-meth x y)))))
+    
+    (if (and res (not (eq res (load-time-value *the-notimplemented*))))
+	res
+      (raise-invalid-operands '** x y))))
+
+(setf (gethash '** *binary-op-funcs-ht*) #'py-**)
+
+;; **= has similar ugliness
+
+(defun py-**= (x y &optional z)
+  (let* ((x.class (py-class-of x))
+	 (iop-meth (recursive-class-dict-lookup x.class '__ipow__))
+	 (res (and iop-meth (if z
+				(py-call iop-meth x y z)
+			      (py-call iop-meth x y)))))
+    
+    (if (and iop-meth (not (eq res (load-time-value *the-notimplemented*))))
+	res
+      nil)))
+
+(setf (gethash '**= *binary-iop-funcs-ht*) #'py-**=)
+
+
+
+(defvar *unary-op-funcs-ht* (make-hash-table :test #'eq))
+(defun get-unary-op-func (op) (gethash op *unary-op-funcs-ht*))
+
+(defmacro def-unary-op-func (syntax fname meth)
+  `(progn (defgeneric ,fname (x)
+	    (:method ((x t))
+		     (let* ((x.class (py-class-of x))
+			    (op-meth (recursive-class-dict-lookup x.class ',meth))
+			    (res (and op-meth (py-call op-meth x))))
+		       (if (or (null op-meth)
+			       (eq res (load-time-value *the-notimplemented*)))
+			   (raise-invalid-operands ',syntax x)
+			 res))))
+	  (setf (gethash ',syntax *unary-op-funcs-ht*) (function ,fname))))
+
+(def-unary-op-func ~  py-unary-~  __invert__ )
+(def-unary-op-func +  py-unary-+  __pos__    )
+(def-unary-op-func -  py-unary--  __neg__    )
+
+(defgeneric py-not (x)
+  (:method ((x t))
+	   (if (py-val->lisp-bool x) *the-false* *the-true*)))
+
+(setf (gethash 'not *unary-op-funcs-ht*) #'py-not)
+
+;; Equality and membership testing:  a in b, a not in b, a is b, a is not b
+
+(defvar *binary-test-funcs-ht* (make-hash-table :test #'eq))
+(defun get-binary-test-func (op) (gethash op *binary-test-funcs-ht*))
+
+(defgeneric py-in (x seq)
+  (:method ((x t) (seq t))
+	   ;; use __contains__, fall back on iterator
+	   (let ((contains-meth (recursive-class-dict-lookup (py-class-of seq) '__contains__)))
+	     (if contains-meth
+		 (let ((res (py-call contains-meth seq x)))
+		   (cond ((eq res t)   (load-time-value *the-true*))
+			 ((eq res nil) (load-time-value *the-false*))
+			 (t            res)))
+	       (loop with f = (get-py-iterate-fun seq)
+		   for seq-item = (funcall f)
+		   while seq-item
+		   when (py-== x seq-item)
+		   return (load-time-value *the-true*)
+		   finally (return (load-time-value *the-false*)))))))
+	     
+(defgeneric py-not-in (x seq)
+  (:method ((x t) (seq t))
+	   (py-not (py-in x seq))))
+
+(setf (gethash 'in *binary-op-funcs-ht*) #'py-in)
+(setf (gethash '|not in| *binary-op-funcs-ht*) #'py-not-in)
+
+
+(defgeneric py-is (x y)
+  (:method ((x t) (y t))
+	   (if (eq x y) *the-true* *the-false*)))
+
+(defgeneric py-is-not (x y)
+  (:method ((x t) (y t))
+	   (if (eq x y) *the-false* *the-true*)))
+
+(setf (gethash 'is *binary-op-funcs-ht*) #'py-is)
+(setf (gethash '|is not| *binary-op-funcs-ht*) #'py-is-not)
+
+
+
+;; Binary comparison operations
+;; 
+;; It appears that all comparisons -- < > <= >= == != <> -- are
+;; defined in terms of the outcome of built-in function `cmp'
+;; (#'py-cmp).
+;; 
+;; #'py-< implements the logic for "a < b"
+;; 
+;; Note this important point: "a < b" is NOT directly translated into
+;; a.__lt__(b), although this __lt__ method *might* be called by
+;; __cmp__, as might b.__ge__ in this case.
+;; 
+;;  '<  -->  #'py-<
+;; 
+;; This mapping is used by the interpreter, in EVAL-COMPARISON
+;; (pyeval.cl).
+
+(defvar *binary-comparison-funcs-ht* (make-hash-table :test #'eq))
+
+(defmacro def-comparison (syntax func test-x-y)
+  `(progn (defgeneric ,func (x y)
+	    (:method ((x t) (y t))
+		     #+(or)(declare (optimize (speed 3) (safety 1) (debug 0)))
+		     (if ,test-x-y
+			 (load-time-value *the-true*)
+		       (load-time-value *the-false*))))
+	  (setf (gethash ',syntax *binary-comparison-funcs-ht*) (function ,func))))
+	    
+;; pyb:cmp returns -1, 0 or 1 (or TypeError if user-supplied
+;; method returns bogus comparison result; that TypeError is not
+;; catched here but goes to user code.)
+
+(def-comparison  <  py-<   (=  (the (integer -1 1) (pyb:cmp x y)) -1))
+(def-comparison  >  py->   (=  (the (integer -1 1) (pyb:cmp x y))  1))
+(def-comparison ==  py-==  (=  (the (integer -1 1) (pyb:cmp x y))  0))
+(def-comparison !=  py-!=  (/= (the (integer -1 1) (pyb:cmp x y))  0)) ;; parser: <> -> !=
+(def-comparison <=  py-<=  (<= (the (integer -1 1) (pyb:cmp x y))  0))
+(def-comparison >=  py->=  (>= (the (integer -1 1) (pyb:cmp x y))  0))
+
+
+
+
+
+
+
+
+
+

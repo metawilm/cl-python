@@ -312,6 +312,8 @@
  
  ;; some with explicit precedences
  
+ ;; maybe is, is-not, in, not-in should be separate from math ops (like binary-test)
+ 
  (binop-expr (binop-expr |not| |in| binop-expr)
 	     ((list 'binary-expr '|not in| $1 $4)) (:precedence |in|))
  (binop-expr (binop-expr |is| |not| binop-expr)

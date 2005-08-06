@@ -40,18 +40,20 @@
      ,@body))
 
 
-;; Compiler optimization options
+;; Compiler debugging and optimization options.
 
-(defvar *py-comp-opt* (copy-tree (:include-line-numbers t) ;; XXX todo: line numbers
-				 (:inline-number-math nil)))
+(defvar *comp-opt*
+    (copy-tree '((:include-line-numbers t) ;; XXX todo: insert line numbers in AST
+		 (:inline-number-math nil)
+		 (:inline-fixnum-math nil))))
 
-(defun py-comp-opt (x)
-  (assert (member x *py-comp-opt* :key #'car))
-  (cdr (assoc x *py-comp-opt*)))
+(defun comp-opt-p (x)
+  (assert (member x *comp-opt* :key #'car) () "Unknown Python compiler option: ~S" x)
+  (cdr (assoc x *comp-opt*)))
 
-(defun (setf py-comp-opt) (val x)
-  (assert (member x *py-comp-opt* :key #'car))
-  (setf (cdr (assoc x *py-comp-opt*)) val))
+(defun (setf comp-opt) (val x)
+  (assert (member x *comp-opt* :key #'car) () "Unknown Python compiler option: ~S" x)
+  (setf (cdr (assoc x *comp-opt*)) val))
 
 ;; The AST node macros
 
@@ -144,19 +146,8 @@
   :get-op-func-todo)
 
 (defmacro binary-expr (op left right)
-  `(let ((left ,left)
-	 (right ,right))
-     
-     ,(let ((py-@ (get-op-func-todo op)))
-	
-	(if (and (py-comp-opt :inline-number-math)
-		 (member op '(+ - * /)))
-	    
-	    `(if (and (numberp left) (numberp right))
-		 (,op left right)
-	       (,py-@ left right))
-	  
-	  `(,py-@ left right)))))
+  (let ((py-@ (get-binary-op-func op)))
+    `(,py-@ ,left ,right)))
 
 (defmacro binary-lazy-expr (op left right)
   (ecase op
@@ -559,10 +550,11 @@
 	   (:lexically-visible-vars ,(when exec-locals
 				       (loop for k being the hash-key in exec-locals
 					   collect k)))
-	   (:context :module))
+	   (:context :module)
+	   (:mod-futures :todo-parse-module-ast-future-imports))
 	   
 	(flet ((.globals. () (module-stmt-make-globals-dict
-			      ;; Updating this dicts should modify the globals.
+			      ;; Updating this dict really modifies the globals.
 			      +mod-globals-names+ +mod-globals-values+ +mod-dyn-globals+)))
 	  
 	  ,(if exec-locals
@@ -655,18 +647,9 @@
   `(make-tuple ,items))
 
 (defmacro unary-expr (op item)
-  (ecase op
-    (+ `(let ((item ,item))
-	  (if (numberp item)
-	      item
-	    (py-+ item))))
-    
-    (- `(let ((item ,item))
-	  (if (numberp item)
-	      (- item)
-	    (py-- item))))
-    
-    (not `(todo))))
+  (let ((py-op-func (get-unary-op-func op)))
+    (assert py-op-func)
+    `(,py-op-func ,item)))
 
 (defmacro while-stmt (test suite else-suite)
   (with-fresh (take-else)
@@ -900,7 +883,6 @@ Returns the new AST."
 
 
 
-
 (defun testw ()
 
   ;; 'len' is a shadowed built-in. Before the first assignment, and
@@ -914,3 +896,35 @@ Returns the new AST."
       nil)))
 
 ;; XXX: accept ; as delimiter of statements in grammar
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+;; Optimization
+
+#+(or) ;; inline number/fixnum additions arithmetic
+(define-compiler-macro py-+ (&whole whole x y)
+  (cond ((comp-opt-p :inline-number-math)
+	 `(let ((left ,x) (right ,y))
+	    (if (and (numberp left) (numberp right))
+		(+ left right)
+	      (py-+ left right))))
+	
+	((comp-opt-p :inline-fixnum-math)
+	`(if (and (fixnump left) (fixnump right))
+	     (+ left right)
+	   (py-+ left right)))
+	
+	(t whole)))
+
+#+(or) ;; methods on py-+
+(defmethod py-+ ((x number) (y number))
+  (+ x y))
+
+#+(or)
+(defmethod py-+ ((x fixnum) (y fixnum))
+  (+ x y))
+
+#+(or) ;; optimize membership test on sequences
+(defmethod py-in (item (seq sequence))
+  (if (member item seq :test #'py-==) *the-true* *the-false*))
