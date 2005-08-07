@@ -16,7 +16,9 @@
   nil)
 
 (defun dict-get (x key)
-  (gethash key (dict x)))
+  (let ((d (dict x)))
+    (assert d () "dict-get: object ~A has no dict (key ~A)" x key)
+    (gethash key (dict x))))
 
 (defun dict-del (x key)
   (remhash (dict x) key))
@@ -106,19 +108,44 @@
 	 (meth (intern (subseq cm (1+ dot-pos)) #.*package*))
 	 (modifiers (loop while (keywordp (car args)) collect (pop args))))
 
-    (assert (<= (length modifiers) 1) () "Multiple modifiers for a py-method: bug?")
-    
-    (destructuring-bind (args &body body) args
-      `(progn (defun ,cls.meth ,args 
-		,@body)
-	      (let* ((cls (or (find-class ',cls) (error "No such class: ~A" ',cls))))
-		(unless (dict cls)
-		  (error "Class ~A has no dict" cls))
-		(setf (dict-get cls ',meth)
-		  ,(ecase (car modifiers)
-		     ((nil)               `(function ,cls.meth))
-		     (:static-method      `(make-instance 'py-static-method
-					     :func (function ,cls.meth))))))))))
+    (assert (<= (length modifiers) 1) ()
+      "Multiple modifiers for a py-method: ~A. Todo?" modifiers)
+
+    `(progn
+       ,(destructuring-bind (func-args &body func-body) args
+	  (loop with real-args
+	      with body = `(locally ,@func-body) ;; allows DECLARE forms at head
+
+	      for sym in func-args
+	      for sym-name = (when (symbolp sym) (symbol-name sym))
+
+	      if (not (symbolp sym))
+	      do (push sym real-args)
+		 
+	      else if (char= #\^ (aref sym-name (1- (length sym-name))))
+	      do (let ((real-name (intern (subseq sym-name 0 (1- (length sym-name)))
+					  #.*package*)))
+		   (push real-name real-args)
+		   (setf body `(let ((,real-name (deproxy ,real-name)))
+				 ,body)))
+		 
+	      else do (push sym real-args)
+	      finally (return `(defun ,cls.meth ,(nreverse real-args)
+				 ,body))))
+       
+       (let* ((cls (or (find-class ',cls) (error "No such class: ~A" ',cls))))
+	 (unless (dict cls)
+	   (error "Class ~A has no dict" cls))
+	 (setf (dict-get cls ',meth)
+	   ,(ecase (car modifiers)
+	      ((nil)               `(function ,cls.meth))
+	      (:static             `(make-instance 'py-static-method
+				      :func (function ,cls.meth)))
+	      (:attribute          `(make-instance 'py-attribute-method
+				      :func (function ,cls.meth)))))))))
+
+(defmacro py-bool (x)
+  `(if ,x (load-time-value *the-true*) (load-time-value *the-false*)))
 
 ;;; Attributes are a fundamental thing: getting, setting, deleting
 
@@ -207,6 +234,21 @@
   ((class :initarg :class))
   (:metaclass py-core-type))
 
+(defclass py-attribute-method (py-method)
+  ()
+  (:metaclass py-core-type))
+
+(def-py-method py-attribute-method.__get__ (x inst class)
+  (declare (ignore class))
+  (py-call (slot-value x 'func) inst))
+
+(def-py-method py-attribute-method.__set__ (x inst class)
+  (declare (ignore class))
+  (error "Attribute ~A of object ~A is read-only (value: ~A)"
+	 x inst (py-call (slot-value x 'func) inst)))
+	 
+
+
 
 ;; None
 
@@ -244,29 +286,34 @@
 
     (loop for c in (mop:class-precedence-list x.class)
 	until (or (eq c (load-time-value (find-class 'standard-class)))
-		  (eq c (load-time-value (find-class 'py-dict-mixin))))
+		  (eq c (load-time-value (find-class 'py-dict-mixin)))
+		  (eq c (load-time-value (find-class 'py-class-mixin))))
 	      
-	for c.dict = (dict c)
+	for c.dict = (dict c) ;; may be NIL
 		     
+	when c.dict
 	do (let ((getattribute-meth (gethash '__getattribute__ c.dict)))
 	     (when (and getattribute-meth
 			(not (eq getattribute-meth #'py-object.__getattribute__)))
 	       (return-from py-object.__getattribute__
 		 (py-call getattribute-meth x attr))))
 	   
-	unless class-attr-val
-	do (let ((val (gethash attr c.dict)))
-	     (when val 
-	       (setf class-attr-val val)))
+	   (unless class-attr-val
+	     (let ((val (gethash attr c.dict)))
+	       (when val 
+		 (setf class-attr-val val))))
 	   
-	unless (or class-attr-val __getattr__)
-	do (let ((getattr-meth (gethash '__getattr__ c.dict)))
-	     (when getattr-meth (setf __getattr__ getattr-meth))))
+	   (unless (or class-attr-val __getattr__)
+	     (let ((getattr-meth (gethash '__getattr__ c.dict)))
+	       (when getattr-meth (setf __getattr__ getattr-meth)))))
 
     (flet ((bind-val (val)
+	     (warn "bind-val ~A to ~A" val x)
 	     (let ((get-meth (recursive-class-dict-lookup
 			      (py-class-of val) '__get__)))
-	       (py-call get-meth x x.class))))
+	       (if get-meth
+		   (py-call get-meth val x x.class)
+		 val))))
 
       ;; Arriving here means: no __getattribute__, but perhaps
       ;; __getattr__ or class-attr-val.
@@ -301,19 +348,24 @@
       until (or (eq c (load-time-value (find-class 'standard-class)))
 		(eq c (load-time-value (find-class 'py-dict-mixin))))
 	    ;; XXX standard-class is after py-dict-mixin etc
-      when (dict-get c attr) return it
-      finally (return nil)
+      when (and (dict c) (dict-get c attr)) return it
+      finally #+(or)(return nil)
 	      
-	      #+(or) ;; this seems not needed, in the finally clause
+	      ;; this seems not needed, in the finally clause
 	      (let ((obj-attr (dict-get 'py-object attr)))
 		(when obj-attr
 		  (warn "rec van py-object: ~A" attr)
 		  (return obj-attr)))))
 
 
+(def-py-method py-object.__get__ (value instance class)
+  (declare (ignore instance class))
+  value)
+
+
 ;; Type (User object)
 
-(def-py-method py-type.__mro__ (x)
+(def-py-method py-type.__mro__ :attribute (x)
 	       (mop:class-precedence-list x))
 
 ;; XXX should default to `object'
@@ -324,7 +376,7 @@
   ()
   (:metaclass py-user-type))
 
-(def-py-method py-module.__new__ :static-method (cls name)
+(def-py-method py-module.__new__ :static (cls name)
 	       (let ((x (make-instance cls)))
 		 (setf (dict-get x '__name__) name)
 		 x))
@@ -339,7 +391,7 @@
   ((file-handle :initform nil :accessor py-file-handle))
   (:metaclass py-user-type))
 
-(def-py-method py-file.__new__ :static-method (x filename)
+(def-py-method py-file.__new__ :static (x filename)
 	       (setf (py-file-handle x) (open-lisp-file-todo filename)))
 
 (def-py-method py-file.__init__ (&rest args)
@@ -367,7 +419,7 @@
   (:documentation "Base class for proxy classes"))
 
 
-(defgeneric maybe-proxy-lisp-val (x)
+(defgeneric deproxy (x)
   (:method ((x py-lisp-object))  (proxy-lisp-val x))
   (:method ((x t))               x))
 
@@ -377,20 +429,28 @@
 (defmethod (setf py-attr) (val (x py-lisp-object) attr)
   (setf (py-attr (proxy-lisp-val x) attr) val))
 
-;;(eval-when (:compile-toplevel :load-toplevele :execute)
 (defmacro def-proxy-class (py-name &optional supers)
   `(progn (defclass ,py-name ,(or supers '(py-lisp-object))
 	    ()
 	    (:metaclass py-lisp-type))
 	  (mop:finalize-inheritance (find-class ',py-name))))
-;()
 
 ;; Number (Lisp object: number)
 
 (def-proxy-class py-number)
 
-(def-py-method py-number.__eq__ (x y)
-	       (= (maybe-proxy-lisp-val x) (maybe-proxy-lisp-val y)))
+(def-py-method py-number.__repr__ (x^) (format nil "~A" x))
+
+(def-py-method py-number.__eq__ (x^ y^)
+  (if (and (numberp x) (numberp y))
+      (py-bool (= x y))
+    *the-notimplemented*))
+
+(def-py-method py-number.real :attribute (x^)
+  (realpart x))
+
+(def-py-method py-number.imag :attribute (x^)
+  (imagpart x))
 
 ;; Complex
 
@@ -407,7 +467,7 @@
 (defvar *the-true* 1)
 (defvar *the-false* 0)
 
-(def-py-method py-int.__new__ :static-method (cls &optional (arg 0))
+(def-py-method py-int.__new__ :static (cls &optional (arg 0))
 	       (if (eq cls (find-class 'py-int))
 		   arg
 		 (let ((i (make-instance cls)))
@@ -415,8 +475,6 @@
 		   i)))
 
 (def-py-method py-int.__init__ (&rest args) nil)
-
-(def-py-method py-int.__str__ (x) (format nil "~A" (maybe-proxy-lisp-val x)))
 
 ;; Float
 
@@ -427,27 +485,25 @@
 
 (def-proxy-class py-list)
 
-(def-py-method py-list.__new__ :static-method (cls)
+(def-py-method py-list.__new__ :static (cls)
 	       (if (eq cls (find-class 'py-list))
 		   (make-array 0 :adjustable t :fill-pointer 0)
 		 (make-instance cls)))
 		    
-(def-py-method py-list.__init__ (x &optional iterable)
-	       (let ((x (maybe-proxy-lisp-val x)))
-		 (when iterable
-		   (loop for item in (py-iterate->lisp-list iterable)
-		       do (vector-push-extend item x)))))
+(def-py-method py-list.__init__ (x^ &optional iterable)
+  (when iterable
+    (loop for item in (py-iterate->lisp-list iterable)
+	do (vector-push-extend item x))))
 
-(def-py-method py-list.__str__ (x)
-	       (let ((x (maybe-proxy-lisp-val x)))
-		 (format t "[~{~A~^, ~}]" (loop for i across x collect i))))
+(def-py-method py-list.__str__ (x^)
+  (format t "[~{~A~^, ~}]" (loop for i across x collect i)))
 
 
 ;; Tuple (Lisp object: consed list)
 
 (def-proxy-class py-tuple)
 
-(def-py-method py-tuple.__new__ :static-method (cls &rest args)
+(def-py-method py-tuple.__new__ :static (cls &rest args)
 	       (if (eq cls (find-class 'py-tuple))
 		   args
 		 (make-instance cls)))
@@ -459,9 +515,8 @@
 
 (def-proxy-class py-string)
 
-(def-py-method py-string.__len__ (x)
-	       (let ((x (maybe-proxy-lisp-val x)))
-		 (length x)))
+(def-py-method py-string.__len__ (x^)
+  (length x))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;  
 
@@ -490,9 +545,44 @@
   ;; the class is used, not an instance attribute (if it would exist)
   
   (let ((ga-meth  (recursive-class-dict-lookup (py-class-of x) '__getattribute__)))
+    (assert ga-meth () "Object ~A (py-class: ~A) does not have a __getattribute__ method"
+	    x (py-class-of x))
     (py-call ga-meth x attr)))
 
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+;;; Descriptors
+
+;; The Python Reference Manual says:
+;; 
+;;   3.3.2.2 Implementing Descriptors
+;;   
+;;   In general, a descriptor is an object attribute with ``binding
+;;   behavior'', one whose attribute access has been overridden by
+;;   methods in the descriptor protocol: __get__(), __set__(), and
+;;   __delete__().  If any of those methods are defined for an object,
+;;   it is said to be a descriptor.
+;; 
+;; A descriptor is called a "data descriptor" iff it implements
+;; `__set__'. Whether this is the case influences the attribute lookup
+;; order.
+
+(defun descriptor-p (x)
+  (let ((x.class (py-class-of x)))
+    (or (recursive-class-dict-lookup x.class '__get__)
+	(recursive-class-dict-lookup x.class '__set__)
+	(recursive-class-dict-lookup x.class '__delete__))))
+
+(defun data-descriptor-p (x)
+  "Returns DES-P, __SET__"
+  ;; check for None?
+  (recursive-class-dict-lookup (py-class-of x) '__set__))
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+;;; Calling objects (functions, classes, instances)
 
 (defgeneric py-call (f &rest args)
   (:method ((f function) &rest args) (apply f args)))
@@ -547,9 +637,9 @@
 					  (py-call op-meth
 						   (if try-right y x)
 						   (if try-right x y)))))
-			   (when (and res
-				      (not (eq res (load-time-value *the-notimplemented*))))
-			     (return res)))
+			   (when res
+			     (unless (eq res (load-time-value *the-notimplemented*))
+			       (return res))))
 			 
 			 (if finish
 			     (raise-invalid-operands ',op-syntax x y)
@@ -659,7 +749,8 @@
 (defgeneric py-in (x seq)
   (:method ((x t) (seq t))
 	   ;; use __contains__, fall back on iterator
-	   (let ((contains-meth (recursive-class-dict-lookup (py-class-of seq) '__contains__)))
+	   (let ((contains-meth (recursive-class-dict-lookup
+				 (py-class-of seq) '__contains__)))
 	     (if contains-meth
 		 (let ((res (py-call contains-meth seq x)))
 		   (cond ((eq res t)   (load-time-value *the-true*))
@@ -678,7 +769,6 @@
 
 (setf (gethash 'in *binary-op-funcs-ht*) #'py-in)
 (setf (gethash '|not in| *binary-op-funcs-ht*) #'py-not-in)
-
 
 (defgeneric py-is (x y)
   (:method ((x t) (y t))
@@ -731,13 +821,4 @@
 (def-comparison !=  py-!=  (/= (the (integer -1 1) (pyb:cmp x y))  0)) ;; parser: <> -> !=
 (def-comparison <=  py-<=  (<= (the (integer -1 1) (pyb:cmp x y))  0))
 (def-comparison >=  py->=  (>= (the (integer -1 1) (pyb:cmp x y))  0))
-
-
-
-
-
-
-
-
-
 

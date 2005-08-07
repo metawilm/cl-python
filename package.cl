@@ -29,7 +29,12 @@
 
 (defun compy ()
   (with-compilation-unit ()
-    (dolist (f '("parser" "lexer" "pyprint" "walk" "gener" ;; AST generation and manipulation
+    (dolist (f '(;; create and modify AST
+		 parser lexer pyprint walk gener compiler 
+		 
+		 ;; Python semantics
+		 builtin-classes
+		 
 		 ;; classes" "exceptions" "pythonic" "functions" 
 		 ;; "methods" "magicmeths" "builtin-classes" "formatstring"
 		 ;; "call" "builtin-funcs" "builtin-types" "mathops"
@@ -38,23 +43,9 @@
 		 ;; "bi-modules" "pyprint"
 		 ))
       #+allegro(excl::compile-file-if-needed f)
-      #-allegro(compile-file (concatenate 'string f ".cl"))
+      #-allegro(compile-file (format nil "~A.cl" f))
       (load f)))
   (values))
-
-#+(or)
-(defun compy ()
-  (with-compilation-unit ()
-    (dolist (f '("classes" "exceptions" "pythonic" "functions" 
-		 "methods" "magicmeths" "builtin-classes" "formatstring"
-		 "call" "builtin-funcs" "builtin-types" "mathops"
-		 "descriptors" "attributes" "modules" "pyeval"
-		 "parsepython" "walk" "gener" "repl" "trace"
-		 "bi-modules" "pyprint"))
-      #+allegro(excl::compile-file-if-needed f)
-      #-allegro(compile-file (concatenate 'string f ".cl"))
-      (load f)))
-  'done)
 
 
 (defpackage :python-builtin-functions

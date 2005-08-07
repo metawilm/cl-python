@@ -1,10 +1,9 @@
 (in-package :python)
 
-;;; Pretty printer for parsed Python code
+;;; Pretty printer for Python ASTs
 ;;;
 ;;; Of course this is fully dependent on the form of the AST that the
 ;;; parser yields.
-;;;
 ;;;
 ;;; TODO: 
 ;;;  - insert line ends for too long lines
@@ -48,7 +47,7 @@
       (format stream "~Gj" (imagpart x))))
 
 (defmethod py-pprint (stream (x string))  
-  ;; see also READ-STRING in PARSEPYTHON.CL
+  ;; inverse of READ-STRING in PARSEPYTHON.CL
 
   (multiple-value-bind (delim-quote other-quote unicode?)
       (loop for ch across x

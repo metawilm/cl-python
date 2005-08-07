@@ -5,26 +5,24 @@
 ;;  
 ;; Because DEFINE-CONDITION has no :metaclass option, we use DEFCLASS.
 
-(defclass Exception (python-object condition)
-  ((args :initarg :args :documentation "Exception arguments (as tuple)"))
-  (:documentation "The Exception type.")
-  (:metaclass python-type)) 
+(defclass Exception (py-object condition)
+  ((args :initarg :args :initform nil :documentation "Arguments as Lisp list"))
+  (:metaclass py-type)) 
 
-;; This `Exception' class is a Python class, a regular Python object,
-;; and a Lisp condition type: CLOS is impressive.
+;; The `Exception' class is a Python class, a regular Python object,
+;; and a Lisp condition. CLOS is pretty impressive.
 
 (defmethod print-object ((x Exception) stream)
-  (format stream "~A" (class-name (class-of x)))
-  (when (slot-boundp x 'args)
-    (format stream ": ~A" (slot-value x 'args))))
+  (format stream "~A~@[: ~{~A~^, ~}]"
+	  (class-name (class-of x))
+	  (slot-value x 'args)))
 
-(defmethod __repr__ ((x Exception))
+(def-py-method Exception.__repr__ (x)
   (with-output-to-string (s)
     (print-object x s)))
-
+    
 (defvar *exceptions-tree* ;; XXX CPython has explanation string for every exception
-    (quote
-     (SystemExit
+    `(SystemExit
       StopIteration
       (StandardError KeyboardInterrupt 
 		     ImportError
@@ -49,37 +47,33 @@
 		     ReferenceError
 		     SystemError 
 		     MemoryError)
+      
       (Warning UserWarning
 	       DeprecationWarning 
 	       PendingDeprecationWarning 
 	       SyntaxWarning 
 	       OverflowWarning 
 	       RuntimeWarning   
-	       FutureWarning))))
+	       FutureWarning)))
 
-(defparameter *python-exceptions* ())
+(defparameter *python-exceptions* (list (cons 'Exception (find-class 'Exception))))
 
-(push (cons 'Exception (find-class 'Exception)) *python-exceptions*)
+(defun def-sub-exc (super exc-name)
+  (let ((c (mop:ensure-class exc-name
+			     :direct-superclasses (list super)
+			     :metaclass 'py-type)))
+    (push (cons exc-name c) *python-exceptions*)))
 
-(defun def-python-exceptions (root tree)
+(defun def-python-exceptions (parent child-tree)
   (declare (optimize (debug 3))
 	   (notinline def-python-exceptions))
-  (flet ((def-sub-exc (exc-name super)
-	     #+(or)(format t "defining exception   ~A  (~A)~%" exc-name super)
-	   (let ((c (mop:ensure-class exc-name
-				      :direct-superclasses (list super)
-				      :metaclass 'python-type)))
-	     (push (cons exc-name c) *python-exceptions*))))
-    
-    (if (symbolp tree)
-	
-	(def-sub-exc tree root)
-      
-      (progn
-	(def-sub-exc (car tree) root)
-	(loop for sub in (cdr tree)
-	    do (def-python-exceptions (car tree) sub))))))
+  
+  (if (symbolp child-tree)
+      (def-sub-exc parent child-tree)
+    (progn
+      (def-sub-exc parent (car child-tree))
+      (loop for subchild in (cdr child-tree)
+	  do (def-python-exceptions (car child-tree) subchild)))))
 
-(mapcar (lambda (x)
-	  (def-python-exceptions 'Exception x))
-	*exceptions-tree*)
+(loop for branch in *exceptions-tree*
+    do (def-python-exceptions 'Exception branch))
