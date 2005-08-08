@@ -159,10 +159,10 @@ VALUE and TARGET context."
 		      ,(funcall f (second form) :value t) ;; XXX value ok...?
 		      ,(loop for for/if in (third form) collect
 			     (ecase (car for/if)
-			       (gen-for-in `(gen-for-in
+			       (for-in `(for-in
 					     ,(funcall f (second for/if) :target t)
 					     ,(funcall f (third  for/if) :value t)))
-			       (gen-if `(gen-if ,(funcall (second for/if) :value t)))))))
+			       (if `(if ,(funcall (second for/if) :value t)))))))
       
     (if-stmt
      (assert (not (or value target)))
@@ -216,12 +216,12 @@ VALUE and TARGET context."
        ,(funcall f (second form) :value t) ;; XXX value ok...?
        ,(loop for for/if in (third form) collect
 	      (ecase (car for/if)
-		(list-for-in
-		 `(list-for-in
+		(for-in
+		 `(for-in
 		   ,(funcall f (second for/if) :target t)
 		   ,(funcall f (third  for/if) :value t)))
-		(list-if
-		 `(list-if
+		(if
+		 `(if
 		   ,(funcall (second for/if) :value t)))))))
     
     (module-stmt

@@ -144,8 +144,14 @@
 	      (:attribute          `(make-instance 'py-attribute-method
 				      :func (function ,cls.meth)))))))))
 
-(defmacro py-bool (x)
-  `(if ,x (load-time-value *the-true*) (load-time-value *the-false*)))
+(defconstant *the-true* 1)
+(defconstant *the-false* 0)
+
+(defun py-bool (lisp-val)
+  (if lisp-val *the-true* *the-false*))
+
+(define-compiler-macro py-bool (lisp-val)
+  `(if ,lisp-val *the-true* *the-false*))
 
 ;;; Attributes are a fundamental thing: getting, setting, deleting
 
@@ -447,10 +453,15 @@
     *the-notimplemented*))
 
 (def-py-method py-number.real :attribute (x^)
-  (realpart x))
+	       (realpart x))
 
 (def-py-method py-number.imag :attribute (x^)
-  (imagpart x))
+	       (imagpart x))
+
+(def-py-method py-number.conjugate (x^)
+  (conjugate x))
+
+
 
 ;; Complex
 
@@ -463,9 +474,6 @@
 ;; Integer
 
 (def-proxy-class py-int (py-real))
-
-(defvar *the-true* 1)
-(defvar *the-false* 0)
 
 (def-py-method py-int.__new__ :static (cls &optional (arg 0))
 	       (if (eq cls (find-class 'py-int))
@@ -737,7 +745,7 @@
 
 (defgeneric py-not (x)
   (:method ((x t))
-	   (if (py-val->lisp-bool x) *the-false* *the-true*)))
+	   (py-bool (not (py-val->lisp-bool x)))))
 
 (setf (gethash 'not *unary-op-funcs-ht*) #'py-not)
 

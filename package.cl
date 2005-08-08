@@ -29,19 +29,20 @@
 
 (defun compy ()
   (with-compilation-unit ()
-    (dolist (f '(;; create and modify AST
-		 parser lexer pyprint walk gener compiler 
-		 
-		 ;; Python semantics
-		 builtin-classes
-		 
-		 ;; classes" "exceptions" "pythonic" "functions" 
-		 ;; "methods" "magicmeths" "builtin-classes" "formatstring"
-		 ;; "call" "builtin-funcs" "builtin-types" "mathops"
-		 ;; "descriptors" "attributes" "modules" "pyeval"
-		 ;; "parsepython" "walk" "gener" "repl" "trace"
-		 ;; "bi-modules" "pyprint"
-		 ))
+    (dolist (f (mapcar #'symbol-name
+		       '(;; create and modify AST
+			 parser lexer pyprint walk gener compiler 
+			 
+			 ;; Python semantics
+			 builtin-classes
+			 
+			 ;; classes" "exceptions" "pythonic" "functions" 
+			 ;; "methods" "magicmeths" "builtin-classes" "formatstring"
+			 ;; "call" "builtin-funcs" "builtin-types" "mathops"
+			 ;; "descriptors" "attributes" "modules" "pyeval"
+			 ;; "parsepython" "walk" "gener" "repl" "trace"
+			 ;; "bi-modules" "pyprint"
+			 )))
       #+allegro(excl::compile-file-if-needed f)
       #-allegro(compile-file (format nil "~A.cl" f))
       (load f)))

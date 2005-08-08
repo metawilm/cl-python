@@ -917,8 +917,8 @@ is encountered, NIL is returned."
 				    :unread-chr (lambda (c)
 						  (declare (optimize (speed 3) (safety 1) (debug 0)))
 						  (unread-char c s))))
-  (:method (filename)
-	   (with-open-file (f filename :direction :input)
+  (:method ((filename t))
+	   (with-open-file (f (string filename) :direction :input)
 	     (parse-python-file f))))
 
 (defmethod parse-python-string ((s string))

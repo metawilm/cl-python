@@ -46,11 +46,12 @@
     (with-standard-io-syntax
       (format stream "~Gj" (imagpart x))))
 
+
 (defmethod py-pprint (stream (x string))  
   ;; inverse of READ-STRING in PARSEPYTHON.CL
 
   (multiple-value-bind (delim-quote other-quote unicode?)
-      (loop for ch across x
+      (loop for ch character across x
 	  counting (char= ch #\') into single-qs
 	  counting (char= ch #\") into double-qs
 	  counting (> (char-code ch) 255) into unicode
@@ -66,7 +67,7 @@
       
       (write-char delim-quote stream) ;; starting quote
       
-      (loop for ch across x
+      (loop for ch character across (the string x)
 	  do (cond ((char= ch delim-quote)  (write-char #\\ stream)
 					    (write-char ch stream))
 		   
@@ -74,7 +75,7 @@
 		   
 		   ((char= ch #\\)  (write-char #\\ stream)
 				    (write-char #\\ stream))
-			 
+		   
 		   ;; printable ASCII character
 		   ((and (<= (char-code ch) 127) 
 			 (graphic-char-p ch))     (write-char ch stream))
@@ -85,7 +86,7 @@
 			    #\0 (char-code ch)))
 		   
 		   ((alphanumericp ch)  (write-char ch stream))
-			 
+		   
 		   (t (loop for ch across
 			    (case ch
 			      (#\Bell      "\\a") 
@@ -119,6 +120,8 @@
 
 (defvar *unary-op-precedence*
     '((not . 2) (+ . 12) (- . 12) (~ . 13)))
+
+(defvar *suite-no-newline* nil)
 
 (defmethod py-pprint (stream (x list))
   (case (car x)
@@ -157,8 +160,11 @@
     
     (for-in-stmt (destructuring-bind (targets source suite else-suite)
 		     (cdr x)
-		   (format stream "for ~A in ~A: ~A~@[else: ~A~]"
-			   targets source suite else-suite)))
+		   #+(or)(format stream "for ~A in ~A: ~A~@[else: ~A~]"
+				 targets source suite else-suite)
+		   (let ((*suite-no-newline* t))
+		     (format stream "for ~A in ~A: ~A~@[~&else: ~A~]"
+			     targets source suite else-suite))))
 
     (funcdef-stmt (destructuring-bind (decorators fname args suite)
 		      (cdr x)
@@ -166,13 +172,26 @@
 		    (format stream "def ~A(" fname)
 		    (apply #'print-arg-list stream args)
 		    (format stream "): ~A" suite)))
-    
+
+    (generator-expr (format stream "(~A" (second x))
+		    (loop for clause in (third x)
+			do (ecase (first clause)
+			      (for-in (format stream " for ~A in ~A"
+						   (second clause) (third clause)))
+			      (if     (format stream " if ~A" (second clause)))))
+		    (format stream ")"))
+     
     (global-stmt     (format stream "global ~{~A~^, ~}" (second x)))
     (identifier-expr (format stream "~A" (second x)))
     
     (if-stmt (destructuring-bind (clauses else-suite) (cdr x)
-	       (format stream "if ~{~A: ~A~}~@[~:{elif ~A: ~A~}~]~@[else: ~A~]"
-		       (car clauses) (cdr clauses) else-suite)))
+	       #+(or)(format stream "if ~{~A: ~A~}~@[~:{elif ~A: ~A~}~]~@[else: ~A~]"
+			     (car clauses) (cdr clauses) else-suite)
+	       
+ 	       (let ((*suite-no-newline* t))
+		 (format stream "if ~{~A: ~A~}~@[~:{~&elif ~A: ~A~}~]~@[~&else: ~A~]"
+			 (car clauses) (cdr clauses) else-suite))))
+    
     
     (import-stmt (format stream "import ~{~:[~A~*~;~*~{~A~^.~}~]~:[~*~; as ~A~]~^, ~}"
 			 (loop for m in (second x)
@@ -196,14 +215,18 @@
 		   (format stream ": ~A" expr)))
 
     (list-expr  (format stream "[~{~A~^, ~}]" (second x)))
-    (list-compr-expr (format stream "[~A" (second x))
-		     (loop for clause in (third x)
-			 do (ecase (first clause)
-			      (list-for-in (format stream " for ~A in ~A"
+    (listcompr-expr (format stream "[~A" (second x))
+		    (loop for clause in (third x)
+			do (ecase (first clause)
+			      (for-in (format stream " for ~A in ~A"
 						   (second clause) (third clause)))
-			      (list-if     (format stream " if ~A" (second clause)))))
-		     (format stream "]"))
-    (module-stmt  (format stream "~A" (second x)))
+			      (if     (format stream " if ~A" (second clause)))))
+		    (format stream "]"))
+    
+    (module-stmt  (let ((suite (cadr x)))
+		    (assert (eq (first suite) 'suite-stmt))
+		    (format stream "~{~A~%~}" (second suite))))
+    
     (pass-stmt    (format stream "pass"))
     
     (print-stmt (destructuring-bind (dest items comma?) (cdr x)
@@ -219,18 +242,56 @@
 		   (format stream "~@[~A~]:~@[~A~]~@[:~A~]" start stop step)))
 
     (subscription-expr (format stream "~A[~A]" (second x) (third x)))
-    (suite-stmt        (format stream "~&~<   ~@;~@{~A~^~&~}~:>~&" (second x)))
+    
+    #+(or) ;; this version does not treat docstrings specially
+    (suite-stmt        (format stream "~&~<    ~@;~@{~A~^~&~}~:>~&" (second x)))
+    
+    (suite-stmt (destructuring-bind (item-1 &rest items) (second x)
+		  (if (stringp item-1)
+		      
+		      ;; docstring at the head of the suite: print as:  """docstring"""
+		      (let ((body-s (with-standard-io-syntax
+				      (format nil "\"\"\"~A\"\"\"~&" item-1)))
+			    (items-s (mapcar (lambda (x) (format nil "~A" x)) items)))
+			
+			#+(or)(with-standard-io-syntax
+				(break "body-s: ~S item-s: ~S" body-s items-s))
+			
+			;; standard syntax, otherwise strings are
+			;; printed with Python string escapes
+			
+			(with-standard-io-syntax
+			  (format stream "~&~@<    ~@;~A~{~A~^~&~}~:>~&" body-s items-s)))
+		    
+		    #+(or)
+		    (format stream "~&~<    ~@;~@{~A~^~&~}~:>~&" (second x))
+		    
+		    (progn (let ((*suite-no-newline* nil))
+			     (format stream "~&~<    ~@;~@{~A~^~&~}~:>" (second x)))
+			   (unless *suite-no-newline*
+			     (format stream "~&"))))))
 	   
     (tuple-expr (let ((brackets? t #+(or)(/= *precedence-level* -1)))
 		  (format stream "~:[~;(~]~{~A~^, ~}~:[~;,~]~:[~;)~]"
 			  brackets? (second x) (cdr (second x)) brackets?)))
     
-    (try-except-stmt (destructuring-bind (try-suite except-suites else-suite)
-			 (cdr x)
-		       (format stream "try: ~A~:{except~@[ ~A~@[, ~A~]~]: ~2@*~A~}~@[else: ~A~]"
-			       try-suite except-suites else-suite)))
+    #+(or)(try-except-stmt (destructuring-bind (try-suite except-suites else-suite)
+			       (cdr x)
+			     (format stream "try: ~A~:{except~@[ ~A~@[, ~A~]~]: ~2@*~A~}~@[else: ~A~]"
+				     try-suite except-suites else-suite)))
     
-    (try-finally-stmt (format stream "try: ~Afinally: ~A" (second x) (third x)))
+    (try-except-stmt (destructuring-bind (try-suite except-suites else-suite)
+			       (cdr x)
+		       (let ((*suite-no-newline* t))
+			 (format stream "try: ~A~:{~&except~@[ ~A~@[, ~A~]~]: ~2@*~A~}~@[~&else: ~A~]"
+				     try-suite except-suites else-suite))))
+    
+    #+(or)(try-finally-stmt (format stream "try: ~Afinally: ~A" (second x) (third x)))
+    
+    (try-finally-stmt (let ((*suite-no-newline* nil))
+			(format stream "try: ~Afinally: ~A" (second x) (third x))))
+    
+		
     
     (tuple-expr   (format stream "(~{~A~^, ~}~@[,~])" (second x) (not (cdr (second x)))))
     
@@ -249,16 +310,15 @@
     (yield-stmt (format stream "yield ~A" (second x)))
     
     (t (with-standard-io-syntax (warn "uncatched in py-pprint: ~A" x)
-				(format stream "~A" x)))))
+				(format stream "#<pyprint uncatched: ~A >" x)))))
 
   
 (defun print-arg-list (stream pos-args key-args *-arg **-arg)
-  ;; using:  ~@[, ~]  as a shortcut for:  ~:[~;, ~]
   (format stream "~@[~{~A~^, ~}~:[~;, ~]~]"
 	  pos-args (or key-args *-arg **-arg))
   
   (format stream "~@[~{~A=~A~^, ~}~:[~;, ~]~]"
-	  (loop for (k . v) in key-args collect k collect v)
+	  (loop for (k v) in key-args collect k collect v)
 	  (or *-arg **-arg))
   
   (format stream "~@[*~A~:[~;, ~]~]" *-arg **-arg)

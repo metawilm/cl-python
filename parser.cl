@@ -134,7 +134,7 @@
  (**-ident    ( |**| identifier ) ($2))
 
  (defparameter (fpdef         ) ($1))
- (defparameter (fpdef |=| test) (`(:key ,$1 . ,$3)))
+ (defparameter (fpdef |=| test) (`(:key ,$1 ,$3)))
  ;; Can't use symbol vs. cons for distinguishing positional and
  ;; keyword arguments, as as positional args may be a structure:
  ;;   def f((x,y), z, q=4): ...
@@ -430,13 +430,13 @@
 
  (list-iter :or list-for list-if)
  (list-for (|for| exprlist |in| testlist-safe list-iter?) 
-	   (`((list-for-in ,$2 ,$4) . ,$5)))
+	   (`((for-in ,$2 ,$4) . ,$5)))
  (:list-iter?)
- (list-if (|if| test list-iter?) (`((list-if ,$2) . ,$3)))
+ (list-if (|if| test list-iter?) (`((if ,$2) . ,$3)))
  
  (gen-iter :or gen-for gen-if)
- (gen-for (|for| exprlist |in| test gen-iter?) (`((gen-for-in ,$2 ,$4) . ,$5)))
- (gen-if  (|if|  test               gen-iter?) (`((gen-if ,$2) . ,$3)))
+ (gen-for (|for| exprlist |in| test gen-iter?) (`((for-in ,$2 ,$4) . ,$5)))
+ (gen-if  (|if|  test               gen-iter?) (`((if ,$2) . ,$3)))
  (:gen-iter?)
  
  (testlist1 (test |,--test*|) ((if $2 `(tuple-expr (,$1 . ,$2)) $1))))

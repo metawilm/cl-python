@@ -157,7 +157,7 @@
 	     (let ((right ,right))
 	       (if (py-val->lisp-bool right)
 		   right
-		 *py-false*)))))
+		 *the-false*)))))
     
     (and `(let ((left ,left))
 	    (if (py-val->lisp-bool left)
@@ -494,8 +494,8 @@
 	    with res = `(vector-push-extend ,item ,vec)
 	    for clause in (reverse for-in/if-clauses)
 	    do (setf res (ecase (car clause)
-			   (list-for-in `(for-in-stmt ,(second clause) ,(third clause) ,res nil))
-			   (list-if     `(if-stmt (,(second clause) ,res) nil))))
+			   (for-in `(for-in-stmt ,(second clause) ,(third clause) ,res nil))
+			   (if     `(if-stmt (,(second clause) ,res) nil))))
 	  finally (return res))
      (make-py-list ,vec))))
 
@@ -927,4 +927,4 @@ Returns the new AST."
 
 #+(or) ;; optimize membership test on sequences
 (defmethod py-in (item (seq sequence))
-  (if (member item seq :test #'py-==) *the-true* *the-false*))
+  (py-bool (member item seq :test #'py-==)))
