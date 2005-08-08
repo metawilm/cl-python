@@ -250,6 +250,7 @@
 		  (if (stringp item-1)
 		      
 		      ;; docstring at the head of the suite: print as:  """docstring"""
+		      ;; hmm maybe there are still issues with escaping
 		      (let ((body-s (with-standard-io-syntax
 				      (format nil "\"\"\"~A\"\"\"~&" item-1)))
 			    (items-s (mapcar (lambda (x) (format nil "~A" x)) items)))
@@ -291,8 +292,6 @@
     (try-finally-stmt (let ((*suite-no-newline* nil))
 			(format stream "try: ~Afinally: ~A" (second x) (third x))))
     
-		
-    
     (tuple-expr   (format stream "(~{~A~^, ~}~@[,~])" (second x) (not (cdr (second x)))))
     
     (unary-expr (let* ((lev (cdr (assoc (second x) *unary-op-precedence*)))
@@ -303,9 +302,8 @@
 			    brackets? (second x) (third x) brackets?))))
     
     (while-stmt (destructuring-bind (test suite else-suite) (cdr x)
-		  (format stream "while ~A: ~A" test suite)
-		  (when else-suite
-		    (format stream "else: ~A" else-suite))))
+		  (let ((*suite-no-newline* t))
+		    (format stream "while ~A: ~A~@[else: ~A~]" test suite else-suite))))
     
     (yield-stmt (format stream "yield ~A" (second x)))
     

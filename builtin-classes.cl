@@ -378,9 +378,14 @@
 
 ;; Module (User object)
 
-(defclass py-module (py-user-object py-dict-mixin)
-  ()
+(defclass py-module (py-user-object) ;; no dict-mixin!?
+  ((globals-names  :initarg :globals-names  :type vector)
+   (globals-values :initarg :globals-values :type vector)
+   (dyn-globals    :initarg :dyn-globals    :type hash-table))
   (:metaclass py-user-type))
+
+(defun make-module (&rest options)
+  (apply #'make-instance 'py-module options))
 
 (def-py-method py-module.__new__ :static (cls name)
 	       (let ((x (make-instance cls)))
@@ -830,3 +835,6 @@
 (def-comparison <=  py-<=  (<= (the (integer -1 1) (pyb:cmp x y))  0))
 (def-comparison >=  py->=  (>= (the (integer -1 1) (pyb:cmp x y))  0))
 
+
+(defgeneric py-val->lisp-bool (x)
+  (:method ((x number)) (/= x 0)))

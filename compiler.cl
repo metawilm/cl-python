@@ -62,10 +62,6 @@
   (break "todo: assert-stmt"))
 
 (defmacro assign-expr (value targets &environment e)
-  
-  #+(or) ;; debug
-  (trace get-pydecl)
-  
   (let ((context (get-pydecl :context e)))
     (with-fresh (val)
       
@@ -170,62 +166,71 @@
     (py-raise 'SyntaxError "BREAK was found outside loop")))
 
 
-(defmacro call-expr (primary (&whole all-args pos-args kwd-args *-arg **-arg))
+(defmacro call-expr (primary (&whole all-args pos-args kwd-args *-arg **-arg)
+		     &environment e)
   
   ;; For complete Python semantics, we check for every call if the
   ;; function being called is one of the built-in functions EVAL,
   ;; LOCALS or GLOBALS, because they access the variable scope of the
   ;; _caller_ (which is ugly).
-
-  `(let ((prim ,primary))
+  ;; 
+  ;; At the module level, globals() and locals() are equivalent.
+  
+  (let ((context (get-pydecl :context e)))
+    
+    `(let ((prim ,primary))
      
-     (cond ((eq prim :the-locals-function-TODO)
-	    (if (and ,(not (or pos-args kwd-args))
-		     ,(or (null *-arg)  `(null (py-iterate->lisp-list ,*-arg)))
-		     ,(or (null **-arg) `(null (py-mapping->lisp-list ,**-arg))))
-		(.locals.)
-	      (py-raise 'TypeError
-			"locals() must be called without args (got: ~A)" ',all-args)))
-
-	   ((eq prim :the-globals-function-TODO)
-	    (if (and ,(not (or pos-args kwd-args))
-		     ,(or (null *-arg)  `(null (py-iterate->lisp-list ,*-arg)))
-		     ,(or (null **-arg) `(null (py-mapping->lisp-list ,**-arg))))
-		(.globals.)
-	      (py-raise 'TypeError
-			"globals() must be called without args (got: ~A)" ',all-args)))
-
-	   ((eq prim :the-eval-function-TODO)
-	    (let ((args (nconc (list ,@pos-args)
-			       ,(when *-arg `(py-iterate->lisp-list ,*-arg)))))
-	      (if (and ,(null kwd-args)
-		       ,(or (null **-arg)
-			    `(null (py-mapping->lisp-list ,**-arg)))
-		       (<= 1 (length args) 3))
-		  
-		  (py-eval ,(first pos-args)
-			   (or ,(second pos-args) (.globals.))
-			   (or ,(third  pos-args) (.locals.)))
-		
+       (cond ((eq prim :the-locals-function-TODO)
+	      (if (and ,(not (or pos-args kwd-args))
+		       ,(or (null *-arg)  `(null (py-iterate->lisp-list ,*-arg)))
+		       ,(or (null **-arg) `(null (py-mapping->lisp-list ,**-arg))))
+		  ,(if (eq context :module)
+		       `(.globals.)
+		     `(.locals.))
 		(py-raise 'TypeError
-			  "eval() must be called with 1 to 3 pos args (got: ~A)" ',all-args))))
+			  "locals() must be called without args (got: ~A)" ',all-args)))
+
+	     ((eq prim :the-globals-function-TODO)
+	      (if (and ,(not (or pos-args kwd-args))
+		       ,(or (null *-arg)  `(null (py-iterate->lisp-list ,*-arg)))
+		       ,(or (null **-arg) `(null (py-mapping->lisp-list ,**-arg))))
+		  (.globals.)
+		(py-raise 'TypeError
+			  "globals() must be called without args (got: ~A)" ',all-args)))
+
+	     ((eq prim :the-eval-function-TODO)
+	      (let ((args (nconc (list ,@pos-args)
+				 ,(when *-arg `(py-iterate->lisp-list ,*-arg)))))
+		(if (and ,(null kwd-args)
+			 ,(or (null **-arg)
+			      `(null (py-mapping->lisp-list ,**-arg)))
+			 (<= 1 (length args) 3))
+		  
+		    (py-eval-todo ,(first pos-args)
+				  (or ,(second pos-args) (.globals.))
+				  (or ,(third  pos-args) ,(if (eq context :module)
+							      `(.globals.)
+							    `(.locals.))))
+		
+		  (py-raise 'TypeError
+			    "eval() must be called with 1 to 3 pos args (got: ~A)" ',all-args))))
 	   
-	   (t (py-call prim
-		       ,@pos-args 
-		       ,@(loop for ((i-e key) val) in kwd-args
-			     do (assert (eq i-e 'identifier-expr))
-				;; XXX tuples?
+	     (t (py-call prim
+			 ,@pos-args 
+			 ,@(loop for ((i-e key) val) in kwd-args
+			       do (assert (eq i-e 'identifier-expr))
+				  ;; XXX tuples?
 				
-			     collect (intern (symbol-name key) :keyword)
-			     collect val)
+			       collect (intern (symbol-name key) :keyword)
+			       collect val)
 		       
-		       ;; Because the * and ** arg may contain a huge
-		       ;; number of items, larger then max num of
-		       ;; lambda args, supply them using special :*
-		       ;; and :** keywords.
+			 ;; Because the * and ** arg may contain a huge
+			 ;; number of items, larger then max num of
+			 ;; lambda args, supply them using special :*
+			 ;; and :** keywords.
 		       
-		       ,@(when *-arg  `((:* ,*-arg)))
-		       ,@(when **-arg `((:** ,**-arg))))))))
+			 ,@(when *-arg  `((:* ,*-arg)))
+			 ,@(when **-arg `((:** ,**-arg)))))))))
 
 (defmacro classdef-stmt (name inheritance suite)
   `(let ((+cls-namespace+ (make-hash-table :test #'eq)))
@@ -380,7 +385,7 @@
 	;; in the class namespace. Macro PY-ARG-FUNCTION ensures this.
 	
 	`(let ((func-lambda
-		(py-arg-function
+		(py-arg-function ,(second name)
 		 (,formal-pos-args ,key-args ,*-arg ,**-arg)
 		 
 		 (let ,(loop for loc in func-locals collect `(,loc :unbound))
@@ -410,8 +415,7 @@
 		`func-lambda
 	      
 	      (with-fresh (func)
-		`(let ((,func (make-py-function :name ',(second name)
-						:function func-lambda)))
+		`(let ((,func (make-py-function ',(second name) func-lambda)))
 		   
 		   ,(let ((art-deco (loop with res = func
 					for deco in (nreverse decorators)
@@ -447,9 +451,11 @@
   (flet ((module-lookup ()
 	   (let ((ix (position name (get-pydecl :mod-globals-names e))))
 	     (if ix
-		 `(svref +mod-globals-values+ ,ix)
+		 `(let ((val (svref +mod-globals-values+ ,ix)))
+		    (when (eq val :unbound) (py-raise 'NameError "Variable ~A is unbound [glob]" ',name))
+		    val)
 	       `(or (gethash ,name +mod-dyn-globals+)
-		    (py-raise 'NameError "No variable with name ~A" ',name))))))
+		    (py-raise 'NameError "No variable with name ~A [dyn-glob]" ',name))))))
     
     (ecase (get-pydecl :context e)
        
@@ -557,16 +563,22 @@
 			      ;; Updating this dict really modifies the globals.
 			      +mod-globals-names+ +mod-globals-values+ +mod-dyn-globals+)))
 	  
+	  #+(or) ;; allegro does not handle these yet
+	  (declare (ignorable (function .globals.)))
+	  
 	  ,(if exec-locals
 	       
 	       `(let ,(loop for k being the hash-key in exec-locals using (hash-value v)
 			  collect `(,k ,v))
 		  ,suite)
 	     
-	     suite)))
+	       suite)))
 	   
       ;; XXX if executing module failed, where to catch error?
       +mod+)))
+
+(defmacro pass-stmt ()
+  nil)
 
 (defmacro print-stmt (dest items comma?)
   ;; XXX todo
@@ -818,6 +830,167 @@ Returns the new AST."
 	  (loop for k being the hash-key in dyn-globals-ht using (hash-value v)
 	      collect (cons k v)))))
 
+
+
+
+(defmacro py-arg-function (name (pos-args key-args *-arg **-arg) &body body)
+  ;; Non-consing argument parsing! (except when *-arg or **-arg present)
+  ;; 
+  ;; XXX todo: the generated code can be cleaned up a bit when there
+  ;; are no arguments (currently zero-length vectors are created).
+  
+  (assert (symbolp name))
+  
+  (let* ((num-pos-args (length pos-args))
+	 (num-key-args (length key-args))
+	 (num-pos-key-args  (+ num-pos-args num-key-args))
+	 
+	 
+	 (pos-key-arg-names (append pos-args (mapcar #'first key-args)))
+	 (key-arg-default-asts (mapcar #'second key-args))
+	 (arg-name-vec (when (> num-pos-key-args 0)
+			 (make-array num-pos-key-args :initial-contents pos-key-arg-names)))
+	 
+	 (arg-kwname-vec (when (> num-pos-key-args 0)
+			   (make-array
+			    num-pos-key-args
+			    :initial-contents (loop for x across arg-name-vec
+						  collect (intern x #.(find-package :keyword))))))
+	 (key-arg-defaults (unless (= num-key-args 0)
+			     (make-array num-key-args))))
+    
+    `(locally (declare (optimize (speed 3) (safety 1) (debug 0)))
+       (let (,@(when key-args
+		 `((key-arg-default-values ,key-arg-defaults))))
+	 
+	 ;; Evaluate default argument values outside the lambda, at
+	 ;; function definition time.
+	 ,@(when key-args
+	     `((progn ,@(loop for i from 0 below num-key-args
+			    collect `(setf (svref key-arg-default-values ,i)
+				       ,(nth i key-arg-default-asts))))))
+
+	 (excl:named-function ,name
+	   (lambda (&rest %args)
+	     (declare (dynamic-extent %args))
+	   
+	     ;; args = (pos_1 pos_2 ... pos_p ; key_1 val_1 ... key_k val_k)
+	     ;; where key_i is a (regular, not :keyword) symbol
+	   
+	     ;; As the first step, the pos_i args are assigned to pos-args,
+	     ;; and if there are more pos_i args then pos-args, then the
+	     ;; remaining ones are assigned to the key-args.
+	   
+	     (let* (,@(when (> num-pos-key-args 0) `((arg-val-vec (make-array ,num-pos-key-args))))
+		    ,@(when (> num-pos-key-args 0) `((num-filled-by-pos-args 0)))
+		    ,@(when **-arg `((for-** ())))
+		    ,@(when *-arg `((for-* ()))))
+	     	     
+	       ,@(when (> num-pos-key-args 0)
+		   `((declare (dynamic-extent arg-val-vec)
+			      (type (integer 0 ,num-pos-key-args) num-filled-by-pos-args))))
+	     
+	       ;; Spread supplied positional args over pos-args and *-arg
+	     
+	       ,@(when (> num-pos-key-args 0)
+		   `((loop 
+			 until (or (= num-filled-by-pos-args ,(if *-arg num-pos-args num-pos-key-args))
+				   (symbolp (car %args))) ;; the empty list NIL is a symbol, too
+			 do (setf (svref arg-val-vec num-filled-by-pos-args) (pop %args))
+			    (incf num-filled-by-pos-args))))
+
+	       ;; Collect remaining pos-arg in *-arg, if present 
+	     
+	       (unless (symbolp (car %args))
+		 ,(if *-arg
+		      `(loop until (symbolp (car %args))
+			   do (push (pop %args) for-*))
+		    `(break "Too many pos args")))
+	     
+	       (assert (symbolp (car %args)))
+	     
+	       ;; All remaining arguments are keyword arguments;
+	       ;; they have to be matched to the remaining pos and
+	       ;; key args by name.
+	       ;; 
+	     
+	       (when %args
+		 (loop
+		     for key = (pop %args)
+		     for val = (pop %args)
+		     while key
+		     do
+		       (when (member key '(:* :**))
+			 (break "* and ** args in a call not handled yet, sorry"))
+		     
+		       ,(cond ((> num-pos-key-args 0)
+			       `(loop for i fixnum from num-filled-by-pos-args below ,num-pos-key-args
+				    when (or (eq (svref ,arg-name-vec i) key)
+					     (eq (svref ,arg-kwname-vec i) key))
+				    do (setf (svref arg-val-vec i) val)
+				       (return)
+				    finally 
+				      ,(if **-arg
+					   `(push (cons key val) for-**)
+					 `(break "Got unknown keyword arg and no **-arg: ~A ~A"
+						 key val))))
+			      (**-arg
+			       ;; this reconsing is necessary as **-arg might not have dynamic extent
+			       `(push (cons key val) for-**))
+			    
+			      (t `(break "Got unknown keyword arg and no **-arg: ~A ~A"
+					 key val)))))
+	     
+	       ;; Ensure all positional arguments covered
+	       ,@(when (> num-pos-args 0)
+		   `((loop for i fixnum from num-filled-by-pos-args below ,num-pos-args
+			 unless (svref arg-val-vec i)
+			 do (break "Positional arg ~A has no value" (svref ,arg-name-vec i)))))
+	     
+	       ;; Use default values for missing keyword arguments (if any)
+	       ,@(when key-args
+		   `((loop for i fixnum from ,num-pos-args below ,num-pos-key-args
+			 unless (svref arg-val-vec i)
+			 do (setf (svref arg-val-vec i)
+			      (svref key-arg-default-values (- i ,num-pos-args))))))
+	     
+	       ;; Initialize local variables
+	       (let (,@(loop for p in pos-key-arg-names and i from 0
+			   collect `(,p (svref arg-val-vec ,i)))  ;; XXX p = (identifier ..) ?
+		     ,@(when  *-arg `((,*-arg (nreverse for-*))))
+		     ,@(when **-arg `((,**-arg for-**))))
+	       
+		 ,@body))))))))
+
+#+(or)
+(defun bar ()
+  (let ((f (py-arg-function foo ((a b c) ((d 42) (e 100)) nil nil)
+				 (setf e (+ a b c))
+				 (setf b (+ d e)))))
+    (disassemble f)))
+
+#+(or)
+(defun foo ()
+  (declare (optimize (speed 3)(safety 0) (debug 0)))
+  (let ((f (py-arg-function foo ((a b c) ((d 42) (e 100)) arg kw)
+			    (values d e arg kw))))
+    ;;    (dotimes (i 1000000)
+    (funcall f 1 2 3 4 5 6 'q 42 'd 1)))
+
+#+(or)
+(defun foo ()
+  #+(or)(declare (optimize (speed 3)(safety 0) (debug 0)))
+  (let ((f (py-arg-function foo
+			    ((a b c) ((d 42) (e 100)) nil nil)
+			    (setf e (+ a b c))
+			    (setf b (+ d e)))))
+    (values
+     (funcall f 1 2 3 'e 10)
+     (funcall f 1 2 3 4 5)
+     (funcall f 1 2 3 'd 23))))
+
+
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Pythonic (copied)
 
@@ -878,6 +1051,7 @@ Returns the new AST."
     (len :the-len-builtin)
     (range :the-range-builtin)))
 
+#+(or)
 (defun make-module (&rest args)
   :make-module-result)
 
@@ -928,3 +1102,18 @@ Returns the new AST."
 #+(or) ;; optimize membership test on sequences
 (defmethod py-in (item (seq sequence))
   (py-bool (member item seq :test #'py-==)))
+
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; tests
+
+#+(or)
+(compile nil
+	 (lambda ()
+	   (declare (optimize (speed 3) (safety 1) (debug 0)))
+	   #.(parse-python-string "
+def f():
+  print 3, 4
+f()
+")))
