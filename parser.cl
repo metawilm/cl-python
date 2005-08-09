@@ -168,10 +168,10 @@
 		  
 		  ((and $2 (eq (car $2) '=))
 		   (let ((items (nreverse `(,$1 ,@(second $2)))))
-		     `(assign-expr ,(car items) ,(cdr items))))
+		     `(assign-stmt ,(car items) ,(cdr items))))
 		  
 		  ($2
-		   (list 'augassign-expr (car $2) $1 (cdr $2)))
+		   (list 'augassign-stmt (car $2) $1 (cdr $2)))
 		  
 		  (t
 		   $1))))

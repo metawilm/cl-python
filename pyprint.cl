@@ -127,9 +127,9 @@
   (case (car x)
 
     (assert-stmt       (format stream "assert ~A~@[, ~A~]" (second x) (third x)))
-    (assign-expr       (format stream "~{~A = ~^~}~A" (third x) (second x)))
+    (assign-stmt       (format stream "~{~A = ~^~}~A" (third x) (second x)))
     (attributeref-expr (format stream "~A.~A"         (second x) (third x)))
-    (augassign-expr    (format stream "~A ~A ~A"      (third x) (second x) (fourth x)))
+    (augassign-stmt    (format stream "~A ~A ~A"      (third x) (second x) (fourth x)))
     (backticks-expr    (format stream "`~{~A~^, ~}`"  (second x)))
     
     ((binary-expr binary-lazy-expr)

@@ -249,7 +249,7 @@
 			  (unless ,loop-var (go ,else-tag))
 			  
 			  ,repeat-tag
-			  (assign-expr ,loop-var (,target))
+			  (assign-stmt ,loop-var (,target))
 			  (:split ,(walk suite stack2))
 			  
 			  ,continue-tag

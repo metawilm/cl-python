@@ -379,9 +379,10 @@
 ;; Module (User object)
 
 (defclass py-module (py-user-object) ;; no dict-mixin!?
-  ((globals-names  :initarg :globals-names  :type vector)
-   (globals-values :initarg :globals-values :type vector)
-   (dyn-globals    :initarg :dyn-globals    :type hash-table))
+  ((globals-names  :initarg :globals-names  :type vector :initform #())
+   (globals-values :initarg :globals-values :type vector :initform #())
+   (dyn-globals    :initarg :dyn-globals    :type hash-table)
+   (name           :initarg :name           :type symbol :initform "__main__"))
   (:metaclass py-user-type))
 
 (defun make-module (&rest options)

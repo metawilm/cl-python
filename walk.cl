@@ -66,17 +66,17 @@ VALUE and TARGET context."
      (assert (not (or value target)))
      `(assert-stmt ,(funcall f (second form) :value t) ,(funcall f (third form))))
       
-    (assign-expr
+    (assign-stmt
      (assert (not (or value target)))
-     `(assign-expr ,(funcall f (second form) :value t)
+     `(assign-stmt ,(funcall f (second form) :value t)
 		   ,(mapcar (lambda (x) (funcall f x :target t)) (third form))))
       
     (attributeref-expr
      `(attributeref-expr ,(funcall f (second form)) ,(third form))) ;; don't recurse on attr name
       
-    (augassign-expr
+    (augassign-stmt
      (assert (not (or value target)))
-     `(augassign-expr ,(second form)
+     `(augassign-stmt ,(second form)
 		      ,(funcall f (third form) :value t :target t) ;; is both v and tg
 		      ,(funcall f (fourth form))))
       
@@ -441,9 +441,9 @@ VALUE and TARGET context."
 		   form
 		   (lambda (form &key value target)
 		     (declare (ignore value target))
-		     (when (eq (first form) 'assign-expr)
-		       (let ((assign-expr form))
-			 #+(or)(warn "    assign-expr: ~A" assign-expr)
+		     (when (eq (first form) 'assign-stmt)
+		       (let ((assign-stmt form))
+			 #+(or)(warn "    assign-stmt: ~A" assign-stmt)
 			 
 			 (walk-py-ast
 			  form
@@ -454,7 +454,7 @@ VALUE and TARGET context."
 				       (eq (second (second form)) self-param)
 				       target)
 			      (format t "in method ~A.~A(~A, ...): ~A~%"
-				      class-name meth-name self-param (ast->python-code assign-expr)))
+				      class-name meth-name self-param (ast->python-code assign-stmt)))
 			    form))))
 		     form)))))
 	    form))))

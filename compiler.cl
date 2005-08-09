@@ -34,7 +34,7 @@
     `(locally (declare (pydecl ,@pairs))
        ,@body))
 
-(defmacro with-fresh (list &body body)
+(defmacro with-gensyms (list &body body)
   `(let ,(loop for x in list
 	     collect `(,x (make-symbol ,(symbol-name x))))
      ,@body))
@@ -61,9 +61,9 @@
   (declare (ignore args))
   (break "todo: assert-stmt"))
 
-(defmacro assign-expr (value targets &environment e)
+(defmacro assign-stmt (value targets &environment e)
   (let ((context (get-pydecl :context e)))
-    (with-fresh (val)
+    (with-gensyms (val)
       
       (flet ((assign-one (tg)
 	       (ecase (car tg)
@@ -106,7 +106,7 @@
 (defmacro attributeref-expr (item attr)
   `(py-attr ,item ,attr))
 
-(defmacro augassign-expr (op place val)
+(defmacro augassign-stmt (op place val)
   (multiple-value-bind (py-@= py-@) (lookup-inplace-op-func op)
     (ecase (car place)
     
@@ -123,7 +123,7 @@
 	
 	  (or (funcall ,py-@= place-val-now ev-val) ;; returns true iff __i@@@__ found
 	      (let ((new-val (funcall ,py-@ place-val-now ev-val)))
-		(assign-expr new-val (,(car place) primary sub))))))
+		(assign-stmt new-val (,(car place) primary sub))))))
 
       (identifier-expr
      
@@ -132,7 +132,7 @@
 	
 	  (or (funcall ,py-@= place-val-now ev-val) ;; returns true iff __i@@@__ found
 	      (let ((new-val (funcall ,py-@ place-val-now ev-val)))
-		(assign-expr new-val (,place)))))))))
+		(assign-stmt new-val (,place)))))))))
 
 (defmacro backticks-expr (item)
   `(py-repr ,item))
@@ -143,7 +143,7 @@
 
 (defmacro binary-expr (op left right)
   (let ((py-@ (get-binary-op-func op)))
-    `(,py-@ ,left ,right)))
+    `(funcall ,py-@ ,left ,right)))
 
 (defmacro binary-lazy-expr (op left right)
   (ecase op
@@ -233,6 +233,8 @@
 			 ,@(when **-arg `((:** ,**-arg)))))))))
 
 (defmacro classdef-stmt (name inheritance suite)
+  ;; todo: define .locals. containing class vars
+  
   `(let ((+cls-namespace+ (make-hash-table :test #'eq)))
      (with-pydecl ((:context :class)
 		   (:classdef-scope-globals ',(classdef-globals suite)))
@@ -313,29 +315,56 @@
   `(make-dict ,alist))
 
 
-(defmacro exec-stmt (code globals locals)
+(defmacro exec-stmt (code globals locals &environment e)
   ;; XXX TODO: also allow code object etc as CODE
   
-  `(let ((ast (let ((ast (parse-python-string ,code)))
-		(assert (eq (car ast) 'module-stmt))
-		ast))
-	 (locals-ht  (py-convert-to-hashtable ,(or locals  `(.locals.))))
-	 (globals-ht (py-convert-to-hashtable ,(or globals `(.globals.)))))
-     
-     (with-pydecl ((:exec-mod-globals-ht globals-ht)
-		   (:exec-mod-locals-ht  locals-ht))
-
-       (eval ast))))
+  ;; An EXEC-STMT is translated into a function, that is compiled and
+  ;; then funcalled. Compiling is needed because otherwise the
+  ;; environment with pydecl it not passed properly.
+  ;; 
+  ;; XXX todo: understand how exactly environments work
+  ;; w.r.t. compilation.
+  
+  (let ((context (get-pydecl :context e)))
+    
+    (with-gensyms (exec-helper-func)
+      
+      `(let ((ast (parse-python-string ,code))
+	     (locals-ht  (convert-to-hash-table ,(or locals (if (eq context :module)
+								`(.globals.)
+							      `(.locals.)))))
+	     (globals-ht (convert-to-hash-table ,(or globals `(.globals.)))))
+	 
+	 (let ((,exec-helper-func
+		(compile nil `(lambda ()
+				(with-module-context (#() #() ,globals-ht)
+				  
+				  ;; Every key-val pair in the locals dict is translated into
+				  ;; an assignment expression.
+				  
+				  (progn ,@(loop for k being the hash-key in locals-ht
+					       using (hash-value val)
+					       for k-sym = (typecase k
+							     (string (intern k #.*package*))
+							     (symbol k)
+							     (t (error "EXEC-STMT: the dict with locals ~
+                                                                 must have keys or symbols as key ~
+                                                                 (got: ~A, as ~A)" k (type-of k))))
+					       collect `(assign-stmt ,val ((identifier-expr ,k-sym)))))
+				  
+				  ,ast)))))
+	   
+	   (funcall ,exec-helper-func))))))
 	 
 
 (defmacro for-in-stmt (target source suite else-suite)
   ;; potential special cases:
   ;;  - <dict>.{items,keys,values}()
   ;;  - constant list/tuple/string
-  (with-fresh (f x)
+  (with-gensyms (f x)
     `(tagbody
        (let* ((,f (lambda (,x)
-		    (assign-expr ,x (,target))
+		    (assign-stmt ,x (,target))
 		    (tagbody 
 		      (with-pydecl ((:inside-loop t))
 			,suite)
@@ -371,7 +400,7 @@
 		 (tuple-expr (let ((tmp-var `(identifier
 					      ,(make-symbol (format nil "~A" (cdr pa))))))
 			       (push tmp-var params)
-			       (push `(assign-expr ,tmp-var (,pa)) destructs)))
+			       (push `(assign-stmt ,tmp-var (,pa)) destructs)))
 		 (identifier-expr (push pa params)))
 	    finally (return (values (nreverse params)
 				    (when destructs
@@ -414,7 +443,7 @@
 		
 		`func-lambda
 	      
-	      (with-fresh (func)
+	      (with-gensyms (func)
 		`(let ((,func (make-py-function ',(second name) func-lambda)))
 		   
 		   ,(let ((art-deco (loop with res = func
@@ -422,7 +451,7 @@
 					do (setf res `(call-expr ,deco ((,res) () nil nil)))
 					finally (return res))))
 		      
-		      `(assign-expr ,art-deco (,name)))))))))))
+		      `(assign-stmt ,art-deco (,name)))))))))))
 
 
 (defmacro generator-expr (item for-in/if-clauses)
@@ -445,7 +474,7 @@
 (defmacro identifier-expr (name &environment e)
   
   ;; The identifier is used for its value; it is not an assignent
-  ;; target (as the latter case is handled by ASSIGN-EXPR).
+  ;; target (as the latter case is handled by ASSIGN-STMT).
   (assert (symbolp name))
   
   (flet ((module-lookup ()
@@ -494,7 +523,7 @@
   
 
 (defmacro listcompr-expr (item for-in/if-clauses)
-  (with-fresh (vec)
+  (with-gensyms (vec)
     `(let ((,vec (make-array 0 :adjustable t :fill-pointer 0)))
        ,(loop
 	    with res = `(vector-push-extend ,item ,vec)
@@ -509,6 +538,85 @@
   `(make-list ,items))
 
 
+
+;; Used by expansions of `module-stmt', `exec-stmt', and by function `eval'.
+
+(defmacro with-this-module-context ((module) &body body)
+  (check-type module py-module)
+  (with-slots (globals-names globals-values dyn-globals) module
+    
+    `(with-module-context (,globals-names ,globals-values ,dyn-globals)
+       ,@body)))
+
+(defmacro with-module-context ((glob-names glob-values dyn-glob
+				&key locals-ht set-builtins create-return-mod)
+			       &body body)
+  (check-type glob-names vector)
+  (check-type dyn-glob hash-table)
+  (when locals-ht (check-type locals-ht hash-table))
+  
+  (with-gensyms (mod)
+    
+    `(let* ((+mod-globals-names+  ,glob-names)
+	    (+mod-globals-values+ ,glob-values)
+	    (+mod-dyn-globals+    ,dyn-glob)
+	    ,@(when create-return-mod
+		`((,mod (make-module :globals-names  ,glob-names
+				     :globals-values ,glob-values
+				     :dyn-globals    ,dyn-glob)))))
+       
+       ,@(when set-builtins
+	   (loop for name across glob-names and i from 0
+	       when (builtin-name-p name)
+	       collect `(setf (svref +mod-globals-values+ ,i)
+			  ,(builtin-name-value name)) into setfs
+	       finally (when setfs
+			 `((progn ,@setfs)))))
+
+       (flet ((.globals. () (module-make-globals-dict
+			       ;; Updating this dict really modifies the globals.
+			       +mod-globals-names+ +mod-globals-values+ +mod-dyn-globals+)))
+	 
+	 #'.globals. ;; remove 'unused' warning
+	 
+	 (with-pydecl
+	     ((:mod-globals-names      ,glob-names)
+	      (:context                :module)
+	      (:mod-futures            :todo-parse-module-ast-future-imports))
+	   
+	   (let ,(when locals-ht
+		   (loop for name being the hash-key in locals-ht
+		       using (hash-value val)
+		       collect `(,name ,val)))
+	     ,@body)))
+       
+       ,@(when create-return-mod
+	   `(,mod)))))
+
+(defmacro module-stmt (suite) ;; &environment e)
+  
+  ;; A module is translated into a lambda that creates and returns a
+  ;; module object. Executing the lambda will create a module object
+  ;; and register it, after which other modules can access it.
+  ;; 
+  ;; Functions, classes and variables inside the module are available
+  ;; as attributes of the module object.
+  ;; 
+  ;; If we are inside an EXEC-STMT, PYDECL assumptions
+  ;; :exec-mod-locals-ht and :exec-mod-globals-ht are assumed declared
+  ;; (hash-tables containing local and global scope).
+  
+  (let* ((ast-globals (module-stmt-globals suite)))
+    
+    `(with-module-context (,(make-array (length ast-globals) :initial-contents ast-globals)
+			   (make-array ,(length ast-globals) :initial-element :unbound) ;; not eval now
+			   ,(make-hash-table :test #'eq)
+			   :locals-ht nil
+			   :set-builtins t
+			   :create-return-mod t)
+       ,suite)))
+
+#+(or) ;; old
 (defmacro module-stmt (suite &environment e)
   
   ;; A module is translated into a lambda that creates and returns a
@@ -527,55 +635,57 @@
 	 (exec-locals  (get-pydecl :exec-mod-locals-ht  e))
 	 (gv           (union ast-globals exec-globals)))
     
-    ;;`(excl:named-function module-stmt-lambda
-    ;;   (lambda ()
-    `(let* ((+mod-globals-names+    (make-array ,(length gv) :initial-contents ',gv))
-	    (+mod-globals-values+   (make-array ,(length gv) :initial-element :unbound))
-	    (+mod-dyn-globals+      nil) ;; hash-table (symbol -> val) of dynamically added vars 
-	    (+mod+                  (make-module :globals-names  +mod-globals-names+
-						 :globals-values +mod-globals-values+
-						 :dyn-globals    +mod-dyn-globals+)))
+    (with-gensyms (mod)
+      
+      ;;`(excl:named-function module-stmt-lambda
+      ;;   (lambda ()
+      `(let* ((+mod-globals-names+    (make-array ,(length gv) :initial-contents ',gv))
+	      (+mod-globals-values+   (make-array ,(length gv) :initial-element :unbound))
+	      (+mod-dyn-globals+      nil) ;; hash-table (symbol -> val) of dynamically added vars 
+	      (,mod                   (make-module :globals-names  +mod-globals-names+
+						   :globals-values +mod-globals-values+
+						   :dyn-globals    +mod-dyn-globals+)))
        
-       ;; Set values of module-level variables with names
-       ;; corresponding to built-in names (like `len')
+	 ;; Set values of module-level variables with names
+	 ;; corresponding to built-in names (like `len')
        
-       ,@(when gv
-	   `((progn ,@(loop for glob-var-name in gv and i from 0
-			  for val = (cond (exec-globals
-					   (gethash glob-var-name exec-globals))
-					  ((builtin-name-p glob-var-name)
-					   (builtin-name-value glob-var-name))
-					  (t
-					   :unbound))
-			  unless (eq val :unbound)
-			  collect `(setf (svref +mod-globals-values+ ,i) ,val)))))
+	 ,@(when gv
+	     `((progn ,@(loop for glob-var-name in gv and i from 0
+			    for val = (cond (exec-globals
+					     (gethash glob-var-name exec-globals))
+					    ((builtin-name-p glob-var-name)
+					     (builtin-name-value glob-var-name))
+					    (t
+					     :unbound))
+			    unless (eq val :unbound)
+			    collect `(setf (svref +mod-globals-values+ ,i) ,val)))))
 
-      ;; Same context as +...+ vars above
-      (with-pydecl
-	  ((:mod-globals-names    ,(make-array (length gv) :initial-contents gv))
-	   (:lexically-visible-vars ,(when exec-locals
-				       (loop for k being the hash-key in exec-locals
-					   collect k)))
-	   (:context :module)
-	   (:mod-futures :todo-parse-module-ast-future-imports))
+	 ;; Same context as +...+ vars above
+	 (with-pydecl
+	     ((:mod-globals-names    ,(make-array (length gv) :initial-contents gv))
+	      (:lexically-visible-vars ,(when exec-locals
+					  (loop for k being the hash-key in exec-locals
+					      collect k)))
+	      (:context :module)
+	      (:mod-futures :todo-parse-module-ast-future-imports))
 	   
-	(flet ((.globals. () (module-stmt-make-globals-dict
-			      ;; Updating this dict really modifies the globals.
-			      +mod-globals-names+ +mod-globals-values+ +mod-dyn-globals+)))
+	   (flet ((.globals. () (module-stmt-make-globals-dict
+				 ;; Updating this dict really modifies the globals.
+				 +mod-globals-names+ +mod-globals-values+ +mod-dyn-globals+)))
 	  
-	  #+(or) ;; allegro does not handle these yet
-	  (declare (ignorable (function .globals.)))
+	     #+(or) ;; allegro does not handle these yet
+	     (declare (ignorable (function .globals.)))
 	  
-	  ,(if exec-locals
+	     ,(if exec-locals
 	       
-	       `(let ,(loop for k being the hash-key in exec-locals using (hash-value v)
-			  collect `(,k ,v))
-		  ,suite)
+		  `(let ,(loop for k being the hash-key in exec-locals using (hash-value v)
+			     collect `(,k ,v))
+		     ,suite)
 	     
-	       suite)))
+		suite)))
 	   
-      ;; XXX if executing module failed, where to catch error?
-      +mod+)))
+	 ;; XXX if executing module failed, where to catch error?
+	 ,mod))))
 
 (defmacro pass-stmt ()
   nil)
@@ -620,13 +730,13 @@
 		   ((eq (car exc) 'tuple-expr)
 		    `((some ,@(loop for cls in (second exc)
 				  collect `(typep exc ,cls)))
-		      (progn ,@(when var `((assign-expr exc (,var))))
+		      (progn ,@(when var `((assign-stmt exc (,var))))
 			     ,handler-suite
 			     (return-from :try-except-stmt nil))))
 				
 		   (t
 		    `((typep exc ,exc)
-		      (progn ,@(when var `((assign-expr exc (,var))))
+		      (progn ,@(when var `((assign-stmt exc (,var))))
 			     ,handler-suite
 			     (return-from :try-except-stmt nil))))))))
     
@@ -664,7 +774,7 @@
     `(,py-op-func ,item)))
 
 (defmacro while-stmt (test suite else-suite)
-  (with-fresh (take-else)
+  (with-gensyms (take-else)
     `(tagbody
        (loop
 	   with ,take-else = t
@@ -690,7 +800,7 @@
 
 #+(or)
 (defun rewrite-name-binding-statements (ast)
-  "Rewrite FUNCDEF-STMT and CLASSDEF-STMT so they become (ASSIGN-EXPR ...).
+  "Rewrite FUNCDEF-STMT and CLASSDEF-STMT so they become (ASSIGN-STMT ...).
 Returns the new AST."
   (walk-py-ast
    ast
@@ -701,7 +811,7 @@ Returns the new AST."
 			 (decorators fname args suite) (cdr form)
 		       (declare (ignore args suite))
 		       
-		       `(assign-expr (loop with res = `(funcdef-expr ,@(cdr form))
+		       `(assign-stmt (loop with res = `(funcdef-expr ,@(cdr form))
 					 for deco in (nreverse decorators)
 					 do (setf res `(call-expr ,deco ((,res) () nil nil)))
 					 finally (return res))
@@ -823,13 +933,21 @@ Returns the new AST."
     #+(or)(warn "module vars: ~A" `(:l ,locals :dg ,declared-globals :os ,outer-scope))
     (union (union locals declared-globals) outer-scope))) ;; !?
 
-(defun module-stmt-make-globals-dict (names-vec values-vec dyn-globals-ht)
-  (make-py-dict
+(defun module-make-globals-dict (names-vec values-vec dyn-globals-ht)
+  (make-py-dict ;; todo: proxy
    (nconc (loop for name across names-vec and val across values-vec
 	      unless (eq val :unbound) collect (cons name val))
 	  (loop for k being the hash-key in dyn-globals-ht using (hash-value v)
 	      collect (cons k v)))))
 
+(defun make-py-dict (list)
+  (loop with ht = (make-hash-table :test #'eq)
+      for (k . v) in list do (setf (gethash k ht) v)
+      finally (return ht)))
+
+(defgeneric convert-to-hash-table (x)
+  (:method ((x list))       (make-py-dict x))
+  (:method ((x hash-table)) x))
 
 
 
