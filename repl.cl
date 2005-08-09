@@ -11,14 +11,16 @@
   #'goto-python-top-level)
 
 
-(defun goto-python-top-level ()
+(defun retry-repl-command ()
   (let ((r (find-restart 'retry-repl-command)))
     (if r
 	(invoke-restart r)
       (warn "There is no Python REPL running."))))
 
 (setf (top-level:alias "rt")
-  #'goto-python-top-level)
+  #'retry-repl-command)
+
+(defvar *repl-mod*)
 
 (defun repl ()
   (labels ((print-cmds-1 (cmds)
@@ -46,7 +48,7 @@
 		 (format t "~A~%" res)))))
     
     (loop
-	with repl-mod = (make-module)
+	with *repl-mod* = (make-module)
 	initially (format t "[CLPython -- type `:q' to quit, `:help' for help]~%")
 
 	do (loop
@@ -66,7 +68,7 @@
 			      (restart-case
 				  (progn
 				    (let ((ast (parse-python-string total)))
-				      (eval-print-ast ast repl-mod)
+				      (eval-print-ast ast *repl-mod*)
 				      (return)))
 				(try-parse-again ()
 				    :report "Parse string again into AST")
@@ -95,5 +97,5 @@
 							  '(try-except-stmt try-finally-stmt
 							    for-in-stmt funcdef-stmt classdef-stmt
 							    if-stmt while-stmt)))))
-				  (eval-print-ast ast repl-mod)
+				  (eval-print-ast ast *repl-mod*)
 				  (setf acc nil)))))))))))))

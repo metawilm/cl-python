@@ -483,23 +483,23 @@
 		 `(let ((val (svref +mod-globals-values+ ,ix)))
 		    (when (eq val :unbound) (py-raise 'NameError "Variable ~A is unbound [glob]" ',name))
 		    val)
-	       `(or (gethash ,name +mod-dyn-globals+)
+	       `(or (gethash ',name +mod-dyn-globals+)
 		    (py-raise 'NameError "No variable with name ~A [dyn-glob]" ',name))))))
     
     (ecase (get-pydecl :context e)
        
-      (:module     (if (member name (get-pydecl :lexically-visible-vars e)) ;; in exec-stmt
-		       name
-		     (module-lookup)))
+      (:module   (if (member name (get-pydecl :lexically-visible-vars e)) ;; in exec-stmt
+		     name
+		   (module-lookup)))
 	       
-      (:function   (if (member name (get-pydecl :lexically-visible-vars e))
-		       name
-		     (module-lookup)))
+      (:function (if (member name (get-pydecl :lexically-visible-vars e))
+		     name
+		   (module-lookup)))
 	       
-      (:class      `(or (gethash ',name +cls-namespace+)
-			,(if (member name (get-pydecl :lexically-visible-vars e))
-			     name
-			   (module-lookup)))))))
+      (:class    `(or (gethash ',name +cls-namespace+)
+		      ,(if (member name (get-pydecl :lexically-visible-vars e))
+			   name
+			 (module-lookup)))))))
 
 (defmacro if-stmt (if-clauses else-clause)
   `(cond ,@(loop for (cond body) in if-clauses
@@ -535,9 +535,7 @@
      (make-py-list ,vec))))
 
 (defmacro list-expr (items)
-  `(make-list ,items))
-
-
+  `(make-py-list-unevaled-list ,items))
 
 ;; Used by expansions of `module-stmt', `exec-stmt', and by function `eval'.
 
@@ -766,7 +764,7 @@
 
 
 (defmacro tuple-expr (items)
-  `(make-tuple ,items))
+  `(make-tuple-unevaled-list ,items))
 
 (defmacro unary-expr (op item)
   (let ((py-op-func (get-unary-op-func op)))
@@ -948,8 +946,6 @@ Returns the new AST."
 (defgeneric convert-to-hash-table (x)
   (:method ((x list))       (make-py-dict x))
   (:method ((x hash-table)) x))
-
-
 
 (defmacro py-arg-function (name (pos-args key-args *-arg **-arg) &body body)
   ;; Non-consing argument parsing! (except when *-arg or **-arg present)

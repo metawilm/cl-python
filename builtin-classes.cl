@@ -381,7 +381,7 @@
 (defclass py-module (py-user-object) ;; no dict-mixin!?
   ((globals-names  :initarg :globals-names  :type vector :initform #())
    (globals-values :initarg :globals-values :type vector :initform #())
-   (dyn-globals    :initarg :dyn-globals    :type hash-table)
+   (dyn-globals    :initarg :dyn-globals    :type hash-table :initform (make-hash-table :test #'eq))
    (name           :initarg :name           :type symbol :initform "__main__"))
   (:metaclass py-user-type))
 
