@@ -512,6 +512,12 @@
 (def-py-method py-list.__str__ (x^)
   (format t "[~{~A~^, ~}]" (loop for i across x collect i)))
 
+(defmacro make-py-list-unevaled-list (items)
+  (let ((vec '#:vec))
+    `(let ((,vec (make-array ,(length items) :adjustable t :fill-pointer ,(length items))))
+       ,@(loop for x in items and i from 0
+	     collect `(setf (aref ,vec ,i) ,x))
+       ,vec)))
 
 ;; Tuple (Lisp object: consed list)
 
@@ -524,6 +530,12 @@
 
 (defvar *the-empty-tuple* (make-instance 'py-tuple))
 
+(defmacro make-tuple-unevaled-list (items)
+  (let ((res '#:res))
+    `(let ((,res ()))
+       ,@(loop for x in items and i from 0
+	     collect `(push ,x ,res))
+       (nreverse ,res))))
 
 ;; String (Lisp object: string)
 
@@ -531,6 +543,22 @@
 
 (def-py-method py-string.__len__ (x^)
   (length x))
+
+
+;; Dict
+
+(def-proxy-class py-dict)
+
+(defun make-dict ()
+  ;; todo: (make-hash-table :test #'py-==  :hash #'py-hash)
+  (make-hash-table :test #'eq))
+		   
+(defmacro make-dict-unevaled-list (items)
+  (let ((dict '#:dict))
+    `(let ((,dict (make-dict)))
+       ,@(loop for (k . v) in items
+	     collect `(setf (gethash ,k ,dict) ,v))
+       ,dict)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;  
 

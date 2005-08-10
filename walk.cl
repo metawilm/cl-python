@@ -153,7 +153,7 @@ VALUE and TARGET context."
 		       ,(mapcar (lambda (kv) (funcall f (cdr kv) :value t)) key-args)
 		       ,*-arg
 		       ,**-arg)
-		      ,(funcall f suite))))
+		      ,suite))) ;; was: funcall on suite 2005.08.10
     
     (generator-expr `(generator-expr
 		      ,(funcall f (second form) :value t) ;; XXX value ok...?

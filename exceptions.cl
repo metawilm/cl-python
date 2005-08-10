@@ -13,7 +13,7 @@
 ;; and a Lisp condition. CLOS is pretty impressive.
 
 (defmethod print-object ((x Exception) stream)
-  (format stream "~A~@[: ~{~A~^, ~}]"
+  (format stream "~A~@[: ~@{~A~^, ~}~]"
 	  (class-name (class-of x))
 	  (slot-value x 'args)))
 

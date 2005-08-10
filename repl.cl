@@ -38,13 +38,22 @@
 	     (destructuring-bind (module-stmt suite) ast
 	       (assert (eq module-stmt 'module-stmt))
 	       (assert (eq (car suite) 'suite-stmt))
-	       (let* ((helper-func (compile nil `(lambda ()
-						   (with-this-module-context (,mod)
-						     ,suite))))
-		      (res (block :calc-res
+	       
+	       (let* ((helper-func
+		       (block :make-func
+			 (loop
+			   (with-simple-restart
+			       (retry-repl-command "Retry the compilation of the REPL command [:rt]")
+			     (return-from :make-func
+			       (compile nil `(lambda ()
+					       (with-this-module-context (,mod)
+						 ,suite))))))))
+		      (res (block :call-func
 			     (loop
-			       (with-simple-restart (retry-repl-command "Retry the REPL command [:rt]")
-				 (return-from :calc-res (funcall helper-func)))))))
+			       (with-simple-restart
+				   (retry-repl-command "Retry calling the compiled REPL command [:rt]")
+				 (return-from :call-func
+				   (funcall helper-func)))))))
 		 (format t "~A~%" res)))))
     
     (loop

@@ -34,7 +34,7 @@
 			 parser lexer pyprint walk gener compiler 
 			 
 			 ;; Python semantics
-			 builtin-classes
+			 exceptions builtin-classes
 			 
 			 ;; classes" "exceptions" "pythonic" "functions" 
 			 ;; "methods" "magicmeths" "builtin-classes" "formatstring"
