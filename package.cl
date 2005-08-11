@@ -34,7 +34,7 @@
 			 parser lexer pyprint walk gener compiler 
 			 
 			 ;; Python semantics
-			 exceptions builtin-classes
+			 builtin-classes exceptions repl
 			 
 			 ;; classes" "exceptions" "pythonic" "functions" 
 			 ;; "methods" "magicmeths" "builtin-classes" "formatstring"
@@ -47,7 +47,6 @@
       #-allegro(compile-file (format nil "~A.cl" f))
       (load f)))
   (values))
-
 
 (defpackage :python-builtin-functions
   (:nicknames :pyb)
@@ -68,6 +67,7 @@
    :super :tuple :xrange :classmethod :staticmethod :property :object
    :type :unicode))
 
+#+(or) ;; unused
 (defpackage :python-module-sys
   (:use)
   (:export :modules))
@@ -79,6 +79,6 @@
 ;;  Some of them aid debugging of Lisp or Python code, but slow down
 ;;  execution.
 
-(defvar *track-exception-stack* t)
+;;(defvar *track-exception-stack* t)
 ;; Slightly violates Python semantics, because exception names are
 ;; evaluated immediately, not only in case an exception does happen.

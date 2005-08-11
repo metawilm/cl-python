@@ -230,8 +230,8 @@
 			 ;; lambda args, supply them using special :*
 			 ;; and :** keywords.
 		       
-			 ,@(when *-arg  `((:* ,*-arg)))
-			 ,@(when **-arg `((:** ,**-arg)))))))))
+			 ,@(when *-arg  `(:* ,*-arg))
+			 ,@(when **-arg `(:** ,**-arg))))))))
 
 (defmacro classdef-stmt (name inheritance suite)
   ;; todo: define .locals. containing class vars
@@ -377,14 +377,15 @@
        ,@(when else-suite `(,else-suite))
       :break)))
 
-
 (defmacro funcdef-stmt (decorators
-			name (&whole formal-args pos-args key-args *-arg **-arg)
+			fname (&whole formal-args pos-args key-args *-arg **-arg)
 			suite
 			&environment e)
   
-  (assert (or (eq name :lambda) 
-	      (and (listp name) (eq (car name) 'identifier-expr))))
+  (cond ((eq fname :lambda))
+	((and (listp fname) (eq (car fname) 'identifier-expr))
+	 (setf fname (second fname)))
+	(t (break :unexpected)))
   
   ;; Replace "def f( (x,y), z):  .." by "def f( _tmp , z):  (x,y) = _tmp; ..".
   ;; Shadows original POS-ARGS.
@@ -412,13 +413,14 @@
       
       (multiple-value-bind (func-explicit-globals func-locals)
 	  (funcdef-globals-and-locals (cons all-pos-arg-names (cdr formal-args)) suite)
-    
+	
 	;; When a method is defined in a class namespace, the default
 	;; argument values are evaluated at function definition time
 	;; in the class namespace. Macro PY-ARG-FUNCTION ensures this.
 	
 	`(let ((func-lambda
-		(py-arg-function ,(second name)
+		(py-arg-function
+		 ,fname
 		 (,formal-pos-args ,key-args ,*-arg ,**-arg)
 		 
 		 (let ,(loop for loc in func-locals collect `(,loc :unbound))
@@ -441,22 +443,27 @@
 				     (:lexically-visible-vars
 				      ,(nconc (copy-list func-locals)
 					      (copy-list all-pos-arg-names)
+					      (when *-arg (list *-arg))
+					      (when **-arg (list **-arg))
 					      (get-pydecl :lexically-visible-vars e))))
-			 ,suite)))))))
+			 
+			 ,(if (generator-ast-p suite)
+			      `(return-stmt ,(rewrite-generator-funcdef-suite fname suite))
+			    suite))))))))
 	   
-	   ,(if (eq name :lambda)
+	   ,(if (eq fname :lambda)
 		
 		`func-lambda
 	      
 	      (with-gensyms (func)
-		`(let ((,func (make-py-function ',(second name) func-lambda)))
+		`(let ((,func (make-py-function ',fname func-lambda)))
 		   
 		   ,(let ((art-deco (loop with res = func
 					for deco in (nreverse decorators)
 					do (setf res `(call-expr ,deco ((,res) () nil nil)))
 					finally (return res))))
 		      
-		      `(assign-stmt ,art-deco (,name)))))))))))
+		      `(assign-stmt ,art-deco ((identifier-expr ,fname))))))))))))
 
 
 (defmacro generator-expr (item for-in/if-clauses)
@@ -763,7 +770,7 @@
 (defmacro unary-expr (op item)
   (let ((py-op-func (get-unary-op-func op)))
     (assert py-op-func)
-    `(,py-op-func ,item)))
+    `(funcall ,py-op-func ,item)))
 
 (defmacro while-stmt (test suite else-suite)
   (with-gensyms (take-else)
@@ -783,7 +790,7 @@
 
 (defmacro yield-stmt (val)
   (declare (ignore val))
-  (break "YIELD found by compiler; generator AST should be rewritten by now."))
+  (error "YIELD found outside function"))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -1116,22 +1123,6 @@ Returns the new AST."
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Pythonic (copied)
-
-(defun py-raise (exc-type string &rest format-args)
-  "Raise a Python exception with given format string"
-  (if (find-class exc-type)
-      (error exc-type :args (apply #'format nil string format-args))
-    (apply #'error string format-args)))
-
-
-(defclass SyntaxError (condition)
-  ((args :initarg :args :documentation "Exception arguments (as tuple)")))
-
-(defmethod print-object ((x SyntaxError) stream)
-  (format stream "~A" (class-name (class-of x)))
-  (when (slot-boundp x 'args)
-    (format stream ": ~A" (slot-value x 'args))))
-
 
 (defun lookup-inplace-op-func (op)
   (break "lookup-inplace-op-func: ~A" op))

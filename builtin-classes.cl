@@ -130,8 +130,10 @@
 				 ,body)))
 		 
 	      else do (push sym real-args)
+		   
 	      finally (return `(defun ,cls.meth ,(nreverse real-args)
-				 ,body))))
+				 (block ,cls.meth
+				   ,body)))))
        
        (let* ((cls (or (find-class ',cls) (error "No such class: ~A" ',cls))))
 	 (unless (dict cls)
@@ -453,10 +455,9 @@
 
 (def-py-method py-number.__repr__ (x^) (format nil "~A" x))
 
-(def-py-method py-number.__eq__ (x^ y^)
-  (if (and (numberp x) (numberp y))
-      (py-bool (= x y))
-    *the-notimplemented*))
+(def-py-method py-number.__eq__  (x^ y^) (py-bool (= x y)))
+(def-py-method py-number.__add__ (x^ y^) (+ x y))
+(def-py-method py-number.__neg__ (x^) (- x))
 
 (def-py-method py-number.real :attribute (x^)
 	       (realpart x))
@@ -867,3 +868,108 @@
 
 (defgeneric py-val->lisp-bool (x)
   (:method ((x number)) (/= x 0)))
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+;;; Iteration
+
+(defgeneric get-py-iterate-fun (x)
+  (:documentation
+   "Return a function that when called repeatedly returns VAL, T, where VAL is the
+next value gotten by iterating over X. Returns NIL, NIL upon exhaustion.")
+  (:method ((x t))
+	   (let* ((x.cls       (py-class-of x))
+		  (__iter__    (recursive-class-dict-lookup x.cls '__iter__))
+		  (__getitem__ (and (not __iter__)
+				    (recursive-class-dict-lookup x.cls '__getitem__))))
+
+	     ;; TODO: binding __getitem__ using __get__ is not done at
+	     ;; all yet.
+	     
+	     (cond (__iter__ ;; Preferable, use __iter__ to retrieve x's iterator
+		    (let* ((iterator     (py-call __iter__ x))
+			   (iterator.cls (py-class-of iterator))
+			   (next-meth    (or (recursive-class-dict-lookup iterator.cls 'next)
+					     (py-raise
+					      'TypeError
+					      "The value returned by ~A's `__iter__' method ~
+                  		               is ~A, which is not an iterator (no `next' method)"
+					      x iterator))))
+		      
+		      ;; Note that we just looked up the `next' method
+		      ;; before the first value is demanded. This is
+		      ;; semantically incorrect in an ignorable way.
+		      
+		      (excl:named-function :py-iterate-fun
+			(lambda ()
+			  (handler-case (values (py-call next-meth iterator))
+			    (StopIteration () (values nil nil))
+			    (:no-error (val)  (values val t)))))))
+		   
+		   
+		   (__getitem__ ;; Fall-back: call __getitem__ with successive integers
+		    (let ((index 0))
+		      (lambda ()
+			(handler-case (values (py-call __getitem__ x index))
+			  
+			  ;; ok if this happens when index = 0: then it's an empty sequence
+			  (IndexError () (values nil nil)) 
+
+			  (:no-error (val) (progn (incf index)
+						  (values val t)))))))
+		   
+		   (t
+		    (py-raise 'TypeError "Iteration over non-sequence (got: ~A)" x))))))
+
+
+(defgeneric map-over-py-object (func object)
+  (:documentation 
+   "Iterate over OBJECT, calling function FUNC on each value. Returns nothing.")
+  (:method ((func function) (object t))
+	   (loop with it-fun = (get-py-iterate-fun object)
+	       for val = (funcall it-fun)
+	       while val do (funcall func val))))
+
+(defgeneric py-iterate->lisp-list (object)
+  (:documentation
+   "Returns a Lisp list, that may not be modified destructively.")
+  (:method ((x t))
+	   (loop with it-fun = (get-py-iterate-fun x)
+	       for val = (funcall it-fun)
+	       while val collect val)))
+
+(defclass py-func-iterator (py-core-object)
+  ((func        :initarg :func :type function)
+   (stopped-yet :initform nil)
+   (end-value   :initarg :end-value))
+  (:metaclass py-core-type))
+
+(defun make-iterator-from-function (f &optional end-value)
+  "Create an iterator that calls f again and again.
+F somehow has to keep its own state.
+When F returns a value EQL to END-VALUE, it is considered finished:
+that value EQL to END-VALUE will be returned, but F will not be called
+any more times."
+  (check-type f function)
+  (make-instance 'py-func-iterator :func f :end-value end-value))
+
+(def-py-method py-func-iterator.next (fi)
+  (with-slots (stopped-yet func end-value) fi
+    (unless stopped-yet
+      (let ((res (funcall func)))
+	(when (eql res end-value)
+	  (setf stopped-yet t))
+	(return-from py-func-iterator.next res)))
+    (py-raise 'StopIteration "Iterator ~S has finished" fi)))
+
+(defun get-py-iterator-for-object (x)
+  (let* ((x.cls       (py-class-of x))
+	 (__iter__    (recursive-class-dict-lookup x.cls '__iter__)))
+    
+    (if __iter__
+	
+	(py-call __iter__ x)
+      
+      (let ((f (get-py-iterate-fun x)))
+	(make-iterator-from-function f)))))

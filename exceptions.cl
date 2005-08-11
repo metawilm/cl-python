@@ -12,6 +12,12 @@
 ;; The `Exception' class is a Python class, a regular Python object,
 ;; and a Lisp condition. CLOS is pretty impressive.
 
+(defun py-raise (exc-type string &rest format-args)
+  "Raise a Python exception with given format string"
+  (assert (find-class exc-type nil) ()
+    (error "Python exception class ~A not found" exc-type))
+  (error exc-type :args (apply #'format nil string format-args)))
+
 (defmethod print-object ((x Exception) stream)
   (format stream "~A~@[: ~@{~A~^, ~}~]"
 	  (class-name (class-of x))

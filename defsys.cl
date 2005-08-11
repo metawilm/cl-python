@@ -7,10 +7,15 @@
 
 (excl:defsystem :python
     (:default-pathname #.*load-pathname*)
-  (:serial
-   "package"
-   "old-classes"
-   ))
+  (:serial "package" (:parallel
+		      "parser"
+		      "lexer"
+		      "pyprint"
+		      "walk"
+		      "gener"
+		      "compiler"
+		      "repl"
+		      (:serial "builtin-classes" "exceptions"))))
 
 (format t "~%;;To compile and load, execute these forms:~%~s~%~s~%"
 	'(excl:compile-system :python)
