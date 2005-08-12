@@ -335,10 +335,10 @@
 			  (assert (eq module-stmt 'module-stmt))
 			  (assert (eq (car suite) 'suite-stmt))
 			  suite))
-	      (locals-ht  (convert-to-hash-table ,(or locals (if (eq context :module)
+	      (locals-ht  (convert-to-namespace-ht ,(or locals (if (eq context :module)
 								 `(.globals.)
 							       `(.locals.)))))
-	      (globals-ht (convert-to-hash-table ,(or globals `(.globals.))))
+	      (globals-ht (convert-to-namespace-ht ,(or globals `(.globals.))))
 	      (loc-kv-pairs (loop for k being the hash-key in locals-ht
 				using (hash-value val)
 				for k-sym = (typecase k
@@ -354,6 +354,8 @@
 		  ;; this assumes that there are not :lexically-visible-vars set yet
 		  (with-pydecl ((:lexically-visible-vars ,(mapcar #'car loc-kv-pairs)))
 		    ,real-ast))))
+	 
+	 (warn "EXEC-STMT: lambda-body: ~A" lambda-body)
 			  
 	 (let ((,exec-helper-func (compile nil `(lambda () ,lambda-body))))
 	   
@@ -496,9 +498,9 @@
 		    (when (eq val :unbound) (py-raise 'NameError "Variable ~A is unbound [glob]" ',name))
 		    val)
 	       `(or (gethash ',name +mod-dyn-globals+)
-		    (py-raise 'NameError "No variable with name ~A [dyn-glob]" ',name))))))
-    
-    #+(or)(warn "identifier ~A: lex=~A" name (get-pydecl :lexically-visible-vars e))
+		    ,(if (builtin-name-p name)
+			 (builtin-name-value name)
+		       `(py-raise 'NameError "No variable with name ~A [dyn-glob]" ',name)))))))
     
     (ecase (get-pydecl :context e)
       
@@ -828,7 +830,7 @@ Returns the new AST."
   
   (labels ((recurse (ast)
 	     
-	     (with-py-ast-nodes ((form &key value target) t ast)
+	     (with-py-ast ((form &key value target) ast)
 	       (case (car form)
 		 
 		 (classdef-stmt (destructuring-bind
@@ -948,9 +950,20 @@ Returns the new AST."
       for (k . v) in list do (setf (gethash k ht) v)
       finally (return ht)))
 
-(defgeneric convert-to-hash-table (x)
-  (:method ((x list))       (make-py-dict x))
-  (:method ((x hash-table)) x))
+(defgeneric convert-to-namespace-ht (x)
+  (:method ((x hash-table)) (loop with d = (make-hash-table :test #'eq) ;; XXX sometimes not needed
+				for k being the hash-key in x using (hash-value v)
+				for k-sym = (typecase k
+					      (string (intern k #.*package*))
+					      (symbol k)
+					      (t (error "Not a valid namespace hash-table,
+                                                         as key is neither string or symbol: ~A ~A"
+							k (type-of k))))
+				do (setf (gethash k-sym d) v)
+				finally (return d)))
+  (:method ((x t))          (let ((x2 (deproxy x)))
+				 (when (eq x x2) (error "invalid namespace: ~A" x))
+				 (convert-to-namespace-ht x2))))
 
 (defmacro py-arg-function (name (pos-args key-args *-arg **-arg) &body body)
   ;; Non-consing argument parsing! (except when *-arg or **-arg present)

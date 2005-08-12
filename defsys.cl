@@ -8,14 +8,16 @@
 (excl:defsystem :python
     (:default-pathname #.*load-pathname*)
   (:serial "package" (:parallel
-		      "parser"
-		      "lexer"
+		      (:serial "parser" "lexer")
 		      "pyprint"
 		      "walk"
-		      "gener"
 		      "compiler"
+		      "gener"
 		      "repl"
-		      (:serial "builtin-classes" "exceptions"))))
+		      "builtin-funcs"
+		      (:serial "builtin-classes" "exceptions")))
+  (:definitions "walk" "compiler"))
+
 
 (format t "~%;;To compile and load, execute these forms:~%~s~%~s~%"
 	'(excl:compile-system :python)

@@ -146,6 +146,8 @@ VALUE and TARGET context."
      (assert (not (or target value)))
      (destructuring-bind (decorators fname (pos-args key-args *-arg **-arg) suite)
 	 (cdr form)
+       (break "WALK-PY-AST recursing into funcdef, allright?  ~A" form)
+       ;; XXX check compiler, that always recursing here is intended
        `(funcdef-stmt ,(loop for deco in decorators
 			   collect (funcall f deco :value t))
 		      ,(funcall f fname :target t)
@@ -306,74 +308,16 @@ VALUE and TARGET context."
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; 
+
 ;; Handy functions for dealing with ASTs
 
-(defun walk-py-ast-subset (ast f &key (nodes t) (recurse-matches t)
-				      (same-namespace nil) (match-initial t))
-  ;; FUNC : function of three args: (ast &key value target)
-  ;; AST  : Python AST, a list
-  ;;  
-  ;; :NODES           : a list of symbols, or T for all
-  ;; :RECURSE-MATCHES : recurse into returned forms?
-  ;; :SAME-NAMESPACE  : don't recurse into CLASSDEF, FUNCDEF and LAMBDA
-  ;; :MATCH-INITIAL   : return initial AST arg if it matches?
-  
-  (check-type ast list) ;; number, string?
-  (unless (eq nodes t)
-    (check-type nodes list))
-
-  (let ((initial-ast ast))
-    (flet ((ast-matches (ast)
-	     (and (or match-initial
-		      (not (eq ast initial-ast)))
-		  (or (eq nodes t)
-		      (member (car ast) nodes)))))
-      
-      (walk-py-ast ast
-		   (lambda (ast &key value target)
-		     
-		     (cond ((and same-namespace (eq (car ast) 'funcdef-stmt))
-			    (when (ast-matches ast)
-			      (let ((id-name (third ast)))
-				(funcall f id-name :target t)))
-			    (values nil t))
-			   
-			   ((and same-namespace (eq (car ast) 'classdef-stmt))
-			    (when (ast-matches ast)
-			      (funcall ast))
-			    (let ((id-name (second ast)))
-			      (when (ast-matches id-name)
-				(funcall f id-name :target t)))
-			    (values nil t))
-			   
-			   ((and same-namespace (eq (car ast) 'lambda-expr))
-			    (when (ast-matches ast)
-			      (funcall f ast :value t))
-			    (values nil t))
-			   
-			   ((ast-matches ast)
-			    (funcall f ast :value value :target target)
-			    (if recurse-matches
-				ast
-			      (values nil t)))
-			   
-			   (t ast)))
-		   :walk-lists-only t))))
-
-
-(defmacro with-py-ast-nodes ((target nodes ast &optional options-list) &body body)
-  "Example: (with-sub-ast ((form &key value target) '(binary unary) ast
-                       (:same-namespace t :recurse t)) ...)"
-  (assert (and (listp target) 
-	       (= (length target) 4)
-	       (eq (second target) '&key)
-	       (member (cddr target) '((target value) (value target)) :test #'equal)) ()
-    "WITH-SUB-AST: the TARGET should be: (form &key value target) (got: ~A)" target)
-  
-  `(walk-py-ast-subset ,ast
-		       (lambda ,target ,@body)
-		       :nodes ,nodes ,@options-list))
+(defmacro with-py-ast ((target ast) &body body)
+  "Example: (with-sub-ast ((form &key value target) ast t)"
+  `(walk-py-ast ,ast
+		(excl:named-function :with-py-ast-function
+		  (lambda ,target
+		    ,@body))))
+		  
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;

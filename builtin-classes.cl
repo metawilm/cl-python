@@ -689,17 +689,20 @@
 			   (setf try-right (not try-right)
 				 finish t))))))
      
-     (setf (gethash ',op-syntax *binary-op-funcs-ht*) (function ,op-func))
+     ,(when op-syntax
+	`(setf (gethash ',op-syntax *binary-op-funcs-ht*) (function ,op-func)))
      
-     (defgeneric ,iop-func (x val)
-       (:method ((x t) (val t))
-		(let* ((iop-meth (recursive-class-dict-lookup (py-class-of x) ',i-meth))
-		       (res (and iop-meth 
-				 (py-call iop-meth x val))))
-		  (and iop-meth
-		       (not (eq res (load-time-value *the-notimplemented*)))))))
+     ,(when iop-func
+	`(defgeneric ,iop-func (x val)
+	   (:method ((x t) (val t))
+		    (let* ((iop-meth (recursive-class-dict-lookup (py-class-of x) ',i-meth))
+			   (res (and iop-meth 
+				     (py-call iop-meth x val))))
+		      (and iop-meth
+			   (not (eq res (load-time-value *the-notimplemented*))))))))
      
-     (setf (gethash ',iop-syntax *binary-iop-funcs-ht*) (function ,iop-func))))
+     ,(when iop-syntax
+	`(setf (gethash ',iop-syntax *binary-iop-funcs-ht*) (function ,iop-func)))))
 
 
 ;; /t/ is not Python syntax, but a hack to support __future__ feature
@@ -716,6 +719,7 @@
 (def-math-func &   py-&    __and__      __rand__       &=   py-&=   __iand__      )
 (def-math-func \|  py-\|   __or__       __ror__        \|=  py-\|=  __ior__       )
 (def-math-func ^   py-^    __xor__      __rxor__       ^=   py-^=   __ixor__      )
+(def-math-func nil py-divmod __divmod__ __rdivmod__    nil  nil     nil           )
 
 ;; a**b (to-the-power) is a special case:
 ;;   
@@ -756,7 +760,6 @@
       nil)))
 
 (setf (gethash '**= *binary-iop-funcs-ht*) #'py-**=)
-
 
 
 (defvar *unary-op-funcs-ht* (make-hash-table :test #'eq))
@@ -870,6 +873,29 @@
   (:method ((x number)) (/= x 0)))
 
 
+;; Shortcut functions
+
+(defmacro def-py-shortcut-func (funcname method &key error)
+  `(defgeneric ,funcname (x)
+     (:method ((x t)) (let* ((x.cls (py-class-of x))
+			     (,method (recursive-class-dict-lookup x.cls ',method)))
+			(if ,method
+			    (py-call ,method x)
+			  ,(or error
+			       `(py-raise 'TypeError
+					  "Object ~A has no `~A' method"
+					  ,(symbol-name method) x)))))))
+
+(def-py-shortcut-func py-abs  __abs__ )
+(def-py-shortcut-func py-repr __repr__)
+(def-py-shortcut-func py-str  __str__ :error (py-repr x))
+(def-py-shortcut-func py-hash __hash__)
+(def-py-shortcut-func py-hex  __hex__ )
+(def-py-shortcut-func py-oct  __oct__ )
+(def-py-shortcut-func py-len  __len__ )
+
+
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 ;;; Iteration
@@ -921,6 +947,7 @@ next value gotten by iterating over X. Returns NIL, NIL upon exhaustion.")
 		   
 		   (t
 		    (py-raise 'TypeError "Iteration over non-sequence (got: ~A)" x))))))
+
 
 
 (defgeneric map-over-py-object (func object)

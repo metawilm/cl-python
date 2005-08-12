@@ -11,14 +11,23 @@
   #'goto-python-top-level)
 
 
-(defun retry-repl-command ()
-  (let ((r (find-restart 'retry-repl-command)))
+(defun retry-repl-comp ()
+  (let ((r (find-restart 'retry-repl-comp)))
     (if r
 	(invoke-restart r)
       (warn "There is no Python REPL running."))))
 
-(setf (top-level:alias "rt")
-  #'retry-repl-command)
+(setf (top-level:alias "rc")
+  #'retry-repl-comp)
+
+(defun retry-repl-eval ()
+  (let ((r (find-restart 'retry-repl-eval)))
+    (if r
+	(invoke-restart r)
+      (warn "There is no Python REPL running."))))
+
+(setf (top-level:alias "re")
+  #'retry-repl-eval)
 
 (defvar *repl-mod*)
 
@@ -38,23 +47,23 @@
 	     (destructuring-bind (module-stmt suite) ast
 	       (assert (eq module-stmt 'module-stmt))
 	       (assert (eq (car suite) 'suite-stmt))
-	       
-	       (let* ((helper-func
-		       (block :make-func
+
+	       (format t "~A~%"
+		       (block :val
 			 (loop
 			   (with-simple-restart
-			       (retry-repl-command "Retry the compilation of the REPL command [:rt]")
-			     (return-from :make-func
-			       (compile nil `(lambda ()
-					       (with-this-module-context (,mod)
-						 ,suite))))))))
-		      (res (block :call-func
-			     (loop
-			       (with-simple-restart
-				   (retry-repl-command "Retry calling the compiled REPL command [:rt]")
-				 (return-from :call-func
-				   (funcall helper-func)))))))
-		 (format t "~A~%" res)))))
+			       (retry-repl-comp
+				"Retry the compilation of the REPL command [:rc]")
+			     (let ((helper-func
+				    (compile nil `(lambda ()
+						    (with-this-module-context (,mod)
+						      ,suite)))))
+			       (loop
+				 (with-simple-restart
+				     (retry-repl-eval
+				      "Retry the execution the compiled REPL command [:re]")
+				   (return-from :val
+				     (funcall helper-func))))))))))))
     
     (loop
 	with *repl-mod* = (make-module)
