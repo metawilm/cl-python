@@ -14,9 +14,9 @@
 		      "compiler"
 		      "gener"
 		      "repl"
-		      "builtin-funcs"
-		      (:serial "builtin-classes" "exceptions")))
-  (:definitions "walk" "compiler"))
+		      (:serial "builtin-classes" "builtin-funcs" "exceptions" "builtin-types")))
+  (:definitions "walk" "compiler") ;; COMPILER uses code walk macro
+  )
 
 
 (format t "~%;;To compile and load, execute these forms:~%~s~%~s~%"

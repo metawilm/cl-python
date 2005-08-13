@@ -254,9 +254,24 @@
   (declare (ignore class))
   (error "Attribute ~A of object ~A is read-only (value: ~A)"
 	 x inst (py-call (slot-value x 'func) inst)))
-	 
 
 
+(defclass py-enumerate (py-core-object)
+  ()
+  (:metaclass py-core-type))
+
+(defclass py-slice (py-core-object)
+  ()
+  (:metaclass py-core-type))
+
+(defclass py-super (py-core-object)
+  ()
+  (:metaclass py-core-type))
+
+
+(defclass py-xrange (py-core-object)
+  ()
+  (:metaclass py-core-type))
 
 ;; None
 
@@ -491,6 +506,8 @@
 
 (def-py-method py-int.__init__ (&rest args) nil)
 
+(def-proxy-class py-bool (py-int))
+
 ;; Float
 
 (def-proxy-class py-float (py-real))
@@ -560,6 +577,7 @@
        ,@(loop for (k . v) in items
 	     collect `(setf (gethash ,k ,dict) ,v))
        ,dict)))
+
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;  
 

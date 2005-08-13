@@ -43,8 +43,9 @@ POS-ARGS is any iterable object; KW-DICT must be of type PY-DICT."
 (defun pyb:callable (x)
   "Returns whether x can be called (function, class, or callable class instance)
    as True or False."
-  (py-bool (pyb::callable-1 x)))
+  (py-bool (recursive-class-dict-lookup (py-class-of x) '__call__)))
 
+#+(or)
 (defgeneric pyb::callable-1 (x)  
   (:documentation "Returns callable-ness as T or NIL")
   (:method ((x function))  t)
@@ -98,8 +99,7 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
 	     (let ((x.class (py-class-of x))
 		   (y.class (py-class-of y)))
       
-	       (when (member (load-time-value (find-class 'py-type))
-			     (list x.class y.class))
+	       (when (member (find-class 'py-type) (list x.class y.class))
 		 (return-from pyb::cmp
 		   (if (eq x y)
 		       0

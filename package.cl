@@ -7,11 +7,9 @@
 (when (find-package :python)
   (delete-package :python))
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Package definitions
 
 (defpackage :python
-  (:documentation "An implementation of the Python programming language.")
+  (:documentation "An implementation Python in Common Lisp.")
   (:use :common-lisp)
   #+(or)(:export :python-type :python-object
 		 :python-class :def-python-class :python-class-p
@@ -25,28 +23,6 @@
 		 :test)
   (:shadow ))
 
-(in-package :python)
-
-(defun compy ()
-  (with-compilation-unit ()
-    (dolist (f (mapcar #'symbol-name
-		       '(;; create and modify AST
-			 parser lexer pyprint walk gener compiler 
-			 
-			 ;; Python semantics
-			 builtin-classes exceptions repl
-			 
-			 ;; classes" "exceptions" "pythonic" "functions" 
-			 ;; "methods" "magicmeths" "builtin-classes" "formatstring"
-			 ;; "call" "builtin-funcs" "builtin-types" "mathops"
-			 ;; "descriptors" "attributes" "modules" "pyeval"
-			 ;; "parsepython" "walk" "gener" "repl" "trace"
-			 ;; "bi-modules" "pyprint"
-			 )))
-      #+allegro(excl::compile-file-if-needed f)
-      #-allegro(compile-file (format nil "~A.cl" f))
-      (load f)))
-  (values))
 
 (defpackage :python-builtin-functions
   (:nicknames :pyb)
@@ -56,29 +32,18 @@
    :delattr :dir :divmod :eval :execfile :filter :getattr :globals
    :hasattr :hash :hex :id :input :intern :isinstance :issubclass
    :iter :len :locals :map :max :min :oct :ord :pow :range :raw_input
-   :reduce :reload :repr :round :setattr :sorted :sum #+(or):type
-   :unichr :vars :zip))
+   :reduce :reload :repr :round :setattr :sorted :sum :unichr :vars
+   :zip ))
+
 
 (defpackage :python-builtin-types
   (:nicknames :pyt)
   (:use )
   (:export
-   :bool :complex :dict :enumerate :float :int :list :long :slice :str
-   :super :tuple :xrange :classmethod :staticmethod :property :object
-   :type :unicode))
-
-#+(or) ;; unused
-(defpackage :python-module-sys
-  (:use)
-  (:export :modules))
-
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Features to be included
-;;  
-;;  Some of them aid debugging of Lisp or Python code, but slow down
-;;  execution.
-
-;;(defvar *track-exception-stack* t)
-;; Slightly violates Python semantics, because exception names are
-;; evaluated immediately, not only in case an exception does happen.
+   :basestring :bool :complex :dict :enumerate :float :int :list :long
+   :slice :str :super :tuple :xrange :classmethod :staticmethod :property
+   :object :type :unicode
+   
+   ;; BUILTIN-TYPES.CL adds the names of the exceptions classes to the
+   ;; exported symbols.
+   ))

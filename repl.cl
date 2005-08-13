@@ -48,22 +48,23 @@
 	       (assert (eq module-stmt 'module-stmt))
 	       (assert (eq (car suite) 'suite-stmt))
 
-	       (format t "~A~%"
-		       (block :val
-			 (loop
-			   (with-simple-restart
-			       (retry-repl-comp
-				"Retry the compilation of the REPL command [:rc]")
-			     (let ((helper-func
-				    (compile nil `(lambda ()
-						    (with-this-module-context (,mod)
-						      ,suite)))))
-			       (loop
-				 (with-simple-restart
-				     (retry-repl-eval
-				      "Retry the execution the compiled REPL command [:re]")
-				   (return-from :val
-				     (funcall helper-func))))))))))))
+	       (let ((val (block :val
+			    (loop
+			      (with-simple-restart
+				  (retry-repl-comp
+				   "Retry the compilation of the REPL command [:rc]")
+				(let ((helper-func
+				       (compile nil `(lambda ()
+						       (with-this-module-context (,mod)
+							 ,suite)))))
+				  (loop
+				    (with-simple-restart
+					(retry-repl-eval
+					 "Retry the execution the compiled REPL command [:re]")
+				      (return-from :val
+					(funcall helper-func))))))))))
+		 (when val
+		   (format t "~A~%" val))))))
     
     (loop
 	with *repl-mod* = (make-module)

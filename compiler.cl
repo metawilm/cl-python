@@ -1171,12 +1171,15 @@ Returns the new AST."
      ,@body))
 
 (defun builtin-name-p (x)
-  (member x '(len range)))
+  (or (find-symbol (string x) (load-time-value (find-package :python-builtin-functions)))
+      (find-symbol (string x) (load-time-value (find-package :python-builtin-types)))))
 
 (defun builtin-name-value (x)
-  (ecase x
-    (len :the-len-builtin)
-    (range :the-range-builtin)))
+  (let ((sym (builtin-name-p x)))
+    (assert sym)
+    (ecase (symbol-package sym)
+      ((load-time-value (find-package :python-builtin-functions))  (symbol-function sym))
+      ((load-time-value (find-package :python-builtin-types))      (symbol-name sym)))))
 
 #+(or)
 (defun make-module (&rest args)

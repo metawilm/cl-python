@@ -1,32 +1,46 @@
 (in-package :python)
 
+(eval-when (:compile-toplevel :load-toplevel :execute)
 
-(defconstant pyt:bool    (find-class 'py-bool))
-(defconstant pyt:complex (find-class 'py-complex))
-(defconstant pyt:dict    (find-class 'py-dict))
-(defconstant pyt:enumerate (find-class 'py-enumerate))
-(defconstant pyt:float   (find-class 'py-float))
-(defconstant pyt:int     (find-class 'py-int))
-(defconstant pyt:list    (find-class 'py-list))
-(defconstant pyt:long    (find-class 'py-int))
-(defconstant pyt:object  (find-class 'python-object))
-(defconstant pyt:property (find-class 'py-property))
-(defconstant pyt:slice   (find-class 'py-slice))
-(defconstant pyt:str     (find-class 'py-string))
-(defconstant pyt:super   (find-class 'py-super))
-(defconstant pyt:tuple   (find-class 'py-tuple))
-(defconstant pyt:type    (find-class 'python-type))
-(defconstant pyt:unicode (find-class 'py-string))
-(defconstant pyt:xrange  (find-class 'py-xrange))
-(defconstant pyt:classmethod  (find-class 'class-method))
-(defconstant pyt:staticmethod (find-class 'static-method))
+;; The corresponding Python classes are defined in BUILTIN-CLASSES.CL
+  
+(defmacro def-bi-types ()
+  (let ((pbt-pkg (find-package :python-builtin-types)))
+    `(progn ,@(loop for (name py-cls) in
+		    `((basestring   py-string       )
+		      (bool         py-bool         )
+		      (classmethod  py-class-method )
+		      (complex      py-complex      )
+		      (dict         py-dict         )
+		      (enumerate    py-enumerate    )
+		      (float        py-float        )
+		      (int          py-int          )
+		      (list         py-list         )
+		      (long         py-int          )
+		      (object       py-object       )
+		      (property     py-property     )
+		      (slice        py-slice        )
+		      (staticmethod py-static-method)
+		      (str          py-string       )
+		      (super        py-super        )
+		      (tuple        py-tuple        )
+		      (type         py-type         )
+		      (unicode      py-string       )
+		      (xrange       py-xrange       ))
+		  for sym = (intern (string name) pbt-pkg)
+		  collect `(defconstant ,sym (find-class ',py-cls))
+		  collect `(export ',sym ,pbt-pkg)))))
 
+(def-bi-types)
+		       
 
-#+(or) ;; todo
-(progn 
-  (defconstant pyt:basestring   xxx) ;; abstract type basestring has subtypes str and unicode
+;; The Python exceptions are defined in EXCEPTIONS.CL
 
-  )
-
-
-;; XXX TODO: "type(name, bases, dict)" creates a new type
+(defmacro def-bi-excs ()
+  (let ((pbt-pkg (find-package :python-builtin-types)))
+    `(progn ,@(loop for c in *exception-classes*
+		  for sym = (intern (string (class-name c)) pbt-pkg)
+		  collect `(defconstant ,sym ,c)
+		  collect `(export ',sym ,pbt-pkg)))))
+(def-bi-excs)
+) ;; eval-when
