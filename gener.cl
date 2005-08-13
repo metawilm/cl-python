@@ -253,27 +253,30 @@
 	  `(let ((.state. 0)
 		 ,@(nreverse vars))
 	     
-	     (excl:named-function (,fname :generator-val-returner)
-	       (lambda ()
-		 ;; This is the function that will repeatedly be
-		 ;; called to return the values
-		     
-		 (macrolet ((generator-finished ()
-			      '(progn (setf .state. ,final-tag)
-				(go ,final-tag))))
-		   
-		   (block :function-body
-		     (tagbody
-		       (case .state.
-			 ,@(loop for i from 0 to yield-counter
-			       collect `(,i (go ,i))))
-		      0
-		       ,@walked-as-list
+	     (make-iterator-from-function 
+	      :name '(:iterator-from-function ,fname)
+	      :func
+	      (excl:named-function (:iterator-from-function ,fname)
+		(lambda ()
+		  ;; This is the function that will repeatedly be
+		  ;; called to return the values
+		  
+		  (macrolet ((generator-finished ()
+			       '(progn (setf .state. ,final-tag)
+				 (go ,final-tag))))
+		    
+		    (block :function-body
+		      (tagbody
+			(case .state.
+			  ,@(loop for i from -1 to yield-counter
+				collect `(,i (go ,i))))
+		       0
+			,@walked-as-list
 
-		       (generator-finished)
-		       
-		       ,final-tag
-		       (py-raise 'StopIteration "The generator has finished."))))))))))))
+			(generator-finished)
+			
+			,final-tag
+			(py-raise 'StopIteration "The generator has finished.")))))))))))))
 
 (defun suite->generator (fname suite)
   ;; Lisp generator function that returns one of:

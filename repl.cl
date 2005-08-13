@@ -52,7 +52,7 @@
 			    (loop
 			      (with-simple-restart
 				  (retry-repl-comp
-				   "Retry the compilation of the REPL command [:rc]")
+				   "Retry the compilation of the REPL command. [:rc]")
 				(let ((helper-func
 				       (compile nil `(lambda ()
 						       (with-this-module-context (,mod)
@@ -60,11 +60,20 @@
 				  (loop
 				    (with-simple-restart
 					(retry-repl-eval
-					 "Retry the execution the compiled REPL command [:re]")
+					 "Retry the execution the compiled REPL command. [:re]")
 				      (return-from :val
 					(funcall helper-func))))))))))
 		 (when val
-		   (format t "~A~%" val))))))
+		   (block :repr
+		     (loop
+		       (with-simple-restart
+			   (:continue "Retry printing the object.")
+			 (let ((str-val (py-str val)))
+			   (if str-val
+			       (progn (write-string (py-val->string str-val))
+				      (write-char #\Newline))
+			     (warn "(py-str ~S) = nil" val))
+			   (return-from :repr))))))))))
     
     (loop
 	with *repl-mod* = (make-module)
@@ -115,6 +124,8 @@
 					     (not (member (caar items)
 							  '(try-except-stmt try-finally-stmt
 							    for-in-stmt funcdef-stmt classdef-stmt
-							    if-stmt while-stmt)))))
-				  (eval-print-ast ast *repl-mod*)
-				  (setf acc nil)))))))))))))
+							    if-stmt while-stmt))))
+				    (eval-print-ast ast *repl-mod*)
+				    (setf acc nil))))))))))))))
+
+

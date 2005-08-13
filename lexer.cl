@@ -13,6 +13,7 @@
 (defvar *lex-debug* nil)
 (defvar *tab-width-spaces* 8)
 
+(defvar *curr-src-line*)
 
 (defun make-py-lexer (&key (read-chr   (lambda () (read-char *standard-input* nil nil t)))
 			   (unread-chr (lambda (c) (unread-char c *standard-input*))))
@@ -24,32 +25,31 @@ an error on eof).
 UNREAD-CHAR is a function of one character that ensures the next call to READ-CHAR
 returns the given character. UNREAD-CHAR is called at most once after a call of
 READ-CHAR."
+  
   (let ((tokens-todo ())
 	(indentation-stack (list 0))
 	(open-lists ())
-	(src-line-no 1)
-	(src-char-no 0))
+	(curr-src-line 1))
     
     (lambda (grammar &optional op)
       (declare (ignore grammar))
-
+      
       (block lexer
 	
 	(when (eq op :report-location)
-	  (return-from lexer `((:line-no ,src-line-no) (:char-no ,src-char-no))))
+	  (return-from lexer `((:line-no ,curr-src-line))))
 	
 	(let ((*lex-read-char* (lambda () (let ((ch (funcall read-chr)))
-					    (if (and ch (char= ch #\Newline))
-						(progn (incf src-line-no)
-						       (setf src-char-no 0))
-					      (incf src-char-no))
+					    (when (and ch (char= ch #\Newline))
+					      (incf curr-src-line))
 					    ch)))
 	      (*lex-unread-char* (lambda (ch)
-				   (if (char= ch #\Newline)
-				       (decf src-line-no)
-				     (decf src-char-no))
-				   (funcall unread-chr ch))))
-	  	  
+				   (when (char= ch #\Newline)
+				     (decf curr-src-line))
+				   (funcall unread-chr ch)))
+	      
+	      (*curr-src-line* curr-src-line))
+	  
 	  (when tokens-todo
 	    (let ((item (pop tokens-todo)))
 	      (when *lex-debug*
@@ -179,9 +179,9 @@ READ-CHAR."
 			       (lex-todo dedent 'dedent))
 			
 			(unless (= (car indentation-stack) new-indent)
-			  (raise-syntax-error
-			   "Dedent didn't arrive at a previous indentation level ~
-                          (indent level after dedent: ~A spaces)" new-indent))))
+			  (py-raise 'SyntaxError
+				    "Dedent did not arrive at a previous indentation level (line ~A)."
+				    *curr-src-line*))))
 		      
 		      (lex-return newline 'newline)))
 		   
@@ -193,12 +193,17 @@ READ-CHAR."
 		    (let ((c2 (read-chr-nil)))
 		      (if (and c2 (char= c2 #\Newline))
 			  (go next-char)
-			(py-raise 'SyntaxError "Syntax error: continuation character \\ ~
-                                                must be followed by Newline, but got ~S" c2))))
+			(py-raise 'SyntaxError
+				  "Continuation character '\\' must be followed by Newline, ~
+                                   but got: '~A' (~S) (line ~A)."
+				  c2 c2 *curr-src-line*))))
 		   
-		   (t (raise-syntax-error
-		       "Lexer got unexpected character: ~A (code: ~A)"
-		       c (char-code c)))))))))))))
+		   (t (with-simple-restart 
+			  (:continue "Discard the character and continue parsing.")
+			(py-raise 'SyntaxError
+				  "Nobody expected this character: '~A' (~S) (line ~A)."
+				  c c *curr-src-line*))
+		      (go next-char))))))))))))
 
 
 (defun read-chr-nil ()
@@ -212,7 +217,7 @@ READ-CHAR."
 (defun read-chr-error ()
   "Return a character, or raise a SyntaxError"
   (or (read-chr-nil)
-      (py-raise 'SyntaxError "Unexpected end of file")))
+      (py-raise 'SyntaxError "Unexpected end of file (line ~A)." *curr-src-line*)))
 
 (defun unread-chr (ch)
   (funcall *lex-unread-char* ch))
@@ -415,7 +420,8 @@ second and later characters must be alphanumeric or underscore."
 			   do (setf code (+ (* code 16)
 					    (or (digit-char-p ch 16)
 						(py-raise 'SyntaxError
-						 "Non-hex digit in \"\u...\": ~S" ch)))
+							  "Non-hex digit in \"\u...\": ~S (line ~A)."
+							  ch *curr-src-line*)))
 				    ch (read-chr-error))
 			   finally (vector-push-extend (code-char code) res))
 		       
@@ -461,7 +467,7 @@ second and later characters must be alphanumeric or underscore."
        
      (t ;; Non-empty string with one starting quote, possibly containing escapes
       (unless third
-	(py-raise 'SyntaxError "Quoted string not finished"))
+	(py-raise 'SyntaxError "Quoted string not finished (line ~A)." *curr-src-line*))
       (let ((res (load-time-value
 		  (make-array 30 :element-type 'character :adjustable t :fill-pointer 0)))
 	    (c third)
@@ -491,7 +497,8 @@ second and later characters must be alphanumeric or underscore."
 		   (let ((ch2 (read-chr-error))) 
 		     (unless (char= ch2 #\{)
 		       (py-raise 'SyntaxError
-			"In Unicode string: \N{...} expected, but got ~S after \N" ch2))
+				 "In Unicode string: \N{...} expected, but got ~S after \N (line ~A)."
+				 ch2 *curr-src-line*))
 		     (loop with ch = (read-chr-error)
 			 with vec = (make-array 10 :element-type 'character
 						:adjustable t :fill-pointer 0)
@@ -507,18 +514,22 @@ second and later characters must be alphanumeric or underscore."
 			(vector-push-extend #\N res))))
 		
 	      ((#\u #\U) (if unicode
-			       
+			     
 			     (loop for i below (if (char= c #\u) 4 8) ;; \uf7d6 \U12345678
 				 with code = 0
 				 with ch
 				 do (setf ch   (read-chr-error)
 					  code (+ (* 16 code) 
 						  (or (digit-char-p ch 16)
-						      (py-raise 'SyntaxError
-						       "Non-hex digit in \"\~A...\": ~S" c ch))))
+						      (py-raise
+						       'SyntaxError
+						       "Non-hex digit in \"\~A...\": ~S (line ~A)."
+						       c ch *curr-src-line*))))
 				 finally (vector-push-extend (code-char code) res))
 			     
-			   (progn (warn "Unicode escape \\~A... found in non-unicode string" c)
+			   (progn (warn
+				   "Unicode escape \\~A... found in non-unicode string (line ~A)"
+				   c *curr-src-line*)
 				  (vector-push-extend #\\ res)
 				  (vector-push-extend c res))))
 	        
@@ -537,7 +548,8 @@ second and later characters must be alphanumeric or underscore."
 			  (b (read-chr-error)))
 		     
 		     (cond ((not (digit-char-p a 16))
-			    (py-raise 'SyntaxError "Non-hex digit found in \x..: ~S" a))
+			    (py-raise 'SyntaxError "Non-hex digit found in \x..: ~S (line ~A)."
+				      a *curr-src-line*))
 			   
 			   ((digit-char-p b 16)
 			    (vector-push-extend (code-char (+ (* 16 (digit-char-p a 16)) 
@@ -723,14 +735,16 @@ second and later characters must be alphanumeric or underscore."
 		     ((digit-char-p ch2 10) (setf exp (digit-char-p ch2 10)
 						  got-num t))
 		     (t (py-raise 'SyntaxError 
-			 "Exponent for literal number invalid: ~A ~A" ch ch2)))
+				  "Exponent for literal number invalid: ~A ~A (line ~A)."
+				  ch ch2 *curr-src-line*)))
 		  
 		    (unless got-num
 		      (let ((ch3 (read-chr-error)))
 			(if (digit-char-p ch3 10)
 			    (setf exp (+ (* 10 exp) (digit-char-p ch3 10)))
 			  (py-raise 'SyntaxError
-			   "Exponent for literal number invalid: ~A ~A ~A" ch ch2 ch3))))
+				    "Exponent for literal number invalid: ~A ~A ~A (line ~A)."
+				    ch ch2 ch3 *curr-src-line*))))
 		    
 		    (loop with ch
 			while (and (setf ch (read-chr-nil))
@@ -822,70 +836,16 @@ second and later characters must be alphanumeric or underscore."
 	    (if (and c2 (char= #\. c1 c2))
 		(if (char= (read-chr-error) #\.)
 		    '|...|
-		  (py-raise 'SyntaxError "Dots `..' may only occur as triple: `...'"))
+		  (py-raise 'SyntaxError
+			    "Dots `..' may only occur as part of a triple `...' (line ~A)."
+			    *curr-src-line*))
 	      (if (punct-char1-p c1)
 		  (progn (when c2 (unread-chr c2))
 			 (lookup-1char c1))
-		(py-raise 'SyntaxError
-		 "Character `!' may only occur as in `!=', not standalone")))))))
-
-#+(or) ;; old
-(defun read-punctuation (c1)
-  "Returns puncutation as symbol."
-  (assert (or (punct-char1-p c1)
-	      (punct-char-not-punct-char1-p c1)))
-  (let ((c2 (read-chr-nil)))
-    (if (punct-char2-p c1 c2)
-	
-	(let ((c3 (read-chr-nil)))
-	  (if (punct-char3-p c1 c2 c3)
-
-	      ;; 3 chars
-	      (ecase c1
-		(#\* '|**=|)
-		(#\< '|<<=|)
-		(#\> '|>>=|)
-		(#\/ '|//=|))
-		    
-	    ;; 2 chars
-	    (progn (when c3 
-		     (unread-chr c3))
-		   (ecase c2
-		     (#\= (ecase c1
-			    (#\= '|==|) (#\> '|>=|) (#\< '|<=|) (#\+ '|+=|) (#\- '|-=|)
-			    (#\* '|*=|) (#\^ '|^=|) (#\! '|!=|) (#\/ '|/=|) (#\| '|\|=|)
-			    (#\% '|%=|) (#\& '|&=|)))
-		     (#\> (ecase c1
-			    (#\< '|<>|)
-			    (#\> '|>>|)))
-		     (#\< (ecase c1
-			    (#\< '|<<|)))
-		     (#\/ (ecase c1
-			    (#\/ '|//|)))
-		     (#\* (ecase c1
-			    (#\* '|**|)))))))
-		     
-	    
-      ;; 1 char, or two of three dots
-      
-      (if (and c2 (char= #\. c1 c2))
-	  
-	  (if (char= (read-chr-error) #\.)
-	      '|...|
-	    (raise-syntax-error "Dots `..' may only occur as triple: `...'"))
-	
-	(if (punct-char1-p c1)
-	    
-	    (progn (when c2 (unread-chr c2))
-		   (ecase c1
-		     (#\. '|.|) (#\= '|=|) (#\+ '|+|) (#\[ '|[|) (#\] '|]|) (#\( '|(|)
-		     (#\) '|)|) (#\< '|<|) (#\> '|>|) (#\{ '|{|) (#\} '|}|) (#\- '|-|)
-		     (#\` '|`|) (#\, '|,|) (#\: '|:|) (#\^ '|^|) (#\& '|&|) (#\| '|\||)
-		     (#\% '|%|) (#\* '|*|) (#\/ '|/|) (#\~ '|~|) (#\@ '|@|) (#\; '|;|)))
-		   
-	  (raise-syntax-error
-	   "Character `!' may only occur as in `!=', not standalone"))))))
-
+		(progn (assert (char= c1 #\!))
+		       (py-raise 'SyntaxError
+				 "Character `!' may only occur as in `!=', not standalone (line ~A)."
+				 *curr-src-line*))))))))
 
 (defun punct-char1-p (c)
   ;; table-based lookup is way faster
@@ -980,8 +940,9 @@ is encountered, NIL is returned."
       (grammar-parse-error (c)
 	(let ((pos (grammar-parse-error-position c))
 	      (token (yacc:grammar-parse-error-token c)))
-	  (py-raise 'SyntaxError "Parse error at token '~S' (line ~A, character ~A)"
-		    token (second (assoc :char-no pos)) (second (assoc :line-no pos))))))))
+	  
+	  (py-raise 'SyntaxError "Parse error at line ~A, at token '~S'."
+		    (second (assoc :line-no pos)) token))))))
 
 (defgeneric parse-python-file (source)
   (:method ((s stream))
@@ -1006,8 +967,6 @@ is encountered, NIL is returned."
      :unread-chr (lambda (c)
 		    (assert (and c (> next-i 0) (char= c (char s (1- next-i)))))
 		    (decf next-i)))))
-
-    
 
 #+(or)
 (defun file->ast (fname)

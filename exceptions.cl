@@ -9,7 +9,7 @@
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
 
-(defclass Exception (py-object condition)
+(defclass Exception (py-object error)
   ((args :initarg :args :initform nil :documentation "Arguments as Lisp list"))
   (:metaclass py-type))
 
@@ -77,8 +77,6 @@
 
 (defun py-raise (exc-type string &rest format-args)
   "Raise a Python exception with given format string"
-  (assert (find-class exc-type nil) ()
-    (error "Python exception class ~A not found" exc-type))
   (error exc-type :args (apply #'format nil string format-args)))
 
 (defmethod print-object ((x Exception) stream)

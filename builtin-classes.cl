@@ -90,6 +90,20 @@
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+;;; dynamic class creation
+
+(defun make-py-class (&key name namespace supers)
+  (assert (symbolp name))
+  (assert (listp supers))
+  (assert (hash-table-p namespace))
+  
+  (mop:ensure-class name
+		    :direct-superclasses supers
+		    :metaclass (find-class 'py-user-type)))
+		    
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
 ;;; Built-in Python object types:
 ;;; 
 ;;; -- type ----------- repr ----- subclassable -- examples -------------------
@@ -103,7 +117,8 @@
 (defmacro def-py-method (cls.meth &rest args)
   (let* ((cm (symbol-name cls.meth))
 	 (dot-pos (or (position #\. cm)
-		      (error "Need dot in name: (def-py-method classname.methodname ..)")))
+		      (error "Need dot in name: (def-py-method classname.methodname ..); got: ~A"
+			     cls.meth)))
 	 (cls  (intern (subseq cm 0 dot-pos) #.*package*))
 	 (meth (intern (subseq cm (1+ dot-pos)) #.*package*))
 	 (modifiers (loop while (keywordp (car args)) collect (pop args))))
@@ -149,6 +164,10 @@
 (defconstant *the-true* 1)
 (defconstant *the-false* 0)
 
+(defvar *the-none*)
+(defvar *the-ellipsis*)
+(defvar *the-notimplemented*)
+    
 (defun py-bool (lisp-val)
   (if lisp-val *the-true* *the-false*))
 
@@ -195,13 +214,34 @@
 
 ;; Function (Core object)
 
+(defclass py-lisp-function (py-core-object)
+  ()
+  (:metaclass py-core-type))
+
+(mop:finalize-inheritance (find-class 'py-lisp-function))
+
+(def-py-method py-lisp-function.__repr__ (func)
+  (with-output-to-string (s)
+    (print-object func s)))
+
+(def-py-method py-lisp-function.__get__ (func inst cls)
+  (if (and inst (not (eq inst *the-none*)))
+      (make-instance 'py-bound-method :instance inst :func func)
+    (if (and cls (not (eq cls *the-none*)))
+	(make-instance 'py-unbound-method :class cls :func func)
+      (py-raise 'ValueError
+		"Method function.__get__(self, inst, cls) must be called with at ~
+                 least one of inst or cls arguments not-none (got: ~A ~A ~A)"
+		func inst cls))))
+
 (defclass funcallable-python-class (mop:funcallable-standard-class py-core-type)
   ;; When subclassable python classes also get such a metatype,
   ;; s/py-core-type/py-type/
   ())
 
 (defclass py-function (standard-generic-function py-core-object py-dict-mixin)
-  () ;; mop:funcallable-standard-class defines :name initarg
+  ;; mop:funcallable-standard-class defines :name initarg, but I don't know how to access it...
+  ((name :initarg :name :accessor py-function-name))
   (:metaclass funcallable-python-class))
 
 (defmethod make-py-function ((name symbol) (f function))
@@ -215,6 +255,10 @@
       (make-instance 'unbound-method :func func :class class)
     (make-instance 'bound-method :func func :instance obj)))
 
+(def-py-method py-function.__repr__ (func)
+  (with-output-to-string (s)
+    (print-unreadable-object (func s :identity t)
+      (format s "python-function ~A" (py-function-name func)))))
 
 ;; Method (Core object)
 
@@ -229,6 +273,12 @@
 (defclass py-bound-method (py-method)
   ((instance :initarg :instance :accessor py-method-instance))
   (:metaclass py-core-type))
+
+(def-py-method py-bound-method.__repr__ (x)
+  (with-output-to-string (s)
+    (print-unreadable-object (x s :identity t :type t)
+      (with-slots (instance func) x
+	(format s "~A.~A" instance func)))))
 
 (defclass py-unbound-method (py-method)
   ((class :initarg :class :accessor py-method-class))
@@ -276,17 +326,17 @@
 ;; None
 
 (defclass py-none (py-core-object) () (:metaclass py-core-type))
-(defvar *the-none* (make-instance 'py-none))
+(setf *the-none* (make-instance 'py-none))
 (defun none-p (x) (eq x *the-none*))
 
 ;; Ellipsis
 
 (defclass py-ellipsis (py-core-type) () (:metaclass py-core-type))
-(defvar *the-ellipsis* (make-instance 'py-ellipsis))
+(setf *the-ellipsis* (make-instance 'py-ellipsis))
 
 ;; NotImlemented
 (defclass py-notimplemented (py-core-type) () (:metaclass py-core-type))
-(defvar *the-notimplemented* (make-instance 'py-notimplemented))
+(setf *the-notimplemented* (make-instance 'py-notimplemented))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -331,7 +381,7 @@
 	       (when getattr-meth (setf __getattr__ getattr-meth)))))
 
     (flet ((bind-val (val)
-	     (warn "bind-val ~A to ~A" val x)
+	     #+(or)(warn "bind-val ~A to ~A" val x)
 	     (let ((get-meth (recursive-class-dict-lookup
 			      (py-class-of val) '__get__)))
 	       (if get-meth
@@ -345,13 +395,14 @@
       ;; `__set__' attribute) has higher priority than an instance
       ;; attribute.
       
+      #+(or)(warn "py-attr: ~A" `(:class-attr-val ,class-attr-val :__getattr__ ,__getattr__))
+
       (return-from py-object.__getattribute__
 	(cond ((and class-attr-val (data-descriptor-p class-attr-val))
 	       (bind-val class-attr-val))
 	      
 	      ;; Only now is an instance attribute value relevant.
-	      ((dict x)
-	       (dict-get x attr))
+	      ((and (dict x) (dict-get x attr)))
 	      
 	      ;; Fall back to a class attribute that is not a `data descriptor'.
 	      (class-attr-val
@@ -385,11 +436,16 @@
   (declare (ignore instance class))
   value)
 
-
 ;; Type (User object)
 
 (def-py-method py-type.__mro__ :attribute (x)
 	       (mop:class-precedence-list x))
+
+(def-py-method py-type.__repr__ (x) ;; XXX deproxy not needed?
+  (with-output-to-string (s)
+    (print-unreadable-object (x s :identity t)
+      (format s "python-class ~A" (class-name x)))))
+  
 
 ;; XXX should default to `object'
 
@@ -413,6 +469,16 @@
 	       (declare (ignore args))
 	       nil)
 
+(defun py-import (mod-name mod-globals-names mod-globals-values mod-dyn-globals-ht)
+  (let* ((file-ast (parse-python-file (format nil "~A.py" mod-name)))
+	 (mod-func (compile nil `(lambda () ,file-ast)))
+	 (mod-obj  (funcall mod-func)))
+    (loop for x across mod-globals-names and i from 0
+	when (eq x mod-name)
+	do (setf (svref mod-globals-values i) mod-obj)
+	   (return)
+	finally (setf (gethash mod-name mod-dyn-globals-ht) mod-obj))
+    nil))
 
 ;; File (User object)
 
@@ -443,7 +509,7 @@
   (:documentation "Metaclass for proxy classes"))
 
 (defclass py-lisp-object (py-object)
-  ((lisp-object :accessor proxy-lisp-val))
+  ((lisp-object :initarg :lisp-object :accessor proxy-lisp-val))
   (:metaclass py-lisp-type)
   (:documentation "Base class for proxy classes"))
 
@@ -454,6 +520,13 @@
 
 (defmethod py-attr ((x py-lisp-object) attr)
   (py-attr (proxy-lisp-val x) attr))
+
+
+(defmethod (setf py-attr) :around (val x attr)
+  (warn "(setf (py-attr ~A ~A) ~A)" x attr val)
+  (let ((res (call-next-method)))
+    (warn "--> ~A" res)
+    res))
 
 (defmethod (setf py-attr) (val (x py-lisp-object) attr)
   (setf (py-attr (proxy-lisp-val x) attr) val))
@@ -513,55 +586,7 @@
 (def-proxy-class py-float (py-real))
 
 
-;; List (Lisp object: adjustable array)
-
-(def-proxy-class py-list)
-
-(def-py-method py-list.__new__ :static (cls)
-	       (if (eq cls (find-class 'py-list))
-		   (make-array 0 :adjustable t :fill-pointer 0)
-		 (make-instance cls)))
-		    
-(def-py-method py-list.__init__ (x^ &optional iterable)
-  (when iterable
-    (loop for item in (py-iterate->lisp-list iterable)
-	do (vector-push-extend item x))))
-
-(def-py-method py-list.__str__ (x^)
-  (format t "[~{~A~^, ~}]" (loop for i across x collect i)))
-
-(defmacro make-py-list-unevaled-list (items)
-  (let ((vec '#:vec))
-    `(let ((,vec (make-array ,(length items) :adjustable t :fill-pointer ,(length items))))
-       ,@(loop for x in items and i from 0
-	     collect `(setf (aref ,vec ,i) ,x))
-       ,vec)))
-
-;; Tuple (Lisp object: consed list)
-
-(def-proxy-class py-tuple)
-
-(def-py-method py-tuple.__new__ :static (cls &rest args)
-	       (if (eq cls (find-class 'py-tuple))
-		   args
-		 (make-instance cls)))
-
-(defvar *the-empty-tuple* (make-instance 'py-tuple))
-
-(defmacro make-tuple-unevaled-list (items)
-  (let ((res '#:res))
-    `(let ((,res ()))
-       ,@(loop for x in items and i from 0
-	     collect `(push ,x ,res))
-       (nreverse ,res))))
-
-;; String (Lisp object: string)
-
-(def-proxy-class py-string)
-
-(def-py-method py-string.__len__ (x^)
-  (length x))
-
+;;; non-numberic classes
 
 ;; Dict
 
@@ -579,6 +604,116 @@
        ,dict)))
 
 
+;; List (Lisp object: adjustable array)
+
+(def-proxy-class py-list)
+
+(def-py-method py-list.__new__ :static (cls)
+	       (if (eq cls (find-class 'py-list))
+		   (make-array 0 :adjustable t :fill-pointer 0)
+		 (make-instance cls)))
+		    
+(def-py-method py-list.__init__ (x^ &optional iterable)
+  (when iterable
+    (loop for item in (py-iterate->lisp-list iterable)
+	do (vector-push-extend item x))))
+
+(def-py-method py-list.__str__ (x^)
+  (with-output-to-string (s)
+    (write-char #\[ s)
+    (loop with len = (length x)
+	for item across x and i from 0
+	do (write-string (py-repr-string item) s)
+	   (unless (= i (1- len))
+	     (write-string ", " s)))
+    (write-char #\] s)))
+
+(def-py-method py-list.__len__ (x^)
+  (length x))
+
+(def-py-method py-list.__repr__ (x^)
+  (with-output-to-string (s)
+    (format s "[")
+    (loop for item across x and i from 0
+	do (unless (= i 0)
+	     (format s ", "))
+	   (repr-fmt s item))
+    (format s "]")))
+
+(def-py-method py-list.__iter__ (x^)
+  (let ((i -1)
+	(max-i (1- (length x))))
+    (make-iterator-from-function
+     :name :list-iterator
+     :func (lambda ()
+	     (when (<= (incf i) max-i)
+	       (aref x i))))))
+
+(defmacro make-py-list-unevaled-list (items)
+  (let ((vec '#:vec))
+    `(let ((,vec (make-array ,(length items) :adjustable t :fill-pointer ,(length items))))
+       ,@(loop for x in items and i from 0
+	     collect `(setf (aref ,vec ,i) ,x))
+       ,vec)))
+
+(defun make-py-list-from-list (list)
+  (let* ((len (length list))
+	 (vec (make-array len :adjustable t :fill-pointer)))
+    (loop for x in list and i from 0
+	do (setf (aref vec i) x))
+    vec))
+
+
+;; String (Lisp object: string)
+
+(def-proxy-class py-string)
+
+(def-py-method py-string.__len__ (x^)
+  (length x))
+
+(def-py-method py-string.__str__ (x^)
+  x)
+
+(def-py-method py-string.__repr__ (x^)
+  (with-output-to-string (s)
+    (py-pprint s x)))
+  
+
+;; Tuple (Lisp object: consed list)
+
+(def-proxy-class py-tuple)
+
+(def-py-method py-tuple.__new__ :static (cls &rest args)
+	       (if (eq cls (find-class 'py-tuple))
+		   args
+		 (make-instance cls)))
+
+(defvar *the-empty-tuple* (make-instance 'py-tuple :lisp-object nil))
+
+(defun make-tuple-from-list (list)
+  (if list
+      list
+    *the-empty-tuple*))
+
+(defmacro make-tuple-unevaled-list (items)
+  (let ((res '#:res))
+    `(let ((,res ()))
+       ,@(loop for x in items and i from 0
+	     collect `(push ,x ,res))
+       (make-tuple-from-list (nreverse ,res)))))
+
+(def-py-method py-tuple.__repr__ (x^)
+  (cond ((null x)       "()")
+	((null (cdr x)) (format nil "(~/python:repr-fmt/,)" (car x)))
+	(t              (format nil "(~{~/python:repr-fmt/~^, ~})" x))))
+
+(def-py-method py-tuple.__iter__ (x^)
+  (make-iterator-from-function
+   :name :tuple-iterator
+   :func (let ((i -1))
+	   (lambda ()
+	     (nth (incf i) x)))))
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;  
 
 (defgeneric py-class-of (x)
@@ -588,6 +723,9 @@
     (:method ((x string))  (load-time-value (find-class 'py-string )))
     (:method ((x vector))  (load-time-value (find-class 'py-list   )))
     (:method ((x list))    (load-time-value (find-class 'py-tuple  )))
+    
+    (:method ((x function))    (load-time-value (find-class 'py-lisp-function)))
+    (:method ((x py-function)) (load-time-value (find-class 'py-function)))
     
     (:method ((x py-lisp-type)) (find-class 'py-type))
     (:method ((x py-core-type)) (find-class 'py-type))
@@ -674,10 +812,17 @@
 
 (defvar *binary-op-funcs-ht* (make-hash-table :test #'eq))
 (defvar *binary-iop-funcs-ht* (make-hash-table :test #'eq))
+(defvar *binary-iop->op-ht* (make-hash-table :test #'eq))
 
-(defun get-binary-op-func (op) (gethash op *binary-op-funcs-ht*))
-(defun get-binary-iop-func (iop) (gethash iop *binary-iop-funcs-ht*))
-
+(defun get-binary-op-func (op) (or (gethash op *binary-op-funcs-ht*)
+				   (error "missing binary op func: ~A" op)))
+(defun get-binary-iop-func (iop) (or (gethash iop *binary-iop-funcs-ht*)
+				     (error "missing binary iop func: ~A" iop)))
+(defun get-binary-op-from-iop-func (iop)
+  (let ((op (or (gethash iop *binary-iop->op-ht*)
+		(error "IOP ~S has no OP counterpart" iop))))
+    (get-binary-op-func op)))
+  
 (defmacro def-math-func (op-syntax op-func l-meth r-meth iop-syntax iop-func i-meth)
   `(progn
      
@@ -720,7 +865,10 @@
 			   (not (eq res (load-time-value *the-notimplemented*))))))))
      
      ,(when iop-syntax
-	`(setf (gethash ',iop-syntax *binary-iop-funcs-ht*) (function ,iop-func)))))
+	`(setf (gethash ',iop-syntax *binary-iop-funcs-ht*) (function ,iop-func)))
+     
+     ,(when (and iop-syntax op-syntax)
+	`(setf (gethash ',iop-syntax *binary-iop->op-ht*) ',op-syntax))))
 
 
 ;; /t/ is not Python syntax, but a hack to support __future__ feature
@@ -781,7 +929,8 @@
 
 
 (defvar *unary-op-funcs-ht* (make-hash-table :test #'eq))
-(defun get-unary-op-func (op) (gethash op *unary-op-funcs-ht*))
+(defun get-unary-op-func (op) (or (gethash op *unary-op-funcs-ht*)
+				  (error "missing unary op func: ~A" op)))
 
 (defmacro def-unary-op-func (syntax fname meth)
   `(progn (defgeneric ,fname (x)
@@ -808,7 +957,8 @@
 ;; Equality and membership testing:  a in b, a not in b, a is b, a is not b
 
 (defvar *binary-test-funcs-ht* (make-hash-table :test #'eq))
-(defun get-binary-test-func (op) (gethash op *binary-test-funcs-ht*))
+(defun get-binary-test-func (op) (or (gethash op *binary-test-funcs-ht*)
+				     (error "missing binary test func: ~A" op)))
 
 (defgeneric py-in (x seq)
   (:method ((x t) (seq t))
@@ -865,6 +1015,7 @@
 ;; (pyeval.cl).
 
 (defvar *binary-comparison-funcs-ht* (make-hash-table :test #'eq))
+(defun get-binary-comparison-func (op) (gethash op *binary-comparison-funcs-ht*))
 
 (defmacro def-comparison (syntax func test-x-y)
   `(progn (defgeneric ,func (x y)
@@ -901,8 +1052,8 @@
 			    (py-call ,method x)
 			  ,(or error
 			       `(py-raise 'TypeError
-					  "Object ~A has no `~A' method"
-					  ,(symbol-name method) x)))))))
+					  "Object ~A (a ~A) has no `~A' method"
+					  x (class-name (py-class-of x)) ,(symbol-name method))))))))
 
 (def-py-shortcut-func py-abs  __abs__ )
 (def-py-shortcut-func py-repr __repr__)
@@ -912,11 +1063,67 @@
 (def-py-shortcut-func py-oct  __oct__ )
 (def-py-shortcut-func py-len  __len__ )
 
+(defun py-val->string (x)
+  (let ((s (deproxy x))) ;; deproxy, as it may be py-string subclass instance
+    (if (stringp s)
+	s
+      (py-raise 'TypeError "Expected a string, but got: ~A" x))))
+
+(defun py-repr-string (x) (py-val->string (py-repr x)))
+(defun py-str-string (x) (py-val->string (py-str x)))
+
+
+(defun repr-fmt (stream argument &optional colon-p at-p &rest parameters)
+  "Wrapper function for PY-REPR that is usable inside format string, using
+the ~/.../ directive: ~/python:repr-fmt/"
+  
+  (when (or colon-p at-p parameters)
+    (error "Format string function py-repr-fmt does not support colon, ~
+            at or parameters"))
+  
+  (let ((s (py-repr-string argument)))
+    (write-string s stream)))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 ;;; Iteration
+
+;; iterator from lambda
+
+(defclass py-func-iterator (py-core-object)
+  ((name        :initarg :name)
+   (func        :initarg :func :type function)
+   (stopped-yet :initform nil))
+  (:metaclass py-core-type))
+
+(defun make-iterator-from-function (&key func name)
+  "Create an iterator that calls f again and again. F somehow has
+to keep its own state. As soon as F returns NIL, it is considered
+finished; F will then not be called again."
+  (check-type func function)
+  (make-instance 'py-func-iterator :func func :name name))
+
+(def-py-method py-func-iterator.next (fi)
+  (with-slots (stopped-yet func) fi
+    (unless stopped-yet
+      (let ((res (funcall func)))
+	(if res
+	    (return-from py-func-iterator.next res)
+	  (progn
+	    (setf stopped-yet t)
+	    (py-raise 'StopIteration "Iterator ~S has finished" fi)))))))
+
+(def-py-method py-func-iterator.__repr__ (fi)
+  (with-output-to-string (s)
+    (print-unreadable-object (fi s :identity t)
+      (with-slots (name) fi
+	(format s "generator ~@[~A~]" name)))))
+
+(def-py-method py-func-iterator.__iter__ (f)
+  f)
+
+;; general useful iteration constructs
 
 (defgeneric get-py-iterate-fun (x)
   (:documentation
@@ -966,8 +1173,6 @@ next value gotten by iterating over X. Returns NIL, NIL upon exhaustion.")
 		   (t
 		    (py-raise 'TypeError "Iteration over non-sequence (got: ~A)" x))))))
 
-
-
 (defgeneric map-over-py-object (func object)
   (:documentation 
    "Iterate over OBJECT, calling function FUNC on each value. Returns nothing.")
@@ -984,29 +1189,7 @@ next value gotten by iterating over X. Returns NIL, NIL upon exhaustion.")
 	       for val = (funcall it-fun)
 	       while val collect val)))
 
-(defclass py-func-iterator (py-core-object)
-  ((func        :initarg :func :type function)
-   (stopped-yet :initform nil)
-   (end-value   :initarg :end-value))
-  (:metaclass py-core-type))
 
-(defun make-iterator-from-function (f &optional end-value)
-  "Create an iterator that calls f again and again.
-F somehow has to keep its own state.
-When F returns a value EQL to END-VALUE, it is considered finished:
-that value EQL to END-VALUE will be returned, but F will not be called
-any more times."
-  (check-type f function)
-  (make-instance 'py-func-iterator :func f :end-value end-value))
-
-(def-py-method py-func-iterator.next (fi)
-  (with-slots (stopped-yet func end-value) fi
-    (unless stopped-yet
-      (let ((res (funcall func)))
-	(when (eql res end-value)
-	  (setf stopped-yet t))
-	(return-from py-func-iterator.next res)))
-    (py-raise 'StopIteration "Iterator ~S has finished" fi)))
 
 (defun get-py-iterator-for-object (x)
   (let* ((x.cls       (py-class-of x))

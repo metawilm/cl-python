@@ -40,12 +40,21 @@
      ,@body))
 
 
+
+;; The ASSERT-STMT uses the value of *__debug__* to determine whether
+;; or not to include the assertion code. Currently there is not way to
+;; set it to False.
+
+(defvar *__debug__* t)
+
+
 ;; Compiler debugging and optimization options.
+;; >> not used yet
 
 (defvar *comp-opt*
-    (copy-tree '((:include-line-numbers t) ;; XXX todo: insert line numbers in AST
+    (copy-tree '((:include-line-numbers t) ;; XXX todo: insert line numbers in AST?
 		 (:inline-number-math nil)
-		 (:inline-fixnum-math nil))))
+		 (:inline-fixnum-math nil)))) 
 
 (defun comp-opt-p (x)
   (assert (member x *comp-opt* :key #'car) () "Unknown Python compiler option: ~S" x)
@@ -57,10 +66,15 @@
 
 ;; The AST node macros
 
-(defmacro assert-stmt (&rest args)
-  (declare (ignore args))
-  (break "todo: assert-stmt"))
-
+(defmacro assert-stmt (test raise-arg)
+  (when *__debug__*
+    `(with-simple-restart (:continue "Ignore the assertion failure")
+       (unless (py-val->lisp-bool ,test)
+	 (py-raise 'AssertionError ,(or raise-arg 
+					`(format nil "Failing test: ~A"
+						 (with-output-to-string (s)
+						   (py-pprint s ',test)))))))))
+  
 (defmacro assign-stmt (value targets &environment e)
   (let ((context (get-pydecl :context e)))
     (with-gensyms (val)
@@ -79,7 +93,7 @@
 				   `(setf (svref +mod-globals-values+ ,ix) ,val)
 				 `(setf (gethash ',name +mod-dyn-globals+) ,val))))
 			   
-			   (local-set () `(setf ,name ,value))
+			   (local-set () `(setf ,name ,val))
 			
 			   (class-set () `(setf (gethash ',name +cls-namespace+) ,val)))
 		    
@@ -103,10 +117,12 @@
 	   ,@(mapcar #'assign-one targets))))))
 
 (defmacro attributeref-expr (item attr)
-  `(py-attr ,item ,attr))
+  `(py-attr ,item ',(second attr)))
 
 (defmacro augassign-stmt (op place val)
-  (multiple-value-bind (py-@= py-@) (lookup-inplace-op-func op)
+  (let ((py-@= (get-binary-iop-func op))
+	(py-@  (get-binary-op-from-iop-func op)))
+	
     (ecase (car place)
     
       (tuple-expr (py-raise 'SyntaxError
@@ -135,10 +151,6 @@
 
 (defmacro backticks-expr (item)
   `(py-repr ,item))
-
-(defun get-op-func-todo (op)
-  (declare (ignore op)) ;; XXX
-  :get-op-func-todo)
 
 (defmacro binary-expr (op left right)
   (let ((py-@ (get-binary-op-func op)))
@@ -179,7 +191,7 @@
     
     `(let ((prim ,primary))
      
-       (cond ((eq prim :the-locals-function-TODO)
+       (cond ((eq prim (load-time-value #'pyb:locals))
 	      (if (and ,(not (or pos-args kwd-args))
 		       ,(or (null *-arg)  `(null (py-iterate->lisp-list ,*-arg)))
 		       ,(or (null **-arg) `(null (py-mapping->lisp-list ,**-arg))))
@@ -189,7 +201,7 @@
 		(py-raise 'TypeError
 			  "locals() must be called without args (got: ~A)" ',all-args)))
 
-	     ((eq prim :the-globals-function-TODO)
+	     ((eq prim (load-time-value #'pyb:globals))
 	      (if (and ,(not (or pos-args kwd-args))
 		       ,(or (null *-arg)  `(null (py-iterate->lisp-list ,*-arg)))
 		       ,(or (null **-arg) `(null (py-mapping->lisp-list ,**-arg))))
@@ -197,7 +209,7 @@
 		(py-raise 'TypeError
 			  "globals() must be called without args (got: ~A)" ',all-args)))
 
-	     ((eq prim :the-eval-function-TODO)
+	     ((eq prim (load-time-value #'pyb:eval))
 	      (let ((args (nconc (list ,@pos-args)
 				 ,(when *-arg `(py-iterate->lisp-list ,*-arg)))))
 		(if (and ,(null kwd-args)
@@ -205,13 +217,13 @@
 			      `(null (py-mapping->lisp-list ,**-arg)))
 			 (<= 1 (length args) 3))
 		    
-		    (py-eval-todo ,(first pos-args)
-				  ,(or (second pos-args)
-				       `(.globals.))
-				  ,(or (third  pos-args)
-				       (if (eq context :module)
-					   `(.globals.)
-					 `(.locals.))))
+		    (pyb:eval ,(first pos-args)
+			      ,(or (second pos-args)
+				   `(.globals.))
+			      ,(or (third  pos-args)
+				   (if (eq context :module)
+				       `(.globals.)
+				     `(.locals.))))
 		
 		  (py-raise 'TypeError
 			    "eval() must be called with 1 to 3 pos args (got: ~A)" ',all-args))))
@@ -235,22 +247,24 @@
 
 (defmacro classdef-stmt (name inheritance suite)
   ;; todo: define .locals. containing class vars
+  (assert (eq (car name) 'identifier-expr))
+  (assert (eq (car inheritance) 'tuple-expr))
   
-  `(let ((+cls-namespace+ (make-hash-table :test #'eq)))
-     (with-pydecl ((:context :class)
-		   (:classdef-scope-globals ',(classdef-globals suite)))
-       ,suite)
-     (make-py-class :name ',(second name)
-		    :namespace +cls-namespace+
-		    :supers ,inheritance)))
+  (with-gensyms (cls)
+    `(let ((+cls-namespace+ (make-hash-table :test #'eq)))
+       
+       (with-pydecl ((:context :class)
+		     (:classdef-scope-globals ',(classdef-globals suite)))
+	 ,suite)
+       
+       (let ((,cls (make-py-class :name ',(second name)
+				  :namespace +cls-namespace+
+				  :supers (list ,@(second inheritance)))))
+	 (assign-stmt ,cls (,name))))))
 
 (defmacro comparison-expr (cmp left right)
-  `(let ((left ,left)
-	 (right ,right))
-     (if (and (numberp left) (numberp right))
-	 (,cmp left right)
-       ,(let ((py-@ :todo-get-cmp-func))
-	  `(,py-@ left right)))))
+  (let ((py-@ (get-binary-comparison-func cmp)))
+    `(funcall ,py-@ ,left ,right)))
 
 (defmacro continue-stmt (&environment e)
   (if (get-pydecl :inside-loop e)
@@ -278,22 +292,22 @@
 	       (if ix
 		   `(let ((old-val (svref +mod-globals-values+ ,ix)))
 		      (if (eq old-val :unbound)
-			  (py-raise 'NameError "Cannot delete variable ~A: ~
-                                                   it is unbound [static global]" ',name)
+			  (py-raise 'NameError "Cannot delete variable '~A': ~
+                                                it is unbound [static global]" ',name)
 			(setf (svref +mod-globals-values+ ,ix) 
 			  ,(if (builtin-name-p name)
 			       (builtin-name-value name)
 			     :unbound))))
 		 `(or (remhash ,name +mod-dyn-globals+)
-		      (py-raise 'NameError "Cannot delete variable ~A: ~
-                                               it is unbound [dyn global]" ',name)))))
+		      (py-raise 'NameError "Cannot delete variable '~A': ~
+                                            it is unbound [dyn global]" ',name)))))
 	    (local-del `(if (eq ,name :unbound)
-			    (py-raise 'NameError "Cannot delete variable ~A: ~
+			    (py-raise 'NameError "Cannot delete variable '~A': ~
                                                   it is unbound [local]" ',name)
 			  (setf ,name :unbound)))
 	      
 	    (class-del `(or (remhash ,name +cls-namespace+)
-			    (py-raise 'NameError "Cannot delete variable ~A: ~
+			    (py-raise 'NameError "Cannot delete variable '~A': ~
                                                   it is unbound [dyn class]" ',name))))
        (ecase context
 	 
@@ -373,10 +387,13 @@
 		    (tagbody 
 		      (with-pydecl ((:inside-loop t))
 			,suite)
+		      (go :continue) ;; prevent warning about unused tag
 		     :continue))))
 	 (declare (dynamic-extent ,f))
 	 (map-over-py-object ,f ,source))
        ,@(when else-suite `(,else-suite))
+       
+       (go :break) ;; prevent warning
       :break)))
 
 (defmacro funcdef-stmt (decorators
@@ -495,12 +512,13 @@
 	   (let ((ix (position name (get-pydecl :mod-globals-names e))))
 	     (if ix
 		 `(let ((val (svref +mod-globals-values+ ,ix)))
-		    (when (eq val :unbound) (py-raise 'NameError "Variable ~A is unbound [glob]" ',name))
+		    (when (eq val :unbound) (py-raise 'NameError
+						      "Variable '~A' is unbound [glob]" ',name))
 		    val)
 	       `(or (gethash ',name +mod-dyn-globals+)
 		    ,(if (builtin-name-p name)
 			 (builtin-name-value name)
-		       `(py-raise 'NameError "No variable with name ~A [dyn-glob]" ',name)))))))
+		       `(py-raise 'NameError "No variable with name '~A' [dyn-glob]" ',name)))))))
     
     (ecase (get-pydecl :context e)
       
@@ -519,10 +537,15 @@
 	 ,@(when else-clause
 	     `((t ,else-clause)))))
 
-(defmacro import-stmt (&rest args)
-  (declare (ignore args))
-  (break "todo: import-stmt"))
-
+(defmacro import-stmt (args)
+  `(progn ,@(loop for x in args
+		collect (if (eq (first x) 'not-as)
+			    `(py-import ',(second (second x))
+					+mod-globals-names+
+					+mod-globals-values+
+					+mod-dyn-globals+)
+			  `(warn "unsupported import: ~A" ',x)))))
+  
 (defmacro import-from-stmt (&rest args)
   (declare (ignore args))
   (break "todo: import-from-stmt"))
@@ -692,9 +715,18 @@
   nil)
 
 (defmacro print-stmt (dest items comma?)
-  ;; XXX todo
-  (declare (ignore dest))
-  `(format t "~{~A~^ ~}~@[~%~]" (list ,@items) ,(not comma?)))
+  ;; XXX todo: use methods `write' of `dest' etc
+  (with-gensyms (x.str)
+    `(progn ,(when dest
+	       `(warn "ignoring 'dest' arg of PRINT stmt (got: ~A)" ',dest))
+	    
+	    ,@(loop for x in items
+		  collect `(let ((,x.str (py-str-string ,x)))
+			     (format t "~A " ,x.str)))
+	    
+	    ,(unless comma?
+	       `(write-char #\Newline t))
+	    nil)))
 
 (defmacro return-stmt (val &environment e)
   (if (get-pydecl :inside-function e)
@@ -714,8 +746,26 @@
     `(progn ,@stmts)))
 
 (defmacro raise-stmt (exc var tb)
-  `(py-raise ,exc ,var ,tb))
-
+  (with-gensyms (the-exc the-var)
+    
+    `(let ((,the-exc ,exc)
+	   (,the-var ,var))
+       
+       ,@(when tb `((warn "Traceback arg to RAISE ignored")))
+       
+       ;; ERROR cannot deal with _classes_ as first condition argument;
+       ;; it must be an _instance_ or condition type _name_.
+       
+       ,(if var
+	    `(etypecase ,the-exc
+	       (class (error (make-instance ,the-exc :args ,the-var)))
+	       (error (progn (warn "RAISE: ignored arg, as exc was already an ~
+                                        instance, not a class")
+			     (error ,the-exc))))
+	  
+	  `(etypecase ,the-exc
+	     (class    (error (make-instance ,the-exc)))
+	     (error    ,the-exc))))))
 
 (defmacro try-except-stmt (suite except-clauses else-suite)
   
@@ -751,7 +801,8 @@
 		    ,@(when else-suite `((go :else)))))
 	   
 	   ,@(when else-suite
-	       `(:else ,else-suite)))))))
+	       `(:else
+		 ,else-suite)))))))
 
 
 (defmacro try-finally-stmt (try-suite finally-suite)
@@ -785,9 +836,13 @@
 	      (tagbody
 		(with-pydecl ((:inside-loop t))
 		  ,suite)
+		
+		(go :continue) ;; prevent warning unused tag
 	       :continue)
 	   finally (when (and ,take-else ,(and else-suite t))
 		     ,else-suite))
+       
+       (go :break) ;; prevent warning
       :break)))
 
 (defmacro yield-stmt (val)
@@ -838,6 +893,7 @@ Returns the new AST."
 				  (declare (ignore suite))
 
 				  (assert (eq identifier 'identifier-expr))
+				  (assert (eq (car inheritance) 'tuple-expr))
 
 				  ;; The class name is always a local.
 				  (when (member cname declared-globals)
@@ -846,7 +902,7 @@ Returns the new AST."
 				  
 				  (pushnew cname locals)
 				  
-				  (loop for x in inheritance do (recurse x)))
+				  (loop for x in (second inheritance) do (recurse x)))
 				(values nil t))
 		 
 		 (funcdef-stmt  (destructuring-bind (decorators (identifier-expr fname) args suite)
@@ -998,7 +1054,7 @@ Returns the new AST."
 	 (key-arg-defaults (unless (= num-key-args 0)
 			     (make-array num-key-args))))
     
-    `(locally (declare (optimize (speed 3) (safety 1) (debug 0)))
+    `(locally (declare (optimize (safety 3) (debug 3)))
        (let (,@(when key-args
 		 `((key-arg-default-values ,key-arg-defaults))))
 	 
@@ -1044,7 +1100,7 @@ Returns the new AST."
 		 ,(if *-arg
 		      `(loop until (symbolp (car %args))
 			   do (push (pop %args) for-*))
-		    `(break "Too many pos args")))
+		    `(error "Too many pos args")))
 	     
 	       (assert (symbolp (car %args)))
 	     
@@ -1060,7 +1116,7 @@ Returns the new AST."
 		     while key
 		     do
 		       (when (member key '(:* :**))
-			 (break "* and ** args in a call not handled yet, sorry"))
+			 (error "* and ** args in a call not handled yet, sorry"))
 		     
 		       ,(cond ((> num-pos-key-args 0)
 			       `(loop for i fixnum from num-filled-by-pos-args below ,num-pos-key-args
@@ -1071,20 +1127,20 @@ Returns the new AST."
 				    finally 
 				      ,(if **-arg
 					   `(push (cons key val) for-**)
-					 `(break "Got unknown keyword arg and no **-arg: ~A ~A"
+					 `(error "Got unknown keyword arg and no **-arg: ~A ~A"
 						 key val))))
 			      (**-arg
 			       ;; this reconsing is necessary as **-arg might not have dynamic extent
 			       `(push (cons key val) for-**))
 			    
-			      (t `(break "Got unknown keyword arg and no **-arg: ~A ~A"
+			      (t `(error "Got unknown keyword arg and no **-arg: ~A ~A"
 					 key val)))))
 	     
 	       ;; Ensure all positional arguments covered
 	       ,@(when (> num-pos-args 0)
 		   `((loop for i fixnum from num-filled-by-pos-args below ,num-pos-args
 			 unless (svref arg-val-vec i)
-			 do (break "Positional arg ~A has no value" (svref ,arg-name-vec i)))))
+			 do (error "Positional arg ~A has no value" (svref ,arg-name-vec i)))))
 	     
 	       ;; Use default values for missing keyword arguments (if any)
 	       ,@(when key-args
@@ -1100,10 +1156,6 @@ Returns the new AST."
 		     ,@(when **-arg `((,**-arg for-**))))
 	       
 		 ,@body))))))))
-
-
-(defun py-eval-todo (&rest args)
-  (error "todo"))
 
 #+(or)
 (defun bar ()
@@ -1132,13 +1184,6 @@ Returns the new AST."
      (funcall f 1 2 3 4 5)
      (funcall f 1 2 3 'd 23))))
 
-
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Pythonic (copied)
-
-(defun lookup-inplace-op-func (op)
-  (break "lookup-inplace-op-func: ~A" op))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -1177,9 +1222,11 @@ Returns the new AST."
 (defun builtin-name-value (x)
   (let ((sym (builtin-name-p x)))
     (assert sym)
-    (ecase (symbol-package sym)
-      ((load-time-value (find-package :python-builtin-functions))  (symbol-function sym))
-      ((load-time-value (find-package :python-builtin-types))      (symbol-name sym)))))
+    (let ((pkg (symbol-package sym)))
+      (cond ((eq pkg (load-time-value (find-package :python-builtin-functions)))
+	     (symbol-function sym))
+	    ((eq pkg (load-time-value (find-package :python-builtin-types)))
+	     (symbol-value sym))))))
 
 #+(or)
 (defun make-module (&rest args)

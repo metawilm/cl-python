@@ -95,7 +95,6 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
 			    ((> i 0) 1)))))
 
 	     ;; CPython: object.c - do_cmp(v,w)
-
 	     (let ((x.class (py-class-of x))
 		   (y.class (py-class-of y)))
       
@@ -104,7 +103,7 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
 		   (if (eq x y)
 		       0
 		     -1)))
-      
+
 	       ;; If X, Y are instances of the same class, it must be a
 	       ;; user-defined class, otherwise we wouldn't be in this
 	       ;; method.
@@ -117,7 +116,7 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
 		   (when (and cmp-res
 			      (not (eq cmp-res *the-notimplemented*)))
 		     (return-from pyb::cmp (normalize cmp-res)))))
-      
+
 	       ;; The "rich comparison" operations __lt__, __eq__, __gt__ are
 	       ;; now called before __cmp__ is called.
 	       ;; 
@@ -160,14 +159,14 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
 	       ;; 
 	       ;; Now, first try X.__cmp__ (even it y.class is a subclass of
 	       ;; x.class) and Y.__cmp__ after that.
-      
+
 	       (let* ((meth (recursive-class-dict-lookup x.class '__cmp__))
 		      (res (when meth
 			     (py-call meth x y))))
 		 (when (and res (not (eq res *the-notimplemented*)))
 		   (let ((norm-res (normalize res)))
 		     (return-from pyb::cmp norm-res))))
-      
+
 	       (let* ((meth (recursive-class-dict-lookup y.class '__cmp__))
 		      (res (when meth
 			     (py-call meth y x))))
@@ -185,7 +184,12 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
 	       ;; that.
       
 	       (when (eq x.class y.class)
-		 (return-from pyb::cmp (pyb:cmp (pyb:id x) (pyb:id y))))
+		 (let ((x.id (pyb:id x))
+		       (y.id (pyb:id y)))
+		   (return-from pyb::cmp 
+		     (cond ((< x.id y.id) -1)
+			   ((= x.id y.id) 0)
+			   (t             1)))))
       
 	       ;; None is smaller than everything (excluding itself, but that
 	       ;; is catched above already, when testing for same class;
@@ -210,7 +214,6 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
 	       ;; Finally, we have either two instances of different non-number
 	       ;; classes, or two instances that are of incomparable numeric
 	       ;; types.
-      
 	       (return-from pyb::cmp
 		 (cond ((eq x y)                   0)
 		       ((< (pyb:id x) (pyb:id y)) -1)
@@ -311,7 +314,7 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
 
 (defun pyb:isinstance (x cls)
   (declare (ignore x cls))
-  (lisp-val->py-bool (error "todo")))
+  (py-bool (error "todo")))
 
 (defmethod pyb::isinstance-1 (x cls)
   ;; CLS is either a class or a _tuple_ of classes (only tuple is
@@ -326,7 +329,7 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
 (defun pyb:issubclass (x cls)
   ;; SUPER is either a class, or a tuple of classes -- denoting
   ;; Lisp-type (OR c1 c2 ..).
-  (lisp-val->py-bool (pyb::issubclass-1 x cls)))
+  (py-bool (pyb::issubclass-1 x cls)))
 
 (defun pyb::issubclass-1 (x cls)
   (if (typep cls 'py-tuple)
@@ -440,7 +443,9 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
 (defun pyb:pow (x y &optional z)
   (py-** x y z))
 
-;; range: type
+(defun pyb:range (x &optional y z)
+  (declare (ignore x y z))
+  (error "todo: range"))
 
 (defun pyb:raw_input (&optional prompt)
   "Pops up a GUI entry window to type text; returns entered string"

@@ -104,9 +104,10 @@ VALUE and TARGET context."
 		   ,(when **-a (funcall f **-a :value t)))))
       
     (classdef-stmt 
+     (break "classdef-stmt ~A" form)
      (assert (not (or target value)))
      (destructuring-bind (cname inheritance suite) (cdr form)
-       (assert (eq (car inheritance) 'tuple))
+       (assert (eq (car inheritance) 'tuple-expr))
        `(classdef-stmt ,(funcall f cname :target t)
 		       ,(funcall f inheritance :value t)
 		       ,(funcall f suite))))

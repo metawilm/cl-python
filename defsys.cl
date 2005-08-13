@@ -8,14 +8,16 @@
 (excl:defsystem :python
     (:default-pathname #.*load-pathname*)
   (:serial "package" (:parallel
-		      (:serial "parser" "lexer")
+		      (:serial "parser" "lexer") ;; lexer uses with-terminal-code from parser
 		      "pyprint"
 		      "walk"
-		      "compiler"
 		      "gener"
 		      "repl"
-		      (:serial "builtin-classes" "builtin-funcs" "exceptions" "builtin-types")))
+		      (:serial "builtin-classes" "builtin-funcs" "exceptions" "builtin-types"
+			       "compiler")))
+  
   (:definitions "walk" "compiler") ;; COMPILER uses code walk macro
+  (:definitions "parser" "lexer") ;; lexer uses parser terminal-code macro
   )
 
 

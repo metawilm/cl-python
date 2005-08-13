@@ -394,6 +394,7 @@
 	   (`(classdef-stmt (identifier-expr ,$2) ,$3 ,$5)))
 
  (inheritance (                ) ('(tuple-expr nil)))
+ (inheritance (|(|          |)|) ('(tuple-expr nil)))
  (inheritance (|(| testlist |)|) ((if (eq (car $2) 'tuple-expr) $2 `(tuple-expr (,$2)))))
  
  (arglist () (`(nil nil nil nil)))
