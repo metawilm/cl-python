@@ -29,6 +29,7 @@ Unless WALK-LISTS-ONLY, F will also be called on numbers and strings."
   (assert (or (listp ast) (null walk-lists-only)))
   
   (labels ((walk-py-ast-1 (ast &rest context)
+	     (declare (optimize (debug 3)))
 	     (assert ast)
 	     (if (and walk-lists-only (not (listp ast)))
 		 
@@ -91,6 +92,8 @@ VALUE and TARGET context."
 		     ,(funcall f (fourth form) :value t)))
       
     ((break-stmt continue-stmt global-stmt identifier-expr pass-stmt) 
+     ;; Note that an identifier-expr may be for None, |...|, True, False
+     ;; The compiler will replace variable |...| by variable |Ellipsis|.
      form)
       
     (call-expr
@@ -104,7 +107,7 @@ VALUE and TARGET context."
 		   ,(when **-a (funcall f **-a :value t)))))
       
     (classdef-stmt 
-     (break "classdef-stmt ~A" form)
+     (warn "walking classdef-stmt")
      (assert (not (or target value)))
      (destructuring-bind (cname inheritance suite) (cdr form)
        (assert (eq (car inheritance) 'tuple-expr))
@@ -120,7 +123,7 @@ VALUE and TARGET context."
       
     (del-stmt
      (assert (not (or target value)))
-     `(del-stmt ,(funcall f (second form) :target t)))
+     `(del-stmt ,(funcall f (second form) :target t))) ;; ":target" hmm
       
     (dict-expr
      (assert (not target))
@@ -144,6 +147,7 @@ VALUE and TARGET context."
 		     ,(when else-suite (funcall f else-suite)))))
       
     (funcdef-stmt
+     (warn "walking funcdef-stmt")
      (assert (not (or target value)))
      (destructuring-bind (decorators fname (pos-args key-args *-arg **-arg) suite)
 	 (cdr form)
@@ -153,20 +157,25 @@ VALUE and TARGET context."
 			   collect (funcall f deco :value t))
 		      ,(funcall f fname :target t)
 		      (,pos-args
-		       ,(mapcar (lambda (kv) (funcall f (cdr kv) :value t)) key-args)
+		       ,(mapcar (lambda (kv) (list (first kv)
+						   (funcall f (second kv) :value t)))
+				key-args)
 		       ,*-arg
 		       ,**-arg)
 		      ,suite))) ;; was: funcall on suite 2005.08.10
     
-    (generator-expr `(generator-expr
-		      ,(funcall f (second form) :value t) ;; XXX value ok...?
-		      ,(loop for for/if in (third form) collect
-			     (ecase (car for/if)
-			       (for-in `(for-in
-					     ,(funcall f (second for/if) :target t)
-					     ,(funcall f (third  for/if) :value t)))
-			       (if `(if ,(funcall (second for/if) :value t)))))))
-      
+    (generator-expr 
+     (warn "walking generator-expr")
+     (destructuring-bind (item for-in/if-clauses) (cdr form)
+       `(generator-expr
+	 ,(funcall f item :target t)
+	 ,(loop for for/if in for-in/if-clauses
+	      collect (ecase (car for/if)
+			(for-in `(for-in
+				  ,(funcall f (second for/if) :target t)
+				  ,(funcall f (third  for/if) :value t)))
+			(if `(if ,(funcall (second for/if) :value t))))))))
+    
     (if-stmt
      (assert (not (or value target)))
      (destructuring-bind
@@ -177,6 +186,7 @@ VALUE and TARGET context."
 		 ,(when else-suite (funcall f else-suite)))))
       
     (import-stmt
+     (warn "walking import-stmt")
      (assert (not (or value target)))
      `(import-stmt ,(loop for clause in (second form) collect
 			  (ecase (first clause)
@@ -188,6 +198,7 @@ VALUE and TARGET context."
 			      "import walk not-as: todo"))))))
       
     (import-from-stmt
+     (warn "walking import-from-stmt")
      (assert (not (or value target)))
      ;; Because of the special machinery behind `import',
      ;; don't treat the source package name as value. XXX
@@ -198,6 +209,7 @@ VALUE and TARGET context."
 			     collect `(as ,src ,(funcall f dest :target t)))))
       
     (lambda-expr
+     (warn "walking lambda-expr")
      (assert (not target))
      (destructuring-bind
 	 ((pos-a key-a *-a **-a) expr) (cdr form)
@@ -214,6 +226,7 @@ VALUE and TARGET context."
 	      (funcall f x :value value :target target))))
       
     (listcompr-expr
+     (warn "walking listcompr-expr")
      (assert (not target))
      `(listcompr-expr
        ,(funcall f (second form) :value t) ;; XXX value ok...?
@@ -268,6 +281,7 @@ VALUE and TARGET context."
 		       collect (funcall f x))))
       
     (try-except-stmt
+     (warn "walking try-except-stmt")
      (assert (not (or value target)))
      (destructuring-bind
 	 (suite except-clauses else-suite) (cdr form)
@@ -282,6 +296,7 @@ VALUE and TARGET context."
 	    (funcall f else-suite)))))
       
     (try-finally-stmt
+     (warn "walking try-finally-stmt")
      (assert (not (or value target)))
      (destructuring-bind (try-suite finally-suite) (cdr form)
        `(try-finally-stmt
@@ -317,6 +332,7 @@ VALUE and TARGET context."
   `(walk-py-ast ,ast
 		(excl:named-function :with-py-ast-function
 		  (lambda ,target
+		    (declare (optimize (debug 3)))
 		    ,@body))))
 		  
 

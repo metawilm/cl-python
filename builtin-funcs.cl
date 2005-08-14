@@ -8,17 +8,17 @@
 ;; These function will always return a Python value.
 
 
-(defun pyb:__import__ (name &optional globals locals fromlist)
+(defun pybf:__import__ (name &optional globals locals fromlist)
   "This function is invoked by the import statement."
   (declare (ignore name globals locals fromlist))
   (error "__import__: todo"))
 
-(defun pyb:abs (x)
+(defun pybf:abs (x)
   "Return the absolute value of object X.
 Raises AttributeError when there is no `__abs__' method."
   (py-abs x))
 
-(defun pyb:apply (function &optional pos-args kw-dict)
+(defun pybf:apply (function &optional pos-args kw-dict)
   "Apply FUNCTION (a callable object) to given args.
 POS-ARGS is any iterable object; KW-DICT must be of type PY-DICT." 
   
@@ -40,13 +40,13 @@ POS-ARGS is any iterable object; KW-DICT must be of type PY-DICT."
     (apply #'py-call function (nconc pos-args kw-list))))
 
 
-(defun pyb:callable (x)
+(defun pybf:callable (x)
   "Returns whether x can be called (function, class, or callable class instance)
    as True or False."
   (py-bool (recursive-class-dict-lookup (py-class-of x) '__call__)))
 
 #+(or)
-(defgeneric pyb::callable-1 (x)  
+(defgeneric pybf::callable-1 (x)  
   (:documentation "Returns callable-ness as T or NIL")
   (:method ((x function))  t)
   (:method ((x py-type))   
@@ -59,15 +59,15 @@ POS-ARGS is any iterable object; KW-DICT must be of type PY-DICT."
   (:method ((x py-method))    t)
   (:method ((x py-user-object)) (recursive-class-dict-lookup (py-class-of x) '__call__))
   (:method ((x t))
-	   (warn "pyb:callable-1: got ~A, assuming nil" x)
+	   (warn "pybf:callable-1: got ~A, assuming nil" x)
 	   nil))
 
 
-(defun pyb:chr (x)
+(defun pybf:chr (x)
   "Return a string of one character whose ASCII code is the integer i. ~@
-   This is the inverse of pyb:ord."
+   This is the inverse of pybf:ord."
   (let ((i (deproxy x)))
-    (unless (typep i (integer 0 255))
+    (unless (typep i '(integer 0 255))
       (py-raise 'TypeError
 		"Built-in function chr() should be given an integer in ~
                  range 0..255 (got: ~A)" x))
@@ -75,7 +75,7 @@ POS-ARGS is any iterable object; KW-DICT must be of type PY-DICT."
 
 
 ;; compare numbers 
-(defgeneric pyb:cmp (x y)
+(defgeneric pybf:cmp (x y)
   (:documentation
    "Compare two objects, of which at least one is a user-defined-object.
 Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
@@ -99,7 +99,7 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
 		   (y.class (py-class-of y)))
       
 	       (when (member (find-class 'py-type) (list x.class y.class))
-		 (return-from pyb::cmp
+		 (return-from pybf::cmp
 		   (if (eq x y)
 		       0
 		     -1)))
@@ -115,7 +115,7 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
 			(cmp-res (when __cmp__ (py-call __cmp__ x y))))
 		   (when (and cmp-res
 			      (not (eq cmp-res *the-notimplemented*)))
-		     (return-from pyb::cmp (normalize cmp-res)))))
+		     (return-from pybf::cmp (normalize cmp-res)))))
 
 	       ;; The "rich comparison" operations __lt__, __eq__, __gt__ are
 	       ;; now called before __cmp__ is called.
@@ -150,7 +150,7 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
 			  (when (and res (not (eq res *the-notimplemented*)))
 			    (let ((true? (py-val->lisp-bool res)))
 			      (when true?
-				(return-from pyb::cmp
+				(return-from pybf::cmp
 				  (if y-sub-of-x (- res-value) res-value))))))))
       
 	       ;; So the rich comparison operations didn't lead to a result.
@@ -165,14 +165,14 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
 			     (py-call meth x y))))
 		 (when (and res (not (eq res *the-notimplemented*)))
 		   (let ((norm-res (normalize res)))
-		     (return-from pyb::cmp norm-res))))
+		     (return-from pybf::cmp norm-res))))
 
 	       (let* ((meth (recursive-class-dict-lookup y.class '__cmp__))
 		      (res (when meth
 			     (py-call meth y x))))
 		 (when (and res (not (eq res *the-notimplemented*)))
 		   (let ((norm-res (- (normalize res))))
-		     (return-from pyb::cmp norm-res))))
+		     (return-from pybf::cmp norm-res))))
       
 	       ;; CPython now does some number coercion attempts that we don't
 	       ;; have to do because we have first-class numbers. (I think.)
@@ -180,13 +180,13 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
 	       ;; object.c - default_3way_compare(v,w)
 	       ;; 
 	       ;; Two instances of same class without any comparison operator,
-	       ;; are compared by pointer value. Our function `pyb:id' fakes
+	       ;; are compared by pointer value. Our function `pybf:id' fakes
 	       ;; that.
       
 	       (when (eq x.class y.class)
-		 (let ((x.id (pyb:id x))
-		       (y.id (pyb:id y)))
-		   (return-from pyb::cmp 
+		 (let ((x.id (pybf:id x))
+		       (y.id (pybf:id y)))
+		   (return-from pybf::cmp 
 		     (cond ((< x.id y.id) -1)
 			   ((= x.id y.id) 0)
 			   (t             1)))))
@@ -195,8 +195,8 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
 	       ;; is catched above already, when testing for same class;
 	       ;; NoneType is not subclassable).
       
-	       (cond ((eq x *the-none*) (return-from pyb::cmp -1))
-		     ((eq y *the-none*) (return-from pyb::cmp  1)))
+	       (cond ((eq x *the-none*) (return-from pybf::cmp -1))
+		     ((eq y *the-none*) (return-from pybf::cmp  1)))
       
 	       ;; Instances of different class are compared by class name, but
 	       ;; numbers are always smaller.
@@ -206,7 +206,7 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
       
 	       (warn "[debug] CMP can't properly compare ~A and ~A." x y)
       
-	       (return-from pyb::cmp
+	       (return-from pybf::cmp
 		 (if (string< (class-name x.class) (class-name y.class))
 		     -1
 		   1))
@@ -214,50 +214,50 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
 	       ;; Finally, we have either two instances of different non-number
 	       ;; classes, or two instances that are of incomparable numeric
 	       ;; types.
-	       (return-from pyb::cmp
+	       (return-from pybf::cmp
 		 (cond ((eq x y)                   0)
-		       ((< (pyb:id x) (pyb:id y)) -1)
+		       ((< (pybf:id x) (pybf:id y)) -1)
 		       (t                          1)))))))
 
 
-(defun pyb:coerce (x y)
+(defun pybf:coerce (x y)
   (declare (ignore x y))
   (error "Function 'coerce' is deprecated, and not implemented"))
 
-(defun pyb:compile (string filename kind &optional flags dont-inherit)
+(defun pybf:compile (string filename kind &optional flags dont-inherit)
   "Compile string into code object."
   (declare (ignore string filename kind flags dont-inherit))
   (error "todo: py-compile"))
 
-(defun pyb:delattr (x name)
+(defun pybf:delattr (x name)
   (check-type x python-object)
   (check-type name attribute-name-designator)
   (error "todo: delattr"))
 
-(defun pyb:dir (&optional x)
+(defun pybf:dir (&optional x)
   "Without args, returns names in current scope. ~@
    With arg X, return list of valid attributes of X. ~@
    Result is sorted alphabetically, and may be incomplete."
   (declare (ignore x))
   (error "todo: dir"))
 
-(defun pyb:divmod (x y)
+(defun pybf:divmod (x y)
   "Return (x/y, x%y) as tuple"
   (py-divmod x y))
 
-(defun pyb:eval (s &optional globals locals)
+(defun pybf:eval (s &optional globals locals)
   (declare (ignore s globals locals))
   ;; ( [user-]py-eval ...)
   (error "todo: eval-string"))
 
-(defun pyb:execfile (filename &optional globals locals)
+(defun pybf:execfile (filename &optional globals locals)
   "Executes Python file FILENAME in a scope with LOCALS (defaulting ~@
    to GLOBALS) and GLOBALS (defaulting to scope in which `execfile' ~@
    is called) as local and global variables. Returns None."
   (declare (ignore filename globals locals))
   (error "todo: execfile"))
 
-(defun pyb:filter (func iterable)
+(defun pybf:filter (func iterable)
   "Construct a list from those elements of LIST for which FUNC is true.
    LIST: a sequence, iterable object, iterator
          If list is a string or a tuple, the result also has that type,
@@ -269,31 +269,31 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
 			   when (py-val->lisp-bool (py-call func (list x)))
 			   collect x)))
 
-(defun pyb:getattr (x attr &optional default)
+(defun pybf:getattr (x attr &optional default)
   "Return the value of attribute NAME of X. ~@
    If attribute doesn't exist, returns supplied DEFAULT or raises AttributeError."
   (declare (ignore x attr default))
   (error "todo"))
 
-(defun pyb:globals ()
+(defun pybf:globals ()
   "Return a dictionary (namespace) representing the current global symbol table. ~@
    This is the namespace of the current module."
   (error "todo: globals"))
 
-(defun pyb:hasattr (x name)
+(defun pybf:hasattr (x name)
   "Returns True is X has attribute NAME, False if not. ~@
    (Uses `getattr'; catches _all_ exceptions.)"
   (declare (ignore x name))
   (error "todo"))
 
-(defun pyb:hash (x)
+(defun pybf:hash (x)
   ;; XX todo: once calculated, store hash in object
   (py-hash x))
 
-(defun pyb:hex (x)
+(defun pybf:hex (x)
   (py-hex x))
 
-(defun pyb:id (x)
+(defun pybf:id (x)
   
   ;; In contrast to CPython, in Allegro the `id' (memory location) of
   ;; Python objects can change during their lifetime.
@@ -304,58 +304,68 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
   (error "TODO: id() not implemented for this Lisp implementation"))
 
 
-(defun pyb:input (&rest args)
+(defun pybf:input (&rest args)
   (declare (ignore args))
   (error "todo: py-input"))
 
-(defun pyb:intern (x)
+(defun pybf:intern (x)
   (declare (ignore x))
   (error "Function 'intern' is deprecated; it is not implemented."))
 
-(defun pyb:isinstance (x cls)
+(defun pybf:isinstance (x cls)
   (declare (ignore x cls))
   (py-bool (error "todo")))
 
-(defmethod pyb::isinstance-1 (x cls)
+(defmethod pybf::isinstance-1 (x cls)
   ;; CLS is either a class or a _tuple_ of classes (only tuple is
   ;; allowed, not other iterables).
   (if (typep cls 'py-tuple)
       (dolist (c (py-iterate->lisp-list cls)
 		(when (subtypep (py-class-of x) c)
-		  (return-from pyb::isinstance-1 t))))
+		  (return-from pybf::isinstance-1 t))))
     (subtypep (py-class-of x) cls)))
 
 
-(defun pyb:issubclass (x cls)
+(defun pybf:issubclass (x cls)
   ;; SUPER is either a class, or a tuple of classes -- denoting
   ;; Lisp-type (OR c1 c2 ..).
-  (py-bool (pyb::issubclass-1 x cls)))
+  (py-bool (pybf::issubclass-1 x cls)))
 
-(defun pyb::issubclass-1 (x cls)
+(defun pybf::issubclass-1 (x cls)
   (if (typep cls 'py-tuple)
       (dolist (c (py-iterate->lisp-list cls))
 	(when (subtypep x c)
-	  (return-from pyb::issubclass-1 t)))
+	  (return-from pybf::issubclass-1 t)))
     (subtypep x cls)))
 
 
-(defun pyb:iter (x &optional y)
-  ;; Return iterator for sequence x
+(defun pybf:iter (x &optional y)
+  ;; Return iterator for iterable X
   ;; 
-  ;; When Y supplied: make generator that calls and returns X() until
-  ;; it's equal to Y.
-  (if (null y)
-      (make-py-iterator-for-object x)
-    (error "todo: iter with 2 args")))
+  ;; When Y supplied: make generator that calls and returns iterator
+  ;; of X until the value returned is equal to Y.
+  
+   (if y
+       
+       (make-iterator-from-function
+	(let ((iterf (get-py-iterate-fun x)))
+	  (lambda () 
+	    (let ((val (funcall iterf)))
+	      (if (py-== val y)
+		  nil
+		val)))))
+     
+     (make-iterator-from-function
+      (get-py-iterate-fun x))))
 
-(defun pyb:len (x)
+(defun pybf:len (x)
   (py-len x))
 
-(defun pyb:locals ()
+(defun pybf:locals ()
   ;; return local variables
   (error "todo: locals()"))
 
-(defun pyb:map (func &rest sequences)
+(defun pybf:map (func &rest sequences)
   
   ;; Apply FUNC to every item of sequence, returning real list of
   ;; values. With multiple sequences, traversal is in parallel and
@@ -406,7 +416,7 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
 				(make-tuple-from-list curr-items)
 			      (py-call func curr-items))))))))))
 
-(defun pyb:max (item &rest items)
+(defun pybf:max (item &rest items)
   (let ((res nil))
     (if (null items)
 	(map-over-py-object (lambda (k) (when (or (null res) (py-> k res))
@@ -418,7 +428,7 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
 		 (setf res k)))))
     res))
 
-(defun pyb:min (item &rest items)
+(defun pybf:min (item &rest items)
   (let ((res nil))
     (if (null items)
 	(map-over-py-object (lambda (k) (when (or (null res) (py-< k res))
@@ -430,29 +440,29 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
 		 (setf res k)))))
     res))
 
-(defun pyb:oct (n)
+(defun pybf:oct (n)
   (py-oct n))
 
-(defun pyb:ord (s)
+(defun pybf:ord (s)
   (let ((s2 (deproxy s)))
     (if (and (stringp s2)
 	     (= (length s2) 1))
 	(char-code (char s2 0))
       (error "wrong arg ORD: ~A" s))))
 
-(defun pyb:pow (x y &optional z)
+(defun pybf:pow (x y &optional z)
   (py-** x y z))
 
-(defun pyb:range (x &optional y z)
+(defun pybf:range (x &optional y z)
   (declare (ignore x y z))
   (error "todo: range"))
 
-(defun pyb:raw_input (&optional prompt)
+(defun pybf:raw_input (&optional prompt)
   "Pops up a GUI entry window to type text; returns entered string"
   (declare (ignore prompt))
   (error "todo: raw_input")) ;; XXX hmm no "prompt" CL function?
 
-(defun pyb:reduce (func seq &optional initial)
+(defun pybf:reduce (func seq &optional initial)
   (let ((res nil))
     (if initial
 	
@@ -466,7 +476,7 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
     (or res
 	(py-raise 'TypeError "reduce() of empty sequence with no initial value"))))
 
-(defun pyb:reload (m)
+(defun pybf:reload (m)
   ;; m py-module
   #+(or)(with-slots (module namespace) m
 	  (let ((mod-ast (parse-python-string (read-file module)))
@@ -482,10 +492,10 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
   m)
 
 
-(defmethod pyb:repr (x)
+(defmethod pybf:repr (x)
   (py-repr x))
 
-(defmethod pyb:round (x &optional (ndigits 0))
+(defmethod pybf:round (x &optional (ndigits 0))
   "Round number X to a precision with NDIGITS decimal digits (default: 0).
    Returns float. Precision may be negative"
   (declare (ignore x ndigits))
@@ -525,16 +535,16 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
       (coerce x 'double-float))))
 
 
-(defun pyb:setattr (x attr val)
+(defun pybf:setattr (x attr val)
   ;; XXX attr symbol/string
   (setf (py-attr x attr) val))
 
-(defun pyb:sorted (x)
+(defun pybf:sorted (x)
   ;;; over sequences, or over all iterable things?
   (declare (ignore x))
   (error "todo: sorted"))
 
-(defun pyb:sum (seq &optional (start 0))
+(defun pybf:sum (seq &optional (start 0))
   (declare (ignore seq start))
   (error "todo")
   #+(or) 
@@ -549,12 +559,12 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
 	    seq)
 	   res)))
 
-(defun pyb:unichr (i)
+(defun pybf:unichr (i)
   ;; -> unicode char i
   (declare (ignore i))
   (error "todo: unichr"))
 
-(defun pyb:vars (&optional x)
+(defun pybf:vars (&optional x)
   "If X supplied, return it's dict, otherwise return local variables."
   (declare (ignore x))
   (error "todo")
@@ -566,9 +576,9 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
 	  (py-raise 'AttributeError
 		    "Instances of class ~A have no attribute '__dict__' (got: ~A)"
 		    (class-of x) x)))
-    (pyb:locals)))
+    (pybf:locals)))
 
-(defun pyb:zip (&rest sequences)
+(defun pybf:zip (&rest sequences)
   "Return a list with tuples, where tuple i contains the i-th argument of ~
    each of the sequences. The returned list has length equal to the shortest ~
    sequence argument."
@@ -588,5 +598,5 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
 	     do (let ((val (funcall iter-func)))
 		  (if val
 		      (setf (aref current-tuple-values iter-i) val)
-		    (return-from pyb:zip (make-py-list res)))))
+		    (return-from pybf:zip (make-py-list res)))))
 	 (vector-push-extend (make-tuple (copy-seq current-tuple-values)) res)))

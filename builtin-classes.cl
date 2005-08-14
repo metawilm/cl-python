@@ -329,6 +329,10 @@
 (setf *the-none* (make-instance 'py-none))
 (defun none-p (x) (eq x *the-none*))
 
+(def-py-method py-none.__repr__ (x)
+  (declare (ignore x))
+  "None")
+   
 ;; Ellipsis
 
 (defclass py-ellipsis (py-core-type) () (:metaclass py-core-type))
@@ -1030,12 +1034,12 @@
 ;; method returns bogus comparison result; that TypeError is not
 ;; catched here but goes to user code.)
 
-(def-comparison  <  py-<   (=  (the (integer -1 1) (pyb:cmp x y)) -1))
-(def-comparison  >  py->   (=  (the (integer -1 1) (pyb:cmp x y))  1))
-(def-comparison ==  py-==  (=  (the (integer -1 1) (pyb:cmp x y))  0))
-(def-comparison !=  py-!=  (/= (the (integer -1 1) (pyb:cmp x y))  0)) ;; parser: <> -> !=
-(def-comparison <=  py-<=  (<= (the (integer -1 1) (pyb:cmp x y))  0))
-(def-comparison >=  py->=  (>= (the (integer -1 1) (pyb:cmp x y))  0))
+(def-comparison  <  py-<   (=  (the (integer -1 1) (pybf:cmp x y)) -1))
+(def-comparison  >  py->   (=  (the (integer -1 1) (pybf:cmp x y))  1))
+(def-comparison ==  py-==  (=  (the (integer -1 1) (pybf:cmp x y))  0))
+(def-comparison !=  py-!=  (/= (the (integer -1 1) (pybf:cmp x y))  0)) ;; parser: <> -> !=
+(def-comparison <=  py-<=  (<= (the (integer -1 1) (pybf:cmp x y))  0))
+(def-comparison >=  py->=  (>= (the (integer -1 1) (pybf:cmp x y))  0))
 
 
 (defgeneric py-val->lisp-bool (x)

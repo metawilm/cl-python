@@ -11,9 +11,8 @@
 		      (:serial "parser" "lexer") ;; lexer uses with-terminal-code from parser
 		      "pyprint"
 		      "walk"
-		      "gener"
 		      "repl"
-		      (:serial "builtin-classes" "builtin-funcs" "exceptions" "builtin-types"
+		      (:serial "builtin-classes" "exceptions" "builtin-funcs" "builtin-types"
 			       "compiler")))
   
   (:definitions "walk" "compiler") ;; COMPILER uses code walk macro

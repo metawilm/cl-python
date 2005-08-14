@@ -36,7 +36,7 @@
 
 (defmacro with-gensyms (list &body body)
   `(let ,(loop for x in list
-	     collect `(,x (make-symbol ,(symbol-name x))))
+	     collect `(,x ',(make-symbol (symbol-name x))))
      ,@body))
 
 
@@ -86,6 +86,7 @@
 		 
 		 (identifier-expr
 		  (let* ((name (second tg)))
+		    (assert (not (eq name '|...|)))
 		    
 		    (flet ((module-set ()
 			     (let ((ix (position name (get-pydecl :mod-globals-names e))))
@@ -191,7 +192,7 @@
     
     `(let ((prim ,primary))
      
-       (cond ((eq prim (load-time-value #'pyb:locals))
+       (cond ((eq prim (load-time-value #'pybf:locals))
 	      (if (and ,(not (or pos-args kwd-args))
 		       ,(or (null *-arg)  `(null (py-iterate->lisp-list ,*-arg)))
 		       ,(or (null **-arg) `(null (py-mapping->lisp-list ,**-arg))))
@@ -201,7 +202,7 @@
 		(py-raise 'TypeError
 			  "locals() must be called without args (got: ~A)" ',all-args)))
 
-	     ((eq prim (load-time-value #'pyb:globals))
+	     ((eq prim (load-time-value #'pybf:globals))
 	      (if (and ,(not (or pos-args kwd-args))
 		       ,(or (null *-arg)  `(null (py-iterate->lisp-list ,*-arg)))
 		       ,(or (null **-arg) `(null (py-mapping->lisp-list ,**-arg))))
@@ -209,7 +210,7 @@
 		(py-raise 'TypeError
 			  "globals() must be called without args (got: ~A)" ',all-args)))
 
-	     ((eq prim (load-time-value #'pyb:eval))
+	     ((eq prim (load-time-value #'pybf:eval))
 	      (let ((args (nconc (list ,@pos-args)
 				 ,(when *-arg `(py-iterate->lisp-list ,*-arg)))))
 		(if (and ,(null kwd-args)
@@ -217,13 +218,13 @@
 			      `(null (py-mapping->lisp-list ,**-arg)))
 			 (<= 1 (length args) 3))
 		    
-		    (pyb:eval ,(first pos-args)
-			      ,(or (second pos-args)
-				   `(.globals.))
-			      ,(or (third  pos-args)
-				   (if (eq context :module)
-				       `(.globals.)
-				     `(.locals.))))
+		    (funcall (load-time-value #'pybf:eval) ,(first pos-args)
+			     ,(or (second pos-args)
+				  `(.globals.))
+			     ,(or (third  pos-args)
+				  (if (eq context :module)
+				      `(.globals.)
+				    `(.locals.))))
 		
 		  (py-raise 'TypeError
 			    "eval() must be called with 1 to 3 pos args (got: ~A)" ',all-args))))
@@ -400,99 +401,116 @@
 			fname (&whole formal-args pos-args key-args *-arg **-arg)
 			suite
 			&environment e)
+
+  ;; The resulting function is returned.
+  ;; 
+  ;; If FNAME is a keyword symbol (like :lambda), then an anonymous
+  ;; function (like from LAMBDA-EXPR) is created. The function is thus
+  ;; not bound to a name. Decorators are not allowed then.
   
-  (cond ((eq fname :lambda))
+  (cond ((keywordp fname)
+	 (assert (null decorators)))
+	
 	((and (listp fname) (eq (car fname) 'identifier-expr))
 	 (setf fname (second fname)))
+	
 	(t (break :unexpected)))
   
-  ;; Replace "def f( (x,y), z):  .." by "def f( _tmp , z):  (x,y) = _tmp; ..".
-  ;; Shadows original POS-ARGS.
-  
-  (let ((all-pos-arg-names (loop with todo = pos-args and res = ()
-			       while todo
-			       do (let ((x (pop todo)))
-				    (ecase (first x)
-				      (identifier-expr (push (second x) res))
-				      (tuple-expr      (setf todo (nconc todo (second x))))))
-			       finally (return res))))
+  (flet ((list-of-all-pos-arg-names (declared-pos-args)
+	   (loop with todo = declared-pos-args and res = ()
+	       while todo
+	       do (let ((x (pop todo)))
+		    (ecase (first x)
+		      (identifier-expr (push (second x) res))
+		      (tuple-expr      (setf todo (nconc todo (second x))))))
+	       finally (return res)))
+	 
+	 ;; Replace "def f( (x,y), z):  .." 
+	 ;; by "def f( _tmp , z):  (x,y) = _tmp; ..".
+
+	 (lambda-args-and-destruct-form (funcdef-pos-args)
+	   (loop with lambda-pos-args = () and destructs = ()
+	       for pa in funcdef-pos-args
+	       do (ecase (car pa)
+		    (tuple-expr      (let ((tmp-var (make-symbol (format nil "~A" (cdr pa)))))
+				       (push tmp-var lambda-pos-args)
+				       (push `(assign-stmt ,tmp-var ((identifier-expr ,pa)))
+					     destructs)))
+		    (identifier-expr (push (second pa) lambda-pos-args)))
+	       finally (return (values (nreverse lambda-pos-args)
+				       (when destructs
+					 `(progn ,@(nreverse destructs))))))))
     
-    (multiple-value-bind (formal-pos-args pos-arg-destruct-form)
-	(loop with formal-pos-args = () and destructs = ()
-	    for pa in pos-args
-	    do (ecase (car pa)
-		 (tuple-expr (let ((tmp-var (make-symbol (format nil "~A" (cdr pa)))))
-			       (push tmp-var formal-pos-args)
-			       (push `(assign-stmt ,tmp-var ((identifier-expr ,pa))) destructs)))
-		 (identifier-expr (push (second pa) formal-pos-args)))
-	    finally (return (values (nreverse formal-pos-args)
-				    (when destructs
-				      `(progn ,@(nreverse destructs))))))
+    ;; new:
+    (let ((all-pos-arg-names (list-of-all-pos-arg-names pos-args)))
       
-      
-      (multiple-value-bind (func-explicit-globals func-locals)
-	  (funcdef-globals-and-locals (cons all-pos-arg-names (cdr formal-args)) suite)
+      (multiple-value-bind
+	  (lambda-pos-args pos-arg-destruct-form) (lambda-args-and-destruct-form pos-args)
 	
-	;; When a method is defined in a class namespace, the default
-	;; argument values are evaluated at function definition time
-	;; in the class namespace. Macro PY-ARG-FUNCTION ensures this.
-	
-	`(let ((func-lambda
-		(py-arg-function
-		 ,fname
-		 (,formal-pos-args ,key-args ,*-arg ,**-arg)
+	(multiple-value-bind
+	    (func-explicit-globals func-locals) (funcdef-globals-and-locals
+						 (cons all-pos-arg-names (cdr formal-args))
+						 suite)
+	  
+	  (let* ((all-locals-and-arg-names (append all-pos-arg-names
+						   (mapcar #'first key-args)
+						   (when *-arg (list *-arg))
+						   (when **-arg (list *-arg))
+						   func-locals))
 		 
-		 (let ,(loop for loc in func-locals collect `(,loc :unbound))
-		   
-		   ,@(when pos-arg-destruct-form
-		       `(,pos-arg-destruct-form))
-		   
-		   (block :function-body
-		     
-		     (flet ((.locals. ()
-			      ,(when func-locals
-				 `(make-py-dict
-				   (delete-if (lambda (x) (eq (cdr x) :unbound))
-					      (mapcar #'cons ',func-locals
-						      (list ,@func-locals)))))))
+		 (func-lambda
+		  `(py-arg-function
+		    ,fname
+		    (,lambda-pos-args ,key-args ,*-arg ,**-arg)
+		    
+		    (let ,(loop for loc in func-locals collect `(,loc :unbound))
+		      
+		      ,@(when pos-arg-destruct-form
+			  `(,pos-arg-destruct-form))
+		      
+		      (block :function-body
+			
+			(flet ((.locals. ()  ;; A lambda (from a lamda--expr) has locals() too!
+				 (make-py-dict
+				  (delete :unbound
+					  (mapcar #'cons ',all-locals-and-arg-names
+						  (list ,@all-locals-and-arg-names))
+					  :key #'cdr))))
+			  
+			  (with-pydecl ((:funcdef-scope-globals ',func-explicit-globals)
+					(:context :function)
+					(:inside-function t)
+					(:lexically-visible-vars
+					 ,(nconc (copy-list func-locals)
+						 (copy-list all-pos-arg-names)
+						 (when *-arg (list *-arg))
+						 (when **-arg (list **-arg))
+						 (get-pydecl :lexically-visible-vars e))))
 			    
-		       (with-pydecl ((:funcdef-scope-globals ',func-explicit-globals)
-				     (:context :function)
-				     (:inside-function t)
-				     (:lexically-visible-vars
-				      ,(nconc (copy-list func-locals)
-					      (copy-list all-pos-arg-names)
-					      (when *-arg (list *-arg))
-					      (when **-arg (list **-arg))
-					      (get-pydecl :lexically-visible-vars e))))
-			 
-			 ,(if (generator-ast-p suite)
-			      `(return-stmt ,(rewrite-generator-funcdef-suite fname suite))
-			    suite))))))))
-	   
-	   ,(if (eq fname :lambda)
+			    ,(if (generator-ast-p suite)
+				 
+				 `(return-stmt ,(rewrite-generator-funcdef-suite fname suite))
+			       
+			       suite))))))))
+	    
+	    (if (keywordp fname)
 		
-		`func-lambda
+		func-lambda
 	      
 	      (with-gensyms (func)
-		`(let ((,func (make-py-function ',fname func-lambda)))
-		   
-		   ,(let ((art-deco (loop with res = func
-					for deco in (nreverse decorators)
-					do (setf res `(call-expr ,deco ((,res) () nil nil)))
-					finally (return res))))
-		      
-		      `(assign-stmt ,art-deco ((identifier-expr ,fname))))))))))))
+		(let ((art-deco (loop with res = func
+				    for deco in (reverse decorators)
+				    do (setf res `(call-expr ,deco ((,res) () nil nil)))
+				    finally (return res))))
+		  
+		  `(let ((,func (make-py-function ',fname func-lambda)))
+		     (assign-stmt ,art-deco ((identifier-expr ,fname)))
+		     (identifier-expr ,fname)))))))))))
 
 
-(defmacro generator-expr (item for-in/if-clauses)
-
-  ;; XXX should this take place before these AST macros run? it
-  ;; introduces a new funcdef-stmt...
-
-  (multiple-value-bind (gen-maker-lambda-one-arg initial-source)
-      (rewrite-generator-expr-ast `(generator-expr ,item ,for-in/if-clauses))
-    `(funcall ,gen-maker-lambda-one-arg ,initial-source)))
+(defmacro generator-expr (&whole whole item for-in/if-clauses)
+  (declare (ignore item for-in/if-clauses))
+  (rewrite-generator-expr-ast whole))
        
 (defmacro global-stmt (names &environment e)
   ;; GLOBAL statements are already determined and used at the moment a
@@ -506,7 +524,11 @@
   
   ;; The identifier is used for its value; it is not an assignent
   ;; target (as the latter case is handled by ASSIGN-STMT).
+  
   (assert (symbolp name))
+  
+  (when (eq name '|...|)
+    (setf name 'Ellipsis))
   
   (flet ((module-lookup ()
 	   (let ((ix (position name (get-pydecl :mod-globals-names e))))
@@ -750,6 +772,7 @@
     
     `(let ((,the-exc ,exc)
 	   (,the-var ,var))
+       (declare (ignorable ,the-var))
        
        ,@(when tb `((warn "Traceback arg to RAISE ignored")))
        
@@ -851,118 +874,108 @@
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; 
-;; Helper functions for the compiler, that preprocess or analyze AST.
 
-#+(or)
-(defun rewrite-name-binding-statements (ast)
-  "Rewrite FUNCDEF-STMT and CLASSDEF-STMT so they become (ASSIGN-STMT ...).
-Returns the new AST."
-  (walk-py-ast
-   ast
-   (lambda (x &key target value)
-     (ecase (car x)
-       
-       (funcdef-stmt (destructuring-bind
-			 (decorators fname args suite) (cdr form)
-		       (declare (ignore args suite))
-		       
-		       `(assign-stmt (loop with res = `(funcdef-expr ,@(cdr form))
-					 for deco in (nreverse decorators)
-					 do (setf res `(call-expr ,deco ((,res) () nil nil)))
-					 finally (return res))
-				     ((identifier-expr ,fname)))))
-       
-       (classdef-stmt (destructuring-bind
-			  (cname inheritance suite) (cdr form)
-			xxxx))))
-   :walk-lists-only t))
+;;; Helper functions for the compiler
 
+(defun builtin-name-p (x)
+  (or (find-symbol (string x) (load-time-value (find-package :python-builtin-functions)))
+      (find-symbol (string x) (load-time-value (find-package :python-builtin-types)))
+      (find-symbol (string x) (load-time-value (find-package :python-builtin-values)))))
+
+(defun builtin-name-value (x)
+  (let ((sym (builtin-name-p x)))
+    (assert sym)
+    (let ((pkg (symbol-package sym)))
+      (cond ((eq pkg (load-time-value (find-package :python-builtin-functions)))
+	     (symbol-function sym))
+	    ((eq pkg (load-time-value (find-package :python-builtin-types)))
+	     (symbol-value sym))
+	    ((eq pkg (load-time-value (find-package :python-builtin-values)))
+	     (symbol-value sym))))))
 
 (defun ast-vars (ast &key params locals declared-globals outer-scope)
   ;; Returns: LOCALS, DECLARED-GLOBALS, OUTER-SCOPE
   ;; which are lists of symbols denoting variable names.
   
-  (labels ((recurse (ast)
+  (labels
+      ((recurse (ast)
+	 (with-py-ast ((form &key value target) ast)
+	   (case (car form)
 	     
-	     (with-py-ast ((form &key value target) ast)
-	       (case (car form)
-		 
-		 (classdef-stmt (destructuring-bind
-				    ((identifier cname) inheritance suite) (cdr form)
-				  (declare (ignore suite))
+	     (classdef-stmt (destructuring-bind
+				((identifier cname) inheritance suite) (cdr form)
+			      (declare (ignore suite))
+			      
+			      (assert (eq identifier 'identifier-expr))
+			      (assert (eq (car inheritance) 'tuple-expr))
+			      
+			      (if (member cname declared-globals)
+				  (error "SyntaxError: class name ~A may not be ~
+                                          declared `global'" cname)
+				(pushnew cname locals))
+			      
+			      (loop for x in (second inheritance) do (recurse x)))
+			    (values nil t))
+	     
+	     (funcdef-stmt  (destructuring-bind (decorators (identifier-expr fname) args suite)
+				(cdr form)
+			      (declare (ignore suite))
+			      (assert (eq identifier-expr 'identifier-expr))
+			      
+			      (if (member fname declared-globals)
+				  (error "SyntaxError: inner function name ~A ~
+                                          may not be declared global" fname)
+				(pushnew fname locals))
+			      
+			      (loop for deco in decorators do (recurse deco))
+			      
+			      (loop for (nil def-val) in (second args)
+				  do (recurse def-val)))
+			    (values nil t))
 
-				  (assert (eq identifier 'identifier-expr))
-				  (assert (eq (car inheritance) 'tuple-expr))
+	     (generator-expr ;; generator expressions XXX
+	      (values nil t))
 
-				  ;; The class name is always a local.
-				  (when (member cname declared-globals)
-				    (error "SyntaxError: class name ~A may not be ~
-                                            declared `global'" cname))
+	     (global-stmt (dolist (name (second form))
+			    (cond ((member name params)
+				   (error "SyntaxError: function param ~A declared `global'"
+					  name))
 				  
-				  (pushnew cname locals)
+				  ((or (member name locals) (member name outer-scope))
+				   (error "SyntaxError: variable ~A used before being ~
+                                               declared `global'" name))
 				  
-				  (loop for x in (second inheritance) do (recurse x)))
-				(values nil t))
-		 
-		 (funcdef-stmt  (destructuring-bind (decorators (identifier-expr fname) args suite)
-				    (cdr form)
-				  (declare (ignore suite))
-				  (assert (eq identifier-expr 'identifier-expr))
+				  (t (pushnew name declared-globals))))
+			  (values nil t))
+	     
+	     (lambda-expr (values nil t)) ;; skip
+	     
+	     (identifier-expr #+(or)(break "ast-vars: identifier-expr ~A" (second form)) 
+			      (let ((name (second form)))
+				(unless (eq name '|...|)
 				  
-				  (when (member fname declared-globals)
-				    (error "SyntaxError: inner function name ~A declared global"
-					   fname))
+				  (when value
+				    (unless (or (member name params)
+						(member name locals)
+						(member name declared-globals))
+				      (pushnew name outer-scope)))
 				  
-				  (pushnew fname locals)
+				  (when target
+				    (when (member name outer-scope)
+				      (error "SyntaxError: local variable ~A referenced before ~
+                                                  assignment" name))
+				    (unless (or (member name params)
+						(member name locals)
+						(member name declared-globals))
+				      (pushnew name locals))))
 				
-				  (loop for deco in decorators do (recurse deco))
-				  (loop for (nil def-val) in (second args)
-				      do (recurse def-val)))
-				(values nil t))
-		 
-		 (global-stmt (dolist (name (second form))
-				(cond ((member name params)
-				       (error "SyntaxError: function param ~A declared `global'"
-					      name))
-				      
-				      ((or (member name locals) (member name outer-scope))
-				       (error "SyntaxError: variable ~A used before being ~
-                                          declared `global'" name))
-				      
-				      (t (pushnew name declared-globals))))
-			      (values nil t))
+				(values nil t)))
 	     
-		 
-	       
-		 (lambda-expr (values nil t)) ;; skip
-		 
-		 (identifier-expr #+(or)(break "ast-vars: identifier-expr ~A" (second form)) 
-				  (let ((name (second form)))
-				    
-				    (when value
-				      (unless (or (member name params)
-						  (member name locals)
-						  (member name declared-globals))
-					(pushnew name outer-scope)))
-				    
-				    (when target
-				      (when (member name outer-scope)
-					(error "SyntaxError: local variable ~A referenced before ~
-                                                assignment" name))
-				      (unless (or (member name params)
-						  (member name locals)
-						  (member name declared-globals))
-					(pushnew name locals)))
-				    (values nil t)))
-		 
-		 (t form)))))
+	     (t form)))))
     
     (recurse ast)
     (values locals declared-globals outer-scope)))
 
-
-  
 (defun funcdef-globals-and-locals (args suite)
   "Given FUNCDEF ARGS and SUITE (or EXPR), return DECLARED-GLOBALS, LOCALS.
    Does _not_ return ARGS (e.g. as part of LOCALS)."
@@ -1022,7 +1035,9 @@ Returns the new AST."
 				 (convert-to-namespace-ht x2))))
 
 (defmacro py-arg-function (name (pos-args key-args *-arg **-arg) &body body)
-  ;; Non-consing argument parsing! (except when *-arg or **-arg present)
+  
+  ;; Non-consing argument parsing! (except when *-arg or **-arg
+  ;; present)
   ;; 
   ;; POS-ARGS: list of symbols
   ;; KEY-ARGS: list of (key-symbol default-val) pairs
@@ -1157,32 +1172,372 @@ Returns the new AST."
 	       
 		 ,@body))))))))
 
-#+(or)
-(defun bar ()
-  (let ((f (py-arg-function foo ((a b c) ((d 42) (e 100)) nil nil)
-				 (setf e (+ a b c))
-				 (setf b (+ d e)))))
-    (disassemble f)))
+#+(or) ;; todo? make function code shorter by using a general function to parse args
+(defun parse-py-func-args (args arg-val-vec
+			   num-pos-args num-key-args
+			   pos-key-arg-names
+			   arg-name-vec arg-kmname-vec
+			   key-arg-default-values)
+  ())
 
-#+(or)
-(defun foo ()
-  (declare (optimize (speed 3)(safety 0) (debug 0)))
-  (let ((f (py-arg-function foo ((a b c) ((d 42) (e 100)) arg kw)
-			    (values d e arg kw))))
-    ;;    (dotimes (i 1000000)
-    (funcall f 1 2 3 4 5 6 'q 42 'd 1)))
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-#+(or)
-(defun foo ()
-  #+(or)(declare (optimize (speed 3)(safety 0) (debug 0)))
-  (let ((f (py-arg-function foo
-			    ((a b c) ((d 42) (e 100)) nil nil)
-			    (setf e (+ a b c))
-			    (setf b (+ d e)))))
-    (values
-     (funcall f 1 2 3 'e 10)
-     (funcall f 1 2 3 4 5)
-     (funcall f 1 2 3 'd 23))))
+;;; Generator rewriting
+
+(defun generator-ast-p (ast)
+  "Is AST a function definition for a generator?"
+  
+  (assert (not (eq (car ast) 'module-stmt)) ()
+    "GENERATOR-AST-P called with a MODULE ast.")
+  
+  (catch 'is-generator
+    (walk-py-ast ast 
+		 (lambda (x &key value target)
+		   (declare (ignore value target))
+		   (case (car x)
+		     
+		     (yield-stmt (throw 'is-generator t))
+		     
+		     ;; don't look for 'yield' in inner functions and classes
+		     ((classdef-stmt funcdef-stmt) (values nil t))
+		     
+		     (t x))))
+    nil))
+
+(defun rewrite-generator-funcdef-suite (fname suite)
+  ;; Returns the function body
+  (assert (symbolp fname))
+  (assert (eq (car suite) 'suite-stmt))
+  (assert (generator-ast-p suite))
+
+  (let ((yield-counter 0)
+	(other-counter 0)
+	(vars ()))
+    
+    (flet ((new-tag (kind) (if (eq kind :yield)
+			       (incf yield-counter)
+			     (make-symbol (format nil "~A~A" kind (incf other-counter))))))
+      
+      (labels
+	  ((walk (form stack)
+	     (walk-py-ast
+	      form
+	      (lambda (form &rest context)
+		(declare (ignore context))
+		(case (first form)
+		  
+		  (yield-stmt
+		   (let ((tag (new-tag :yield)))
+		     (values `(:split (setf .state. ,tag)
+				      (return-from :function-body ,(second form)) 
+				      ,tag)
+			     t)))
+		  
+		  (while-stmt
+		   (destructuring-bind (test suite else-suite) (cdr form)
+		     (let ((repeat-tag (new-tag :repeat))
+			   (else-tag   (new-tag :else))
+			   (after-tag  (new-tag :end+break-target)))
+		       (values `(:split
+				 (unless (py-val->lisp-bool ,test)
+				   (go ,else-tag))
+
+				 ,repeat-tag
+				 (:split
+				  ,(walk suite
+					 (cons (cons repeat-tag after-tag)
+					       stack)))
+				 (if (py-val->lisp-bool ,test)
+				     (go ,repeat-tag)
+				   (go ,after-tag))
+				 
+				 ,else-tag
+				 ,@(when else-suite
+				     `((:split ,(walk else-suite stack))))
+				 
+				 ,after-tag)
+			       t))))
+		  
+		  (if-stmt
+		   (if (not (generator-ast-p form))
+		       (values form t)
+		     (destructuring-bind (clauses else-suite) (cdr form)
+		       (loop
+			   with else-tag = (new-tag :else) and after-tag = (new-tag :after)
+									   
+			   for (expr suite) in clauses
+			   for then-tag = (new-tag :then)
+					  
+			   collect `((py-val->lisp-bool ,expr) (go ,then-tag)) into tests
+			   collect `(:split ,then-tag
+					    (:split ,(walk suite stack))
+					    (go ,after-tag)) into suites
+			   finally
+			     (return
+			       (values `(:split (cond ,@tests
+						      (t (go ,else-tag)))
+						(:split ,@suites)
+						,else-tag
+						,@(when else-suite
+						    `((:split ,(walk else-suite stack))))
+						,after-tag)
+				       t))))))
+		  
+		  (for-in-stmt
+		   (destructuring-bind (target source suite else-suite) (cdr form)
+		     (let* ((repeat-tag (new-tag :repeat))
+			    (else-tag   (new-tag :else))
+			    (end-tag    (new-tag :end+break-target))
+			    (continue-tag (new-tag :continue-target))
+			    (generator  (new-tag :generator))
+			    (loop-var   (new-tag :loop-var))
+			    (stack2     (cons (cons continue-tag end-tag)
+					      stack)))
+		       (push loop-var vars)
+		       (push generator vars)
+		       
+		       (values
+			`(:split 
+			  (setf ,generator (get-py-iterate-fun ,source)
+				,loop-var  (funcall ,generator))
+			  (unless ,loop-var (go ,else-tag))
+			  
+			  ,repeat-tag
+			  (assign-stmt ,loop-var (,target))
+			  (:split ,(walk suite stack2))
+			  
+			  ,continue-tag
+			  (setf ,loop-var (funcall ,generator))
+			  (if ,loop-var (go ,repeat-tag) (go ,end-tag))
+			  
+			  ,else-tag
+			  ,@(when else-suite
+			      `((:split ,(walk else-suite stack2))))
+			  
+			  ,end-tag
+			  (setf ,loop-var nil
+				,generator nil))
+			t))))
+		  
+		  (break-stmt
+		   (unless stack (error "BREAK outside loop"))
+		   (values `(go ,(cdr (car stack)))
+			   t))
+		    
+		  (continue-stmt
+		   (unless stack (error "CONTINUE outside loop"))
+		   (values `(go ,(car (car stack)))
+			   t))
+		    
+		  (return-stmt
+		   (when (second form)
+		     (error "SyntaxError: Inside generator, RETURN statement may not have ~
+                             an argument (got: ~S)" form))
+		    
+		   ;; from now on, we will always return to this state
+		   (values `(generator-finished)
+			   t))
+
+		  (suite-stmt
+		   (if (not (generator-ast-p form))
+		       (values form t)
+		     (values `(:split ,@(loop for stmt in (second form)
+					    collect (walk stmt stack)))
+			     t)))
+		    
+		  (try-except-stmt
+		   (if (not (generator-ast-p form))
+		       (values form t)
+		     
+		     ;; Three possibilities:
+		     ;;  1. YIELD-STMT or RETURN-STMT in TRY-SUITE 
+		     ;;  2. YIELD-STMT or RETURN-STMT in some EXCEPT-CLAUSES
+		     ;;  3. YIELD-STMT or RETURN-STMT in ELSE-SUITE
+		     ;; 
+		     ;; We rewrite it such that all cases are covered,
+		     ;; so maybe there is more rewritten than strictly
+		     ;; needed.
+		     
+		     (destructuring-bind (try-suite except-clauses else-suite) (cdr form)
+		       (loop
+			   with try-tag = (new-tag :yield)
+			   with else-tag = (new-tag :else)
+			   with after-tag = (new-tag :after)
+			   with gen-maker = '#:helper-gen-maker and gen = '#:helper-gen
+				      				      
+			   initially (push gen vars)
+			     
+			   for (exc var suite) in except-clauses
+			   for tag = (new-tag :exc-suite)
+				     
+			   collect `(,exc ,var (go ,tag)) into jumps
+			   nconc `(,tag ,(walk suite stack) (go ,after-tag)) into exc-bodies
+									      
+			   finally
+			     (return
+			       (values
+				`(:split
+				  (setf ,gen (py-iterate->lisp-fun
+					      (funcall ,(suite->generator gen-maker try-suite))))
+				  (setf .state. ,try-tag)
+				  
+				  ;; yield all values returned by helpder function .gen.
+				  ,try-tag
+				  (try-except-stmt
+				   (let ((val (funcall ,gen)))
+				     (case val
+				       (:explicit-return (generator-finished))
+				       (:implicit-return (go ,else-tag))
+				       (t (return-from :function-body val))))
+				   
+				   ,@jumps)
+				  
+				  ,@exc-bodies
+				  
+				  ,else-tag
+				  ,@(when else-suite
+				      `((:split ,(walk else-suite stack))))
+				  
+				  ,after-tag
+				  (setf ,gen nil))
+				t))))))
+		  
+		  (try-finally
+		   (destructuring-bind (try-suite finally-suite) (cdr form)
+		     (when (generator-ast-p try-suite)
+		       (error "SyntaxError: YIELD is not allowed in the TRY suite of ~
+                               a TRY/FINALLY statement (got: ~S)" form))
+		     
+		     (if (not (generator-ast-p finally-suite))
+			 (values form t)
+
+		       (let ((fin-catched-exp '#:fin-catched-exc))
+			 
+			 (pushnew fin-catched-exp vars)
+			 (values
+			  `(:split
+			    (multiple-value-bind (val cond)
+				(ignore-errors ,try-suite ;; no need to walk
+					       (values))
+			      (setf ,fin-catched-exp cond))
+			    
+			    ,(walk finally-suite stack)
+			    
+			    (when ,fin-catched-exp
+			      (error ,fin-catched-exp)))
+			  
+			  t)))))
+		  
+		  (t (values form
+			     t)))))))
+
+	(let ((walked-as-list (multiple-value-list (apply-splits (walk suite ()))))
+	      (final-tag -1))
+	  
+	  `(let ((.state. 0)
+		 ,@(nreverse vars))
+	     
+	     (make-iterator-from-function 
+	      :name '(:iterator-from-function ,fname)
+	      :func
+	      (excl:named-function (:iterator-from-function ,fname)
+		(lambda ()
+		  ;; This is the function that will repeatedly be
+		  ;; called to return the values
+		  
+		  (macrolet ((generator-finished ()
+			       '(progn (setf .state. ,final-tag)
+				 (go ,final-tag))))
+		    
+		    (block :function-body
+		      (tagbody
+			(case .state.
+			  ,@(loop for i from -1 to yield-counter
+				collect `(,i (go ,i))))
+		       0
+			,@walked-as-list
+
+			(generator-finished)
+			
+			,final-tag
+			(py-raise 'StopIteration "The generator has finished.")))))))))))))
+
+(defun suite->generator (fname suite)
+  ;; Lisp generator function that returns one of:
+  ;;  VAL              -- value explicitly `yield'-ed
+  ;;  :implicit-return -- no more statements in the function body
+  ;;  :explicit-return -- explicit return from function
+  
+  (assert (eq (car suite) 'suite-stmt))
+  (assert (generator-ast-p suite))
+  
+  `(funcdef-stmt
+    nil (identifier-expr ,fname) (nil nil nil nil)
+    (suite-stmt
+     ,@(mapcar (lambda (x)
+		 (walk-py-ast x
+			      (lambda (form &rest context)
+				(declare (ignore context))
+				(case (car form)
+				     
+				  ((funcdef-stmt classdef-stmt)
+				   (values form t))
+				     
+				  (return-stmt 
+				   (when (second form)
+				     (error "SyntaxError: Inside generator, RETURN ~
+                                             statement may not have an argument ~
+                                             (got: ~S)" form))
+				   (values `(return-from :function-body :explicit-return)
+					   t))
+				     
+				  (t form)))))
+	       (second suite))
+     (return-from :function-body :implicit-return))))
+
+
+
+(defun rewrite-generator-expr-ast (ast)
+  ;; rewrite:  (x*y for x in bar if y)
+  ;; into:     def f(src):  for x in src:  if y:  yield x*y
+  ;;           f(bar)
+  ;; values: (FUNCDEF ...)  bar
+  (assert (eq (car ast) 'generator-expr))
+  (destructuring-bind (item for-in/if-clauses) (cdr ast)
+
+    (let ((first-for (pop for-in/if-clauses))
+	  (first-source '#:first-source))
+      
+      (assert (eq (car first-for) 'for-in))
+      
+      (let ((stuff (loop with res = `(yield-stmt ,item)
+		       for clause in (reverse for-in/if-clauses)
+		       do (setf res
+			    (ecase (car clause)
+			      (for-in `(for-in-stmt
+					,(second clause) ,(third clause) ,res nil))
+			      (if     `(if-stmt ((,(second clause) ,res)) nil))))
+		       finally (return res))))
+	
+	`(call-expr 
+	  (funcdef-stmt nil (identifier-expr :generator-expr-helper-func)
+			(((identifier-expr ,first-source)) nil nil nil)
+			(suite-stmt
+			 ((for-in-stmt ,(second first-for) (identifier-expr ,first-source)
+				       ,stuff nil))))
+	  
+	  ((,(third first-for)) nil nil nil))))))
+
+(defun apply-splits (form)
+  (cond ((atom form)
+	 (values form))
+	
+	((eq (car form) :split)
+	 (values-list (loop for elm in (cdr form)
+			  append (multiple-value-list (apply-splits elm)))))
+	
+	(t (loop for elm in form
+	       append (multiple-value-list (apply-splits elm))))))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -1214,39 +1569,6 @@ Returns the new AST."
 	;; more?
 	)
      ,@body))
-
-(defun builtin-name-p (x)
-  (or (find-symbol (string x) (load-time-value (find-package :python-builtin-functions)))
-      (find-symbol (string x) (load-time-value (find-package :python-builtin-types)))))
-
-(defun builtin-name-value (x)
-  (let ((sym (builtin-name-p x)))
-    (assert sym)
-    (let ((pkg (symbol-package sym)))
-      (cond ((eq pkg (load-time-value (find-package :python-builtin-functions)))
-	     (symbol-function sym))
-	    ((eq pkg (load-time-value (find-package :python-builtin-types)))
-	     (symbol-value sym))))))
-
-#+(or)
-(defun make-module (&rest args)
-  :make-module-result)
-
-
-
-(defun testw ()
-
-  ;; 'len' is a shadowed built-in. Before the first assignment, and
-  ;; after deleting it, that variable has its built-in value.
-  (let* ((ast (parse-python-string "def f(): return 42"))
-	 (me (macroexpand ast)))
-    (prin1 me)
-    (let ((f (compile nil `(lambda () ,ast))))
-      (format t "f: ~S~%" f)
-      ;;(format t "funcall result: ~S" (funcall f))
-      nil)))
-
-;; XXX: accept ; as delimiter of statements in grammar
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -1287,7 +1609,6 @@ Returns the new AST."
 #+(or)
 (compile nil
 	 (lambda ()
-	   (declare (optimize (speed 3) (safety 1) (debug 0)))
 	   #.(parse-python-string "
 def f():
   print 3, 4

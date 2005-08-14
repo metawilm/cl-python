@@ -25,7 +25,7 @@
 
 
 (defpackage :python-builtin-functions
-  (:nicknames :pyb)
+  (:nicknames :pybf)
   (:use )
   (:export 
    :__import__ :abs :apply :callable :chr :cmp :coerce :compile
@@ -37,7 +37,7 @@
 
 
 (defpackage :python-builtin-types
-  (:nicknames :pyt)
+  (:nicknames :pybt)
   (:use )
   (:export
    :basestring :bool :complex :dict :enumerate :float :int :list :long
@@ -47,3 +47,10 @@
    ;; BUILTIN-TYPES.CL adds the names of the exceptions classes to the
    ;; exported symbols.
    ))
+
+(defpackage :python-builtin-values
+  (:nicknames :pybv)
+  (:use )
+  (:export
+   :None :Ellipsis :True :False :NotImplemented))
+
