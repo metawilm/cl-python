@@ -12,8 +12,7 @@
 		      "pyprint"
 		      "walk"
 		      "repl"
-		      (:serial "builtin-classes" "exceptions" "builtin-funcs" "builtin-types"
-			       "compiler")))
+		      (:serial "builtin-classes" "exceptions" "builtins" "compiler")))
   
   (:definitions "walk" "compiler") ;; COMPILER uses code walk macro
   (:definitions "parser" "lexer") ;; lexer uses parser terminal-code macro

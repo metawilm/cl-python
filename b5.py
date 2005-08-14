@@ -1,25 +1,15 @@
-import clpy
-
 # Test existence and performance of builtins that aren't used elsewhere
 
 show = True
 
 def check(a, b):
-    print "begin check", a, b
-    #clpy(format t "lisp: a: ~A  b: ~A" (namespace-lookup *scope* 'a) (namespace-lookup *scope* 'b))
-    
     if __debug__:
         if show:
-            print "test: ", `a`, "==", `b` ## WB
-    print " --"
+            print `a`, "==", `b`
     if not a == b:
-        print "== failed" ## WB
-        clpy.craise( AssertionError("%.30r != %.30r" % (a, b)) )
-    else:
-      print "== ok", a, b
+        raise AssertionError("%.30r != %.30r" % (a, b))
 
 def exception(exc, f, *args):
-    #print "WWW exception", exc, f, args ## wb
     try:
         f(*args)
     except exc:
@@ -27,8 +17,8 @@ def exception(exc, f, *args):
             if show:
                 print "%s%r raised %s" % (f.__name__, args, exc.__name__)
     else:
-        clpy.craise( AssertionError("%s not raised by %s%r" %
-	       (exc.__name__, f.__name__, args)))
+        raise AssertionError("%s not raised by %s%r",
+                             exc.__name__, f.__name__, args)
 
 def check_functions(i=0, j=0):
     check(abs(42*i), 42*j)
@@ -42,7 +32,6 @@ def check_functions(i=0, j=0):
     check(bool(i-j), False)
     check(bool([i, j]), True)
     check(bool([i, j][i:j]), False)
-
     check(bool({i: j}), True)
     check(bool({}), False)
 
@@ -64,18 +53,16 @@ def check_functions(i=0, j=0):
 
     check(hash(42), hash(42L))
     check(hash(42), hash(42.0))
-
     check(hash(42+0j), hash(42.0))
     check(hash("abc"), hash(u"abc"))
 
     check(hex(42).lower(), "0x2a")
-    ## check(hex(42L).lower(), "0x2al") # int/long uni -WB
+    check(hex(42L).lower(), "0x2al")
 
     check(int("42"), 42)
     check(int("12345678910"), 12345678910)
     check(int("42", 0), 42)
     check(int("042", 0), 34)
-
     check(int("0x42", 0), 66)
     check(int("42", 8), 34)
     check(int("42", 16), 66)
@@ -93,10 +80,10 @@ def check_functions(i=0, j=0):
     check(long("42", 16), 66)
 
     check(isinstance(42, int), True)
-    ## check(isinstance(42, long), False) # int/long unification - WB
-    ## check(isinstance(42L, int), False) # WB
+    check(isinstance(42, long), False)
+    check(isinstance(42L, int), False)
     check(isinstance(42L, long), True)
-    ## check(isinstance(12345678910, int), False)
+    check(isinstance(12345678910, int), False)
     check(isinstance(12345678910, long), True)
     check(isinstance(3.14, int), False)
     check(isinstance(3.14, float), True)
@@ -144,7 +131,7 @@ def check_functions(i=0, j=0):
         raise AssertionError("objects not unique")
 
     check(oct(42), '052')
-    ## check(oct(42L), '052L') # WB: int/long unification
+    check(oct(42L), '052L')
 
     check(ord("a"), 97)
     check(ord(u"a"), 97)
@@ -157,40 +144,36 @@ def check_functions(i=0, j=0):
     check(reduce(lambda a, b: a+b, ("a", "b", "c", "d", "e")), "abcde")
 
     check(repr(42), "42")
-    ## check(repr(42L), "42L") # WB int/long unification
-    check(repr(3.5), "3.5") # 3.5d0
-    check(repr(4.5j), "4.5j") # 4.5d0j
+    check(repr(42L), "42L")
+    check(repr(3.5), "3.5")
+    check(repr(4.5j), "4.5j")
     check(repr(4j+3), "(3+4j)")
     check(repr(4j-3), "(-3+4j)")
     check(repr(-4j), "-4j")
-    ## check(repr(3.5-0j), "(3.5+0j)")  # WB: Lisp normalization at work...
-
+    check(repr(3.5-0j), "(3.5+0j)")
     check(repr("abc"), "'abc'")
     check(repr("abc\012"), "'abc\\n'")
-    ## check(repr(u"abc"), "u'abc'") # CLPython: only string prefix 'u' when it's really unicode string
-
+    check(repr(u"abc"), "u'abc'")
     check(repr(u"abc\u1234"), "u'abc\u1234'")
     check(repr(range(5)), "[0, 1, 2, 3, 4]")
     check(repr(('a', 'b', 'c')), "('a', 'b', 'c')")
-
     check(repr({1: 42}), "{1: 42}")
 
     for x in 42, 42L, 3.5, 4.5j, 4j+3, "abc", range(3), (1, 2, 'c'), {}:
-        check(repr(x), `x`) # 3.5d0
+        check(repr(x), `x`)
 
     check(round(3.14), 3.0)
     check(round(3.14, 1), 3.1)
     check(round(31.4, -1), 30.0)
+
     check(str(42), "42")
     check(str(42L), "42")
-    ## check(str(3.5), "3.5") # 3.5d0
-
-    ## check(str(4.5j), "4.5j") # 4.5d0j
+    check(str(3.5), "3.5")
+    check(str(4.5j), "4.5j")
     check(str(4j+3), "(3+4j)")
     check(str(4j-3), "(-3+4j)")
     check(str(-4j), "-4j")
-    ## check(str(3.5-0j), "(3.5+0j)") # Lisp normalization
-
+    check(str(3.5-0j), "(3.5+0j)")
     check(str("abc"), "abc")
     check(str(range(5)), "[0, 1, 2, 3, 4]")
     check(str(('a', 'b', 'c')), "('a', 'b', 'c')")
@@ -208,16 +191,15 @@ def check_functions(i=0, j=0):
     check(type(42), int)
     check(type(42L), long)
     check(type(3.14), float)
-    ## check(type(0j), complex) # Lisp normalization
+    check(type(0j), complex)
     check(type(''), str)
-    ## check(type(u''), unicode) 
+    check(type(u''), unicode)
     check(type(()), tuple)
     check(type(range(10)), list)
     check(type({}), dict)
     check(type(type), type)
     check(type(object), type)
     check(type(lambda: None), type(check_functions))
-
     class C(object):
         pass
     class MC(type):
@@ -230,7 +212,7 @@ def check_functions(i=0, j=0):
     check(type(D), MC)
     check(type(E), MC)
 
-    check(unicode("abc"), u"abc") # unicode normalization
+    check(unicode("abc"), u"abc")
     check("abc".decode(), u"abc")
     check(unicode("abc", "ASCII"), u"abc")
     check("abc".decode("646"), u"abc")
@@ -242,7 +224,6 @@ def check_functions(i=0, j=0):
     exception(UnicodeError, "abc\xff".decode)
     exception(UnicodeError, unicode, "abc\xff", "us_ascii")
     exception(UnicodeError, "abc\xff".decode, "Ascii")
-    
     exception(UnicodeError, unicode, "abc\xff", "UTF-8")
     exception(UnicodeError, "abc\xff".decode, "utf8")
     check(u"abc\xff".encode("utf-8"), "abc\xc3\xbf")
@@ -254,8 +235,7 @@ def check_functions(i=0, j=0):
 
     check(zip("abc", "def"), [('a', 'd'), ('b', 'e'), ('c', 'f')])
     check(zip("abc", "def", "ghi"),
-      [('a', 'd', 'g'), ('b', 'e', 'h'), ('c', 'f', 'i')])
-
+          [('a', 'd', 'g'), ('b', 'e', 'h'), ('c', 'f', 'i')])
 
 def check_descriptors(i, j):
 
@@ -274,8 +254,6 @@ def check_descriptors(i, j):
             if args:
                 return None
             return super(C, cls).__new__(cls)
-
-        __new__ = staticmethod(__new__) ## WB
 
         def __init__(self):
             self.__dict__["foo"] = 42
@@ -311,7 +289,6 @@ def check_descriptors(i, j):
         fs = staticmethod(f)
 
         def __repr__(self):
-            return super(C, self).__repr__() ## wb
             s = super(C, self).__repr__()
             s = s.replace("<" + __name__ + ".", "<")
             i = s.index(" at ")
@@ -387,12 +364,10 @@ def main():
     global show
     show = True
     for i in range(500):
-        check_functions(j=long(i*1000000), i=i*1000000) # WB
+        check_functions(j=long(i*1000000), i=i*1000000)
         check_descriptors(j=long(i*1000000), i=i*1000000)
         show = False
     print "OK."
-
-#main() # WB
 
 if __name__ == '__main__':
     main()

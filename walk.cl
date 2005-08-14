@@ -186,28 +186,58 @@ VALUE and TARGET context."
 		 ,(when else-suite (funcall f else-suite)))))
       
     (import-stmt
+     ;; XXX http://www.python.org/doc/essays/packages.html
      (warn "walking import-stmt")
      (assert (not (or value target)))
-     `(import-stmt ,(loop for clause in (second form) collect
-			  (ecase (first clause)
-			    (as `(as ,(second clause)
-				     ,(funcall f (third clause)
-					       :target t)))
-			    (not-as  ;; TODO: attributeref
-			     (error
-			      "import walk not-as: todo"))))))
+     (values form t)
+    
+     #+(or) ;; todo
+     `(import-stmt ,(loop for (as/not-as src-item &optional here-name) in (second form)
+			do (ecase as/not-as
+			     (as (assert here-name)
+				 (ecase (first src-item)
+				   (attributeref-expr  :todo)
+				   (identifier-expr    (funcall src-item :value t)))
+				 
+				 (funcall f (third clause)
+					  :target t)))
+			   (not-as  ;; TODO: attributeref
+			    (error
+			     "import walk not-as: todo")))))
       
     (import-from-stmt
      (warn "walking import-from-stmt")
      (assert (not (or value target)))
-     ;; Because of the special machinery behind `import',
-     ;; don't treat the source package name as value. XXX
-     `(import-from-stmt ,(second form)
-			,(loop for (as src dest) in (third form)
-			     do (assert (eq as 'as))
-				(assert (eq (first dest) 'identifier))
-			     collect `(as ,src ,(funcall f dest :target t)))))
-      
+     (values form t)
+     
+     #+(or) ;; todo
+     (destructuring-bind (source items) (cdr form)
+       (assert (member (car source) '(identifier-expr attributeref-expr)))
+       
+       `(import-from-stmt ,(ecase (car source)
+			     (identifier-expr   (funcall f source :value t))
+			     (attributeref-expr (progn 
+						  ;; let's recurse only on the 'x' in
+						  ;; 'from x.y.z import ...'
+						  (funcall (first (second source)) :value t)
+						  source)))
+			  ,(if (eq items '*)
+			       items
+			     (loop for x in items
+				 do (ecase (car x)
+				      (as     (destructuring-bind (src-name here-name) (cdr x)
+						;; let's recurse only on the here-name
+						(declare (ignore src-name))
+						(funcall here-name :target t)))
+				      
+				      (not-as (let ((item (second x)))
+						(assert (eq (car item) 'identifier-expr))
+						;; from .. import x -> x becomes bound
+						(funcall f item :target t))))
+				  
+				    ;; for now don't use returns from funcall
+				 finally (return items))))))
+    
     (lambda-expr
      (warn "walking lambda-expr")
      (assert (not target))
@@ -237,8 +267,8 @@ VALUE and TARGET context."
 		   ,(funcall f (second for/if) :target t)
 		   ,(funcall f (third  for/if) :value t)))
 		(if
-		 `(if
-		   ,(funcall (second for/if) :value t)))))))
+		    `(if
+			 ,(funcall (second for/if) :value t)))))))
     
     (module-stmt
      (assert (not (or value target)))

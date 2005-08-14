@@ -45,11 +45,13 @@
 	  (gethash '___ dyn-globals) *the-none*)
     
     (labels ((print-cmds-1 (cmds)
-	       (loop for (cmd expl) in cmds do (format t "  ~13A: ~A~%" cmd expl)))
+	       (loop for (cmd expl) in cmds do (format t "  ~19A: ~A~%" cmd expl)))
 	     (print-cmds ()
 	       (format t "~%In the Python interpreter:~%")
-	       (print-cmds-1 '((":help" "print (this) help")
-			       (":q" "quit")))
+	       (print-cmds-1 '((":help"             "print (this) help")
+			       (":q"                "quit")
+			       ("<command>"         "execute Python or Lisp <command>")
+			       ("<space><command>"  "execute Lisp <command>")))
 	       (format t "~%In the Lisp debugger:~%")
 	       (print-cmds-1 '((":ptl" "back to Python top level")
 			       (":rt"  "retry the last, failed Python command")))
@@ -87,12 +89,10 @@
 		       (loop
 			 (with-simple-restart
 			     (:continue "Retry printing the object.")
-			   (let ((str-val (py-str val)))
-			     (if str-val
-				 (progn (write-string (py-val->string str-val))
-					(write-char #\Newline)
-					(remember-value val))
-			       (warn "(py-str ~S) = nil" val))
+			   (let ((str-val (py-str-string val)))
+			     (write-string (py-val->string str-val))
+			     (write-char #\Newline)
+			     (remember-value val)
 			     (return-from :repr))))))))))
     
       (loop
@@ -135,21 +135,28 @@
 				(block :try-parse
 
 				  ;; try to parse as Python code first
-				  (let ((ast (ignore-errors (parse-python-string total))))
-				    (when ast
-				      (destructuring-bind (module-stmt (suite-stmt items)) ast
-					(assert (eq module-stmt 'module-stmt))
-					(assert (eq suite-stmt 'suite-stmt))
-					(when (and (= (length items) 1)
-						   (or (not (listp (car items)))
-						       (not 
-							(member (caar items)
-								'(try-except-stmt try-finally-stmt
-								  for-in-stmt funcdef-stmt
-								  classdef-stmt if-stmt while-stmt)))))
-					  (eval-print-ast ast)
-					  (setf acc nil)))
-				      (return-from :try-parse)))
+				  ;;  but when first char is a space, it is Lisp code
+				  (unless (and (> (length total) 0)
+					       (char= (char total 0) #\Space))
+				    (let ((ast (ignore-errors (parse-python-string total))))
+				      (when ast
+					(destructuring-bind (module-stmt (suite-stmt items)) ast
+					  (assert (eq module-stmt 'module-stmt))
+					  (assert (eq suite-stmt 'suite-stmt))
+					  (when (and (= (length items) 1)
+						     (or (not (listp (car items)))
+							 (not 
+							  (member (caar items)
+								  '(classdef-stmt
+								    for-in-stmt
+								    funcdef-stmt
+								    if-stmt
+								    try-except-stmt
+								    try-finally-stmt
+								    while-stmt)))))
+					    (eval-print-ast ast)
+					    (setf acc nil)))
+					(return-from :try-parse))))
 				
 				  ;; try to parse as Lisp code second
 				  (let ((lisp-form (read-from-string total nil nil)))

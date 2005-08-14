@@ -1,12 +1,66 @@
 (in-package :python)
 
-;;; Built-in functions
+;;; Built-in types, functions and values.
 
-;; The built-in functions below are in the same order as listed at
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+;;; 1) Built-in types
+
+(eval-when (:compile-toplevel :load-toplevel :execute)
+
+;; The corresponding Python classes are defined in BUILTIN-CLASSES.CL
+  
+(defmacro def-bi-types ()
+  (let ((pbt-pkg (find-package :python-builtin-types)))
+    `(progn ,@(loop for (name py-cls) in
+		    `((basestring   py-string       )
+		      (bool         py-bool         )
+		      (classmethod  py-class-method )
+		      (complex      py-complex      )
+		      (dict         py-dict         )
+		      (enumerate    py-enumerate    )
+		      (float        py-float        )
+		      (int          py-int          )
+		      (list         py-list         )
+		      (long         py-int          )
+		      (object       py-object       )
+		      (property     py-property     )
+		      (slice        py-slice        )
+		      (staticmethod py-static-method)
+		      (str          py-string       )
+		      (super        py-super        )
+		      (tuple        py-tuple        )
+		      (type         py-type         )
+		      (unicode      py-string       )
+		      (xrange       py-xrange       ))
+		  for sym = (intern (string name) pbt-pkg)
+		  collect `(defconstant ,sym (find-class ',py-cls))
+		  collect `(export ',sym ,pbt-pkg)))))
+
+(def-bi-types)
+		       
+
+;; The Python exceptions are defined in EXCEPTIONS.CL
+
+(defmacro def-bi-excs ()
+  (let ((pbt-pkg (find-package :python-builtin-types)))
+    `(progn ,@(loop for c in *exception-classes*
+		  for sym = (intern (string (class-name c)) pbt-pkg)
+		  collect `(defconstant ,sym ,c)
+		  collect `(export ',sym ,pbt-pkg)))))
+(def-bi-excs)
+) ;; eval-when
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+;;; 2) Built-in functions
+
+;; These functions below are in the same order as listed at
 ;; http://www.python.org/doc/current/lib/built-in-funcs.html#built-in-funcs
 ;; 
-;; These function will always return a Python value.
-
+;; These function will always return a Python value (so never e.g. a
+;; Lisp generalized boolean).
 
 (defun pybf:__import__ (name &optional globals locals fromlist)
   "This function is invoked by the import statement."
@@ -454,8 +508,11 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
   (py-** x y z))
 
 (defun pybf:range (x &optional y z)
-  (declare (ignore x y z))
-  (error "todo: range"))
+  (when (or y z)
+    (error "todo: range with more than 1 arg"))
+  (unless (excl:fixnump x)
+    (py-raise 'ValueError "range(x): x must be integer (fixnum) (got: ~A)" x))
+  (make-py-list-from-list (loop for i from 0 below x collect i)))
 
 (defun pybf:raw_input (&optional prompt)
   "Pops up a GUI entry window to type text; returns entered string"
@@ -600,3 +657,14 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
 		      (setf (aref current-tuple-values iter-i) val)
 		    (return-from pybf:zip (make-py-list res)))))
 	 (vector-push-extend (make-tuple (copy-seq current-tuple-values)) res)))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+;;; 3) Built-in values
+
+(defconstant pybv:None           *the-none*           )
+(defconstant pybv:Ellipsis       *the-ellipsis*       )
+(defconstant pybv:True           *the-true*           )
+(defconstant pybv:False          *the-false*          )
+(defconstant pybv:NotImplemented *the-notimplemented* )
+

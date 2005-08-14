@@ -47,6 +47,11 @@
 
 (defvar *__debug__* t)
 
+;; Modules are kept in a dictionary `sys.modules', from string to
+;; module object. For now, we keep a symbol->mod ht.
+
+(defvar *py-modules* (make-hash-table :test #'eq))
+    
 
 ;; Compiler debugging and optimization options.
 ;; >> not used yet
@@ -83,6 +88,18 @@
 	       (ecase (car tg)
 		 
 		 ((attributeref-expr subscription-expr)  `(setf ,tg ,val))
+		 
+		 ((list-expr tuple-expr)
+		  (let* ((targets (second tg))
+			 (num-targets (length targets)))
+		    ;; for now KISS
+		    `(let ((val-list (py-iterate->lisp-list ,val)))
+		       (unless (= (length val-list) ,num-targets)
+			 (py-raise 'ValueError
+				   "Assignment to several vars: wanted ~A values, but got ~A"
+				   ,num-targets (length val-list)))
+		       ,@(loop for target in targets
+			     collect `(assign-stmt (pop val-list) (,target))))))
 		 
 		 (identifier-expr
 		  (let* ((name (second tg)))
@@ -246,7 +263,7 @@
 			 ,@(when *-arg  `(:* ,*-arg))
 			 ,@(when **-arg `(:** ,**-arg))))))))
 
-(defmacro classdef-stmt (name inheritance suite)
+(defmacro classdef-stmt (name inheritance suite &environment e)
   ;; todo: define .locals. containing class vars
   (assert (eq (car name) 'identifier-expr))
   (assert (eq (car inheritance) 'tuple-expr))
@@ -260,7 +277,16 @@
        
        (let ((,cls (make-py-class :name ',(second name)
 				  :namespace +cls-namespace+
-				  :supers (list ,@(second inheritance)))))
+				  :supers (list ,@(second inheritance))
+				  :cls-metaclass (gethash '__metaclass__ +cls-namespace+)
+				  :mod-metaclass
+				  ,(let ((ix (position '__metaclass__
+						       (get-pydecl :mod-globals-names e))))
+				     (if ix
+					 `(let ((val (svref +mod-globals-values+ ,ix)))
+					    (unless (eq val :unbound)
+					      val))
+				       `(gethash '__metaclass__ +mod-dyn-globals+))))))
 	 (assign-stmt ,cls (,name))))))
 
 (defmacro comparison-expr (cmp left right)
@@ -457,9 +483,8 @@
 						   (when *-arg (list *-arg))
 						   (when **-arg (list *-arg))
 						   func-locals))
-		 
 		 (func-lambda
-		  `(py-arg-function
+		 `(py-arg-function
 		    ,fname
 		    (,lambda-pos-args ,key-args ,*-arg ,**-arg)
 		    
@@ -470,7 +495,7 @@
 		      
 		      (block :function-body
 			
-			(flet ((.locals. ()  ;; A lambda (from a lamda--expr) has locals() too!
+			(flet ((.locals. ()  ;; lambdas and gen-exprs have 'locals()' too
 				 (make-py-dict
 				  (delete :unbound
 					  (mapcar #'cons ',all-locals-and-arg-names
@@ -503,8 +528,27 @@
 				    do (setf res `(call-expr ,deco ((,res) () nil nil)))
 				    finally (return res))))
 		  
-		  `(let ((,func (make-py-function ',fname func-lambda)))
+		  `(let ((,func (make-py-function ',fname ,func-lambda)))
+		     
 		     (assign-stmt ,art-deco ((identifier-expr ,fname)))
+		     
+		     ;;;;;;;;;
+		     ;; 
+		     ;; Ugly special-casing:
+		     ;;  class C:
+		     ;;   def __new__(..)  <-- the __new__ method inside a class
+		     ;;                        automatically becomes a 'static-method'
+		     ;; as by:  __new__ = staticmethod(__new__)
+		     ;; 
+		     ,@(when (and (eq (get-pydecl :context e) :class)
+				  (eq fname '__new__))
+			 
+			 `((assign-stmt (call-expr (identifier-expr staticmethod)
+						   (((identifier-expr ,fname)) nil nil nil))
+					((identifier-expr ,fname)))))
+		     ;;
+		     ;;;;;;;;;
+		     
 		     (identifier-expr ,fname)))))))))))
 
 
@@ -568,9 +612,29 @@
 					+mod-dyn-globals+)
 			  `(warn "unsupported import: ~A" ',x)))))
   
-(defmacro import-from-stmt (&rest args)
-  (declare (ignore args))
-  (break "todo: import-from-stmt"))
+(defmacro import-from-stmt (source-name items)
+  (if (eq (car source-name) 'identifier-expr)
+      
+      ;; import names from 1 module: "from x import ..."
+      `(let ((module ,source-name))
+	 ,@(loop for item in items
+	       collect (ecase (car item)
+			 (not-as  ;; "from mod import name"
+			  (let ((name (second item)))
+			    (assert (eq (car name) 'identifier-expr))
+			    ;; name = mod.name
+			    `(assign-stmt (attributeref-expr module ,name)
+					  (,name))))
+			 (as ;; "from mod import name-in-mod as name-here"
+			  (destructuring-bind 
+			      (name-in-mod name-here) (cdr item)
+			    (assert (eq (car name-in-mod) 'identifier-expr))
+			    (assert (eq (car name-here)   'identifier-expr))
+			    ;; name-here = mod.name-in-mod
+			    `(assign-stmt (attributeref-expr module ,name-in-mod)
+					  (,name-here)))))))
+    
+    `(error "TODO: dotted import, like:  from x.y import ...")))
 
 (defmacro lambda-expr (args expr)
   ;; XXX maybe the resulting LAMBDA results in more code than
@@ -635,9 +699,9 @@
 	 ,@body))
        
      ,@(when create-return-mod
-	 `((make-module :globals-names  ,glob-names
-			:globals-values ,glob-values
-			:dyn-globals    ,dyn-glob)))))
+	 `((make-module :globals-names  +mod-globals-names+
+			:globals-values +mod-globals-values+
+			:dyn-globals    +mod-dyn-globals+)))))
 
 
 (defmacro module-stmt (suite) ;; &environment e)
@@ -1306,6 +1370,7 @@
 			  (assign-stmt ,loop-var (,target))
 			  (:split ,(walk suite stack2))
 			  
+			  (go ,continue-tag) ;; prevent warnings
 			  ,continue-tag
 			  (setf ,loop-var (funcall ,generator))
 			  (if ,loop-var (go ,repeat-tag) (go ,end-tag))

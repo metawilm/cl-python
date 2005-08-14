@@ -92,15 +92,89 @@
 
 ;;; dynamic class creation
 
-(defun make-py-class (&key name namespace supers)
+(defun make-py-class (&key name namespace supers cls-metaclass mod-metaclass)
   (assert (symbolp name))
   (assert (listp supers))
   (assert (hash-table-p namespace))
+
+  ;; XXX is this a true restriction?  Custom metaclasses may allow
+  ;; more kinds of `bases' in their __new__(...) ?
   
-  (mop:ensure-class name
-		    :direct-superclasses supers
-		    :metaclass (find-class 'py-user-type)))
-		    
+  ;; either:
+  ;;  1) all supers are subtype of 'py-type   (to create a new metaclass)
+  ;;  2) all supers are subtype of 'py-object (to create new "regular user-level" class)
+  
+  (flet ((of-type-class (s) (typep s 'class))
+	 (subclass-of-py-object-p (s) (subtypep s 'py-object))
+	 (subclass-of-py-type-p   (s) (subtypep s 'py-type)))
+    
+    (unless (every #'of-type-class supers)
+      (py-raise 'TypeError "Not all superclasses are classes (got: ~A)." supers))
+
+    (loop for s in supers
+	unless (or (subclass-of-py-type-p s)
+		   (subclass-of-py-object-p s))
+	do (error "BUG? Superclass ~A is neither sub of 'type nor sub of 'object!" s))
+    
+    (let ((core-supers (remove-if-not (lambda (s) (typep s 'py-core-type)) supers)))
+      (when core-supers
+	(py-raise 'TypeError "Cannot subclass from these classes: ~A" core-supers)))
+    
+    (when (and (some #'subclass-of-py-type-p supers)
+	       (some #'subclass-of-py-object-p supers))
+      (py-raise 'TypeError "Superclasses are at different levels (some metaclass, ~
+                            some regular class) (got: ~A)." supers))
+    
+    (let ((metaclass (or cls-metaclass
+			 (when supers (class-of (car supers)))
+			 mod-metaclass
+			 (find-class 'py-type))))
+
+      (unless (and (typep metaclass 'class)
+		   (subtypep metaclass 'py-type))
+	(py-raise 'TypeError "Not a valid metaclass: ~A" metaclass))
+      
+      (let ((__new__ (recursive-class-dict-lookup metaclass '__new__)))
+	
+	(assert __new__ ()
+	  "recur: no __new__ found for class ~A, yet it is a subclass of PY-TYPE ?!"
+	  metaclass)
+
+	(let ((bound-_new_ (and __new__ 
+				(bind-val __new__ metaclass (py-class-of metaclass)))))
+
+	  (assert bound-_new_ () "bound __new__ failed")
+	  (warn "Calling this __new__ method: ~S" bound-_new_)
+	  
+	  ;; If __new__ is a static method, then bound-_new_ will
+	  ;; be the underlying function.
+	  
+	  (let ((cls (py-call bound-_new_ metaclass name supers namespace)))
+	    
+	    (warn "The __new__ method returned class: ~S" cls)
+	    (assert cls () "__new__ returned NIL: ~A" bound-_new_)
+	    
+	    ;; Call __init__ when the "thing" returned by
+	    ;; <metaclass>.__new__ is of type <metaclass>.
+	    
+	    (if (typep cls metaclass)
+		
+		(let ((__init__ (recursive-class-dict-lookup metaclass '__init__)))
+		  (if __init__
+		      (progn (warn "  __init__ method is: ~A" __init__)
+			     (py-call __init__ cls))
+		    (warn "No __init__ found, for class ~A returned by metaclass ~A"
+			  cls metaclass)))
+	      
+	      (warn "Not calling __init__ method, as class ~A is not instance of metaclass ~A"
+		    cls metaclass))
+	    
+	    cls))))))
+	  
+	  
+	  
+	   
+
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -284,9 +358,19 @@
   ((class :initarg :class :accessor py-method-class))
   (:metaclass py-core-type))
 
+
 (defclass py-static-method (py-method)
   ()
   (:metaclass py-core-type))
+
+(def-py-method py-static-method.__get__ (x inst class)
+  (declare (ignore inst class))
+  (slot-value x 'func))
+
+(def-py-method py-static-method.__repr__ (x)
+  (with-output-to-string (s)
+    (print-unreadable-object (x s :identity t)
+      (format s "the static method ~A" (slot-value x 'func)))))
 
 (defclass py-class-method (py-method)
   ((class :initarg :class))
@@ -298,12 +382,17 @@
 
 (def-py-method py-attribute-method.__get__ (x inst class)
   (declare (ignore class))
-  (py-call (slot-value x 'func) inst))
+  (if inst
+      (py-call (slot-value x 'func) inst)
+    nil))
 
 (def-py-method py-attribute-method.__set__ (x inst class)
-  (declare (ignore class))
-  (error "Attribute ~A of object ~A is read-only (value: ~A)"
-	 x inst (py-call (slot-value x 'func) inst)))
+  (if inst
+      (py-raise 'TypeError
+		"Attribute ~A of object ~A is read-only (value: ~A)"
+		x inst (py-call (slot-value x 'func) inst))
+    (py-raise 'TypeError
+	      "Class ~A has no attribute ~A" class x)))
 
 
 (defclass py-enumerate (py-core-object)
@@ -314,7 +403,7 @@
   ()
   (:metaclass py-core-type))
 
-(defclass py-super (py-core-object)
+(defclass py-super (py-core-object) ;; subclassable?
   ()
   (:metaclass py-core-type))
 
@@ -356,11 +445,20 @@
 
 ;; Object (User object)
 
+(defun bind-val (val x x.class)
+  (let ((get-meth (recursive-class-dict-lookup
+		   (py-class-of val) '__get__)))
+    (if get-meth
+	(py-call get-meth val x x.class)
+      val)))
+
 (def-py-method py-object.__getattribute__ (x attr)
   (let ((class-attr-val   nil)
 	(__getattr__      nil)
 	(x.class          (py-class-of x)))
-
+    
+    #+(or)(break "po.__getattr..__ ~A ~A    cpl=~A" x attr (mop:class-precedence-list x.class))
+    
     (loop for c in (mop:class-precedence-list x.class)
 	until (or (eq c (load-time-value (find-class 'standard-class)))
 		  (eq c (load-time-value (find-class 'py-dict-mixin)))
@@ -385,12 +483,7 @@
 	       (when getattr-meth (setf __getattr__ getattr-meth)))))
 
     (flet ((bind-val (val)
-	     #+(or)(warn "bind-val ~A to ~A" val x)
-	     (let ((get-meth (recursive-class-dict-lookup
-			      (py-class-of val) '__get__)))
-	       (if get-meth
-		   (py-call get-meth val x x.class)
-		 val))))
+	     (bind-val val x x.class)))
 
       ;; Arriving here means: no __getattribute__, but perhaps
       ;; __getattr__ or class-attr-val.
@@ -399,25 +492,34 @@
       ;; `__set__' attribute) has higher priority than an instance
       ;; attribute.
       
-      #+(or)(warn "py-attr: ~A" `(:class-attr-val ,class-attr-val :__getattr__ ,__getattr__))
+      #+(or)(warn "po.__ga__: ~S" `(:class-attr-val ,class-attr-val :__getattr__ ,__getattr__))
 
-      (return-from py-object.__getattribute__
-	(cond ((and class-attr-val (data-descriptor-p class-attr-val))
-	       (bind-val class-attr-val))
+      (when (and class-attr-val (data-descriptor-p class-attr-val))
+	(return-from py-object.__getattribute__
+	  (bind-val class-attr-val)))
+      
+      ;; Try instance dict
+      (when (dict x)
+	(let ((val (dict-get x attr)))
+	  (when val
+	    (return-from py-object.__getattribute__
+
+	      (if (eq x (find-class 'py-type)) ;; XXX check if this is right
+		  (bind-val val)
+		val)))))
+      
+      ;; Fall back to a class attribute that is not a `data descriptor'.
+      (when class-attr-val
+	(return-from py-object.__getattribute__
+	  (bind-val class-attr-val)))
+      
+      ;; Fall back to the __getattr__ hook.
+      (when __getattr__
+	(return-from py-object.__getattribute__
+	  (py-call (bind-val __getattr__) (symbol-name attr))))
 	      
-	      ;; Only now is an instance attribute value relevant.
-	      ((and (dict x) (dict-get x attr)))
-	      
-	      ;; Fall back to a class attribute that is not a `data descriptor'.
-	      (class-attr-val
-	       (bind-val class-attr-val))
-	      
-	      ;; Fall back to the __getattr__ hook.
-	      (__getattr__
-	       (py-call (bind-val __getattr__) (symbol-name attr)))
-	      
-	      ;; Give up.
-	      (t (error "No such attribute: ~A . ~A" x attr)))))))
+      ;; Give up.
+      (error "No such attribute: ~A . ~A" x attr))))
 
 (defmethod recursive-class-dict-lookup ((cls class) attr)
   ;; Look for ATTR in class CLS and all its superclasses.
@@ -432,7 +534,7 @@
 	      ;; this seems not needed, in the finally clause
 	      (let ((obj-attr (dict-get 'py-object attr)))
 		(when obj-attr
-		  (warn "rec van py-object: ~A" attr)
+		  #+(or)(warn "rec van py-object: ~A" attr)
 		  (return obj-attr)))))
 
 
@@ -442,6 +544,30 @@
 
 ;; Type (User object)
 
+(def-py-method py-type.__new__ :static (metacls &optional name supers dict)
+	       (cond ((or name supers dict)
+		      
+		      (let* ((cls-type (if (and (some (lambda (s) (subtypep s 'py-type)) supers)
+						(eq metacls 'py-type)) ;; XXX (subtypep meta pytype)?
+					   :metaclass
+					 :class))
+			     
+			     (c (mop:ensure-class
+				 name 
+				 :direct-superclasses supers
+				 :metaclass (ecase cls-type
+					      (:metaclass (find-class 'py-meta-type))
+					      (:class     metacls)))))
+			(setf (slot-value c 'dict) dict)
+			c))
+		     
+		     (t ;; function type(x) -> <the type of x> 
+		      (py-class-of metacls))))
+
+(def-py-method py-type.__init__ (cls)
+  (declare (ignore cls))
+  nil)
+
 (def-py-method py-type.__mro__ :attribute (x)
 	       (mop:class-precedence-list x))
 
@@ -449,7 +575,6 @@
   (with-output-to-string (s)
     (print-unreadable-object (x s :identity t)
       (format s "python-class ~A" (class-name x)))))
-  
 
 ;; XXX should default to `object'
 
@@ -473,6 +598,42 @@
 	       (declare (ignore args))
 	       nil)
 
+(def-py-method py-module.__repr__ (x^)
+  (with-output-to-string (s)
+    (print-unreadable-object (x s :identity t)
+      (format s "module ~A" (slot-value x 'name)))))
+
+(defun py-string-val->symbol (attr)
+  (if (symbolp attr)
+      attr
+    
+    (let ((attr.string (if (stringp attr)
+			   attr
+			 (py-val->string attr))))
+      
+      (or (find-symbol attr.string #.*package*)
+	  (intern attr.string #.*package*)))))
+      
+(def-py-method py-module.__getattribute__ (x^ attr)
+  (let ((attr.sym (py-string-val->symbol attr)))
+    
+    (with-slots (name globals-names globals-values dyn-globals) x
+      
+      (loop for i from 0
+	  for n across globals-names
+	  when (eq n attr.sym) 
+	  do (let ((val (svref globals-values i)))
+	       (if (eq val :unbound)
+		   (py-raise 'AttributeError "Module ~A has no attribute ~A" x attr.sym)
+		 (return-from py-module.__getattribute__ val))))
+      
+      (let ((val (gethash dyn-globals attr.sym)))
+	(when (and val
+		   (not (eq val :unbound)))
+	  (return-from py-module.__getattribute__ val)))
+      
+      (py-raise 'AttributeError "Module ~A has no attribute ~A" x attr.sym))))
+			     
 (defun py-import (mod-name mod-globals-names mod-globals-values mod-dyn-globals-ht)
   (let* ((file-ast (parse-python-file (format nil "~A.py" mod-name)))
 	 (mod-func (compile nil `(lambda () ,file-ast)))
@@ -607,6 +768,24 @@
 	     collect `(setf (gethash ,k ,dict) ,v))
        ,dict)))
 
+(def-py-method py-dict.__str__ (x^)
+  (with-output-to-string (s)
+    (print-unreadable-object (x s :identity t)
+      (format s "dict with ~A items" (hash-table-count x)))))
+
+(def-py-method py-dict.__repr__ (x^)
+  (with-output-to-string (s)
+    (write-char #\{ s)
+    (loop with c = (hash-table-count x)
+	for key being the hash-key in x
+	using (hash-value val)
+	for i from 1
+	do (write-string (py-repr-string key) s)
+	   (write-char #\: s)
+	   (write-string (py-repr-string val) s)
+	   (unless (= i c)
+	     (write-string ", " s)))
+    (write-char #\} s)))
 
 ;; List (Lisp object: adjustable array)
 
@@ -662,7 +841,7 @@
 
 (defun make-py-list-from-list (list)
   (let* ((len (length list))
-	 (vec (make-array len :adjustable t :fill-pointer)))
+	 (vec (make-array len :adjustable t :fill-pointer t)))
     (loop for x in list and i from 0
 	do (setf (aref vec i) x))
     vec))
@@ -727,6 +906,7 @@
     (:method ((x string))  (load-time-value (find-class 'py-string )))
     (:method ((x vector))  (load-time-value (find-class 'py-list   )))
     (:method ((x list))    (load-time-value (find-class 'py-tuple  )))
+    (:method ((x hash-table)) (load-time-value (find-class 'py-dict)))
     
     (:method ((x function))    (load-time-value (find-class 'py-lisp-function)))
     (:method ((x py-function)) (load-time-value (find-class 'py-function)))

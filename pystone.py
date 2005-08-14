@@ -34,7 +34,16 @@ Version History:
 
 LOOPS = 500
 
-from time import clock
+# from time import clock
+
+clock_i = 0
+
+def clock():
+  print "(clock)"
+  global clock_i
+  clock_i += 1
+  return clock_i
+
 
 __version__ = "1.1"
 
@@ -59,9 +68,10 @@ FALSE = 0
 
 def main():
     benchtime, stones = pystones()
-    print "Pystone(%s) time for %d passes = %g" % \
-          (__version__, LOOPS, benchtime)
-    print "This machine benchmarks at %g pystones/second" % stones
+    #print "Pystone(%s) time for %d passes = %g" % \
+    #      (__version__, LOOPS, benchtime)
+    #print "This machine benchmarks at %g pystones/second" % stones
+    print "finished"
 
 
 def pystones(loops=LOOPS):

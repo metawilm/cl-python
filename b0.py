@@ -1,8 +1,5 @@
 def check(a, b):
-    print "checking %s" % a
     if not a == b:
-        #clpy (break "assertionerror ~%~A ~%---~%~A"
-        #       (namespace-lookup *scope* 'a) (namespace-lookup *scope* 'b)) # WB
         raise AssertionError("%.30r != %.30r" % (a, b))
 
 def proto___new__(cls, name):
@@ -18,16 +15,13 @@ def proto___repr__(self):
 
 class MetaToken(type):
     def __new__(metacls, name, bases, vars):
-        # print "MetaToken.__new__( %s, %s, %s, %s)" % (metacls, name, bases, vars) ## WB
         cls = type.__new__(metacls, name, bases, vars)
-        # print "cls = %s" % cls ## WB
         cls.__new__ = staticmethod(proto___new__)
         cls.__repr__ = cls.__str__ = proto___repr__
         cls.next = 0
         cls.name2num = {}
         cls.num2name = {}
         return cls
-    __new__ = staticmethod(__new__) ## WB
 
 Token = MetaToken('Token', (int,), {})
 
@@ -134,13 +128,13 @@ class Scanner(object):
         yield EOF, ''
 
 class Link(object):
-    ## __slots__ = ['value', 'next'] # WB
+    __slots__ = ['value', 'next']
     def __init__(self):
         self.value = None
         self.next = None
 
 class Clone(object):
-    ## __slots__ = ['link', 'itnext'] # WB
+    __slots__ = ['link', 'itnext']
     def __init__(self, it, link=None):
         if isinstance(it, Clone):
             self.itnext = it.itnext
@@ -162,7 +156,6 @@ class Clone(object):
 
 def getcFromString(s):
     for c in s:
-        # print "getcFromString returning: ", c # WB
         yield c
     while True:
         yield ''
@@ -286,30 +279,13 @@ class Generator(Function):
     def __call__(self, *args):
         check(len(args), len(self.args))
         locals = self.makeLocals(zip(self.args, args))
-        # try:
-        #    for value in geneval(self.body, self.globals, locals):
-        #        yield value
-        # except DoReturn, exc:
-        #    if exc.value is not None:
-        #        raise RuntimeError("'return' with argument in generator")
-        #    return
-        ## rewritten as CLPython can't handle `yield' inside `try/except' and `try/finally' yet -WB
         try:
-          i = iter( geneval(self.body, self.globals, locals) )
+            for value in geneval(self.body, self.globals, locals):
+                yield value
         except DoReturn, exc:
-          if exc.value is not None:
-             raise RuntimeError("'return' with argument in generator")
-          return
-        while 1:
-          try:
-            value = i.next()
-          except StopIteration:
-            return
-          except DoReturn, exc:
             if exc.value is not None:
-               raise RuntimeError("'return' with argument in generator")
+                raise RuntimeError("'return' with argument in generator")
             return
-          yield value
 
 class Node(object):
     def isgenerator(self):
@@ -318,7 +294,6 @@ class Node(object):
         self.eval(globals, locals)
         if False:
             yield None
-
 class Define(Node):
     def __init__(self, name, args, body):
         self.name = name
@@ -333,7 +308,6 @@ class Define(Node):
         else:
             obj = Function(self.name, self.args, self.body, globals)
         globals[self.name] = obj
-
 class For(Node):
     def __init__(self, var, seq, body):
         self.var = var
@@ -352,25 +326,11 @@ class For(Node):
     def geneval(self, globals, locals):
         for value in self.seq.eval(globals, locals):
             self.var.assign(value, globals, locals)
-            #try:
-            #    for v in geneval(self.body, globals, locals):
-            #        yield v
-            #except DoBreak:
-            #    break
-            ## rewritten -WB
             try:
-              i = iter( geneval(self.body, globals, locals) )
+                for v in geneval(self.body, globals, locals):
+                    yield v
             except DoBreak:
-              break
-            while 1:
-              try:
-                 v = i.next()
-              except StopIteration:
-                 break
-              except DoBreak:
-                 return
-              yield v     
-
+                break
 class While(Node):
     def __init__(self, test, body):
         self.test = test
@@ -387,25 +347,11 @@ class While(Node):
                 break
     def geneval(self, globals, locals):
         while self.test.eval(globals, locals):
-           # try:
-           #     for value in geneval(self.body, globals, locals):
-           #         yield value
-           # except DoBreak:
-           #     break
-           ## rewritten - WB
-           try:
-             i = iter( geneval(self.body, globals, locals) )
-           except DoBreak:
-             break
-           while 1:
-             try:
-               value = i.next()
-             except StopIteration:
-               break
-             except DoBreak:
-               return
-             yield value
-
+            try:
+                for value in geneval(self.body, globals, locals):
+                    yield value
+            except DoBreak:
+                break
 class If(Node):
     def __init__(self, test, body, elsebody=None):
         self.test = test
@@ -607,11 +553,10 @@ class Parser(object):
         self.nexttoken()
     def nexttoken(self):
         self.token, self.value = rv = self.scanner.next()
-        print rv ## WB
+        ##print rv
         return rv
     def expect(self, token, value=None):
         if self.token != token:
-            print "Parser.expect wrong: ", self.token, token
             raise SyntaxError
         if value is not None and self.value != value:
             raise SyntaxError
@@ -811,7 +756,6 @@ def cleanup(s):
     return s
 
 def write(s):
-    raise Wilem ## WB
     s = cleanup(s)
     if __debug__:
         print s,
@@ -866,7 +810,6 @@ class instrumentCall(object):
         self.name = name
         self.obj = obj
     def __call__(self, *args):
-        raise Appel ## WB
         global indent
         oldindent = indent
         try:
@@ -912,9 +855,7 @@ def main():
     for pair in it:
         L.append(pair)
     L2 = list(it2)
-    print "checking L, L2" # WB
     check(L, L2)
-    print "checked L, L2" # WB
 
     scanner = Scanner(getcFromString(sample).next).tokenize()
     parser = Parser(scanner)
