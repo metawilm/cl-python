@@ -78,6 +78,8 @@
   ()
   (:metaclass py-type))
 
+(mop:finalize-inheritance (find-class 'py-object))
+
 #+(or)
 (defmethod make-instance ((cls py-type) &rest initargs)
   ;; Create an instance of a Python class.
@@ -269,7 +271,7 @@
       (recursive-class-dict-lookup x attr)
     (dict-get x attr)))
 
-#+(or)
+;; allowed for now...
 (defmethod (setf py-attr) (val (x py-dict-mixin) attr)
   (setf (dict-get x attr) val))
 
@@ -354,6 +356,10 @@
       (with-slots (instance func) x
 	(format s "~A.~A" instance func)))))
 
+(def-py-method py-bound-method.__call__ (x &rest args)
+  (with-slots (func instance) x
+    (apply #'py-call func instance args)))
+
 (defclass py-unbound-method (py-method)
   ((class :initarg :class :accessor py-method-class))
   (:metaclass py-core-type))
@@ -371,6 +377,14 @@
   (with-output-to-string (s)
     (print-unreadable-object (x s :identity t)
       (format s "the static method ~A" (slot-value x 'func)))))
+
+(def-py-method py-static-method.__call__ (x &rest args)
+  (apply #'py-call (slot-value x 'func) args))
+
+(defmethod print-object ((x py-static-method) stream)
+  (print-unreadable-object (x stream :identity t :type t)
+    (format stream ":func ~A" (slot-value x 'func))))
+    
 
 (defclass py-class-method (py-method)
   ((class :initarg :class))
@@ -409,9 +423,40 @@
 
 
 (defclass py-xrange (py-core-object)
-  ()
+  (start stop step)
   (:metaclass py-core-type))
 
+(mop:finalize-inheritance (find-class 'py-xrange))
+
+(def-py-method py-xrange.__init__ (x &rest args)
+  (with-slots (start stop step) x
+    (setf start nil
+	  stop nil
+	  step nil)
+    (ecase (length args)
+      (0 (py-raise 'TypeError "xrange: >= 1 arg needed"))
+      (1 (unless (> (car args) 0)
+	   (break "xrange: invalid only val: ~A" (car args)))
+	 (setf start 0 
+	       stop (car args)
+	       step 1))
+      (2 (break "xrange 2 todo"))
+      (3 (break "xrange 3 todo")))))
+
+(def-py-method py-xrange.__iter__ (x^)
+  (with-slots (start stop step) x
+    (let ((i start))
+      (make-iterator-from-function :name :xrange-iterator
+				   :func (lambda ()
+					   (unless (>= i stop)
+					     (prog1 i
+					       (incf i step))))))))
+
+(def-py-method py-xrange.__str__ (x^)
+  (with-output-to-string (s)
+    (print-unreadable-object (x s :identity t :type t)
+      (with-slots (start stop step) x
+	(format s ":start ~A :stop ~A :step ~A" start stop step)))))
 ;; None
 
 (defclass py-none (py-core-object) () (:metaclass py-core-type))
@@ -521,6 +566,15 @@
       ;; Give up.
       (error "No such attribute: ~A . ~A" x attr))))
 
+(def-py-method py-object.__new__ :static (cls &rest attr)
+  (declare (ignore attr))
+  (make-instance cls))
+
+(def-py-method py-object.__init__ (&rest attr)
+  (declare (ignore attr))
+  ;; nothing
+  )
+
 (defmethod recursive-class-dict-lookup ((cls class) attr)
   ;; Look for ATTR in class CLS and all its superclasses.
   ;; and finally (which is in this implementation not a superclass of a class).
@@ -577,7 +631,18 @@
     (print-unreadable-object (x s :identity t)
       (format s "python-class ~A" (class-name x)))))
 
-;; XXX should default to `object'
+(def-py-method py-type.__call__ (x &rest args)
+  (if (subtypep x 'py-type)
+      ;; make a new class
+      (error "__call__ on subclass of 'type': ?")
+    
+    (let* ((__new__ (recursive-class-dict-lookup x '__new__))
+	   (inst (apply #'py-call __new__ x args))
+	   (__init__ (recursive-class-dict-lookup (py-class-of inst) '__init__)))
+      
+      (apply #'py-call __init__ inst args)
+      inst)))
+
 
 ;; Module (User object)
 
@@ -636,9 +701,11 @@
       (py-raise 'AttributeError "Module ~A has no attribute ~A" x attr.sym))))
 			     
 (defun py-import (mod-name mod-globals-names mod-globals-values mod-dyn-globals-ht)
-  (let* ((file-ast (parse-python-file (format nil "~A.py" mod-name)))
+  (let* ((*current-module-name* (string mod-name))
+	 (file-ast (parse-python-file (format nil "~A.py" mod-name)))
 	 (mod-func (compile nil `(lambda () ,file-ast)))
 	 (mod-obj  (funcall mod-func)))
+    (declare (special *current-module-name*))
     (loop for x across mod-globals-names and i from 0
 	when (eq x mod-name)
 	do (setf (svref mod-globals-values i) mod-obj)
@@ -687,13 +754,6 @@
 (defmethod py-attr ((x py-lisp-object) attr)
   (py-attr (proxy-lisp-val x) attr))
 
-
-(defmethod (setf py-attr) :around (val x attr)
-  (warn "(setf (py-attr ~A ~A) ~A)" x attr val)
-  (let ((res (call-next-method)))
-    (warn "--> ~A" res)
-    res))
-
 (defmethod (setf py-attr) (val (x py-lisp-object) attr)
   (setf (py-attr (proxy-lisp-val x) attr) val))
 
@@ -712,6 +772,7 @@
 (def-py-method py-number.__eq__  (x^ y^) (py-bool (= x y)))
 (def-py-method py-number.__add__ (x^ y^) (+ x y))
 (def-py-method py-number.__neg__ (x^) (- x))
+(def-py-method py-number.__mul__ (x^ y^) (* x y))
 
 (def-py-method py-number.real :attribute (x^)
 	       (realpart x))
@@ -732,6 +793,7 @@
 
 (def-proxy-class py-real (py-number))
 
+
 ;; Integer
 
 (def-proxy-class py-int (py-real))
@@ -744,6 +806,12 @@
 		   i)))
 
 (def-py-method py-int.__init__ (&rest args) nil)
+
+(def-py-method py-int.__floordiv__ (x^ y^)
+  (values (floor x y)))
+
+(def-py-method py-int.__mod__ (x^ y^)
+  (mod x y))
 
 (def-proxy-class py-bool (py-int))
 
@@ -761,7 +829,7 @@
 (defun make-dict ()
   ;; todo: (make-hash-table :test #'py-==  :hash #'py-hash)
   (make-hash-table :test #'eq))
-		   
+
 (defmacro make-dict-unevaled-list (items)
   (let ((dict '#:dict))
     `(let ((,dict (make-dict)))
@@ -787,6 +855,40 @@
 	   (unless (= i c)
 	     (write-string ", " s)))
     (write-char #\} s)))
+
+(def-py-method py-dict.__setitem__ (dict^ key val)
+  (assert (integerp key) () "Dict: only integer keys supported for now, not: ~A" key)
+  (setf (gethash key dict) val))
+
+(def-py-method py-dict.__getitem__ (dict^ key)
+  (assert (integerp key) () "Dict: only integer keys supported for now, not: ~A" key)
+  (or (gethash key dict)
+      (py-raise 'KeyError "Dict has no such key: ~A" key)))
+
+(def-py-method py-dict.__iter__ (dict^)
+  (with-hash-table-iterator (next-func dict)
+    (make-iterator-from-function
+     :name :py-dict-iterator
+     :func (lambda () (multiple-value-bind (ret key val) 
+			  (next-func)
+			(declare (ignore val))
+			(when ret key))))))
+
+(def-py-method py-dict.__eq__ (dict^ dict2)
+  (assert (eq (class-of dict2) (find-class 'hash-table)) () "py-dict.__eq__ wants two real dicts")
+  (let ((res1 (sort (loop for k being the hash-key in dict
+			using (hash-value v)
+			collect (cons k v))
+		    #'< :key #'car))
+	(res2 (sort (loop for k being the hash-key in dict2
+			using (hash-value v)
+			collect (cons k v))
+		    #'< :key #'car)))
+    
+    #+(or)(warn "~A ~A" res1 res2)
+    (py-bool (equalp res1 res2))))
+    
+  
 
 ;; List (Lisp object: adjustable array)
 
@@ -869,17 +971,24 @@
 
 (def-proxy-class py-tuple)
 
-(def-py-method py-tuple.__new__ :static (cls &rest args)
-	       (if (eq cls (find-class 'py-tuple))
-		   args
-		 (make-instance cls)))
+(def-py-method py-tuple.__new__ :static (cls &optional iterable)
+	       (let ((tup (make-tuple-from-list (when iterable
+						  (py-iterate->lisp-list iterable)))))
+		 
+		 (cond ((eq cls (find-class 'py-tuple)) tup)
+		       
+		       ((subtypep cls (find-class 'py-tuple))
+			(let ((x (make-instance cls)))
+			  (setf (proxy-lisp-val x) tup)
+			  x))
+		       
+		       (t (error "invalid py-tuple.__new__ cls: ~A" cls)))))
+		   
 
 (defvar *the-empty-tuple* (make-instance 'py-tuple :lisp-object nil))
 
 (defun make-tuple-from-list (list)
-  (if list
-      list
-    *the-empty-tuple*))
+  (or list *the-empty-tuple*))
 
 (defmacro make-tuple-unevaled-list (items)
   (let ((res '#:res))
@@ -971,15 +1080,27 @@
 ;;; Calling objects (functions, classes, instances)
 
 (defgeneric py-call (f &rest args)
+  (:method ((f t) &rest args) (let ((__call__ (recursive-class-dict-lookup (py-class-of f) '__call__)))
+				(apply #'py-call __call__ f args)))
   (:method ((f function) &rest args) (apply f args)))
+
 
 ;;; Subscription of items (sequences, mappings)
 
 (defgeneric py-subs (x item)
   (:method ((x t) (item t))
 	   (let ((gi (recursive-class-dict-lookup (py-class-of x) '__getitem__)))
-	     (when gi
-	       (py-call gi x item)))))
+	     (if gi
+		 (py-call gi x item)
+	       (py-raise 'TypeError "Object ~A does not support item extraction" x)))))
+
+(defgeneric (setf py-subs) (new-val x item)
+  (:method (new-val x item)
+	   (let ((si (recursive-class-dict-lookup (py-class-of x) '__setitem__)))
+	     (if si
+		 (py-call si x item new-val)
+	       (py-raise 'TypeError "Object ~A does not support item assignment" x)))))
+	  
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -1001,9 +1122,9 @@
   ;; XXX merge into one pretty printer string
   ;; XXX TypeError
   (error (if right
-	     (format nil "Invalid operands for operation ~A: ~A and ~A"
+	     (format nil "Operation '~A' not supported for operands ~A and ~A."
 		     operation left right)
-	   (format nil "Invalid operand for operation ~A: ~A" operation left))))
+	   (format nil "Operation '~A' not supported for operand ~A." operation left))))
 
 (defvar *binary-op-funcs-ht* (make-hash-table :test #'eq))
 (defvar *binary-iop-funcs-ht* (make-hash-table :test #'eq))
@@ -1168,7 +1289,7 @@
 	       (loop with f = (get-py-iterate-fun seq)
 		   for seq-item = (funcall f)
 		   while seq-item
-		   when (py-== x seq-item)
+		   when (py-val->lisp-bool (py-== x seq-item))
 		   return (load-time-value *the-true*)
 		   finally (return (load-time-value *the-false*)))))))
 	     

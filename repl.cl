@@ -44,7 +44,8 @@
     (declare (special *the-none*))
     (setf (gethash '_   dyn-globals) *the-none*
 	  (gethash '__  dyn-globals) *the-none*
-	  (gethash '___ dyn-globals) *the-none*)
+	  (gethash '___ dyn-globals) *the-none*
+	  (gethash '__name__ dyn-globals) "__main__")
     
     (labels ((print-cmds-1 (cmds)
 	       (loop for (cmd expl) in cmds do (format t "  ~19A: ~A~%" cmd expl)))

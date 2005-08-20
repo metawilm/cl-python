@@ -57,12 +57,17 @@
 (defvar *py-modules* (make-hash-table :test #'eq))
     
 
+;; The name of the module now being compiled.
+
+(defvar *current-module-name* "__main__")
+
+
 ;; Compiler debugging and optimization options.
 ;; XXX not used yet
 
 (defvar *comp-opt*
     (copy-tree '((:include-line-numbers t) ;; XXX include line numbers in AST? not sure its useful
-		 (:inline-number-math nil)
+		 (:inline-number-math t)
 		 (:inline-fixnum-math nil)))) 
 
 (defun comp-opt-p (x)
@@ -669,7 +674,7 @@
        ,@body)))
 
 (defmacro with-module-context ((glob-names glob-values dyn-glob
-				&key set-builtins create-return-mod)
+				&key set-builtins create-return-mod module-name)
 			       &body body)
   (check-type glob-names vector)
   (check-type dyn-glob hash-table)
@@ -677,14 +682,19 @@
   `(let* ((+mod-globals-names+  ,glob-names)
 	  (+mod-globals-values+ ,glob-values)
 	  (+mod-dyn-globals+    ,dyn-glob))
-	
+     
      ,@(when set-builtins
 	 (loop for name across glob-names and i from 0
-	     when (builtin-name-p name)
+	     if (builtin-name-p name)
 	     collect `(setf (svref +mod-globals-values+ ,i)
 			,(builtin-name-value name)) into setfs
+							 
+	     else if (eq name '__name__)
+	     collect `(setf (svref +mod-globals-values+ ,i) ,(or module-name "__main__"))
+	     into setfs
+	       
 	     finally (when setfs
-		       `((progn ,@setfs)))))
+		       (return `((progn ,@setfs))))))
 
      (flet ((.globals. () (module-make-globals-dict
 			   ;; Updating this dict really modifies the globals.
@@ -703,6 +713,7 @@
 	 `((make-module :globals-names  +mod-globals-names+
 			:globals-values +mod-globals-values+
 			:dyn-globals    +mod-dyn-globals+)))))
+
 
 
 (defmacro module-stmt (suite) ;; &environment e)
@@ -724,7 +735,8 @@
 			   (make-array ,(length ast-globals) :initial-element :unbound) ;; not eval now
 			   ,(make-hash-table :test #'eq)
 			   :set-builtins t
-			   :create-return-mod t)
+			   :create-return-mod t
+			   :module-name *current-module-name*)
        ,suite)))
 
 #+(or) ;; old
@@ -1154,7 +1166,9 @@ AST is either an AST list or Python code string."
   (multiple-value-bind
       (locals declared-globals outer-scope) (ast-vars suite)
     #+(or)(warn "module vars: ~A" `(:l ,locals :dg ,declared-globals :os ,outer-scope))
-    (union (union locals declared-globals) outer-scope))) ;; !?
+    (let ((res (union (union locals declared-globals) outer-scope))) ;; !?
+      (pushnew '__name__ res)
+      res)))
 
 (defun module-make-globals-dict (names-vec values-vec dyn-globals-ht)
   (make-py-dict ;; todo: proxy
@@ -1780,20 +1794,33 @@ AST is either an AST list or Python code string."
 		(+ left right)
 	      (py-+ left right))))
 	
-	((comp-opt-p :inline-fixnum-math)
-	`(if (and (fixnump left) (fixnump right))
-	     (+ left right)
-	   (py-+ left right)))
+	(t whole)))
+
+#+(or)
+(define-compiler-macro py-* (&whole whole x y)
+  (cond ((comp-opt-p :inline-number-math)
+	 `(let ((left ,x) (right ,y))
+	    (if (and (numberp left) (numberp right))
+		(* left right)
+	      (py-* left right))))
 	
 	(t whole)))
 
-#+(or) ;; methods on py-+
-(defmethod py-+ ((x number) (y number))
-  (+ x y))
-
 #+(or)
-(defmethod py-+ ((x fixnum) (y fixnum))
-  (+ x y))
+(define-compiler-macro py-// (&whole whole x y)
+  (cond ((comp-opt-p :inline-number-math)
+	 `(let ((left ,x) (right ,y))
+	    (if (and (integerp left) (integerp right))
+		(floor left right)
+	      (py-// left right))))
+	
+	(t whole)))
+
+
+#+(or) ;; methods on py-+
+((defmethod py-+  ((x integer) (y integer)) (+ x y))
+ (defmethod py-// ((x integer) (y integer)) (floor x y))
+ (defmethod py-*  ((x integer) (y integer)) (* x y)))
 
 #+(or) ;; optimize membership test on sequences
 (defmethod py-in (item (seq sequence))
@@ -1811,3 +1838,5 @@ def f():
   print 3, 4
 f()
 ")))
+
+

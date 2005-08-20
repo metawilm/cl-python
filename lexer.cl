@@ -288,6 +288,7 @@ C must be either a character or NIL."
   "Cached vector for identifier, used for looking up identifier in cache
 before allocating a vector on its own.")
 
+#+(or) ;; use old for now
 (defun read-identifier (first-char)
   "Read an identifier (which is possibly a reserved word) and return it as a
 symbol. Identifiers start with an underscore or alphabetic character, while
@@ -359,7 +360,7 @@ second and later characters must be alphanumeric or underscore."
 				    (return (cache-symbol (or (find-symbol arr #.*package*)
 							      (intern arr #.*package*)))))))))))))
 
-#+(or) ;; Equivalent, but a bit slower, original code. Allocates an array for every identifier.
+#+(and) ;; Equivalent, but a bit slower, original code. Allocates an array for every identifier.
 (defun read-identifier (first-char)
   "Returns the identifier read as string. ~@
    Identifiers start start with an underscore or alphabetic character; ~@
@@ -379,8 +380,25 @@ second and later characters must be alphanumeric or underscore."
 	do (vector-push-extend c res)
 	finally (when c (unread-chr c)))
     
+    #+(or)
     (or (find-symbol res #.*package*)
-	(intern (simple-string-from-vec res) #.*package*))))
+	(intern (simple-string-from-vec res) #.*package*))
+    
+    (let ((sym (find-symbol res #.*package*)))
+      (cond ((and sym (constantp sym))
+	     
+	     ;; Oops... a symbol like `nil' or `pi'.
+	     ;; Use our own uninterned symbol, instead.
+	     ;; Maybe we should have used the package system for this...
+	     (let* ((ht (load-time-value (make-hash-table :test #'eq)))
+		    (our-sym (gethash sym ht)))
+	       
+	       (or our-sym
+		   (let ((new-sym (make-symbol res)))
+		     (setf (gethash sym ht) new-sym)
+		     new-sym))))
+	    (sym sym)
+	    (t (intern (simple-string-from-vec res) #.*package*))))))
 
 
 ;; String

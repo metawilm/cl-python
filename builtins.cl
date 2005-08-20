@@ -434,8 +434,7 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
 	 ;; function "reduces" data.
 
 	 (make-py-list-from-list
-	  (mapcar (lambda (val)
-		    (py-call func (list val)))
+	  (mapcar (lambda (val) (py-call func val))
 		  (py-iterate->lisp-list (car sequences)))))
 	
 	(t
