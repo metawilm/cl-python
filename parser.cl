@@ -114,8 +114,9 @@
 					     collect (cdr p) into kw
 					     else collect p into pos
 					     finally (return (list pos kw)))
-					  ,*-a
-					  ,**-a))))
+					  ,(when *-a `(identifier-expr ,*-a))
+					  ,(when **-a `(identifier-expr ,**-a))))))
+ 
  (parameter-list5 (defparameter+                       ) ((list  $1 nil nil)))
  (parameter-list5 (defparameter+ ni-*-ident ni-**-ident) ((list  $1  $2  $3)))
  (parameter-list5 (defparameter+ ni-*-ident            ) ((list  $1  $2 nil)))

@@ -398,19 +398,16 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
   ;; 
   ;; When Y supplied: make generator that calls and returns iterator
   ;; of X until the value returned is equal to Y.
-  
-   (if y
-       
-       (make-iterator-from-function
-	(let ((iterf (get-py-iterate-fun x)))
-	  (lambda () 
-	    (let ((val (funcall iterf)))
-	      (if (py-== val y)
-		  nil
-		val)))))
-     
-     (make-iterator-from-function
-      (get-py-iterate-fun x))))
+
+  (make-iterator-from-function
+   :func (if y
+	     (let ((iterf (get-py-iterate-fun x)))
+	       (lambda () 
+		 (let ((val (funcall iterf)))
+		   (if (py-== val y)
+		       nil
+		     val))))
+	   (get-py-iterate-fun x))))
 
 (defun pybf:len (x)
   (py-len x))

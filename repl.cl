@@ -35,6 +35,8 @@
 (defvar __  nil) ;; second-last
 (defvar ___ nil) ;; third-last
 
+(defvar *repl-time* nil)
+
 (defun repl ()
   (let* ((*repl-mod* (make-module))
 	 (dyn-globals (slot-value *repl-mod* 'dyn-globals)))
@@ -83,7 +85,10 @@
 					  (retry-repl-eval
 					   "Retry the execution the compiled REPL command. [:re]")
 					(return-from :val
-					  (funcall helper-func))))))))))
+					  (if *repl-time*
+					      (prog1 (time (funcall helper-func))
+						(terpri))
+					    (funcall helper-func)))))))))))
 		   (when val
 		     (block :repr
 		       (loop
@@ -160,7 +165,8 @@
 				
 				  ;; try to parse as Lisp code second
 				  (let ((lisp-form (read-from-string total nil nil)))
-				    (when lisp-form
+				    (when (and lisp-form
+					       (not (member lisp-form '(def class for while if)))) 
 				      (let ((res (eval lisp-form)))
 					(write res)
 					(write-char #\Newline)

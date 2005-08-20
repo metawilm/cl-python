@@ -558,6 +558,7 @@
 				 :metaclass (ecase cls-type
 					      (:metaclass (find-class 'py-meta-type))
 					      (:class     metacls)))))
+			(mop:finalize-inheritance c)
 			(setf (slot-value c 'dict) dict)
 			c))
 		     
@@ -846,6 +847,8 @@
 	do (setf (aref vec i) x))
     vec))
 
+(defun make-py-list-from-vec (vec)
+  vec)
 
 ;; String (Lisp object: string)
 
@@ -969,6 +972,14 @@
 
 (defgeneric py-call (f &rest args)
   (:method ((f function) &rest args) (apply f args)))
+
+;;; Subscription of items (sequences, mappings)
+
+(defgeneric py-subs (x item)
+  (:method ((x t) (item t))
+	   (let ((gi (recursive-class-dict-lookup (py-class-of x) '__getitem__)))
+	     (when gi
+	       (py-call gi x item)))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -1254,7 +1265,12 @@
       (py-raise 'TypeError "Expected a string, but got: ~A" x))))
 
 (defun py-repr-string (x) (py-val->string (py-repr x)))
-(defun py-str-string (x) (py-val->string (py-str x)))
+(defun py-str-string  (x) (py-val->string (py-str x)))
+
+(defun py-str-symbol  (x &optional (package #.*package*))
+  (if (symbolp x) 
+      x
+    (intern (py-str-string x) package)))
 
 
 (defun repr-fmt (stream argument &optional colon-p at-p &rest parameters)
@@ -1385,3 +1401,4 @@ next value gotten by iterating over X. Returns NIL, NIL upon exhaustion.")
       
       (let ((f (get-py-iterate-fun x)))
 	(make-iterator-from-function f)))))
+
