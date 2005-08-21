@@ -173,3 +173,22 @@
 					(write-char #\Newline)
 					(remember-value res))
 				      (setf acc nil)))))))))))))))
+
+(defun prof (f kind)
+  (ecase kind
+    (:t (prof:with-profiling (:type :time :count t) (funcall f))
+	   (terpri)
+	   (prof:show-flat-profile))
+    (:tg (prof:with-profiling (:type :time) (funcall f))
+	 (terpri)
+	 (prof:show-call-graph))
+    (:s (prof:with-profiling (:type :space) (funcall f))
+	(terpri)
+	(prof:show-flat-profile))
+    (:sg (prof:with-profiling (:type :space) (funcall f))
+	 (terpri)
+	 (prof:show-call-graph))
+    (:time (time (funcall f)))))
+
+
+

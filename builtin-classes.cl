@@ -5,10 +5,21 @@
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-;;; Class frameword:  py-meta-type, py-type, py-object
+;;; Class frameword:  py-meta-type, py-type, py-dictless-object
+
+(eval-when (compile load eval)
+(defvar *warn-making-dict* nil)
+)
+
+(eval-when (compile load eval)
+(defun dict-init-func ()
+  (when *warn-making-dict*
+    (break "making dict..."))
+  (make-hash-table :test #'eq))
+)
 
 (defclass py-dict-mixin ()
-  ((dict :initarg :dict :initform (make-hash-table :test #'eq) :accessor dict)))
+  ((dict :initarg :dict :initform (dict-init-func) :accessor dict)))
 
 (defmethod dict ((x symbol)) ;; (dict <symbol>) is designator for (dict <class>)
   (dict (find-class x)))
@@ -74,7 +85,13 @@
 
 ;; Python classes are instances of (a subclass of) python-type
 
-(defclass py-object (py-dict-mixin standard-object)
+(defclass py-dictless-object (standard-object)
+  ()
+  (:metaclass py-type))
+
+(mop:finalize-inheritance (find-class 'py-dictless-object))
+
+(defclass py-object (py-dict-mixin py-dictless-object)
   ()
   (:metaclass py-type))
 
@@ -86,7 +103,7 @@
   TODO)
 
 #+(or)
-(defmethod initialize-instance ((x py-object) &rest initargs)
+(defmethod initialize-instance ((x py-dictless-object) &rest initargs)
   ;; Initialize a simple instance of a Python class.
   TODO)
 
@@ -104,7 +121,7 @@
   
   ;; either:
   ;;  1) all supers are subtype of 'py-type   (to create a new metaclass)
-  ;;  2) all supers are subtype of 'py-object (to create new "regular user-level" class)
+  ;;  2) all supers are subtype of 'py-dictless-object (to create new "regular user-level" class)
   
   (flet ((of-type-class (s) (typep s 'class))
 	 (subclass-of-py-object-p (s) (subtypep s 'py-object))
@@ -284,7 +301,7 @@
 
 ;;; Core objects (function, method, None...; not subclassable by the user)
 
-(defclass py-core-object (py-object) ())
+(defclass py-core-object (py-dictless-object) ())
 (defclass py-core-type   (py-type)   ())
 
 
@@ -1130,14 +1147,16 @@
 (defvar *binary-iop-funcs-ht* (make-hash-table :test #'eq))
 (defvar *binary-iop->op-ht* (make-hash-table :test #'eq))
 
-(defun get-binary-op-func (op) (or (gethash op *binary-op-funcs-ht*)
+
+  
+(defun get-binary-op-func-name (op) (or (gethash op *binary-op-funcs-ht*)
 				   (error "missing binary op func: ~A" op)))
-(defun get-binary-iop-func (iop) (or (gethash iop *binary-iop-funcs-ht*)
+(defun get-binary-iop-func-name (iop) (or (gethash iop *binary-iop-funcs-ht*)
 				     (error "missing binary iop func: ~A" iop)))
-(defun get-binary-op-from-iop-func (iop)
+(defun get-binary-op-func-name-from-iop (iop)
   (let ((op (or (gethash iop *binary-iop->op-ht*)
 		(error "IOP ~S has no OP counterpart" iop))))
-    (get-binary-op-func op)))
+    (get-binary-op-func-name op)))
   
 (defmacro def-math-func (op-syntax op-func l-meth r-meth iop-syntax iop-func i-meth)
   `(progn
@@ -1169,7 +1188,7 @@
 				 finish t))))))
      
      ,(when op-syntax
-	`(setf (gethash ',op-syntax *binary-op-funcs-ht*) (function ,op-func)))
+	`(setf (gethash ',op-syntax *binary-op-funcs-ht*) ',op-func))
      
      ,(when iop-func
 	`(defgeneric ,iop-func (x val)
@@ -1181,7 +1200,7 @@
 			   (not (eq res (load-time-value *the-notimplemented*))))))))
      
      ,(when iop-syntax
-	`(setf (gethash ',iop-syntax *binary-iop-funcs-ht*) (function ,iop-func)))
+	`(setf (gethash ',iop-syntax *binary-iop-funcs-ht*) ',iop-func))
      
      ,(when (and iop-syntax op-syntax)
 	`(setf (gethash ',iop-syntax *binary-iop->op-ht*) ',op-syntax))))
@@ -1226,7 +1245,7 @@
 	res
       (raise-invalid-operands '** x y))))
 
-(setf (gethash '** *binary-op-funcs-ht*) #'py-**)
+(setf (gethash '** *binary-op-funcs-ht*) 'py-**)
 
 ;; **= has similar ugliness
 
@@ -1241,11 +1260,11 @@
 	res
       nil)))
 
-(setf (gethash '**= *binary-iop-funcs-ht*) #'py-**=)
+(setf (gethash '**= *binary-iop-funcs-ht*) 'py-**=)
 
 
 (defvar *unary-op-funcs-ht* (make-hash-table :test #'eq))
-(defun get-unary-op-func (op) (or (gethash op *unary-op-funcs-ht*)
+(defun get-unary-op-func-name (op) (or (gethash op *unary-op-funcs-ht*)
 				  (error "missing unary op func: ~A" op)))
 
 (defmacro def-unary-op-func (syntax fname meth)
@@ -1258,7 +1277,7 @@
 			       (eq res (load-time-value *the-notimplemented*)))
 			   (raise-invalid-operands ',syntax x)
 			 res))))
-	  (setf (gethash ',syntax *unary-op-funcs-ht*) (function ,fname))))
+	  (setf (gethash ',syntax *unary-op-funcs-ht*) ',fname)))
 
 (def-unary-op-func ~  py-unary-~  __invert__ )
 (def-unary-op-func +  py-unary-+  __pos__    )
@@ -1268,7 +1287,7 @@
   (:method ((x t))
 	   (py-bool (not (py-val->lisp-bool x)))))
 
-(setf (gethash 'not *unary-op-funcs-ht*) #'py-not)
+(setf (gethash 'not *unary-op-funcs-ht*) 'py-not)
 
 ;; Equality and membership testing:  a in b, a not in b, a is b, a is not b
 
@@ -1297,8 +1316,8 @@
   (:method ((x t) (seq t))
 	   (py-not (py-in x seq))))
 
-(setf (gethash 'in *binary-op-funcs-ht*) #'py-in)
-(setf (gethash '|not in| *binary-op-funcs-ht*) #'py-not-in)
+(setf (gethash 'in *binary-op-funcs-ht*) 'py-in)
+(setf (gethash '|not in| *binary-op-funcs-ht*) 'py-not-in)
 
 (defgeneric py-is (x y)
   (:method ((x t) (y t))
@@ -1308,8 +1327,8 @@
   (:method ((x t) (y t))
 	   (if (eq x y) *the-false* *the-true*)))
 
-(setf (gethash 'is *binary-op-funcs-ht*) #'py-is)
-(setf (gethash '|is not| *binary-op-funcs-ht*) #'py-is-not)
+(setf (gethash 'is *binary-op-funcs-ht*) 'py-is)
+(setf (gethash '|is not| *binary-op-funcs-ht*) 'py-is-not)
 
 
 
@@ -1331,7 +1350,7 @@
 ;; (pyeval.cl).
 
 (defvar *binary-comparison-funcs-ht* (make-hash-table :test #'eq))
-(defun get-binary-comparison-func (op) (gethash op *binary-comparison-funcs-ht*))
+(defun get-binary-comparison-func-name (op) (gethash op *binary-comparison-funcs-ht*))
 
 (defmacro def-comparison (syntax func test-x-y)
   `(progn (defgeneric ,func (x y)
@@ -1340,7 +1359,7 @@
 		     (if ,test-x-y
 			 (load-time-value *the-true*)
 		       (load-time-value *the-false*))))
-	  (setf (gethash ',syntax *binary-comparison-funcs-ht*) (function ,func))))
+	  (setf (gethash ',syntax *binary-comparison-funcs-ht*) ',func)))
 	    
 ;; pyb:cmp returns -1, 0 or 1 (or TypeError if user-supplied
 ;; method returns bogus comparison result; that TypeError is not
@@ -1427,13 +1446,13 @@ finished; F will then not be called again."
 
 (def-py-method py-func-iterator.next (fi)
   (with-slots (stopped-yet func) fi
-    (unless stopped-yet
-      (let ((res (funcall func)))
-	(if res
-	    (return-from py-func-iterator.next res)
-	  (progn
-	    (setf stopped-yet t)
-	    (py-raise 'StopIteration "Iterator ~S has finished" fi)))))))
+    (let ((res (cond (stopped-yet nil)
+		     ((funcall func))
+		     (t (setf stopped-yet t)
+			nil))))
+      (if res
+	  (return-from py-func-iterator.next res)
+	(py-raise 'StopIteration "Iterator ~S has finished" fi)))))
 
 (def-py-method py-func-iterator.__repr__ (fi)
   (with-output-to-string (s)
@@ -1473,7 +1492,7 @@ next value gotten by iterating over X. Returns NIL, NIL upon exhaustion.")
 		      ;; before the first value is demanded. This is
 		      ;; semantically incorrect in an ignorable way.
 		      
-		      (excl:named-function :py-iterate-fun
+		      (excl:named-function (:py-iterate-fun using __iter__)
 			(lambda ()
 			  (handler-case (values (py-call next-meth iterator))
 			    (StopIteration () (values nil nil))
@@ -1482,25 +1501,29 @@ next value gotten by iterating over X. Returns NIL, NIL upon exhaustion.")
 		   
 		   (__getitem__ ;; Fall-back: call __getitem__ with successive integers
 		    (let ((index 0))
-		      (lambda ()
-			(handler-case (values (py-call __getitem__ x index))
-			  
-			  ;; ok if this happens when index = 0: then it's an empty sequence
-			  (IndexError () (values nil nil)) 
-
-			  (:no-error (val) (progn (incf index)
-						  (values val t)))))))
+		      (excl:named-function (:py-iterate-fun using __getitem__)
+			(lambda ()
+			  (handler-case (values (py-call __getitem__ x index))
+			    
+			    ;; ok if this happens when index = 0: then it's an empty sequence
+			    (IndexError () (values nil nil)) 
+			    
+			    (:no-error (val) (progn (incf index)
+						    (values val t))))))))
 		   
 		   (t
 		    (py-raise 'TypeError "Iteration over non-sequence (got: ~A)" x))))))
 
 (defgeneric map-over-py-object (func object)
   (:documentation 
-   "Iterate over OBJECT, calling function FUNC on each value. Returns nothing.")
+   "Iterate over OBJECT, calling the Lisp function FUNC on each value. Returns nothing.")
+  
   (:method ((func function) (object t))
+	   (break "map over ~A" object)
 	   (loop with it-fun = (get-py-iterate-fun object)
 	       for val = (funcall it-fun)
 	       while val do (funcall func val))))
+
 
 (defgeneric py-iterate->lisp-list (object)
   (:documentation
@@ -1523,3 +1546,18 @@ next value gotten by iterating over X. Returns NIL, NIL upon exhaustion.")
       (let ((f (get-py-iterate-fun x)))
 	(make-iterator-from-function f)))))
 
+
+(defun py-print (dest items comma?)
+  (when dest
+    (warn "ignoring 'dest' arg of PRINT stmt (got: ~A)" dest))
+  
+  (dolist (x items)
+    (typecase x
+      (integer (excl::fast (format t "~A" (the integer x))))
+      (t (format t "~A " (py-str-string x))))
+    (write-char #\Space t))
+  
+  (unless comma?
+    (write-char #\Newline t))
+  
+  nil)

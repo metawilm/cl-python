@@ -17,6 +17,16 @@
 ;; The Python compiler uses its own kind of declaration to keep state
 ;; in generated code; this declaration is named "pydecl".
 
+#+(or)
+(sys:define-declaration
+    pydecl (&rest property-pairs) nil :declare
+    (lambda (declaration env)
+      (let ((res (append (cdr declaration)
+			 (sys:declaration-information 'pydecl env))))
+	#+(or)(warn "decl ~A + ~A = ~A" (sys:declaration-information 'pydecl env) declaration res)
+	(values :declare
+		(cons 'pydecl res)))))
+
 (sys:define-declaration
     pydecl (&rest property-pairs) nil :declare
     (lambda (declaration env)
@@ -24,6 +34,16 @@
 	      (cons 'pydecl
 		    (nconc (cdr declaration)
 			   (sys:declaration-information 'pydecl env))))))
+
+
+#+(or)
+(sys:define-declaration
+    pydecl (&rest property-pairs) nil :declare
+    (lambda (declaration env)
+      (declare (ignore env))
+      (values :declare
+	      (cons 'pydecl
+		    (cdr declaration)))))
 
 (defun get-pydecl (var env)
   (let ((res (second (assoc var (sys:declaration-information 'pydecl env) :test #'eq))))
@@ -61,6 +81,9 @@
 
 (defvar *current-module-name* "__main__")
 
+;; Module of the function currently executing
+
+(defvar *cfm* nil)
 
 ;; Compiler debugging and optimization options.
 ;; XXX not used yet
@@ -72,12 +95,16 @@
 
 (defun comp-opt-p (x)
   (assert (member x *comp-opt* :key #'car) () "Unknown Python compiler option: ~S" x)
-  (cdr (assoc x *comp-opt*)))
+  (second (assoc x *comp-opt*)))
 
 (defun (setf comp-opt) (val x)
   (assert (member x *comp-opt* :key #'car) () "Unknown Python compiler option: ~S" x)
-  (setf (cdr (assoc x *comp-opt*)) val))
+  (setf (second (assoc x *comp-opt*)) val))
 
+
+(defmacro fast (&body body)
+  `(locally (declare (optimize (speed 3) (safety 0) (debug 0)))
+     ,@body))
 
 ;;; The macros corresponding to AST nodes
 
@@ -91,6 +118,25 @@
 						   (py-pprint s ',test)))))))))
   
 (defmacro assign-stmt (value targets &environment e)
+
+  (when (and (listp value) (member (car value) '(tuple-expr list-expr))
+	     (= (length targets) 1) (member (caar targets) '(tuple-expr list-expr))
+	     (= (length (second value)) (length (second (car targets)))))
+    #+(or)(warn "inlining ~A = ~A" targets value)
+    ;; Shortcut the case "a,b,.. = 1,2,.." where left and right same
+    ;; number of items. Note that RHS is evaluated before assignment
+    ;; to LHS takes place.
+    
+    (let* ((value-items (second value))
+	   (tg-items    (second (car targets)))
+	   (temp-items  (loop for i from 0 below (length value-items) collect (gensym "assign-val"))))
+      
+      (return-from assign-stmt
+	`(let ,(loop for te in temp-items for va in value-items
+		   collect `(,te ,va))
+	   ,@(loop for te in temp-items for tg in tg-items
+		 collect `(assign-stmt ,te (,tg)))))))
+  
   (let ((context (get-pydecl :context e)))
     (with-gensyms (val)
       
@@ -148,8 +194,8 @@
   `(py-attr ,item ',(second attr)))
 
 (defmacro augassign-stmt (op place val)
-  (let ((py-@= (get-binary-iop-func op))
-	(py-@  (get-binary-op-from-iop-func op)))
+  (let ((py-@= (get-binary-iop-func-name op))
+	(py-@  (get-binary-op-func-name-from-iop op)))
 	
     (ecase (car place)
     
@@ -163,9 +209,12 @@
 	       (sub           ,(third place))
 	       (ev-val        ,val)
 	       (place-val-now (,(car place) place-obj-1 place-obj-2)))
-	
-	  (or (funcall ,py-@= place-val-now ev-val) ;; returns true iff __i@@@__ found
-	      (let ((new-val (funcall ,py-@ place-val-now ev-val)))
+
+	  ;; Using (function py-+) syntax to enable compiler macros.
+	  ;; [inserting func directly as (funcall ,(function py-+) ..) will skip comp macros]
+	  
+	  (or (funcall (function ,py-@=) place-val-now ev-val) ;; returns true iff __i@@@__ found
+	      (let ((new-val (funcall (function ,py-@) place-val-now ev-val)))
 		(assign-stmt new-val (,(car place) primary sub))))))
 
       (identifier-expr
@@ -173,14 +222,18 @@
        `(let* ((ev-val ,val)
 	       (place-val-now ,place))
 	
-	  (or (funcall ,py-@= place-val-now ev-val) ;; returns true iff __i@@@__ found
-	      (let ((new-val (funcall ,py-@ place-val-now ev-val)))
+	  (or (funcall (function ,py-@=) place-val-now ev-val) ;; returns true iff __i@@@__ found
+	      (let ((new-val (funcall (function ,py-@) place-val-now ev-val)))
 		(assign-stmt new-val (,place)))))))))
 
 (defmacro backticks-expr (item)
   `(py-repr ,item))
 
 (defmacro binary-expr (op left right)
+  (let ((py-@ (get-binary-op-func-name op)))
+    `(funcall (function ,py-@) ,left ,right))
+  
+  #+(or)
   (let ((py-@ (get-binary-op-func op)))
     `(funcall ,py-@ ,left ,right)))
 
@@ -300,8 +353,8 @@
 	 (assign-stmt ,cls (,name))))))
 
 (defmacro comparison-expr (cmp left right)
-  (let ((py-@ (get-binary-comparison-func cmp)))
-    `(funcall ,py-@ ,left ,right)))
+  (let ((py-@ (get-binary-comparison-func-name cmp)))
+    `(funcall (function ,py-@) ,left ,right)))
 
 (defmacro continue-stmt (&environment e)
   (if (get-pydecl :inside-loop e)
@@ -507,11 +560,12 @@
 					 ,(append all-locals-and-arg-names
 						  (get-pydecl :lexically-visible-vars e))))
 			    
-			    ,(if (generator-ast-p suite)
+			    (let ((*cfm* +mod+))
+			      ,(if (generator-ast-p suite)
+				   
+				   `(return-stmt ,(rewrite-generator-funcdef-suite fname suite))
 				 
-				 `(return-stmt ,(rewrite-generator-funcdef-suite fname suite))
-			       
-			       suite))))))))
+				 suite)))))))))
 	    
 	    (if (keywordp fname)
 		
@@ -681,8 +735,13 @@
   
   `(let* ((+mod-globals-names+  ,glob-names)
 	  (+mod-globals-values+ ,glob-values)
-	  (+mod-dyn-globals+    ,dyn-glob))
-     
+	  (+mod-dyn-globals+    ,dyn-glob)
+	  (+mod+ ,(when create-return-mod
+		    `(make-module :globals-names  +mod-globals-names+
+				  :globals-values +mod-globals-values+
+				  :dyn-globals    +mod-dyn-globals+))))
+     (declare (ignorable +mod+))
+	      
      ,@(when set-builtins
 	 (loop for name across glob-names and i from 0
 	     if (builtin-name-p name)
@@ -710,9 +769,7 @@
 	 ,@body))
        
      ,@(when create-return-mod
-	 `((make-module :globals-names  +mod-globals-names+
-			:globals-values +mod-globals-values+
-			:dyn-globals    +mod-dyn-globals+)))))
+	 `(+mod+))))
 
 
 
@@ -739,93 +796,14 @@
 			   :module-name *current-module-name*)
        ,suite)))
 
-#+(or) ;; old
-(defmacro module-stmt (suite &environment e)
-  
-  ;; A module is translated into a lambda that creates and returns a
-  ;; module object. Executing the lambda will create a module object
-  ;; and register it, after which other modules can access it.
-  ;; 
-  ;; Functions, classes and variables inside the module are available
-  ;; as attributes of the module object.
-  ;; 
-  ;; If we are inside an EXEC-STMT, PYDECL assumptions
-  ;; :exec-mod-locals-ht and :exec-mod-globals-ht are assumed declared
-  ;; (hash-tables containing local and global scope).
-  
-  (let* ((ast-globals  (module-stmt-globals suite))
-	 (exec-globals (get-pydecl :exec-mod-globals-ht e))
-	 (exec-locals  (get-pydecl :exec-mod-locals-ht  e))
-	 (gv           (union ast-globals exec-globals)))
-    
-    (with-gensyms (mod)
-      
-      ;;`(excl:named-function module-stmt-lambda
-      ;;   (lambda ()
-      `(let* ((+mod-globals-names+    (make-array ,(length gv) :initial-contents ',gv))
-	      (+mod-globals-values+   (make-array ,(length gv) :initial-element :unbound))
-	      (+mod-dyn-globals+      nil) ;; hash-table (symbol -> val) of dynamically added vars 
-	      (,mod                   (make-module :globals-names  +mod-globals-names+
-						   :globals-values +mod-globals-values+
-						   :dyn-globals    +mod-dyn-globals+)))
-       
-	 ;; Set values of module-level variables with names
-	 ;; corresponding to built-in names (like `len')
-       
-	 ,@(when gv
-	     `((progn ,@(loop for glob-var-name in gv and i from 0
-			    for val = (cond (exec-globals
-					     (gethash glob-var-name exec-globals))
-					    ((builtin-name-p glob-var-name)
-					     (builtin-name-value glob-var-name))
-					    (t
-					     :unbound))
-			    unless (eq val :unbound)
-			    collect `(setf (svref +mod-globals-values+ ,i) ,val)))))
-
-	 ;; Same context as +...+ vars above
-	 (with-pydecl
-	     ((:mod-globals-names    ,(make-array (length gv) :initial-contents gv))
-	      (:lexically-visible-vars ,(when exec-locals
-					  (loop for k being the hash-key in exec-locals
-					      collect k)))
-	      (:context :module)
-	      (:mod-futures :todo-parse-module-ast-future-imports))
-	   
-	   (flet ((.globals. () (module-stmt-make-globals-dict
-				 ;; Updating this dict really modifies the globals.
-				 +mod-globals-names+ +mod-globals-values+ +mod-dyn-globals+)))
-	  
-	     #+(or) ;; allegro does not handle these yet
-	     (declare (ignorable (function .globals.)))
-	  
-	     ,(if exec-locals
-	       
-		  `(let ,(loop for k being the hash-key in exec-locals using (hash-value v)
-			     collect `(,k ,v))
-		     ,suite)
-	     
-		suite)))
-	   
-	 ;; XXX if executing module failed, where to catch error?
-	 ,mod))))
-
 (defmacro pass-stmt ()
   nil)
 
 (defmacro print-stmt (dest items comma?)
   ;; XXX todo: use methods `write' of `dest' etc
-  (with-gensyms (x.str)
-    `(progn ,(when dest
-	       `(warn "ignoring 'dest' arg of PRINT stmt (got: ~A)" ',dest))
-	    
-	    ,@(loop for x in items
-		  collect `(let ((,x.str (py-str-string ,x)))
-			     (format t "~A " ,x.str)))
-	    
-	    ,(unless comma?
-	       `(write-char #\Newline t))
-	    nil)))
+  (with-gensyms (list)
+    `(excl:with-stack-list (,list ,@items)
+       (py-print ,dest ,list ,comma?))))
 
 (defmacro return-stmt (val &environment e)
   (if (get-pydecl :inside-function e)
@@ -921,9 +899,9 @@
   `(make-tuple-unevaled-list ,items))
 
 (defmacro unary-expr (op item)
-  (let ((py-op-func (get-unary-op-func op)))
+  (let ((py-op-func (get-unary-op-func-name op)))
     (assert py-op-func)
-    `(funcall ,py-op-func ,item)))
+    `(funcall (function ,py-op-func) ,item)))
 
 (defmacro while-stmt (test suite else-suite)
   (with-gensyms (take-else)
@@ -1783,51 +1761,6 @@ AST is either an AST list or Python code string."
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-;; Optimization
-
-#+(or) ;; inline number/fixnum additions arithmetic
-(define-compiler-macro py-+ (&whole whole x y)
-  (cond ((comp-opt-p :inline-number-math)
-	 `(let ((left ,x) (right ,y))
-	    (if (and (numberp left) (numberp right))
-		(+ left right)
-	      (py-+ left right))))
-	
-	(t whole)))
-
-#+(or)
-(define-compiler-macro py-* (&whole whole x y)
-  (cond ((comp-opt-p :inline-number-math)
-	 `(let ((left ,x) (right ,y))
-	    (if (and (numberp left) (numberp right))
-		(* left right)
-	      (py-* left right))))
-	
-	(t whole)))
-
-#+(or)
-(define-compiler-macro py-// (&whole whole x y)
-  (cond ((comp-opt-p :inline-number-math)
-	 `(let ((left ,x) (right ,y))
-	    (if (and (integerp left) (integerp right))
-		(floor left right)
-	      (py-// left right))))
-	
-	(t whole)))
-
-
-#+(or) ;; methods on py-+
-((defmethod py-+  ((x integer) (y integer)) (+ x y))
- (defmethod py-// ((x integer) (y integer)) (floor x y))
- (defmethod py-*  ((x integer) (y integer)) (* x y)))
-
-#+(or) ;; optimize membership test on sequences
-(defmethod py-in (item (seq sequence))
-  (py-bool (member item seq :test #'py-==)))
-
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; tests
 
 #+(or)
@@ -1838,5 +1771,3 @@ def f():
   print 3, 4
 f()
 ")))
-
-

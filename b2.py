@@ -32,7 +32,9 @@ tests = {
 def main():
     pi = PI()
     checks = {}
-    for x, y in izip(xrange(1000), pi):
+    iz = izip(xrange(1000), pi)
+    print "iz = ", iz
+    for x, y in iz:
         print y,
         if x in tests:
             checks[x] = pi.a1
