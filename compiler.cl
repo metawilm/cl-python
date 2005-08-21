@@ -370,49 +370,55 @@
     (subscription-expr
      `(py-del-subs ,@(cdr item))) ;; XXX maybe inline dict case
     
-    (attributeref-expr `(py-del-attr ,@(cdr item)))
+    (attributeref-expr
+     (destructuring-bind (object (id-ex attr-name)) (cdr item)
+       (assert (eq id-ex 'identifier-expr))
+       `(py-del-attr ,object ',attr-name)))
     
     (identifier-expr
-     (let* ((name (second item))
-	    (context (get-pydecl :context e))
-
-	    (module-del
-	     ;; reset module-level vars with built-in names to their built-in value
-	     (let ((ix (position name (get-pydecl :mod-globals-names e))))
-	       (if ix
-		   `(let ((old-val (svref +mod-globals-values+ ,ix)))
-		      (if (eq old-val :unbound)
-			  (py-raise 'NameError "Cannot delete variable '~A': ~
-                                                it is unbound [static global]" ',name)
-			(setf (svref +mod-globals-values+ ,ix) 
-			  ,(if (builtin-name-p name)
-			       (builtin-name-value name)
-			     :unbound))))
-		 `(or (remhash ,name +mod-dyn-globals+)
-		      (py-raise 'NameError "Cannot delete variable '~A': ~
-                                            it is unbound [dyn global]" ',name)))))
-	    (local-del `(if (eq ,name :unbound)
-			    (py-raise 'NameError "Cannot delete variable '~A': ~
-                                                  it is unbound [local]" ',name)
-			  (setf ,name :unbound)))
+     (let* ((name (second item)))
+       
+       (flet ((module-del ()
+		;; reset module-level vars with built-in names to their built-in value
+		(let ((ix (position name (get-pydecl :mod-globals-names e))))
+		  (if ix
+		      `(let ((old-val (svref +mod-globals-values+ ,ix)))
+			 (if (eq old-val :unbound)
+			     (py-raise 'NameError "Cannot delete variable '~A': ~
+                                                   it is unbound [static global]" ',name)
+			   (setf (svref +mod-globals-values+ ,ix) 
+			     ,(if (builtin-name-p name)
+				  (builtin-name-value name)
+				:unbound))))
+		    `(or (remhash ',name +mod-dyn-globals+)
+			 (py-raise 'NameError "Cannot delete variable '~A': ~
+                                               it is unbound [dyn global]" ',name)))))
+	      (local-del ()
+		`(if (eq ,name :unbound)
+		     (py-raise 'NameError
+			       "Cannot delete variable '~A': it is unbound [local]" ',name)
+		   (setf ,name :unbound)))
 	      
-	    (class-del `(or (remhash ,name +cls-namespace+)
-			    (py-raise 'NameError "Cannot delete variable '~A': ~
-                                                  it is unbound [dyn class]" ',name))))
-       (ecase context
+	      (class-del ()
+		`(or (remhash ',name +cls-namespace+)
+		     (py-raise 'NameError
+			       "Cannot delete variable '~A': it is unbound [dyn class]"
+			       ',name))))
 	 
-	 (:module   (if (member name (get-pydecl :lexically-visible-vars e))
-			local-del
-		      module-del))
+	 (ecase (get-pydecl :context e)
+	 
+	   (:module   (if (member name (get-pydecl :lexically-visible-vars e))
+			  (local-del)
+			(module-del)))
 	   
-	 (:function (if (or (member name (get-pydecl :func-globals e))
-			    (not (member name (get-pydecl :lexically-visible-vars e))))
-			module-del
-		      local-del))
+	   (:function (if (or (member name (get-pydecl :func-globals e))
+			      (not (member name (get-pydecl :lexically-visible-vars e))))
+			  (module-del)
+			(local-del)))
 	   
-	 (:class    (if (member name (get-pydecl :class-globals e))
-			module-del
-		      class-del)))))))
+	   (:class    (if (member name (get-pydecl :class-globals e))
+			  (module-del)
+			(class-del)))))))))
 
 (defmacro dict-expr (alist)
   `(make-dict-unevaled-list ,alist))
@@ -626,19 +632,22 @@
   (assert (symbolp name))
   
   (when (eq name '|...|)
-    (setf name 'Ellipsis))
+    (return-from identifier-expr
+      `pybv:Ellipsis))
   
   (flet ((module-lookup ()
 	   (let ((ix (position name (get-pydecl :mod-globals-names e))))
 	     (if ix
 		 `(let ((val (svref +mod-globals-values+ ,ix)))
-		    (when (eq val :unbound) (py-raise 'NameError
-						      "Variable '~A' is unbound [glob]" ',name))
-		    val)
+		    (if (eq val :unbound)
+			(py-raise 'NameError
+				  "Variable '~A' is unbound [glob]" ',name)
+		      val))
 	       `(or (gethash ',name +mod-dyn-globals+)
 		    ,(if (builtin-name-p name)
 			 (builtin-name-value name)
-		       `(py-raise 'NameError "No variable with name '~A' [dyn-glob]" ',name)))))))
+		       `(py-raise 'NameError
+				  "Variable '~A' is unbound [dyn-glob]" ',name)))))))
     
     (ecase (get-pydecl :context e)
 

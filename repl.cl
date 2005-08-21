@@ -189,6 +189,3 @@
 	 (terpri)
 	 (prof:show-call-graph))
     (:time (time (funcall f)))))
-
-
-

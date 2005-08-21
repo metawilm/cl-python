@@ -275,9 +275,6 @@
 (defgeneric (setf py-attr) (val x attr)
   (:documentation "Set attribute ATTR of X to VAL"))
 
-(defgeneric py-del-attr (x attr)
-  (:documentation "Remove attribute ATTR of X"))
-
 
 ;; By default, when an object has a dict, attributes are looked up in
 ;; the dict.
@@ -425,10 +422,34 @@
     (py-raise 'TypeError
 	      "Class ~A has no attribute ~A" class x)))
 
+(def-py-method py-attribute-method.__repr__ (x)
+  (with-output-to-string (s)
+    (print-unreadable-object (x s :type t :identity t))))
 
 (defclass py-enumerate (py-core-object)
-  ()
+  ((gener :initarg :gener))
   (:metaclass py-core-type))
+
+(mop:finalize-inheritance (find-class 'py-enumerate))
+
+(def-py-method py-enumerate.__new__ :static (cls iterable)
+	       (assert (subtypep cls 'py-enumerate))
+	       (let ((gener (make-iterator-from-function
+			     :name :enumerater
+			     :func (let ((iter (get-py-iterate-fun iterable))
+					 (i 0))
+				     (lambda ()
+				       (let ((val (funcall iter)))
+					 (when val
+					   (prog1 
+					       (make-tuple-from-list (list i val))
+					     (incf i)))))))))
+		 (make-instance cls) :gener gener))
+
+(def-py-method py-enumerate.__repr__ (x)
+  (with-output-to-string (s)
+    (print-unreadable-object (x s :identity t :type t))))
+
 
 (defclass py-slice (py-core-object)
   ()
@@ -519,7 +540,8 @@
 	(__getattr__      nil)
 	(x.class          (py-class-of x)))
     
-    #+(or)(break "po.__getattr..__ ~A ~A    cpl=~A" x attr (mop:class-precedence-list x.class))
+    #+(or)(break "po.__getattr..__ ~A ~A    cpl=~A"
+		 x attr (mop:class-precedence-list x.class))
     
     (loop for c in (mop:class-precedence-list x.class)
 	until (or (eq c (load-time-value (find-class 'standard-class)))
@@ -544,44 +566,61 @@
 	     (let ((getattr-meth (gethash '__getattr__ c.dict)))
 	       (when getattr-meth (setf __getattr__ getattr-meth)))))
 
-    (flet ((bind-val (val)
-	     (bind-val val x x.class)))
+    ;; Arriving here means: no __getattribute__, but perhaps
+    ;; __getattr__ or class-attr-val.
+    
+    ;; A class attribute that is a data descriptor (i.e. has a
+    ;; `__set__' attribute) has higher priority than an instance
+    ;; attribute.
+    
+    #+(or)(warn "po.__ga__: ~S" `(:class-attr-val ,class-attr-val :__getattr__ ,__getattr__))
 
-      ;; Arriving here means: no __getattribute__, but perhaps
-      ;; __getattr__ or class-attr-val.
-      
-      ;; A class attribute that is a data descriptor (i.e. has a
-      ;; `__set__' attribute) has higher priority than an instance
-      ;; attribute.
-      
-      #+(or)(warn "po.__ga__: ~S" `(:class-attr-val ,class-attr-val :__getattr__ ,__getattr__))
+    (when (and class-attr-val (data-descriptor-p class-attr-val))
+      (return-from py-object.__getattribute__
+	(bind-val class-attr-val x x.class)))
+    
+    ;; Try instance dict
+    (when (dict x)
+      (let ((val (dict-get x attr)))
+	(when val
+	  
+	  (cond ((subtypep (py-class-of x) 'py-type)
+		 
+		 ;; XXX check the exact condition under which binding
+		 ;; of instance dict item occurs
 
-      (when (and class-attr-val (data-descriptor-p class-attr-val))
-	(return-from py-object.__getattribute__
-	  (bind-val class-attr-val)))
-      
-      ;; Try instance dict
-      (when (dict x)
-	(let ((val (dict-get x attr)))
-	  (when val
-	    (return-from py-object.__getattribute__
+		 (let ((bound-val (bind-val val nil x)))
+		   (when bound-val ;; attribute-method bounded to class -> NIL
+		     (return-from py-object.__getattribute__ bound-val))))
 
-	      (if (eq x (find-class 'py-type)) ;; XXX check if this is right
-		  (bind-val val)
-		val)))))
-      
-      ;; Fall back to a class attribute that is not a `data descriptor'.
-      (when class-attr-val
-	(return-from py-object.__getattribute__
-	  (bind-val class-attr-val)))
-      
-      ;; Fall back to the __getattr__ hook.
-      (when __getattr__
-	(return-from py-object.__getattribute__
-	  (py-call (bind-val __getattr__) (symbol-name attr))))
-	      
-      ;; Give up.
-      (error "No such attribute: ~A . ~A" x attr))))
+		(t (return-from py-object.__getattribute__ 
+		     val))))))
+    
+    ;; Fall back to a class attribute that is not a `data descriptor'.
+    (when class-attr-val
+      (return-from py-object.__getattribute__
+	(bind-val class-attr-val x x.class)))
+    
+    ;; Fall back to the __getattr__ hook.
+    (when __getattr__
+      (return-from py-object.__getattribute__
+	(py-call (bind-val __getattr__ x x.class) (symbol-name attr))))
+    
+    ;; Give up.
+    (error "No such attribute: ~A . ~A" x attr)))
+
+
+
+(def-py-method py-object.__delattr__ (x attr)
+  (check-type attr symbol)
+  (let ((d (dict x)))
+    (cond ((null d) (py-raise 'TypeError
+			      "Object ~A has not attribute `~A' (not even a dict)." 
+			      x attr))
+	  ((remhash attr d))
+	  (t (py-raise 'ValueError "Object ~A has not attribute `~A' (but there is a dict)."
+		       x attr)))))
+	  
 
 (def-py-method py-object.__new__ :static (cls &rest attr)
   (declare (ignore attr))
@@ -591,6 +630,10 @@
   (declare (ignore attr))
   ;; nothing
   )
+
+(def-py-method py-object.__repr__ (x)
+  (with-output-to-string (s)
+    (print-unreadable-object (x s :identity t :type t))))
 
 (defmethod recursive-class-dict-lookup ((cls class) attr)
   ;; Look for ATTR in class CLS and all its superclasses.
@@ -608,6 +651,13 @@
 		  #+(or)(warn "rec van py-object: ~A" attr)
 		  (return obj-attr)))))
 
+(defun recursive-class-lookup-and-bind (x attr)
+  #+(or)(warn "recursive-class-lookup-and-bind ~A ~A" x attr)
+  (let* ((x.cls (py-class-of x))
+	 (val   (recursive-class-dict-lookup x.cls attr)))
+    (when val
+      (bind-val val x x.cls))))
+    
 
 (def-py-method py-object.__get__ (value instance class)
   (declare (ignore instance class))
@@ -615,26 +665,25 @@
 
 ;; Type (User object)
 
-(def-py-method py-type.__new__ :static (metacls &optional name supers dict)
-	       (cond ((or name supers dict)
+(def-py-method py-type.__new__ :static (metacls name supers dict)
+	       
+	       (let* ((cls-type (if (and (some (lambda (s) (subtypep s 'py-type)) supers)
+					 (eq metacls 'py-type)) ;; XXX (subtypep meta pytype)?
+				    :metaclass
+				  :class))
 		      
-		      (let* ((cls-type (if (and (some (lambda (s) (subtypep s 'py-type)) supers)
-						(eq metacls 'py-type)) ;; XXX (subtypep meta pytype)?
-					   :metaclass
-					 :class))
-			     
-			     (c (mop:ensure-class
-				 name 
-				 :direct-superclasses supers
-				 :metaclass (ecase cls-type
-					      (:metaclass (find-class 'py-meta-type))
-					      (:class     metacls)))))
-			(mop:finalize-inheritance c)
-			(setf (slot-value c 'dict) dict)
-			c))
-		     
-		     (t ;; function type(x) -> <the type of x> 
-		      (py-class-of metacls))))
+		      (c (mop:ensure-class
+			  name 
+			  :direct-superclasses (or supers
+						   (list (find-class 'py-user-object)))
+			  :metaclass (ecase cls-type
+				       (:metaclass (find-class 'py-meta-type))
+				       (:class     metacls)))))
+		 
+		 (mop:finalize-inheritance c)
+		 (setf (slot-value c 'dict) dict)
+		 
+		 c))
 
 (def-py-method py-type.__init__ (cls)
   (declare (ignore cls))
@@ -648,17 +697,33 @@
     (print-unreadable-object (x s :identity t)
       (format s "python-class ~A" (class-name x)))))
 
-(def-py-method py-type.__call__ (x &rest args)
-  (if (subtypep x 'py-type)
-      ;; make a new class
-      (error "__call__ on subclass of 'type': ?")
-    
-    (let* ((__new__ (recursive-class-dict-lookup x '__new__))
-	   (inst (apply #'py-call __new__ x args))
-	   (__init__ (recursive-class-dict-lookup (py-class-of inst) '__init__)))
-      
-      (apply #'py-call __init__ inst args)
-      inst)))
+(def-py-method py-type.__call__ (cls &rest args)
+  
+  (cond ((and (eq cls (find-class 'py-type))
+	      args
+	      (not (cdr args)))
+	 (return-from py-type.__call__
+	   (py-class-of (car args))))
+	
+	((subtypep cls 'py-type)
+	 ;; make a new class
+	 (error "__call__ on subclass of 'type': ?  shouldn't it use type.__new__?"))
+	
+	((eq cls (find-class 'py-object))
+	 ;; object() -> an instance without __dict__
+	 (return-from py-type.__call__
+	   (make-instance 'py-dictless-object)))
+	
+	(t (let* ((__new__ (recursive-class-dict-lookup cls '__new__))
+		  (inst (apply #'py-call __new__ cls args)))
+	     
+	     (when (typep inst cls)
+	       ;; don't do this when type(x) was executed
+	       (let ((__init__ (recursive-class-dict-lookup (py-class-of inst) '__init__)))
+		 (apply #'py-call __init__ inst args)))
+	     
+	     (return-from py-type.__call__
+	       inst)))))
 
 
 ;; Module (User object)
@@ -666,7 +731,8 @@
 (defclass py-module (py-user-object) ;; no dict-mixin!?
   ((globals-names  :initarg :globals-names  :type vector :initform #())
    (globals-values :initarg :globals-values :type vector :initform #())
-   (dyn-globals    :initarg :dyn-globals    :type hash-table :initform (make-hash-table :test #'eq))
+   (dyn-globals    :initarg :dyn-globals    :type hash-table
+		   :initform (make-hash-table :test #'eq))
    (name           :initarg :name           :type symbol :initform "__main__"))
   (:metaclass py-user-type))
 
@@ -758,7 +824,7 @@
   ()
   (:documentation "Metaclass for proxy classes"))
 
-(defclass py-lisp-object (py-object)
+(defclass py-lisp-object (py-dictless-object)
   ((lisp-object :initarg :lisp-object :accessor proxy-lisp-val))
   (:metaclass py-lisp-type)
   (:documentation "Base class for proxy classes"))
@@ -1056,10 +1122,26 @@
   ;; where the accent after xxx in __xxx'__ means that the method from
   ;; the class is used, not an instance attribute (if it would exist)
   
-  (let ((ga-meth  (recursive-class-dict-lookup (py-class-of x) '__getattribute__)))
-    (assert ga-meth () "Object ~A (py-class: ~A) does not have a __getattribute__ method"
-	    x (py-class-of x))
-    (py-call ga-meth x attr)))
+  (let ((ga-meth (recursive-class-lookup-and-bind x '__getattribute__)))
+    
+    (assert ga-meth ()
+      "Object ~A (py-class: ~A) does not have a __getattribute__ method"
+      x (py-class-of x))
+    
+    (py-call ga-meth attr)))
+
+
+(defgeneric py-del-attr (x attr)
+  (:documentation "Remove attribute ATTR of X")
+  
+  (:method (x attr)
+	   (let ((da-meth (recursive-class-lookup-and-bind x '__delattr__)))
+	     (assert da-meth ()
+	       "Object ~A (py-class: ~A) does not have a __delattr__ method"
+	       x (py-class-of x))
+	     
+	     (py-call da-meth attr))))
+
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -1097,8 +1179,9 @@
 ;;; Calling objects (functions, classes, instances)
 
 (defgeneric py-call (f &rest args)
-  (:method ((f t) &rest args) (let ((__call__ (recursive-class-dict-lookup (py-class-of f) '__call__)))
-				(apply #'py-call __call__ f args)))
+  (:method ((f t) &rest args)
+	   (let ((__call__ (recursive-class-dict-lookup (py-class-of f) '__call__)))
+	     (apply #'py-call __call__ f args)))
   (:method ((f function) &rest args) (apply f args)))
 
 

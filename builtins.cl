@@ -23,6 +23,7 @@
 		      (int          py-int          )
 		      (list         py-list         )
 		      (long         py-int          )
+		      (number       py-number       )
 		      (object       py-object       )
 		      (property     py-property     )
 		      (slice        py-slice        )

@@ -7,21 +7,31 @@
 
 (excl:defsystem :python
     (:default-pathname #.*load-pathname*)
+
+  ("package")
   
-  (:serial "package" 
-	   
-	   (:definitions "walk" "compiler") ;; COMPILER uses code walk macro
-	   (:definitions "parser" "lexer") ;; LEXER uses parser terminal-code macro
-	   (:definitions "builtin-classes" "optimize") ;; OPTIMIZE defines methods on b-i classes
-	   (:definitions "exceptions" "builtins")
-	   (:definitions "builtin-classes" "builtins")
-	   
-	   (:parallel
-	    (:serial "parser" "lexer") ;; lexer uses with-terminal-code from parser
-	    "pyprint"
-	    "walk"
-	    "repl"
-	    (:serial "builtin-classes" "exceptions" "builtins" "compiler" "optimize"))))
+  ("pyprint" (:uses-definitions-from "package"))
+  ("walk"    (:uses-definitions-from "package"))
+  ("repl"    (:uses-definitions-from "package"))
+  
+  ("builtin-classes" (:uses-definitions-from "package"))
+  ("exceptions"      (:uses-definitions-from "builtin-classes"))
+  ("builtins"        (:uses-definitions-from "exceptions" "builtin-classes"))
+  ("optimize"        (:uses-definitions-from "builtin-classes" "builtins"))
+  
+  ("parser"  (:uses-definitions-from "package"))
+  ("lexer"   (:uses-definitions-from "parser")) ;; parser macro: with-terminal-code
+  
+  ("compiler" (:uses-definitions-from "builtins" "walk")) ;; fill asts
+  
+  #+(or)
+  (:serial
+   "package" (:parallel
+	      (:serial "parser" "lexer") 
+	      "pyprint"
+	      "walk"
+	      "repl"
+	      (:serial "builtin-classes" "exceptions" "builtins" "compiler" "optimize"))))
 
 
 (defun compy ()
