@@ -810,9 +810,7 @@
 
 (defmacro print-stmt (dest items comma?)
   ;; XXX todo: use methods `write' of `dest' etc
-  (with-gensyms (list)
-    `(excl:with-stack-list (,list ,@items)
-       (py-print ,dest ,list ,comma?))))
+  `(py-print ,dest ,items ,comma?))
 
 (defmacro return-stmt (val &environment e)
   (if (get-pydecl :inside-function e)

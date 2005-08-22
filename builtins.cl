@@ -159,10 +159,6 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
 		       0
 		     -1)))
 
-	       ;; If X, Y are instances of the same class, it must be a
-	       ;; user-defined class, otherwise we wouldn't be in this
-	       ;; method.
-      
 	       ;; If the class is equal and it defines __cmp__, use that.
       
 	       (when (eq x.class y.class)

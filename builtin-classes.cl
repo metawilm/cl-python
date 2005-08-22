@@ -22,7 +22,9 @@
   ((dict :initarg :dict :initform (dict-init-func) :accessor dict)))
 
 (defmethod dict ((x symbol)) ;; (dict <symbol>) is designator for (dict <class>)
+  (break "dict symbol: ~A" x)
   (dict (find-class x)))
+
 (defmethod dict ((x t))
   nil)
 
@@ -147,7 +149,7 @@
     (let ((metaclass (or cls-metaclass
 			 (when supers (class-of (car supers)))
 			 mod-metaclass
-			 (find-class 'py-type))))
+			 (load-time-value (find-class 'py-type)))))
 
       (unless (and (typep metaclass 'class)
 		   (subtypep metaclass 'py-type))
@@ -646,7 +648,7 @@
       finally #+(or)(return nil)
 	      
 	      ;; this seems not needed, in the finally clause
-	      (let ((obj-attr (dict-get 'py-object attr)))
+	      (let ((obj-attr (dict-get (load-time-value (find-class 'py-object)) attr)))
 		(when obj-attr
 		  #+(or)(warn "rec van py-object: ~A" attr)
 		  (return obj-attr)))))
@@ -675,9 +677,9 @@
 		      (c (mop:ensure-class
 			  name 
 			  :direct-superclasses (or supers
-						   (list (find-class 'py-user-object)))
+						   (list (load-time-value (find-class 'py-user-object))))
 			  :metaclass (ecase cls-type
-				       (:metaclass (find-class 'py-meta-type))
+				       (:metaclass (load-time-value (find-class 'py-meta-type)))
 				       (:class     metacls)))))
 		 
 		 (mop:finalize-inheritance c)
@@ -699,7 +701,7 @@
 
 (def-py-method py-type.__call__ (cls &rest args)
   
-  (cond ((and (eq cls (find-class 'py-type))
+  (cond ((and (eq cls (load-time-value (find-class 'py-type)))
 	      args
 	      (not (cdr args)))
 	 (return-from py-type.__call__
@@ -709,7 +711,7 @@
 	 ;; make a new class
 	 (error "__call__ on subclass of 'type': ?  shouldn't it use type.__new__?"))
 	
-	((eq cls (find-class 'py-object))
+	((eq cls (load-time-value (find-class 'py-object)))
 	 ;; object() -> an instance without __dict__
 	 (return-from py-type.__call__
 	   (make-instance 'py-dictless-object)))
@@ -882,7 +884,7 @@
 (def-proxy-class py-int (py-real))
 
 (def-py-method py-int.__new__ :static (cls &optional (arg 0))
-	       (if (eq cls (find-class 'py-int))
+	       (if (eq cls (find-class (load-time-value 'py-int)))
 		   arg
 		 (let ((i (make-instance cls)))
 		   (setf (proxy-lisp-val i) arg)
@@ -958,7 +960,8 @@
 			(when ret key))))))
 
 (def-py-method py-dict.__eq__ (dict^ dict2)
-  (assert (eq (class-of dict2) (find-class 'hash-table)) () "py-dict.__eq__ wants two real dicts")
+  (assert (eq (class-of dict2)
+	      (load-time-value (find-class 'hash-table))) () "py-dict.__eq__ wants two real dicts")
   (let ((res1 (sort (loop for k being the hash-key in dict
 			using (hash-value v)
 			collect (cons k v))
@@ -978,7 +981,7 @@
 (def-proxy-class py-list)
 
 (def-py-method py-list.__new__ :static (cls)
-	       (if (eq cls (find-class 'py-list))
+	       (if (eq cls (load-time-value (find-class 'py-list)))
 		   (make-array 0 :adjustable t :fill-pointer 0)
 		 (make-instance cls)))
 		    
@@ -1048,8 +1051,18 @@
 (def-py-method py-string.__repr__ (x^)
   (with-output-to-string (s)
     (py-pprint s x)))
-  
 
+(def-py-method py-string.__add__ (x^ y^)
+  (concatenate 'string (the string x) (the string y)))
+
+(def-py-method py-string.__cmp__ (x^ y^)
+  (cond ((string< x y) -1)
+	((string= x y)  0)
+	(t              1)))
+
+(def-py-method py-string.__mod__ (x^ args)
+  (format nil "[[string-%  ~A  ~A]]" x (py-str-string args))) 
+  
 ;; Tuple (Lisp object: consed list)
 
 (def-proxy-class py-tuple)
@@ -1058,9 +1071,9 @@
 	       (let ((tup (make-tuple-from-list (when iterable
 						  (py-iterate->lisp-list iterable)))))
 		 
-		 (cond ((eq cls (find-class 'py-tuple)) tup)
+		 (cond ((eq cls (load-time-value (find-class 'py-tuple))) tup)
 		       
-		       ((subtypep cls (find-class 'py-tuple))
+		       ((subtypep cls (load-time-value (find-class 'py-tuple)))
 			(let ((x (make-instance cls)))
 			  (setf (proxy-lisp-val x) tup)
 			  x))
@@ -1106,9 +1119,9 @@
     (:method ((x function))    (load-time-value (find-class 'py-lisp-function)))
     (:method ((x py-function)) (load-time-value (find-class 'py-function)))
     
-    (:method ((x py-lisp-type)) (find-class 'py-type))
-    (:method ((x py-core-type)) (find-class 'py-type))
-    (:method ((x py-user-type)) (find-class 'py-type))
+    (:method ((x py-lisp-type)) (load-time-value (find-class 'py-type)))
+    (:method ((x py-core-type)) (load-time-value (find-class 'py-type)))
+    (:method ((x py-user-type)) (load-time-value (find-class 'py-type)))
     
     (:method ((x class))   (if (eq x (load-time-value (find-class 'py-type)))
 			       x  ;; py-type is its own class
@@ -1222,9 +1235,9 @@
   ;; XXX merge into one pretty printer string
   ;; XXX TypeError
   (error (if right
-	     (format nil "Operation '~A' not supported for operands ~A and ~A."
+	     (format nil "Operation '~A' not supported for operands ~S and ~S."
 		     operation left right)
-	   (format nil "Operation '~A' not supported for operand ~A." operation left))))
+	   (format nil "Operation '~S' not supported for operand ~S." operation left))))
 
 (defvar *binary-op-funcs-ht* (make-hash-table :test #'eq))
 (defvar *binary-iop-funcs-ht* (make-hash-table :test #'eq))
@@ -1634,13 +1647,15 @@ next value gotten by iterating over X. Returns NIL, NIL upon exhaustion.")
   (when dest
     (warn "ignoring 'dest' arg of PRINT stmt (got: ~A)" dest))
   
-  (dolist (x items)
-    (typecase x
-      (integer (excl::fast (format t "~A" (the integer x))))
-      (t (format t "~A " (py-str-string x))))
-    (write-char #\Space t))
-  
-  (unless comma?
-    (write-char #\Newline t))
-  
-  nil)
+  (excl::fast
+   (let ((*print-pretty* nil))
+     (dolist (x items)
+       (typecase x
+	 (integer (excl::fast (write (the integer x) :base 10)))
+	 (t (format t "~A " (py-str-string x))))
+       (write-char #\Space t))
+     
+     (unless comma?
+       (write-char #\Newline)))))
+
+
