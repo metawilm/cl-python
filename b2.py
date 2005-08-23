@@ -32,9 +32,7 @@ tests = {
 def main():
     pi = PI()
     checks = {}
-    iz = izip(xrange(1000), pi)
-    print "iz = ", iz
-    for x, y in iz:
+    for x, y in izip(xrange(1000), pi):
         print y,
         if x in tests:
             checks[x] = pi.a1
@@ -43,3 +41,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+

@@ -376,10 +376,14 @@
 	    ((|,|)                . ((list t)))
 	    ((|,| expr exprlist2) . ((list $2 $3))))
 
- (testlist (test testlist2) ((if $2 `(tuple-expr ,(cons $1 $2)) $1)))
+ (testlist (test testlist2) ((if $2 
+				 `(tuple-expr ,(cons $1 (if (eq (car (last $2)) :dummy)
+							    (butlast $2)
+							  $2)))
+			       $1)))
  (testlist2 :or
 	    (()                   . (nil))
-	    ((|,|)                . ((list t)))
+	    ((|,|)                . ((list :dummy)))
 	    ((|,| test testlist2) . ((cons $2 $3))))
 
  (testlist-safe :or

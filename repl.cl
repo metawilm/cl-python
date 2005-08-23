@@ -38,8 +38,8 @@
 (defvar *repl-time* nil)
 
 (defun repl ()
-  (let* ((*repl-mod* (make-module))
-	 (dyn-globals (slot-value *repl-mod* 'dyn-globals)))
+  (setf *repl-mod* (make-module))
+  (let* ((dyn-globals (slot-value *repl-mod* 'dyn-globals)))
     
     (declare (special *the-none*))
     (setf (gethash '_   dyn-globals) *the-none*
@@ -189,3 +189,19 @@
 	 (terpri)
 	 (prof:show-call-graph))
     (:time (time (funcall f)))))
+
+
+;; stuff used by emacs
+
+(defun run-py-code-string (str)
+  (let ((ast (parse-python-string str)))
+    (run-ast ast)))
+ 
+(defun run-ast (ast)
+  (when (eq (car ast) 'module-stmt)
+    (setq ast (cadr ast)))
+  
+  (let ((func (compile nil `(lambda ()
+			      (with-this-module-context (,*repl-mod*)
+				,ast)))))
+    (funcall func)))

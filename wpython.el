@@ -1,14 +1,35 @@
-(defun wilm (start end)
+(defun clpython-eval-region (start end)
+  "Call with region, otherwise current line is executed"
   (interactive "r")
 
-  ;; normalize region
-  (goto-char end)   (beginning-of-line) (setq end   (point-marker))
-  (goto-char start) (beginning-of-line) (setq start (point-marker))
+  (save-excursion
 
-  (let ((tmp-file (make-temp-name "/tmp/clpython_")))
-    (write-region start end tmp-file nil)
-    (message (format "written %S characters from region" (- end start)))
+    ;; normalize region
+    ;(goto-char start) (beginning-of-line) (setq start (point-marker))
+    ;(goto-char end)   (beginning-of-line) (setq end (point-marker))
 
-    ;; stuff with tmp-file ...
+    (let* ((code-string (buffer-substring start end)))
+      
+      (set-buffer (get-buffer-create "clpython-tmp-buffer"))
+      (erase-buffer)
+      
+      (let ((cmds `((in-package :python)
+		    (run-py-code-string ,code-string))))
+	
+	(dolist (sexp cmds)
+	  (insert (format "%S\n" sexp)))
+	
+	(fi::eval-region-internal (point-min) (point-max) nil)))))
 
-    (delete-file tmp-file)))
+(global-set-key "\C-x\p" 'clpython-eval-region)
+
+" test:
+print f, 1+2
+def f(x): x+10
+g()
+x = 4
+def g():
+  print 3
+
+"
+
