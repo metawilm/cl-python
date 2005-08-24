@@ -221,6 +221,7 @@
 		    name
 		    :direct-superclasses supers
 		    :metaclass (load-time-value (find-class 'py-meta-type)))))
+	  (setf (slot-value cls 'dict) namespace)
 	  (return-from make-py-class cls)))
       
       
@@ -241,7 +242,13 @@
 	  ;; If __new__ is a static method, then bound-_new_ will
 	  ;; be the underlying function.
 	  
-	  (let ((cls (py-call bound-_new_ metaclass name supers namespace)))
+	  ;; Note that all params must be Python vals, therefore
+	  ;; (string ..), make-tuple-...
+	  (let ((cls (py-call bound-_new_
+			      metaclass
+			      (string name) 
+			      (make-tuple-from-list supers)
+			      namespace)))
 	    
 	    (warn "The __new__ method returned class: ~S" cls)
 	    (assert cls () "__new__ returned NIL: ~A" bound-_new_)
@@ -412,9 +419,9 @@
     x))
 
 (def-py-method py-function.__get__ (func obj class)
-  (if (none-p obj)
-      (make-instance 'unbound-method :func func :class class)
-    (make-instance 'bound-method :func func :instance obj)))
+  (if (or (null obj) (none-p obj))
+      (make-instance 'py-unbound-method :func func :class class)
+    (make-instance 'py-bound-method :func func :instance obj)))
 
 (def-py-method py-function.__repr__ (func)
   (with-output-to-string (s)
@@ -449,10 +456,19 @@
   ((class :initarg :class :accessor py-method-class))
   (:metaclass py-core-type))
 
+(def-py-method py-unbound-method.__repr__ (x)
+  (with-output-to-string (s)
+    (print-unreadable-object (x s :identity t :type t)
+      (with-slots (class func) x
+	(format s "~A.~A" class func)))))
 
 (defclass py-static-method (py-method)
   ()
   (:metaclass py-core-type))
+
+(def-py-method py-static-method.__new__ (cls func)
+  (assert (eq cls (load-time-value (find-class 'py-static-method))))
+  (make-instance 'py-static-method :func func))
 
 (def-py-method py-static-method.__get__ (x inst class)
   (declare (ignore inst class))
@@ -731,7 +747,14 @@
 
 ;; Type (User object)
 
-(def-py-method py-type.__new__ :static (metacls name supers dict)
+(def-py-method py-type.__new__ :static (metacls name supers^ dict)
+	       
+	       ;; deproxy supers, as it may be *the-empty-tuple* instance
+	       (unless (symbolp name)
+		 (let ((str (deproxy name)))
+		   (if (stringp str)
+		       (setf name (intern str #.*package*))
+		     (py-raise 'TypeError "Invalid class name: ~A" name))))
 	       
 	       (let* ((cls-type (if (and (some (lambda (s) (subtypep s 'py-type)) supers)
 					 (eq metacls 'py-type)) ;; XXX (subtypep meta pytype)?
@@ -751,8 +774,8 @@
 		 
 		 c))
 
-(def-py-method py-type.__init__ (cls)
-  (declare (ignore cls))
+(def-py-method py-type.__init__ (cls &rest args)
+  (declare (ignore cls args))
   nil)
 
 (def-py-method py-type.__mro__ :attribute (x)
@@ -773,6 +796,7 @@
 	 (return-from py-type.__call__
 	   (py-class-of (car args))))
 	
+	#+(or)
 	((subtypep cls 'py-type)
 	 ;; make a new class
 	 (error "__call__ on subclass of 'type': ?  shouldn't it use type.__new__?"))

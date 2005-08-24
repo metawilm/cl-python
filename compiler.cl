@@ -129,13 +129,15 @@
     
     (let* ((value-items (second value))
 	   (tg-items    (second (car targets)))
-	   (temp-items  (loop for i from 0 below (length value-items) collect (gensym "assign-val"))))
+	   (temp-items  (loop for i from 0 below (length value-items)
+			    collect (gensym "assign-val"))))
       
       (return-from assign-stmt
 	`(let ,(loop for te in temp-items for va in value-items
 		   collect `(,te ,va))
 	   ,@(loop for te in temp-items for tg in tg-items
 		 collect `(assign-stmt ,te (,tg)))))))
+  
   
   (let ((context (get-pydecl :context e)))
     (with-gensyms (val)
@@ -196,35 +198,49 @@
 (defmacro augassign-stmt (op place val)
   (let ((py-@= (get-binary-iop-func-name op))
 	(py-@  (get-binary-op-func-name-from-iop op)))
-	
+
+    ;; py-@= returns t iff __i@@@__ found
+    
+    ;; Using (function py-+) syntax to enable compiler macros:
+    ;; 
+    ;; inserting func directly as (funcall ,(function py-+) ..) will
+    ;; skip comp macros.
+
     (ecase (car place)
     
       (tuple-expr (py-raise 'SyntaxError
 			    "Augmented assignment to multiple places not possible (got: ~S)"
 			    `(,place ,op ,val)))
-    
-      ((attributeref-expr subscription-expr)
-     
-       `(let* ((primary       ,(second place))
-	       (sub           ,(third place))
-	       (ev-val        ,val)
-	       (place-val-now (,(car place) place-obj-1 place-obj-2)))
 
-	  ;; Using (function py-+) syntax to enable compiler macros.
-	  ;; [inserting func directly as (funcall ,(function py-+) ..) will skip comp macros]
-	  
-	  (or (funcall (function ,py-@=) place-val-now ev-val) ;; returns true iff __i@@@__ found
-	      (let ((new-val (funcall (function ,py-@) place-val-now ev-val)))
-		(assign-stmt new-val (,(car place) primary sub))))))
-
-      (identifier-expr
-     
-       `(let* ((ev-val ,val)
-	       (place-val-now ,place))
-	
-	  (or (funcall (function ,py-@=) place-val-now ev-val) ;; returns true iff __i@@@__ found
-	      (let ((new-val (funcall (function ,py-@) place-val-now ev-val)))
-		(assign-stmt new-val (,place)))))))))
+      (attributeref-expr (destructuring-bind (item attr) (cdr place)
+			   `(let* ((ev-prim ,item)
+				   (ev-val  ,val)
+				   (place-val-now (attributeref-expr ev-prim ,attr)))
+			      
+			      (or (funcall (function ,py-@=) place-val-now ev-val)
+				  (let ((new-val (funcall (function ,py-@)
+							  place-val-now ev-val)))
+				    (assign-stmt new-val
+						 ((attributeref-expr ev-prim ,attr))))))))
+			 
+      (subscription-expr (destructuring-bind (item sub) (cdr place)
+			   `(let* ((ev-item ,item)
+				   (ev-sub  ,sub)
+				   (place-val-now (subscription-expr ev-item ev-sub)))
+			  
+			      (or (funcall (function ,py-@=) place-val-now ev-val)
+				  (let ((new-val (funcall (function ,py-@)
+							  place-val-now ev-val)))
+				    (assign-stmt new-val
+						 ((subscription-expr ev-prim ev-sub))))))))
+      
+      (identifier-expr `(let* ((ev-val        ,val)
+			       (place-val-now ,place))
+			  
+			  (or (funcall (function ,py-@=) place-val-now ev-val)
+			      (let ((new-val (funcall (function ,py-@)
+						      place-val-now ev-val)))
+				(assign-stmt new-val (,place)))))))))
 
 (defmacro backticks-expr (item)
   `(py-repr ,item))
@@ -258,8 +274,7 @@
     (py-raise 'SyntaxError "BREAK was found outside loop")))
 
 
-(defmacro call-expr (primary (&whole all-args pos-args kwd-args *-arg **-arg)
-		     &environment e)
+(defmacro call-expr (primary (&whole all-args pos-args kwd-args *-arg **-arg))
   
   ;; For complete Python semantics, we check for every call if the
   ;; function being called is one of the built-in functions EVAL,
@@ -267,64 +282,97 @@
   ;; _caller_ (which is ugly).
   ;; 
   ;; At the module level, globals() and locals() are equivalent.
-  
-  (let ((context (get-pydecl :context e)))
-    
-    `(let ((prim ,primary))
-     
-       (cond ((eq prim (load-time-value #'pybf:locals))
-	      (if (and ,(not (or pos-args kwd-args))
-		       ,(or (null *-arg)  `(null (py-iterate->lisp-list ,*-arg)))
-		       ,(or (null **-arg) `(null (py-mapping->lisp-list ,**-arg))))
-		  ,(if (eq context :module)
-		       `(.globals.)
-		     `(.locals.))
-		(py-raise 'TypeError
-			  "locals() must be called without args (got: ~A)" ',all-args)))
-
-	     ((eq prim (load-time-value #'pybf:globals))
-	      (if (and ,(not (or pos-args kwd-args))
-		       ,(or (null *-arg)  `(null (py-iterate->lisp-list ,*-arg)))
-		       ,(or (null **-arg) `(null (py-mapping->lisp-list ,**-arg))))
-		  (.globals.)
-		(py-raise 'TypeError
-			  "globals() must be called without args (got: ~A)" ',all-args)))
-
-	     ((eq prim (load-time-value #'pybf:eval))
-	      (let ((args (nconc (list ,@pos-args)
-				 ,(when *-arg `(py-iterate->lisp-list ,*-arg)))))
-		(if (and ,(null kwd-args)
-			 ,(or (null **-arg)
-			      `(null (py-mapping->lisp-list ,**-arg)))
-			 (<= 1 (length args) 3))
+  (declare (ignore all-args))
+  (cond ((null (or kwd-args *-arg **-arg))
+	 `(py-call ,primary ,@pos-args))
+	
+	(t `(let* ((ev-prim ,primary)
+		   (pos-args (list ,@pos-args))
+		   (all-pos-args ,(if *-arg
+				      `(nconc pos-args (py-iterate->lisp-list ,*-arg))
+				    `pos-args))
+		   (more-key-args ,(if **-arg
+				       `(py-mapping->lisp-list-TODO ,**-arg)
+				     `())))
+	      
+	      (apply #'py-call ev-prim (nconc all-pos-args
+					      ,@(loop for ((i-e key) val) in kwd-args
+						    do (assert (eq i-e 'identifier-expr))
+						    collect (intern (symbol-name key) :keyword)
+						    collect val)
+					      more-key-args))))))
+  #|
+  (py-call prim
+	   ,@pos-args 
+	   ,@(loop for ((i-e key) val) in kwd-args
+		 do (assert (eq i-e 'identifier-expr))
+		    ;; XXX tuples?
 		    
-		    (funcall (load-time-value #'pybf:eval) ,(first pos-args)
-			     ,(or (second pos-args)
-				  `(.globals.))
-			     ,(or (third  pos-args)
-				  (if (eq context :module)
-				      `(.globals.)
-				    `(.locals.))))
-		
-		  (py-raise 'TypeError
-			    "eval() must be called with 1 to 3 pos args (got: ~A)" ',all-args))))
+		 collect (intern (symbol-name key) :keyword)
+		 collect val)
 	   
-	     (t (py-call prim
-			 ,@pos-args 
-			 ,@(loop for ((i-e key) val) in kwd-args
-			       do (assert (eq i-e 'identifier-expr))
-				  ;; XXX tuples?
-				
-			       collect (intern (symbol-name key) :keyword)
-			       collect val)
-		       
-			 ;; Because the * and ** arg may contain a huge
-			 ;; number of items, larger then max num of
-			 ;; lambda args, supply them using special :*
-			 ;; and :** keywords.
-		       
-			 ,@(when *-arg  `(:* ,*-arg))
-			 ,@(when **-arg `(:** ,**-arg))))))))
+	   ;; Because the * and ** arg may contain a huge
+	   ;; number of items, larger then max num of
+	   ;; lambda args, supply them using special :*
+	   ;; and :** keywords.
+	   
+	   ,@(when *-arg  `(:* ,*-arg))
+	   ,@(when **-arg `(:** ,**-arg)))
+  
+  
+  `(cond ((eq prim (load-time-value #'pybf:locals))
+	 (if (and ,(not (or pos-args kwd-args))
+		  ,(or (null *-arg)  `(null (py-iterate->lisp-list ,*-arg)))
+		  ,(or (null **-arg) `(null (py-mapping->lisp-list ,**-arg))))
+	     
+	     (.locals.)
+	   
+	   (py-raise 'TypeError
+		     "locals() must be called without args (got: ~A)" ',all-args)))
+
+	((eq prim (load-time-value #'pybf:globals))
+	 (if (and ,(not (or pos-args kwd-args))
+		  ,(or (null *-arg)  `(null (py-iterate->lisp-list ,*-arg)))
+		  ,(or (null **-arg) `(null (py-mapping->lisp-list ,**-arg))))
+	     (.globals.)
+	   (py-raise 'TypeError
+		     "globals() must be called without args (got: ~A)" ',all-args)))
+
+	((eq prim (load-time-value #'pybf:eval))
+	 (let ((args (nconc (list ,@pos-args)
+			    ,(when *-arg `(py-iterate->lisp-list ,*-arg)))))
+	   (if (and ,(null kwd-args)
+		    ,(or (null **-arg)
+			 `(null (py-mapping->lisp-list ,**-arg)))
+		    (<= 1 (length args) 3))
+	       
+	       (funcall (load-time-value #'pybf:eval) ,(first pos-args)
+			,(or (second pos-args)
+			     `(.globals.))
+			,(or (third  pos-args)
+			     `(.locals.)))
+	     
+	     (py-raise 'TypeError
+		       "eval() must be called with 1 to 3 pos args (got: ~A)" ',all-args))))
+	
+	(t (py-call prim
+		    ,@pos-args 
+		    ,@(loop for ((i-e key) val) in kwd-args
+			  do (assert (eq i-e 'identifier-expr))
+			     ;; XXX tuples?
+			     
+			  collect (intern (symbol-name key) :keyword)
+			  collect val)
+		    
+		    ;; Because the * and ** arg may contain a huge
+		    ;; number of items, larger then max num of
+		    ;; lambda args, supply them using special :*
+		    ;; and :** keywords.
+		    
+		    ,@(when *-arg  `(:* ,*-arg))
+		    ,@(when **-arg `(:** ,**-arg)))))
+		    #|
+  )
 
 (defmacro classdef-stmt (name inheritance suite &environment e)
   ;; todo: define .locals. containing class vars
@@ -603,7 +651,7 @@
 		     ,@(when (and (eq (get-pydecl :context e) :class)
 				  (eq fname '__new__))
 			 
-			 `((assign-stmt (call-expr (identifier-expr staticmethod)
+			 `((assign-stmt (call-expr pybt:staticmethod
 						   (((identifier-expr ,fname)) nil nil nil))
 					((identifier-expr ,fname)))))
 		     ;;
@@ -767,16 +815,18 @@
      (flet ((.globals. () (module-make-globals-dict
 			   ;; Updating this dict really modifies the globals.
 			   +mod-globals-names+ +mod-globals-values+ +mod-dyn-globals+)))
-	 
-       #'.globals. ;; remove 'unused' warning
-	 
-       (with-pydecl
-	   ((:mod-globals-names      ,glob-names)
-	    (:context                :module)
-	    (:mod-futures            :todo-parse-module-ast-future-imports))
-	   
-	 ,@body))
        
+       #'.globals. ;; remove 'unused' warning
+
+       (macrolet ((.locals. () `(.globals.)))
+	 
+	 (with-pydecl
+	     ((:mod-globals-names      ,glob-names)
+	      (:context                :module)
+	      (:mod-futures            :todo-parse-module-ast-future-imports))
+	   
+	   ,@body)))
+     
      ,@(when create-return-mod
 	 `(+mod+))))
 
