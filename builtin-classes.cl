@@ -50,6 +50,10 @@
 (defclass py-meta-type (py-class-mixin standard-class)
   ())
 
+(defmethod initialize-instance :after ((cls py-meta-type) &rest initargs)
+  (declare (ignore initargs))
+  (mop:finalize-inheritance cls))
+
 #+(or)
 (defmethod make-instance
     ((cls (eql (find-class 'py-meta-type))) &rest initargs)
@@ -62,6 +66,10 @@
 (defclass py-type (py-class-mixin standard-class)
   ()
   (:metaclass py-meta-type))
+
+(defmethod initialize-instance :after ((cls py-type) &rest initargs)
+  (declare (ignore initargs))
+  (mop:finalize-inheritance cls))
 
 #+(or)
 (defmethod make-instance ((cls py-meta-type) &rest initargs)
@@ -99,6 +107,31 @@
 
 (mop:finalize-inheritance (find-class 'py-object))
 
+
+;; Core type/object
+
+(defclass py-core-object (py-dictless-object) ())
+(defclass py-core-type   (py-type)   ())
+
+;; User type/object
+
+(defclass py-user-type   (py-type) ())
+(defclass py-user-object (py-object)
+  ()
+  (:metaclass py-user-type))
+
+;; Lisp type/object
+
+(defclass py-lisp-type (py-type)
+  ()
+  (:documentation "Metaclass for proxy classes"))
+
+(defclass py-lisp-object (py-dictless-object)
+  ((lisp-object :initarg :lisp-object :accessor proxy-lisp-val))
+  (:metaclass py-lisp-type)
+  (:documentation "Base class for proxy classes"))
+
+
 #+(or)
 (defmethod make-instance ((cls py-type) &rest initargs)
   ;; Create an instance of a Python class.
@@ -126,7 +159,7 @@
   ;;  2) all supers are subtype of 'py-dictless-object (to create new "regular user-level" class)
   
   (flet ((of-type-class (s) (typep s 'class))
-	 (subclass-of-py-object-p (s) (subtypep s 'py-object))
+	 (subclass-of-py-dl-object-p (s) (subtypep s 'py-dictless-object))
 	 (subclass-of-py-type-p   (s) (subtypep s 'py-type)))
     
     (unless (every #'of-type-class supers)
@@ -134,7 +167,7 @@
 
     (loop for s in supers
 	unless (or (subclass-of-py-type-p s)
-		   (subclass-of-py-object-p s))
+		   (subclass-of-py-dl-object-p s))
 	do (error "BUG? Superclass ~A is neither sub of 'type nor sub of 'object!" s))
     
     (let ((core-supers (remove-if-not (lambda (s) (typep s 'py-core-type)) supers)))
@@ -142,18 +175,56 @@
 	(py-raise 'TypeError "Cannot subclass from these classes: ~A" core-supers)))
     
     (when (and (some #'subclass-of-py-type-p supers)
-	       (some #'subclass-of-py-object-p supers))
+	       (some #'subclass-of-py-dl-object-p supers))
       (py-raise 'TypeError "Superclasses are at different levels (some metaclass, ~
                             some regular class) (got: ~A)." supers))
+    
+
+    ;; Python class `object' corresponds to Lisp class 'py-dictless-object
+    ;; but the new class should have a dict:
+    
+    (substitute (load-time-value (find-class 'py-object))
+		(load-time-value (find-class 'py-dictless-object))
+		supers)
+    
     
     (let ((metaclass (or cls-metaclass
 			 (when supers (class-of (car supers)))
 			 mod-metaclass
 			 (load-time-value (find-class 'py-type)))))
+      
+      (warn "metaclass: ~A" metaclass)
+      
+      (unless (typep metaclass 'class)
+	(py-raise 'TypeError "Metaclass must be a class (got: ~A)" metaclass))
+      
+      (unless (or (eq metaclass (load-time-value (find-class 'py-meta-type)))
+		  (subtypep metaclass 'py-type))
+	(py-raise 'TypeError 
+		  "Metaclass must be subclass of `type' (got class: ~A)" metaclass))
+      
 
-      (unless (and (typep metaclass 'class)
-		   (subtypep metaclass 'py-type))
-	(py-raise 'TypeError "Not a valid metaclass: ~A" metaclass))
+      ;; When inheriting from py-lisp-type (like `int'), use
+      ;; py-user-type as metaclass.
+      ;; XXX subclassing `function' ?
+      
+      (when (member metaclass
+		    (load-time-value (list (find-class 'py-lisp-type))
+					   (find-class 'py-core-type)))
+	(setf metaclass (load-time-value (find-class 'py-user-type))))
+      
+      
+      ;; Subclass of `type' has metaclass 'py-meta-type
+      
+      (when (eq metaclass (load-time-value (find-class 'py-meta-type)))
+	(let ((cls (mop:ensure-class
+		    name
+		    :direct-superclasses supers
+		    :metaclass (load-time-value (find-class 'py-meta-type)))))
+	  (return-from make-py-class cls)))
+      
+      
+      ;; Not a subclass of `type', so at the `object' level
       
       (let ((__new__ (recursive-class-dict-lookup metaclass '__new__)))
 	
@@ -300,8 +371,6 @@
 
 ;;; Core objects (function, method, None...; not subclassable by the user)
 
-(defclass py-core-object (py-dictless-object) ())
-(defclass py-core-type   (py-type)   ())
 
 
 ;; Function (Core object)
@@ -521,11 +590,6 @@
 
 ;;; User objects (Object, Module, File, Property)
 
-(defclass py-user-type   (py-type) ())
-
-(defclass py-user-object (py-object)
-  ()
-  (:metaclass py-user-type))
 
 
 ;; Object (User object)
@@ -697,7 +761,9 @@
 (def-py-method py-type.__repr__ (x) ;; XXX deproxy not needed?
   (with-output-to-string (s)
     (print-unreadable-object (x s :identity t)
-      (format s "python-class ~A" (class-name x)))))
+      (format s "~@[meta~*~]class ~A"
+	      (typep x (load-time-value (find-class 'py-meta-type)))
+	      (class-name x)))))
 
 (def-py-method py-type.__call__ (cls &rest args)
   
@@ -821,16 +887,6 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 ;;; Lisp objects (proxies around Lisp values: number, string, list, tuple, dict)
-
-(defclass py-lisp-type (py-type)
-  ()
-  (:documentation "Metaclass for proxy classes"))
-
-(defclass py-lisp-object (py-dictless-object)
-  ((lisp-object :initarg :lisp-object :accessor proxy-lisp-val))
-  (:metaclass py-lisp-type)
-  (:documentation "Base class for proxy classes"))
-
 
 (defgeneric deproxy (x)
   (:method ((x py-lisp-object))  (proxy-lisp-val x))
@@ -1087,11 +1143,7 @@
   (or list *the-empty-tuple*))
 
 (defmacro make-tuple-unevaled-list (items)
-  (let ((res '#:res))
-    `(let ((,res ()))
-       ,@(loop for x in items and i from 0
-	     collect `(push ,x ,res))
-       (make-tuple-from-list (nreverse ,res)))))
+  `(make-tuple-from-list (list ,@items)))
 
 (def-py-method py-tuple.__repr__ (x^)
   (cond ((null x)       "()")
@@ -1123,9 +1175,19 @@
     (:method ((x py-core-type)) (load-time-value (find-class 'py-type)))
     (:method ((x py-user-type)) (load-time-value (find-class 'py-type)))
     
-    (:method ((x class))   (if (eq x (load-time-value (find-class 'py-type)))
-			       x  ;; py-type is its own class
-			     (class-of x)))
+    (:method ((x class))   (cond
+			    ((eq x (load-time-value (find-class 'py-type)))
+			     x)  ;; py-type is its own class
+			    
+			    ((eq x (load-time-value (find-class 'py-meta-type)))
+			     ;; the metatypes is posing as `type'
+			     (load-time-value (find-class 'py-type)))
+			    
+			    ((typep x (load-time-value (find-class 'py-meta-type)))
+			     ;; metatypes fake being of type `type'
+			     (load-time-value (find-class 'py-type)))
+			    
+			    (t (class-of x))))
     (:method ((x t))       (class-of x)))
 
 (defmethod py-attr (x attr)

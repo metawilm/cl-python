@@ -13,6 +13,14 @@
   ((args :initarg :args :initform nil :documentation "Arguments as Lisp list"))
   (:metaclass py-type))
 
+(def-py-method Exception.__new__ :static (cls &rest args)
+	       (declare (ignore args))
+	       (assert (subtypep cls (load-time-value (find-class 'Exception))))
+	       (make-instance cls))
+
+(def-py-method Exception.__init__ (x &rest args)
+  (setf (slot-value x 'args) args))
+    
 (defvar *exception-tree* ;; XXX CPython has explanation string for every exception
     `(SystemExit
       StopIteration

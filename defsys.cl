@@ -39,7 +39,7 @@
 
 (defun loadpy ()
   (excl:load-system :python)
-  (setf *package* (find-package :python)))
+  #+(or)(setf *package* (find-package :python)))
 
 (format t "~%;;To compile and load, execute these forms:~%~s~%~s~%"
 	'(excl:compile-system :python)
