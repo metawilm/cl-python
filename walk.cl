@@ -26,7 +26,10 @@ Unless WALK-LISTS-ONLY, F will also be called on numbers and strings."
   ;; module, is evaluated in a non-value non-target context, that
   ;; context seems a reasonable default for the keyword arguments.
 
-  (assert (or (listp ast) (null walk-lists-only)))
+  (when (and walk-lists-only (not (listp ast)))
+    (return-from walk-py-ast ast))
+	     
+  #+(or)(assert (or (listp ast) (null walk-lists-only)))
   
   (labels ((walk-py-ast-1 (ast &rest context)
 	     (declare (optimize (debug 3)))
@@ -101,11 +104,11 @@ VALUE and TARGET context."
      #+(or)(assert (not target))
      (destructuring-bind (primary (p-a k-a *-a **-a)) (cdr form)
        `(call-expr ,(funcall f primary :value t)
-		   ,(mapcar (lambda (pos-arg) (funcall f pos-arg :value t)) p-a)
-		   ,(mapcar (lambda (kv) (list (first kv) (funcall f (second kv) :value t)))
-			    k-a)
-		   ,(when *-a (funcall f *-a :value t))
-		   ,(when **-a (funcall f **-a :value t)))))
+		   (,(mapcar (lambda (pos-arg) (funcall f pos-arg :value t)) p-a)
+		    ,(mapcar (lambda (kv) (list (first kv) (funcall f (second kv) :value t)))
+			     k-a)
+		    ,(when *-a (funcall f *-a :value t))
+		    ,(when **-a (funcall f **-a :value t))))))
       
     (classdef-stmt 
      (warn "walking classdef-stmt")
@@ -324,22 +327,21 @@ VALUE and TARGET context."
 		       collect (funcall f x))))
       
     (try-except-stmt
-     (warn "walking try-except-stmt")
+     #+(or)(warn "walking try-except-stmt ~A" form)
      #+(or)(assert (not (or value target)))
      (destructuring-bind
 	 (suite except-clauses else-suite) (cdr form)
        `(try-except-stmt
 	 ,(funcall f suite)
-	 (,@(loop for (exc var handler-form) 
-		in except-clauses collect
-		  `(,(when exc (funcall f exc :value t))
-		       ,(when var (funcall f var :target t))
-		     ,(funcall f handler-form))))
+	 (,@(loop for (exc var handler-form) in except-clauses 
+		collect `(,(when exc (funcall f exc :value t))
+			     ,(when var (funcall f var :target t))
+			   ,(funcall f handler-form))))
 	 ,(when else-suite
 	    (funcall f else-suite)))))
       
     (try-finally-stmt
-     (warn "walking try-finally-stmt")
+     #+(or)(warn "walking try-finally-stmt")
      #+(or)(assert (not (or value target)))
      (destructuring-bind (try-suite finally-suite) (cdr form)
        `(try-finally-stmt

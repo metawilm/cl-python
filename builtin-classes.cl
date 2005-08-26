@@ -778,6 +778,13 @@
   (declare (ignore cls args))
   nil)
 
+(def-py-method py-type.__name__ :attribute (cls)
+	       ;; XXX remove prefix `py-' etc
+  (string (class-name cls)))
+
+(def-py-method py-dictless-object.__class__ :attribute (x)
+	       (py-class-of x))
+
 (def-py-method py-type.__mro__ :attribute (x)
 	       (mop:class-precedence-list x))
 
@@ -934,7 +941,24 @@
 
 (def-py-method py-number.__repr__ (x^) (format nil "~A" x))
 
-(def-py-method py-number.__eq__  (x^ y^) (py-bool (= x y)))
+(def-py-method py-number.__eq__  (x^ y^) (py-bool (and (numberp y) (= x y))))
+
+(def-py-method py-number.__hash__ (x^)
+  (cond ((integerp x)   (sxhash x))
+	
+	((floatp x)
+	 (multiple-value-bind (int-part float-part)
+	     (truncate x)
+	   (if (= float-part 0)
+	       (sxhash int-part)
+	     (sxhash x))))
+	       
+	((complexp x) (if (= (imagpart x) 0)
+			  (sxhash (realpart x))
+			(sxhash x)))
+	
+	(t (break :unexpected))))
+
 (def-py-method py-number.__add__ (x^ y^) (+ x y))
 (def-py-method py-number.__neg__ (x^) (- x))
 (def-py-method py-number.__mul__ (x^ y^) (* x y))
@@ -991,9 +1015,12 @@
 
 (def-proxy-class py-dict)
 
+(defun py-==->lisp-val (x y)
+  (/= (py-== x y) 0))
+       
 (defun make-dict ()
   ;; todo: (make-hash-table :test #'py-==  :hash #'py-hash)
-  (make-hash-table :test #'eq))
+  (make-hash-table :test 'py-==->lisp-val :hash-function 'py-hash))
 
 (defmacro make-dict-unevaled-list (items)
   (let ((dict '#:dict))
@@ -1022,11 +1049,9 @@
     (write-char #\} s)))
 
 (def-py-method py-dict.__setitem__ (dict^ key val)
-  (assert (integerp key) () "Dict: only integer keys supported for now, not: ~A" key)
   (setf (gethash key dict) val))
 
 (def-py-method py-dict.__getitem__ (dict^ key)
-  (assert (integerp key) () "Dict: only integer keys supported for now, not: ~A" key)
   (or (gethash key dict)
       (py-raise 'KeyError "Dict has no such key: ~A" key)))
 
@@ -1053,7 +1078,12 @@
     
     #+(or)(warn "~A ~A" res1 res2)
     (py-bool (equalp res1 res2))))
-    
+
+(def-py-method py-dict.fromkeys :static (seq &optional (val pybv:None))
+       (let* ((d (make-dict)))
+	 (map-over-py-object (lambda (key) (setf (gethash key d) val))
+			     seq)
+	 d))
   
 
 ;; List (Lisp object: adjustable array)
@@ -1101,6 +1131,31 @@
 	     (when (<= (incf i) max-i)
 	       (aref x i))))))
 
+(def-py-method py-list.__getitem__ (x^ item)
+  (check-type item integer)
+  (when (< item 0)
+    (incf item (length x)))
+  (unless (<= 0 item (1- (length x)))
+    (py-raise 'ValueError
+	      "<list>[i] : i outside range (got ~A, length list = ~A)"
+	      item (length x)))
+  (aref x item))
+    
+(def-py-method py-list.__delitem__ (x^ item)
+  (check-type item integer)
+  (when (< item 0)
+    (incf item (length x)))
+  (unless (<= 0 item (1- (length x)))
+    (py-raise 'ValueError
+	      "del <list>[i] : i outside range (got ~A, length list = ~A)"
+	      item (length x)))
+  (loop for i from item below (1- (length x))
+      do (setf (aref x i) (aref x (1+ i))))
+  (decf (fill-pointer x)))
+
+(def-py-method py-list.append (x^ y)
+  (vector-push-extend y x))
+
 (defmacro make-py-list-unevaled-list (items)
   (let ((vec '#:vec))
     `(let ((,vec (make-array ,(length items) :adjustable t :fill-pointer ,(length items))))
@@ -1122,27 +1177,58 @@
 
 (def-proxy-class py-string)
 
-(def-py-method py-string.__len__ (x^)
-  (length x))
+(def-py-method py-string.__len__  (x^)  (length x))
 
-(def-py-method py-string.__str__ (x^)
-  x)
-
-(def-py-method py-string.__repr__ (x^)
-  (with-output-to-string (s)
-    (py-pprint s x)))
-
-(def-py-method py-string.__add__ (x^ y^)
-  (concatenate 'string (the string x) (the string y)))
+(def-py-method py-string.__iter__ (x^)
+  (make-iterator-from-function :name :string-iterator
+			       :func (let ((i 0)) (lambda ()
+						    (when (< i (length x))
+						      (prog1
+							  (string (char x i))
+							(incf i)))))))
+(def-py-method py-string.__str__  (x^)  x)
+(def-py-method py-string.__repr__ (x^)  (with-output-to-string (s)
+					  (py-pprint s x)))
+(def-py-method py-string.__add__ (x^ y^) (concatenate 'string
+					   (the string x) (the string y)))
+(def-py-method py-string.__hash__ (x^) (sxhash x))
 
 (def-py-method py-string.__cmp__ (x^ y^)
-  (cond ((string< x y) -1)
+  (cond ((not (stringp y)) -1) ;; whatever
+	((string< x y) -1)
 	((string= x y)  0)
 	(t              1)))
 
 (def-py-method py-string.__mod__ (x^ args)
   (format nil "[[string-%  ~A  ~A]]" x (py-str-string args))) 
-  
+
+(def-py-method py-string.isspace (x^)
+  (py-bool (and (> (length x) 0) ;; empty string is defiend as "not space"
+		(every (lambda (ch) (member ch '(#\Space #\Tab #\Newline)))
+		       x))))
+
+(def-py-method py-string.isalpha (x^) (py-bool (every #'alpha-char-p x)))
+(def-py-method py-string.isalnum (x^) (py-bool (every #'alphanumericp x)))
+(def-py-method py-string.isdigit (x^) (py-bool (every #'digit-char-p x)))
+(def-py-method py-string.islower (x^) (py-bool (every #'lower-case-p x)))
+
+(def-py-method py-string.join (x^ seq-of-strings)
+  (let* ((strings (mapcar #'py-val->string (py-iterate->lisp-list seq-of-strings)))
+	 (num-strings (length strings))
+	 (tot-num-chars (+ (* (1- num-strings) (length x))
+			   (apply #'+ (mapcar #'length strings))))
+	 (res (make-array tot-num-chars :element-type 'character)))
+    (loop
+	with res-i = 0
+	for s in strings and i from 0
+	do (loop for ch across s do (setf (aref res res-i) ch)
+				    (incf res-i))
+	unless (= i (1- num-strings))
+	do (loop for ch across x do (setf (aref res res-i) ch)
+				    (incf res-i)))
+    res))
+
+
 ;; Tuple (Lisp object: consed list)
 
 (def-proxy-class py-tuple)
@@ -1607,6 +1693,15 @@ the ~/.../ directive: ~/python:repr-fmt/"
     (write-string s stream)))
 
 
+(defgeneric py-del-subs (x item)
+  (:method (x item) (let* ((x.cls (py-class-of x))
+			   (__delitem__ (recursive-class-dict-lookup x.cls '__delitem__)))
+		      (if __delitem__
+			    (py-call __delitem__ x item)
+			(py-raise 'TypeError
+				  "Object ~A (a ~A) has no `__delitem__' method"
+				  x (class-name (py-class-of x)))))))
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 ;;; Iteration
@@ -1736,9 +1831,7 @@ next value gotten by iterating over X. Returns NIL, NIL upon exhaustion.")
   (excl::fast
    (let ((*print-pretty* nil))
      (dolist (x items)
-       (typecase x
-	 (integer (excl::fast (write (the integer x) :base 10)))
-	 (t (format t "~A " (py-str-string x))))
+       (format t "~A " (py-str-string x))
        (write-char #\Space t))
      
      (unless comma?

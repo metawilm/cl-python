@@ -22,16 +22,10 @@
   ("parser"  (:uses-definitions-from "package"))
   ("lexer"   (:uses-definitions-from "parser")) ;; parser macro: with-terminal-code
   
-  ("compiler" (:uses-definitions-from "builtins" "walk")) ;; fill asts
+  ("compiler" (:uses-definitions-from "builtins" "walk" "lexer")) ;; fill asts, parse-python-string
   
-  #+(or)
-  (:serial
-   "package" (:parallel
-	      (:serial "parser" "lexer") 
-	      "pyprint"
-	      "walk"
-	      "repl"
-	      (:serial "builtin-classes" "exceptions" "builtins" "compiler" "optimize"))))
+  ("builtin-classes" (:uses-definitions-from "pyprint")) ;; py-pprint
+  )
 
 
 (defun compy ()

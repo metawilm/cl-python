@@ -185,7 +185,7 @@
  (augassign :or |+=| |-=| |*=| |/=| |%=| |&=| |\|=| |^=| |<<=| |>>=| |**=| |//=| )
 
  (print-stmt :or
-	     ((print)                             . (`(print-stmt nil nil)))
+	     ((print)                             . (`(print-stmt nil nil nil)))
 	     ((print test |,--test*| comma?)      . (`(print-stmt nil (,$2 . ,$3) ,(and $4 t))))
 	     ((print |>>| test |,--test*| comma?) . (`(print-stmt ,$3 ,$4 ,(and $5 t)))))
  (:|,--test*|)

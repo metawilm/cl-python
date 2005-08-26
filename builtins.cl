@@ -364,8 +364,11 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
   (error "Function 'intern' is deprecated; it is not implemented."))
 
 (defun pybf:isinstance (x cls)
-  (declare (ignore x cls))
-  (py-bool (error "todo")))
+  (let ((cls (deproxy cls)))
+    (if (listp cls)
+	(some (lambda (c) (pybf:isinstance x c)) cls)
+      (py-bool (or (typep x cls)
+		   (subtypep (py-class-of x) cls))))))
 
 (defmethod pybf::isinstance-1 (x cls)
   ;; CLS is either a class or a _tuple_ of classes (only tuple is
@@ -632,24 +635,25 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
   "Return a list with tuples, where tuple i contains the i-th argument of ~
    each of the sequences. The returned list has length equal to the shortest ~
    sequence argument."
-  
-  ;;XXX CPython looks up __len__, __iter__, __getitem__ attributes here
+
+  ;; CPython looks up __len__, __iter__, __getitem__ attributes here
   ;; need to make an iterator for each sequence first, then call the iterators
-  (declare (ignore sequences))
-  (error "todo")
-  #+(or)
-  (loop with iter-vec = (make-array (length sequences)
-				    :initial-contents (mapcar #'get-py-iterate-fun sequences))
-      with res = (make-array 20 :adjustable t :fill-pointer 0)
-      with current-tuple-values = (make-array (length sequences))
-      for tuple-no from 0
-      do (loop for iter-i from 0
-	     for iter-func across iter-vec
-	     do (let ((val (funcall iter-func)))
-		  (if val
-		      (setf (aref current-tuple-values iter-i) val)
-		    (return-from pybf:zip (make-py-list res)))))
-	 (vector-push-extend (make-tuple (copy-seq current-tuple-values)) res)))
+  
+  (unless sequences
+    (py-raise 'TypeError "zip(): must have at least one sequence"))
+  
+  (loop with iters = (mapcar #'get-py-iterate-fun sequences)
+      for tuple = (loop for iter in iters
+		      if (funcall iter)
+		      collect it into cur-tuple-vals
+		      else return nil
+		      finally (return cur-tuple-vals))
+      if tuple
+      collect it into tuples
+      else return (make-array (length tuples)
+			      :adjustable t
+			      :fill-pointer (length tuples)
+			      :initial-contents tuples)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 

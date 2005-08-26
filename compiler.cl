@@ -301,32 +301,32 @@
 						    collect (intern (symbol-name key) :keyword)
 						    collect val)
 					      more-key-args))))))
-  #|
-  (py-call prim
-	   ,@pos-args 
-	   ,@(loop for ((i-e key) val) in kwd-args
-		 do (assert (eq i-e 'identifier-expr))
-		    ;; XXX tuples?
-		    
-		 collect (intern (symbol-name key) :keyword)
-		 collect val)
-	   
-	   ;; Because the * and ** arg may contain a huge
-	   ;; number of items, larger then max num of
-	   ;; lambda args, supply them using special :*
-	   ;; and :** keywords.
-	   
-	   ,@(when *-arg  `(:* ,*-arg))
-	   ,@(when **-arg `(:** ,**-arg)))
-  
-  
-  `(cond ((eq prim (load-time-value #'pybf:locals))
+#+(or)
+`((py-call prim
+	  ,@pos-args 
+	  ,@(loop for ((i-e key) val) in kwd-args
+		do (assert (eq i-e 'identifier-expr))
+		   ;; XXX tuples?
+		  
+		collect (intern (symbol-name key) :keyword)
+		collect val)
+	 
+	  ;; Because the * and ** arg may contain a huge
+	  ;; number of items, larger then max num of
+	  ;; lambda args, supply them using special :*
+	  ;; and :** keywords.
+	 
+	  ,@(when *-arg  `(:* ,*-arg))
+	  ,@(when **-arg `(:** ,**-arg)))
+
+
+ `(cond ((eq prim (load-time-value #'pybf:locals))
 	 (if (and ,(not (or pos-args kwd-args))
 		  ,(or (null *-arg)  `(null (py-iterate->lisp-list ,*-arg)))
 		  ,(or (null **-arg) `(null (py-mapping->lisp-list ,**-arg))))
-	     
+	    
 	     (.locals.)
-	   
+	  
 	   (py-raise 'TypeError
 		     "locals() must be called without args (got: ~A)" ',all-args)))
 
@@ -345,34 +345,34 @@
 		    ,(or (null **-arg)
 			 `(null (py-mapping->lisp-list ,**-arg)))
 		    (<= 1 (length args) 3))
-	       
+	      
 	       (funcall (load-time-value #'pybf:eval) ,(first pos-args)
 			,(or (second pos-args)
 			     `(.globals.))
 			,(or (third  pos-args)
 			     `(.locals.)))
-	     
-	     (py-raise 'TypeError
-		       "eval() must be called with 1 to 3 pos args (got: ~A)" ',all-args))))
-	
+	    
+	     a(py-raise 'TypeError
+			"eval() must be called with 1 to 3 pos args (got: ~A)" ',all-args))))
+       
 	(t (py-call prim
 		    ,@pos-args 
 		    ,@(loop for ((i-e key) val) in kwd-args
 			  do (assert (eq i-e 'identifier-expr))
 			     ;; XXX tuples?
-			     
+			    
 			  collect (intern (symbol-name key) :keyword)
 			  collect val)
-		    
+		   
 		    ;; Because the * and ** arg may contain a huge
 		    ;; number of items, larger then max num of
 		    ;; lambda args, supply them using special :*
 		    ;; and :** keywords.
-		    
+		   
 		    ,@(when *-arg  `(:* ,*-arg))
-		    ,@(when **-arg `(:** ,**-arg)))))
-		    #|
-  )
+		    ,@(when **-arg `(:** ,**-arg))))))
+
+
 
 (defmacro classdef-stmt (name inheritance suite &environment e)
   ;; todo: define .locals. containing class vars
@@ -860,7 +860,7 @@
 
 (defmacro print-stmt (dest items comma?)
   ;; XXX todo: use methods `write' of `dest' etc
-  `(py-print ,dest ,items ,comma?))
+  `(py-print ,dest (list ,@items) ,comma?))
 
 (defmacro return-stmt (val &environment e)
   (if (get-pydecl :inside-function e)
@@ -868,8 +868,7 @@
     (py-raise 'SyntaxError "RETURN found outside function")))
 
 (defmacro slice-expr (start stop step)
-  (declare (special *None*))
-  `(make-slice ,(or start *None*) ,(or stop *None*) ,(or step *None*)))
+  `(make-slice ,(or start pybv:None) ,(or stop pybv:None) ,(or step pybv:None)))
 
 (defmacro subscription-expr (item subs)
   `(py-subs ,item ,subs))
@@ -903,7 +902,6 @@
 	     (error    ,the-exc))))))
 
 (defmacro try-except-stmt (suite except-clauses else-suite)
-  
   ;; The Exception class in a clause is evaluated only after an
   ;; exception is thrown. Can't use handler-case for that reason.
   
@@ -1017,34 +1015,49 @@ AST is either an AST list or Python code string."
     
     (format t "locals      : ~{~:A ~}~%globals     : ~{~:A ~}~%outer scope : ~{~:A ~}~%"
 	    locals globals outers)))
-			
+
+(defvar *ast-vars-where* nil)
+
 (defun ast-vars (ast &key value target
-			  params locals declared-globals outer-scope)
+			  params locals declared-globals outer-scope
+			  is-module-scope)
+  
   ;; Returns: LOCALS, DECLARED-GLOBALS, OUTER-SCOPE
   ;; which are lists of symbols denoting variable names.
+  ;; 
+  ;; If IS-MODULE-SCOPE, then all variables will be in LOCALS.
+  
   (declare (optimize (debug 3)))
   
   (labels
       ((recurse (ast &key value target)
-	 #+(or)(warn "(recurse ~A :value ~A :target ~A)" ast value target)
+	 
+	 #+(or)(let ((*print-pretty* nil))
+		 (warn "(recurse ~A :value ~A :target ~A)" ast value target))
+	 
+	 (unless (listp ast)
+	   (return-from recurse))
+	 
 	 (with-py-ast ((form &key value target) ast :value value :target target) 
 	   (case (car form)
 	     
 	     (classdef-stmt (destructuring-bind
-				((identifier cname) (tuple-expr inheritance-list) suite) (cdr form)
-			      (declare (ignore suite))
+				((identifier cname) (tuple-expr inheritance-list) suite)
+				(cdr form)
 			      
-			      (assert (eq identifier 'identifier-expr))
-			      (assert (eq tuple-expr 'tuple-expr))
-			      
-			      (if (member cname declared-globals)
-				  (py-raise 'SyntaxError
-					    "A class name may not be declared `global' (class: '~A')."
-					    cname)
-				(pushnew cname locals))
-			      
-			      (loop for cls in inheritance-list 
-				  do (recurse cls :value t)))
+				(declare (ignore suite))
+				(assert (eq identifier 'identifier-expr))
+				(assert (eq tuple-expr 'tuple-expr))
+				
+				(if (member cname declared-globals)
+				    (py-raise 'SyntaxError
+					      "A class name may not be declared `global' ~
+                                             (class: '~A')."
+					      cname)
+				  (pushnew cname locals))
+				
+				(loop for cls in inheritance-list 
+				    do (recurse cls :value t)))
 			    (values nil t))
 	     
 	     (funcdef-stmt  (destructuring-bind 
@@ -1056,18 +1069,21 @@ AST is either an AST list or Python code string."
 				  do (recurse deco :value t))
 			      
 			      (if (member fname declared-globals)
-				  (error "SyntaxError: inner function name may not be declared
-                                          global (inner function: '~A')." fname)
+				  (error "SyntaxError: inner function name may not be ~
+                                            declared global (inner function: '~A', at ~A)."
+					 fname *ast-vars-where*)
 				(pushnew fname locals))
 			      
-			      (loop for (nil def-val) in (second args) ;; kwdarg default values
+			      ;; kwdarg default values
+			      (loop for (nil def-val) in (second args)
 				  do (recurse def-val :value t))
 			      
 			      
 			      (let ((all-args (apply #'funcdef-list-all-arg-names args)))
 				
 				(multiple-value-bind (f-locals f-globals f-outers)
-				    (ast-vars suite :value t :params all-args)
+				    (let ((*ast-vars-where* `(funcdef ,fname)))
+				      (ast-vars suite :value t :params all-args))
 				  
 				  (declare (ignore f-locals f-globals))
 
@@ -1078,7 +1094,9 @@ AST is either an AST list or Python code string."
 						 ;; `global' decls leak to inner functions
 						 (member name declared-globals))
 					     
-				      do (pushnew name outer-scope)))))
+				      do (if (eq *ast-vars-where* :module-scope) 
+					     (pushnew name locals)
+					   (pushnew name outer-scope))))))
 			    
 			    ;; When a function defines x as global, for inner
 			    ;; functions it's a global too:
@@ -1101,15 +1119,40 @@ AST is either an AST list or Python code string."
 	     
 	     (global-stmt (dolist (name (second form))
 			    (cond ((member name params)
-				   (error "SyntaxError: function param may not be declared `global'
-                                           (param '~A')." name))
+				   (error "SyntaxError: function param may not be declared ~
+                                           `global' (param '~A', at ~A)."
+					  name *ast-vars-where*))
 				  
 				  ((or (member name locals) (member name outer-scope))
 				   (error "SyntaxError: variable '~A' used before being ~
-                                           declared `global'." name))
+                                           declared `global' (at ~A)." name *ast-vars-where*))
 				  
 				  (t (pushnew name declared-globals))))
 			  (values nil t))
+
+	     (identifier-expr (let ((name (second form)))
+				(unless (eq name '|...|)
+				  
+				  (when value
+				    (unless (or (member name params)
+						(member name locals)
+						(member name declared-globals))
+				      
+				      (if (eq *ast-vars-where* :module-scope)
+					  (pushnew name locals)
+					(pushnew name outer-scope))))
+				  
+				  (when target
+				    (when (member name outer-scope)
+				      (warn "Local variable '~A' referenced ~
+                                             before assignment (at ~A)."
+					    name *ast-vars-where*))
+				    (unless (or (member name params)
+						(member name locals)
+						(member name declared-globals))
+				      (pushnew name locals)))))
+				
+				(values nil t))
 	     
 	     (lambda-expr (destructuring-bind (args expr) (cdr form)
 			    (let ((all-args (apply #'funcdef-list-all-arg-names args)))
@@ -1130,29 +1173,11 @@ AST is either an AST list or Python code string."
 			  
 			  (values nil t))
 	     
-	     (identifier-expr (let ((name (second form)))
-				(unless (eq name '|...|)
-				  
-				  (when value
-				    (unless (or (member name params)
-						(member name locals)
-						(member name declared-globals))
-				      (pushnew name outer-scope)))
-				  
-				  (when target
-				    (when (member name outer-scope)
-				      (error "SyntaxError: local variable '~A' referenced before ~
-                                              assignment." name))
-				    (unless (or (member name params)
-						(member name locals)
-						(member name declared-globals))
-				      (pushnew name locals))))
-				
-				(values nil t)))
-	     
 	     (t form)))))
     
-    (recurse ast :value value :target target)
+    (let ((*ast-vars-where* (if is-module-scope :module-scope :not-module-scope)))
+      (recurse ast :value value :target target))
+    
     (values locals declared-globals outer-scope)))
 
 
@@ -1199,7 +1224,7 @@ AST is either an AST list or Python code string."
 
 (defun module-stmt-globals (suite)
   (multiple-value-bind
-      (locals declared-globals outer-scope) (ast-vars suite)
+      (locals declared-globals outer-scope) (ast-vars suite :is-module-scope t)
     #+(or)(warn "module vars: ~A" `(:l ,locals :dg ,declared-globals :os ,outer-scope))
     (let ((res (union (union locals declared-globals) outer-scope))) ;; !?
       (pushnew '__name__ res)
@@ -1471,62 +1496,15 @@ AST is either an AST list or Python code string."
 		(declare (ignore context))
 		(case (first form)
 		  
-		  (yield-stmt
-		   (let ((tag (new-tag :yield)))
-		     (values `(:split (setf .state. ,tag)
-				      (return-from :function-body ,(second form)) 
-				      ,tag)
-			     t)))
-		  
-		  (while-stmt
-		   (destructuring-bind (test suite else-suite) (cdr form)
-		     (let ((repeat-tag (new-tag :repeat))
-			   (else-tag   (new-tag :else))
-			   (after-tag  (new-tag :end+break-target)))
-		       (values `(:split
-				 (unless (py-val->lisp-bool ,test)
-				   (go ,else-tag))
-
-				 ,repeat-tag
-				 (:split
-				  ,(walk suite
-					 (cons (cons repeat-tag after-tag)
-					       stack)))
-				 (if (py-val->lisp-bool ,test)
-				     (go ,repeat-tag)
-				   (go ,after-tag))
-				 
-				 ,else-tag
-				 ,@(when else-suite
-				     `((:split ,(walk else-suite stack))))
-				 
-				 ,after-tag)
-			       t))))
-		  
-		  (if-stmt
-		   (if (not (generator-ast-p form))
-		       (values form t)
-		     (destructuring-bind (clauses else-suite) (cdr form)
-		       (loop
-			   with else-tag = (new-tag :else) and after-tag = (new-tag :after)
-									   
-			   for (expr suite) in clauses
-			   for then-tag = (new-tag :then)
-					  
-			   collect `((py-val->lisp-bool ,expr) (go ,then-tag)) into tests
-			   collect `(:split ,then-tag
-					    (:split ,(walk suite stack))
-					    (go ,after-tag)) into suites
-			   finally
-			     (return
-			       (values `(:split (cond ,@tests
-						      (t (go ,else-tag)))
-						(:split ,@suites)
-						,else-tag
-						,@(when else-suite
-						    `((:split ,(walk else-suite stack))))
-						,after-tag)
-				       t))))))
+		  (break-stmt
+		   (unless stack (error "BREAK outside loop"))
+		   (values `(go ,(cdr (car stack)))
+			   t))
+		    
+		  (continue-stmt
+		   (unless stack (error "CONTINUE outside loop"))
+		   (values `(go ,(car (car stack)))
+			   t))
 		  
 		  (for-in-stmt
 		   (destructuring-bind (target source suite else-suite) (cdr form)
@@ -1565,15 +1543,35 @@ AST is either an AST list or Python code string."
 				,generator nil))
 			t))))
 		  
-		  (break-stmt
-		   (unless stack (error "BREAK outside loop"))
-		   (values `(go ,(cdr (car stack)))
-			   t))
-		    
-		  (continue-stmt
-		   (unless stack (error "CONTINUE outside loop"))
-		   (values `(go ,(car (car stack)))
-			   t))
+		  (if-stmt
+		   
+		   (if nil  ;; need to always rewrite, because of "while test: if foo: continue"
+		       #+(or)(not (generator-ast-p form))
+		       
+		       
+		       
+		       (values form t)
+		     (destructuring-bind (clauses else-suite) (cdr form)
+		       (loop
+			   with else-tag = (new-tag :else) and after-tag = (new-tag :after)
+									   
+			   for (expr suite) in clauses
+			   for then-tag = (new-tag :then)
+					  
+			   collect `((py-val->lisp-bool ,expr) (go ,then-tag)) into tests
+			   collect `(:split ,then-tag
+					    (:split ,(walk suite stack))
+					    (go ,after-tag)) into suites
+			   finally
+			     (return
+			       (values `(:split (cond ,@tests
+						      (t (go ,else-tag)))
+						(:split ,@suites)
+						,else-tag
+						,@(when else-suite
+						    `((:split ,(walk else-suite stack))))
+						,after-tag)
+				       t))))))
 		    
 		  (return-stmt
 		   (when (second form)
@@ -1585,14 +1583,18 @@ AST is either an AST list or Python code string."
 			   t))
 
 		  (suite-stmt
-		   (if (not (generator-ast-p form))
+		   (if nil
+		       #+(or)(not (generator-ast-p form))
 		       (values form t)
+		       
 		     (values `(:split ,@(loop for stmt in (second form)
 					    collect (walk stmt stack)))
 			     t)))
 		    
 		  (try-except-stmt
-		   (if (not (generator-ast-p form))
+		   (if nil
+		       #+(or)(not (generator-ast-p form))
+		       
 		       (values form t)
 		     
 		     ;; Three possibilities:
@@ -1623,20 +1625,23 @@ AST is either an AST list or Python code string."
 			     (return
 			       (values
 				`(:split
-				  (setf ,gen (py-iterate->lisp-fun
+				  (setf ,gen (get-py-iterate-fun
 					      (funcall ,(suite->generator gen-maker try-suite))))
 				  (setf .state. ,try-tag)
 				  
 				  ;; yield all values returned by helpder function .gen.
 				  ,try-tag
 				  (try-except-stmt
-				   (let ((val (funcall ,gen)))
+				   
+				   (let ((val (funcall ,gen))) ;; try-suite
 				     (case val
 				       (:explicit-return (generator-finished))
 				       (:implicit-return (go ,else-tag))
 				       (t (return-from :function-body val))))
 				   
-				   ,@jumps)
+				   ,jumps ;; handlers
+				   
+				   nil) ;; else-suite
 				  
 				  ,@exc-bodies
 				  
@@ -1654,7 +1659,9 @@ AST is either an AST list or Python code string."
 		       (error "SyntaxError: YIELD is not allowed in the TRY suite of ~
                                a TRY/FINALLY statement (got: ~S)" form))
 		     
-		     (if (not (generator-ast-p finally-suite))
+		     (if nil
+			 #+(or)(not (generator-ast-p finally-suite))
+			 
 			 (values form t)
 
 		       (let ((fin-catched-exp '#:fin-catched-exc))
@@ -1673,6 +1680,38 @@ AST is either an AST list or Python code string."
 			      (error ,fin-catched-exp)))
 			  
 			  t)))))
+		  
+		  (while-stmt
+		   (destructuring-bind (test suite else-suite) (cdr form)
+		     (let ((repeat-tag (new-tag :repeat))
+			   (else-tag   (new-tag :else))
+			   (after-tag  (new-tag :end+break-target)))
+		       (values `(:split
+				 (unless (py-val->lisp-bool ,test)
+				   (go ,else-tag))
+
+				 ,repeat-tag
+				 (:split
+				  ,(walk suite
+					 (cons (cons repeat-tag after-tag)
+					       stack)))
+				 (if (py-val->lisp-bool ,test)
+				     (go ,repeat-tag)
+				   (go ,after-tag))
+				 
+				 ,else-tag
+				 ,@(when else-suite
+				     `((:split ,(walk else-suite stack))))
+				 
+				 ,after-tag)
+			       t))))
+		  
+		  (yield-stmt
+		   (let ((tag (new-tag :yield)))
+		     (values `(:split (setf .state. ,tag)
+				      (return-from :function-body ,(second form)) 
+				      ,tag)
+			     t)))
 		  
 		  (t (values form
 			     t)))))))
@@ -1720,7 +1759,7 @@ AST is either an AST list or Python code string."
   `(funcdef-stmt
     nil (identifier-expr ,fname) (nil nil nil nil)
     (suite-stmt
-     ,@(mapcar (lambda (x)
+     ,(mapcar (lambda (x)
 		 (walk-py-ast x
 			      (lambda (form &rest context)
 				(declare (ignore context))
