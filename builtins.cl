@@ -334,8 +334,8 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
 (defun pybf:hasattr (x name)
   "Returns True is X has attribute NAME, False if not. ~@
    (Uses `getattr'; catches _all_ exceptions.)"
-  (declare (ignore x name))
-  (error "todo"))
+  (check-type name string)
+  (py-bool (ignore-errors (py-attr x (intern name #.*package*)))))
 
 (defun pybf:hash (x)
   ;; XX todo: once calculated, store hash in object

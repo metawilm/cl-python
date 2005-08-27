@@ -21,23 +21,34 @@
 (defclass py-dict-mixin ()
   ((dict :initarg :dict :initform (dict-init-func) :accessor dict)))
 
-(defmethod dict ((x symbol)) ;; (dict <symbol>) is designator for (dict <class>)
-  (break "dict symbol: ~A" x)
-  (dict (find-class x)))
-
 (defmethod dict ((x t))
   nil)
+
+(defun hash-table-is-dict-p (x)
+  (eq (hash-table-test x) 'py-==->lisp-val))
 
 (defun dict-get (x key)
   (let ((d (dict x)))
     (assert d () "dict-get: object ~A has no dict (key ~A)" x key)
-    (gethash key (dict x))))
+    (if (and (symbolp key) (hash-table-is-dict-p d))
+	(gethash (symbol-name key) d)
+      (gethash key d))))
 
 (defun dict-del (x key)
   (remhash (dict x) key))
 
 (defun (setf dict-get) (new-val x key)
-  (setf (gethash key (dict x)) new-val))
+  (let ((d (dict x)))
+    (if (and (symbolp key) (hash-table-is-dict-p d))
+	(setf (gethash (symbol-name key) d) new-val)
+      (setf (gethash key d) new-val))))
+
+
+(defun sym-gethash (key ht &optional (is-dict (hash-table-is-dict-p ht)))
+  (assert (symbolp key))
+  (if is-dict
+      (gethash (symbol-name key) ht)
+    (gethash key ht)))
 
 
 (defclass py-class-mixin (py-dict-mixin)
@@ -631,21 +642,22 @@
 		  (eq c (load-time-value (find-class 'py-class-mixin))))
 	      
 	for c.dict = (dict c) ;; may be NIL
+	for c.dict-is-dict = (and c.dict (hash-table-is-dict-p c.dict))
 		     
 	when c.dict
-	do (let ((getattribute-meth (gethash '__getattribute__ c.dict)))
+	do (let ((getattribute-meth (sym-gethash '__getattribute__ c.dict c.dict-is-dict)))
 	     (when (and getattribute-meth
 			(not (eq getattribute-meth #'py-object.__getattribute__)))
 	       (return-from py-object.__getattribute__
 		 (py-call getattribute-meth x attr))))
 	   
 	   (unless class-attr-val
-	     (let ((val (gethash attr c.dict)))
+	     (let ((val (sym-gethash attr c.dict c.dict-is-dict)))
 	       (when val 
 		 (setf class-attr-val val))))
 	   
 	   (unless (or class-attr-val __getattr__)
-	     (let ((getattr-meth (gethash '__getattr__ c.dict)))
+	     (let ((getattr-meth (sym-gethash '__getattr__ c.dict c.dict-is-dict)))
 	       (when getattr-meth (setf __getattr__ getattr-meth)))))
 
     ;; Arriving here means: no __getattribute__, but perhaps
@@ -764,7 +776,8 @@
 		      (c (mop:ensure-class
 			  name 
 			  :direct-superclasses (or supers
-						   (list (load-time-value (find-class 'py-user-object))))
+						   (load-time-value
+						    (list (find-class 'py-user-object))))
 			  :metaclass (ecase cls-type
 				       (:metaclass (load-time-value (find-class 'py-meta-type)))
 				       (:class     metacls)))))
@@ -780,7 +793,10 @@
 
 (def-py-method py-type.__name__ :attribute (cls)
 	       ;; XXX remove prefix `py-' etc
-  (string (class-name cls)))
+	       (string (class-name cls)))
+
+(def-py-method py-type.__dict__ :attribute (cls)
+  (dict cls))
 
 (def-py-method py-dictless-object.__class__ :attribute (x)
 	       (py-class-of x))
@@ -901,11 +917,11 @@
   ((file-handle :initform nil :accessor py-file-handle))
   (:metaclass py-user-type))
 
-(def-py-method py-file.__new__ :static (x filename)
-	       (setf (py-file-handle x) (open-lisp-file-todo filename)))
+(def-py-method py-file.__new__ :static (cls filename)
+	       (make-instance cls :file-handle (open-lisp-file-todo filename)))
 
-(def-py-method py-file.__init__ (&rest args)
-	       (declare (ignore args))
+(def-py-method py-file.__init__ (x &rest args)
+	       (declare (ignore x args))
 	       nil)
 
 
@@ -990,7 +1006,11 @@
 (def-py-method py-int.__new__ :static (cls &optional (arg 0))
 	       (if (eq cls (find-class (load-time-value 'py-int)))
 		   arg
-		 (let ((i (make-instance cls)))
+		 
+		 (make-instance cls :lisp-object arg)
+		 
+		 #+(or)
+		 (let ((i (make-instance cls :lisp-object arg)))
 		   (setf (proxy-lisp-val i) arg)
 		   i)))
 
@@ -1049,11 +1069,13 @@
     (write-char #\} s)))
 
 (def-py-method py-dict.__setitem__ (dict^ key val)
-  (setf (gethash key dict) val))
+  (let ((key2 (if (symbolp key) (symbol-name key) key)))
+    (setf (gethash key2 dict) val)))
 
 (def-py-method py-dict.__getitem__ (dict^ key)
-  (or (gethash key dict)
-      (py-raise 'KeyError "Dict has no such key: ~A" key)))
+  (let ((key2 (if (symbolp key) (symbol-name key) key)))
+    (or (gethash key2 dict)
+	(py-raise 'KeyError "Dict has no such key: ~A" key2))))
 
 (def-py-method py-dict.__iter__ (dict^)
   (with-hash-table-iterator (next-func dict)
@@ -1090,7 +1112,8 @@
 
 (def-proxy-class py-list)
 
-(def-py-method py-list.__new__ :static (cls)
+(def-py-method py-list.__new__ :static (cls &optional iterable)
+	       (declare (ignore iterable))
 	       (if (eq cls (load-time-value (find-class 'py-list)))
 		   (make-array 0 :adjustable t :fill-pointer 0)
 		 (make-instance cls)))
@@ -1140,7 +1163,17 @@
 	      "<list>[i] : i outside range (got ~A, length list = ~A)"
 	      item (length x)))
   (aref x item))
-    
+
+(def-py-method py-list.__setitem__ (x^ item val)
+  (check-type item integer)
+  (when (< item 0)
+    (incf item (length x)))
+  (unless (<= 0 item (1- (length x)))
+    (py-raise 'ValueError
+	      "<list>[i] = x : i outside range (got ~A, length list = ~A)"
+	      item (length x)))
+  (setf (aref x item) val))
+
 (def-py-method py-list.__delitem__ (x^ item)
   (check-type item integer)
   (when (< item 0)
@@ -1177,6 +1210,12 @@
 
 (def-proxy-class py-string)
 
+(def-py-method py-string.__new__ :static (cls &optional (val ""))
+	       (assert (stringp val))
+	       (if (eq cls (find-class 'py-string))
+		   val
+		 (make-instance cls :lisp-object val)))
+
 (def-py-method py-string.__len__  (x^)  (length x))
 
 (def-py-method py-string.__iter__ (x^)
@@ -1186,6 +1225,18 @@
 						      (prog1
 							  (string (char x i))
 							(incf i)))))))
+
+(def-py-method py-string.__getitem__ (x^ item)
+  (check-type item integer)
+  (when (< item 0)
+    (incf item (length x)))
+  (unless (<= 0 item (1- (length x)))
+    (py-raise 'ValueError
+	      "<string>[i] : i outside range (got ~A, length string = ~A)"
+	      item (length x)))
+  (aref x item))
+
+    
 (def-py-method py-string.__str__  (x^)  x)
 (def-py-method py-string.__repr__ (x^)  (with-output-to-string (s)
 					  (py-pprint s x)))
@@ -1202,6 +1253,7 @@
 (def-py-method py-string.__mod__ (x^ args)
   (format nil "[[string-%  ~A  ~A]]" x (py-str-string args))) 
 
+
 (def-py-method py-string.isspace (x^)
   (py-bool (and (> (length x) 0) ;; empty string is defiend as "not space"
 		(every (lambda (ch) (member ch '(#\Space #\Tab #\Newline)))
@@ -1213,21 +1265,29 @@
 (def-py-method py-string.islower (x^) (py-bool (every #'lower-case-p x)))
 
 (def-py-method py-string.join (x^ seq-of-strings)
-  (let* ((strings (mapcar #'py-val->string (py-iterate->lisp-list seq-of-strings)))
-	 (num-strings (length strings))
-	 (tot-num-chars (+ (* (1- num-strings) (length x))
-			   (apply #'+ (mapcar #'length strings))))
-	 (res (make-array tot-num-chars :element-type 'character)))
-    (loop
-	with res-i = 0
-	for s in strings and i from 0
-	do (loop for ch across s do (setf (aref res res-i) ch)
-				    (incf res-i))
-	unless (= i (1- num-strings))
-	do (loop for ch across x do (setf (aref res res-i) ch)
-				    (incf res-i)))
-    res))
+  (let* ((strings (mapcar #'py-val->string (py-iterate->lisp-list seq-of-strings))))
+    
+    (unless strings
+      (return-from py-string.join ""))
+    
+    (let* ((num-strings (length strings))
+	   (tot-num-chars (+ (* (1- num-strings) (length x))
+			     (apply #'+ (mapcar #'length strings))))
+	   (res (make-array tot-num-chars :element-type 'character)))
+      (loop
+	  with res-i = 0
+	  for s in strings and i from 0
+	  do (loop for ch across s do (setf (aref res res-i) ch)
+				      (incf res-i))
+	  unless (= i (1- num-strings))
+	  do (loop for ch across x do (setf (aref res res-i) ch)
+				      (incf res-i)))
+      res)))
 
+(def-py-method py-string.replace (x^ old new &optional count^)
+  (let ((olds (py-val->string old))
+	(news (py-val->string new)))
+    (substitute news olds x :count count)))
 
 ;; Tuple (Lisp object: consed list)
 
@@ -1640,9 +1700,9 @@
 (def-comparison <=  py-<=  (<= (the (integer -1 1) (pybf:cmp x y))  0))
 (def-comparison >=  py->=  (>= (the (integer -1 1) (pybf:cmp x y))  0))
 
-
 (defgeneric py-val->lisp-bool (x)
-  (:method ((x number)) (/= x 0)))
+  (:method ((x number)) (/= x 0))
+  (:method ((x string)) (> (length x) 0)))
 
 
 ;; Shortcut functions
@@ -1661,10 +1721,17 @@
 (def-py-shortcut-func py-abs  __abs__ )
 (def-py-shortcut-func py-repr __repr__)
 (def-py-shortcut-func py-str  __str__ :error (py-repr x))
-(def-py-shortcut-func py-hash __hash__)
 (def-py-shortcut-func py-hex  __hex__ )
 (def-py-shortcut-func py-oct  __oct__ )
 (def-py-shortcut-func py-len  __len__ )
+
+#+(or)
+(defun py-hash (x)
+  (py-hash-1 (if (symbolp x)
+		 (symbol-name x)
+	       x)))
+
+(def-py-shortcut-func py-hash __hash__)
 
 (defun py-val->string (x)
   (let ((s (deproxy x))) ;; deproxy, as it may be py-string subclass instance
@@ -1679,6 +1746,11 @@
   (if (symbolp x) 
       x
     (intern (py-str-string x) package)))
+
+(defun py-sym-string (x)
+  (etypecase x
+    (symbol (symbol-name x))
+    (string x)))
 
 
 (defun repr-fmt (stream argument &optional colon-p at-p &rest parameters)

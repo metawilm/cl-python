@@ -171,7 +171,9 @@
 			   
 			   (local-set () `(setf ,name ,val))
 			
-			   (class-set () `(setf (gethash ',name +cls-namespace+) ,val)))
+			   (class-set () `(setf 
+					      (gethash ,(symbol-name name) +cls-namespace+)
+					    ,val)))
 		    
 		      (ecase context
 		      
@@ -380,7 +382,7 @@
   (assert (eq (car inheritance) 'tuple-expr))
   
   (with-gensyms (cls)
-    `(let ((+cls-namespace+ (make-hash-table :test #'eq)))
+    `(let ((+cls-namespace+ (make-dict) #+(or)(make-hash-table :test #'eq)))
        
        (with-pydecl ((:context :class)
 		     (:classdef-scope-globals ',(classdef-globals suite)))
@@ -389,7 +391,7 @@
        (let ((,cls (make-py-class :name ',(second name)
 				  :namespace +cls-namespace+
 				  :supers (list ,@(second inheritance))
-				  :cls-metaclass (gethash '__metaclass__ +cls-namespace+)
+				  :cls-metaclass (gethash "__metaclass__" +cls-namespace+)
 				  :mod-metaclass
 				  ,(let ((ix (position '__metaclass__
 						       (get-pydecl :mod-globals-names e))))
@@ -448,7 +450,7 @@
 		   (setf ,name :unbound)))
 	      
 	      (class-del ()
-		`(or (remhash ',name +cls-namespace+)
+		`(or (py-del-subs +cls-namespace+ ,(symbol-name name))
 		     (py-raise 'NameError
 			       "Cannot delete variable '~A': it is unbound [dyn class]"
 			       ',name))))
@@ -709,7 +711,7 @@
 		     name
 		   (module-lookup)))
       
-      (:class    `(or (gethash ',name +cls-namespace+)
+      (:class    `(or (gethash ,(symbol-name name) +cls-namespace+)
 		      ,(if (member name (get-pydecl :lexically-visible-vars e))
 			   name
 			 (module-lookup)))))))
@@ -939,8 +941,13 @@
 
 
 (defmacro try-finally-stmt (try-suite finally-suite)
+  `(progn (handler-case (values ,try-suite)
+	    (Exception ()))
+	  ,finally-suite)
+  
+  #+(or)
   `(unwind-protect 
-     
+       
        (multiple-value-bind (val exc) (ignore-errors ,try-suite)
 	 (when (and (null val)
 		    (typep exc 'condition)
