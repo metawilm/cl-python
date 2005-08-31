@@ -278,6 +278,8 @@
 
 (defmacro call-expr (primary (&whole all-args pos-args kwd-args *-arg **-arg))
   
+  ;; XXX todo: check that key args are after pos args (or in parser?)
+  
   ;; For complete Python semantics, we check for every call if the
   ;; function being called is one of the built-in functions EVAL,
   ;; LOCALS or GLOBALS, because they access the variable scope of the
@@ -298,10 +300,10 @@
 				     `())))
 	      
 	      (apply #'py-call ev-prim (nconc all-pos-args
-					      ,@(loop for ((i-e key) val) in kwd-args
-						    do (assert (eq i-e 'identifier-expr))
-						    collect (intern (symbol-name key) :keyword)
-						    collect val)
+					      (list ,@(loop for ((i-e key) val) in kwd-args
+						  do (assert (eq i-e 'identifier-expr))
+						  collect (intern (symbol-name key) :keyword)
+						  collect val))
 					      more-key-args))))))
 #+(or)
 `((py-call prim
@@ -616,7 +618,7 @@
 					 ,(append all-locals-and-arg-names
 						  (get-pydecl :lexically-visible-vars e))))
 			    
-			    (let ((*cfm* +mod+))
+			    (let (#+(or)(*cfm* +mod+))
 			      ,(if (generator-ast-p suite)
 				   
 				   `(return-stmt ,(rewrite-generator-funcdef-suite fname suite))
@@ -674,6 +676,20 @@
   (unless (get-pydecl :inside-function e)
     (warn "Bogus `global' statement found at top-level (not inside a function)")))
 
+
+(defun identifier-expr-module-lookup (name ix +mod-globals-values+ +mod-dyn-globals+ builtin-value)
+  (if ix
+      (let ((val (svref +mod-globals-values+ ix)))
+	(if (eq val :unbound)
+	    (py-raise 'NameError
+		      "Variable '~A' is unbound [glob]" name)
+	  val))
+    (or (gethash name +mod-dyn-globals+)
+	builtin-value
+	(py-raise 'NameError
+		  "Variable '~A' is unbound [dyn-glob]" name))))
+
+
 (defmacro identifier-expr (name &environment e)
   
   ;; The identifier is used for its value; it is not an assignent
@@ -687,6 +703,12 @@
   
   (flet ((module-lookup ()
 	   (let ((ix (position name (get-pydecl :mod-globals-names e))))
+	     `(identifier-expr-module-lookup ',name
+					     ,ix +mod-globals-values+ +mod-dyn-globals+
+					     ,(when (builtin-name-p name)
+						(builtin-name-value name)))
+	     
+	     #+(or)
 	     (if ix
 		 `(let ((val (svref +mod-globals-values+ ,ix)))
 		    (if (eq val :unbound)
@@ -1264,6 +1286,7 @@ AST is either an AST list or Python code string."
 				 (when (eq x x2) (error "invalid namespace: ~A" x))
 				 (convert-to-namespace-ht x2))))
 
+#+(or)
 (defmacro py-arg-function (name (pos-args key-args *-arg **-arg) &body body)
   
   ;; Non-consing argument parsing! (except when *-arg or **-arg
@@ -1299,7 +1322,7 @@ AST is either an AST list or Python code string."
 	 (key-arg-defaults (unless (= num-key-args 0)
 			     (make-array num-key-args))))
     
-    `(locally (declare (optimize #+(or)(speed 3) (safety 3) (debug 3)))
+    `(locally #+(or)(declare (optimize (speed 3) (safety 1) (debug 3)))
        (let (,@(when key-args
 		 `((key-arg-default-values ,key-arg-defaults))))
 	 
@@ -1335,10 +1358,10 @@ AST is either an AST list or Python code string."
 	     
 	       ,@(when (> num-pos-key-args 0)
 		   `((loop 
-			 until (or (= num-filled-by-pos-args ,(if *-arg num-pos-args num-pos-key-args))
-				   (symbolp (car %args))) ;; the empty list NIL is a symbol, too
-			 do (setf (svref arg-val-vec num-filled-by-pos-args) (pop %args))
-			    (incf num-filled-by-pos-args))))
+			  until (or (= num-filled-by-pos-args ,(if *-arg num-pos-args num-pos-key-args))
+				    (symbolp (car %args))) ;; the empty list NIL is a symbol, too
+			  do (setf (svref arg-val-vec num-filled-by-pos-args) (pop %args))
+			     (incf num-filled-by-pos-args))))
 
 	       ;; Collect remaining pos-arg in *-arg, if present 
 	     
@@ -1416,31 +1439,248 @@ AST is either an AST list or Python code string."
 	       ;; Ensure all positional arguments covered
 	       ,@(when (> num-pos-args 0)
 		   `((loop for i fixnum from num-filled-by-pos-args below ,num-pos-args
-			 unless (svref arg-val-vec i)
-			 do (error "Positional arg ~A has no value" (svref ,arg-name-vec i)))))
+			  unless (svref arg-val-vec i)
+			  do (error "Positional arg ~A has no value" (svref ,arg-name-vec i)))))
 	     
 	       ;; Use default values for missing keyword arguments (if any)
 	       ,@(when key-args
 		   `((loop for i fixnum from ,num-pos-args below ,num-pos-key-args
-			 unless (svref arg-val-vec i)
-			 do (setf (svref arg-val-vec i)
-			      (svref key-arg-default-values (- i ,num-pos-args))))))
+			  unless (svref arg-val-vec i)
+			  do (setf (svref arg-val-vec i)
+			       (svref key-arg-default-values (- i ,num-pos-args))))))
 	     
 	       ;; Initialize local variables
 	       (let (,@(loop for p in pos-key-arg-names and i from 0
-			   collect `(,p (svref arg-val-vec ,i)))  ;; XXX p = (identifier ..) ?
+			   collect `(,p (svref arg-val-vec ,i))) ;; XXX p = (identifier ..) ?
 		     ,@(when  *-arg `((,*-arg  for-*)))
 		     ,@(when **-arg `((,**-arg for-**))))
-	       
+		 
 		 ,@body))))))))
 
-#+(or) ;; todo? make function code shorter by using a general function to parse args
-(defun parse-py-func-args (args arg-val-vec
-			   num-pos-args num-key-args
-			   pos-key-arg-names
-			   arg-name-vec arg-kmname-vec
-			   key-arg-default-values)
-  ())
+
+
+;; NEW
+
+(defmacro py-arg-function (name (pos-args key-args *-arg **-arg) &body body)
+  
+  ;; Non-consing argument parsing! (except when *-arg or **-arg
+  ;; present)
+  ;; 
+  ;; POS-ARGS: list of symbols
+  ;; KEY-ARGS: list of (key-symbol default-val) pairs
+  ;; *-ARG, **-ARG: a symbol or NIL 
+  ;; 
+  ;; XXX todo: the generated code can be cleaned up a bit when there
+  ;; are no arguments (currently zero-length vectors are created).
+  
+  #+(or)(break "py-arg-function: args=~A ~A ~A ~A" pos-args key-args *-arg **-arg)
+  
+  (assert (symbolp name))
+  
+  (let* ((num-pos-args (length pos-args))
+	 (num-key-args (length key-args))
+	 (num-pos-key-args  (+ num-pos-args num-key-args))
+	 (pos-key-arg-names (nconc (copy-list pos-args) (mapcar #'first key-args)))
+	 (key-arg-default-asts (mapcar #'second key-args))
+	 (arg-name-vec (make-array num-pos-key-args :initial-contents pos-key-arg-names))
+	 
+	 (arg-kwname-vec (make-array
+			  num-pos-key-args
+			  :initial-contents (loop for x across arg-name-vec
+						collect (intern x #.(find-package :keyword)))))
+    
+	 (fa (make-fa :num-pos-args     num-pos-args
+		      :num-key-args     num-key-args
+		      :num-pos-key-args num-pos-key-args
+		      :pos-key-arg-names (make-array (length pos-key-arg-names)
+						     :initial-contents pos-key-arg-names)
+		      :key-arg-default-vals :py-will-be-filled-at-load-time
+		      :arg-name-vec     arg-name-vec
+		      :arg-kwname-vec   arg-kwname-vec
+		      :*-arg            *-arg
+		      :**-arg           **-arg)))
+    
+    `(progn
+       (setf (fa-key-arg-default-vals ,fa)
+	 (make-array ,num-key-args :initial-contents (list ,@key-arg-default-asts)))
+       
+       (excl:named-function ,name
+	 
+	 (lambda (&rest %args)
+	   (declare (dynamic-extent %args)
+		    (optimize (speed 3) (safety 0)))
+	   
+	   (let ((arg-val-vec (make-array ,(+ num-pos-key-args (if *-arg 1 0) (if **-arg 1 0))
+					  :initial-element nil)))
+	     (declare (dynamic-extent arg-val-vec))
+	     
+	     (parse-py-func-args %args arg-val-vec ,fa)
+
+	     ;; arg-val-vec is now filled with values for local variables
+	     (let (,@(loop for p in pos-key-arg-names and i from 0
+			 collect `(,p (svref arg-val-vec ,i)))
+		   ,@(when  *-arg
+		       `((,*-arg  (svref arg-val-vec ,num-pos-key-args))))
+		   
+		   ,@(when **-arg
+		       `((,**-arg  (svref arg-val-vec ,(1+ num-pos-key-args))))))
+	       
+	       (locally (declare (optimize (speed 3) (safety 1)))
+		 ,@body))))))))
+
+(defstruct (func-args (:type vector) (:conc-name fa-) (:constructor make-fa))
+  (num-pos-args         :type fixnum :read-only t)
+  (num-key-args         :type fixnum :read-only t)
+  (num-pos-key-args     :type fixnum :read-only t)
+  (pos-key-arg-names    :type vector :read-only t)
+  (key-arg-default-vals :type vector :read-only nil) ;; filled at load time
+  (arg-name-vec         :type vector :read-only t)
+  (arg-kwname-vec       :type vector :read-only t)
+  (*-arg                :type symbol :read-only t)
+  (**-arg               :type symbol :read-only t))
+  
+
+
+(defun parse-py-func-args (%args arg-val-vec fa)
+  ;; %ARGS: the (&rest) list containing pos and ":key val" arguments
+  ;; ARG-VAL-VEC: (dynamic extent) vector to store final argument values in
+  ;;              => the penultimate item will get *-arg value (if any)
+  ;;                 the last item **-arg value (if any)
+  ;;                 so ARG-VAL-VEC must be larger than just num-pos-and-key-args! 
+  ;; FA: func-args struct
+  
+  (declare (optimize (speed 3) (safety 1) (debug 0))
+	   (type list %args))
+  
+  (let ((num-filled-by-pos-args 0)
+	(for-*  ())
+	(for-** ()))
+    
+    (declare (type (integer 0 #.most-positive-fixnum) num-filled-by-pos-args))
+    
+    ;; Match standard pos-args and *-arg
+    
+    (loop
+	with max-to-fill-with-pos = (the fixnum 
+				      (if (fa-*-arg fa) (fa-num-pos-args fa) (fa-num-pos-key-args fa)))
+	until (or (= num-filled-by-pos-args max-to-fill-with-pos)
+		  (symbolp (car %args))) ;; the empty list NIL is a symbol, too
+	      
+	do (setf (svref arg-val-vec num-filled-by-pos-args) (pop %args))
+	   (incf num-filled-by-pos-args)
+	   
+	finally
+	  (unless (symbolp (car %args))
+	    (if (fa-*-arg fa)
+		
+		(setf for-*
+		  ;; Reconsing because %args might be dynamic-extent.
+		  (loop until (symbolp (car %args)) collect (pop %args)))
+
+	      (error "Too many pos args"))))
+    
+    ;; All remaining arguments are keyword arguments;
+    ;; they have to be matched to the remaining pos and
+    ;; key args by name.
+    
+    (loop
+	for key = (pop %args) and val = (pop %args) 
+	while key do
+	  (cond
+	   ((eq key :*)
+	    (let ((extra-pos (py-iterate->lisp-list val)))
+	      (when extra-pos
+		
+		(cond ((> (the fixnum (fa-num-pos-key-args fa)) 0)
+		       (loop
+			   with max-to-fill-with-pos = (the fixnum (if (fa-*-arg fa)
+								       (fa-num-pos-args fa)
+								     (fa-num-pos-key-args fa)))
+			   while extra-pos
+			   until (= num-filled-by-pos-args max-to-fill-with-pos)
+				 
+			   do (if (svref arg-val-vec num-filled-by-pos-args)
+				  (error "Too many positional args (via * arg)")
+				(setf (svref arg-val-vec num-filled-by-pos-args)
+				  (pop extra-pos)))
+			      (incf num-filled-by-pos-args)
+			      
+			   finally
+			     (when extra-pos
+			       (if (fa-*-arg fa)
+				   (setf for-* (nconc for-* extra-pos))
+				 (error "Too many positional args (via * arg)")))))
+		      
+		      ((fa-*-arg fa)  ;; no pos/key args, but *-arg
+		       (setf for-* (nconc for-* extra-pos)))
+		      
+		      (t
+		       (error "Too many positional args (via * arg)"))))))
+	   
+	   ((eq key :**)
+	    ;; XXX largely untested
+	    (let* ((**-arg val)
+		   (**-arg-keys (py-iterate->lisp-list **-arg)))
+	      (loop 
+		  with bound-getitem = (recursive-class-lookup-and-bind **-arg '__getitem__)
+		  for k in **-arg-keys
+			   
+			   ;; PY-STR-SYMBOL raises error when k not string
+		  for k-sym = (py-str-symbol k #.(find-package :keyword))
+		  for v = (py-call bound-getitem k)
+			  
+		  do (push k-sym %args) ;; the KISS way
+		     (push v %args))))
+	   
+	   (t 
+	    ;; regular key arg: either a symbol |foo| or keyword symbol |:foo|
+	    (cond ((> (the fixnum (fa-num-pos-key-args fa)) 0)
+		   (loop 
+		       with name-vec = (fa-arg-name-vec fa)
+		       with kwname-vec = (fa-arg-kwname-vec fa)
+					 
+		       for i fixnum from num-filled-by-pos-args below 
+			 (the fixnum (fa-num-pos-key-args fa))
+			 
+		       when (or (eq (svref name-vec   i) key) 
+				(eq (svref kwname-vec i) key))
+			    
+		       do (when (svref arg-val-vec i)
+			    (error "Got multiple values (at least once via `key=' arg) ~%
+                                      for parameter `~A'" (svref name-vec i)))
+			  (setf (svref arg-val-vec i) val)
+			  (return)
+			  
+		       finally 
+			 (if (fa-**-arg fa)
+			     (push (cons key val) for-**)
+			   (error "Got unknown keyword arg and no **-arg: ~A ~A" key val))))
+		  
+		  ((fa-**-arg fa)
+		   (push (cons key val) for-**))
+		  
+		  (t (error "Got unknown keyword arg and no **-arg: ~A ~A" key val))))))
+    
+    ;; Ensure all positional arguments covered
+    (loop for i fixnum from num-filled-by-pos-args below (the fixnum (fa-num-pos-args fa))
+	unless (svref arg-val-vec i)
+	do (error "Positional arg ~A has no value" (svref (fa-arg-name-vec fa) i)))
+    
+    ;; Use default values for missing keyword arguments
+    (loop for i fixnum from (fa-num-pos-args fa) below (the fixnum (fa-num-pos-key-args fa))
+	unless (svref arg-val-vec i)
+	do (setf (svref arg-val-vec i)
+	     (svref (fa-key-arg-default-vals fa) (- i (fa-num-pos-args fa)))))
+
+    (when for-*
+      (setf (svref arg-val-vec (fa-num-pos-key-args fa)) for-*))
+
+    (when for-**
+      (setf (svref arg-val-vec (1+ (the fixnum (fa-num-pos-key-args fa)))) for-**)))
+  
+  (values))
+  
+      
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 

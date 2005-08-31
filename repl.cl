@@ -86,10 +86,14 @@
 					  (retry-repl-eval
 					   "Retry the execution the compiled REPL command. [:re]")
 					(return-from :val
-					  (if *repl-time*
-					      (prog1 (time (funcall helper-func))
-						(terpri))
-					    (funcall helper-func)))))))))))
+					  (case *repl-time*
+					    (:ptime (prof:with-profiling (:type :time)
+						      (funcall helper-func))
+						    (terpri)
+						    (prof:show-call-graph))
+					    (:time (prog1 (time (funcall helper-func))
+						     (terpri)))
+					    (t (funcall helper-func))))))))))))
 		   (when val
 		     (block :repr
 		       (loop

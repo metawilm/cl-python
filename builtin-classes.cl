@@ -902,7 +902,7 @@
   (let* ((*current-module-name* (string mod-name))
 	 (file-ast (parse-python-file (format nil "~A.py" mod-name)))
 	 (mod-func (compile nil `(lambda () ,file-ast)))
-	 (mod-obj  (funcall mod-func)))
+	 (mod-obj (funcall mod-func)))
     (declare (special *current-module-name*))
     (loop for x across mod-globals-names and i from 0
 	when (eq x mod-name)
@@ -1101,11 +1101,13 @@
     #+(or)(warn "~A ~A" res1 res2)
     (py-bool (equalp res1 res2))))
 
-(def-py-method py-dict.fromkeys :static (seq &optional (val pybv:None))
-       (let* ((d (make-dict)))
-	 (map-over-py-object (lambda (key) (setf (gethash key d) val))
-			     seq)
-	 d))
+(def-py-method py-dict.fromkeys :static (seq &optional val)
+	       (unless val
+		 (setf val pybv:None))
+	       (let* ((d (make-dict)))
+		 (map-over-py-object (lambda (key) (setf (gethash key d) val))
+				     seq)
+		 d))
   
 
 ;; List (Lisp object: adjustable array)
@@ -1745,7 +1747,9 @@
 (defun py-str-symbol  (x &optional (package #.*package*))
   (if (symbolp x) 
       x
-    (intern (py-str-string x) package)))
+    (let ((str (py-str-string x)))
+      (or (find-symbol str package)
+	  (intern (py-str-string x) package)))))
 
 (defun py-sym-string (x)
   (etypecase x
