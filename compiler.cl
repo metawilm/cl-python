@@ -1020,7 +1020,8 @@
 (defun builtin-name-p (x)
   (or (find-symbol (string x) (load-time-value (find-package :python-builtin-functions)))
       (find-symbol (string x) (load-time-value (find-package :python-builtin-types)))
-      (find-symbol (string x) (load-time-value (find-package :python-builtin-values)))))
+      (find-symbol (string x) (load-time-value (find-package :python-builtin-values)))
+      (find-symbol (string x) (load-time-value (find-package :python-builtin-clpy)))))
 
 (defun builtin-name-value (x)
   (let ((sym (builtin-name-p x)))
@@ -1031,7 +1032,9 @@
 	    ((eq pkg (load-time-value (find-package :python-builtin-types)))
 	     (symbol-value sym))
 	    ((eq pkg (load-time-value (find-package :python-builtin-values)))
-	     (symbol-value sym))))))
+	     (symbol-value sym))
+	    ((eq pkg (load-time-value (find-package :python-builtin-clpy)))
+	     (symbol-function sym))))))
 
 (defun describe-vars (ast)
   "Print locals, global and outer scope variables of AST.
@@ -1052,8 +1055,8 @@ AST is either an AST list or Python code string."
 			  params locals declared-globals outer-scope
 			  is-module-scope)
   
-  ;; Returns: LOCALS, DECLARED-GLOBALS, OUTER-SCOPE
-  ;; which are lists of symbols denoting variable names.
+  ;; Returns: LOCALS, DECLARED-GLOBALS, OUTER-SCOPE which are lists of
+  ;; symbols denoting variable names.
   ;; 
   ;; If IS-MODULE-SCOPE, then all variables will be in LOCALS.
   

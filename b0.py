@@ -1,4 +1,5 @@
 def check(a, b):
+    print "checking ", a, b
     if not a == b:
         raise AssertionError("%.30r != %.30r" % (a, b))
 
@@ -740,6 +741,7 @@ class OutputFile(object):
 output = OutputFile()
 
 def cleanup(s):
+    return s ## XXX
     s = str(s).replace('<__main__.', '<').replace('<b0.', '<')
     i = s.find(' at 0x')
     while i > 0:
@@ -774,8 +776,11 @@ def myhash(s, ord=ord):
     return x^len(s)
 
 def checkoutput(n=0):
+    brek("checkoutput", n, output)
     outputtext = output.getvalue()
-    check(strhash(outputtext), n)
+    h = strhash(outputtext)
+    print "checkoutput: strhash=", h, "n=", n
+    check(h, n)
 
 strhash = myhash
 
@@ -859,13 +864,17 @@ def main():
     check(L, L2)
 
     scanner = Scanner(getcFromString(sample).next).tokenize()
+    print "scanner:", scanner
     parser = Parser(scanner)
+    print "parser:", parser
     instrumentClass(Parser)
+    #print "class instrumented"
     root = parser.parse()
-
+    print "aap 1 "
     checkoutput(1413352820)
-
+    print "aap 2"
     env = Dict()
+    print "aap 3"
     eval(root, env, env)
     g = env['pi']()
     for i in range(1000):

@@ -550,8 +550,19 @@
 
 
 (defclass py-slice (py-core-object)
-  ()
+  ((start :initarg :start)
+   (stop  :initarg :stop)
+   (step  :initarg :step))
   (:metaclass py-core-type))
+
+(defun make-slice (start stop step)
+  #+(or)(break "make-slice ~A ~A ~A" start stop step)
+  (when (eq start *the-none*) (setf start nil))
+  (when (eq stop *the-none*)  (setf stop nil))
+  (when (eq step *the-none*)  (setf step nil))
+	    
+  (make-instance 'py-slice :start start :stop stop :step step))
+  
 
 (defclass py-super (py-core-object) ;; subclassable?
   ()
@@ -1006,9 +1017,15 @@
 
 (def-proxy-class py-int (py-real))
 
-(def-py-method py-int.__new__ :static (cls &optional (arg 0))
+(def-py-method py-int.__new__ :static (cls &optional (arg 0) (base 0))
 	       (if (eq cls (find-class (load-time-value 'py-int)))
-		   arg
+		   
+		   (etypecase arg
+		     (integer arg)
+		     (string (let ((*read-base* (if (= base 0) 10 
+						  (progn (check-type base (integer 2 36))
+							 base))))
+			       (read-from-string arg))))
 		 
 		 (make-instance cls :lisp-object arg)
 		 
@@ -1056,6 +1073,19 @@
 	     collect `(setf (gethash ,k ,dict) ,v))
        ,dict)))
 
+(def-py-method py-dict.__new__ :static (cls &rest kwargs)
+  (let ((ht (loop 
+		with ht = (make-dict)
+		for key = (pop kwargs)
+		for val = (pop kwargs)
+		while key
+		do (setf (gethash (py-sym-string key) ht) val)
+		finally (return ht))))
+    (if (eq cls (load-time-value (find-class 'py-dict)))
+	ht
+      (make-instance cls :lisp-object ht))))
+
+				
 (def-py-method py-dict.__str__ (x^)
   (with-output-to-string (s)
     (print-unreadable-object (x s :identity t)
@@ -1110,7 +1140,7 @@
 
 (def-py-method py-dict.fromkeys :static (seq &optional val)
 	       (unless val
-		 (setf val pybv:None))
+		 (setf val *the-none*))
 	       (let* ((d (make-dict)))
 		 (map-over-py-object (lambda (key) (setf (gethash key d) val))
 				     seq)
@@ -1125,7 +1155,7 @@
 	       (declare (ignore iterable))
 	       (if (eq cls (load-time-value (find-class 'py-list)))
 		   (make-array 0 :adjustable t :fill-pointer 0)
-		 (make-instance cls)))
+		 (make-instance cls :lisp-object nil)))
 		    
 (def-py-method py-list.__init__ (x^ &optional iterable)
   (when iterable
@@ -1235,15 +1265,26 @@
 							  (string (char x i))
 							(incf i)))))))
 
-(def-py-method py-string.__getitem__ (x^ item)
-  (check-type item integer)
-  (when (< item 0)
-    (incf item (length x)))
-  (unless (<= 0 item (1- (length x)))
-    (py-raise 'ValueError
-	      "<string>[i] : i outside range (got ~A, length string = ~A)"
-	      item (length x)))
-  (aref x item))
+(def-py-method py-string.__getitem__ (x^ item^)
+  (etypecase item
+    (integer (when (< item 0)
+	       (incf item (length x)))
+	     (unless (<= 0 item (1- (length x)))
+	       (py-raise 'ValueError
+			 "<string>[i] : i outside range (got ~A, length string = ~A)"
+			 item (length x)))
+	     (aref x item))
+    (py-slice (with-slots (start stop step) item
+		(setf start (deproxy start))
+		(setf stop  (deproxy stop))
+		(setf step  (deproxy step))
+		(cond ((and (null start) stop (null step))
+		       (subseq x 0 stop))
+		      ((and start (null stop) (null step))
+		       (subseq x start))
+		      ((and start stop (= stop -1) (null step))
+		       (subseq x start (1- (length x))))
+		      (t (break "unhandled py-string.__getitem__ slice ~A" item)))))))
 
     
 (def-py-method py-string.__str__  (x^)  x)
@@ -1273,6 +1314,7 @@
 (def-py-method py-string.isdigit (x^) (py-bool (every #'digit-char-p x)))
 (def-py-method py-string.islower (x^) (py-bool (every #'lower-case-p x)))
 
+(def-py-method py-string.find (x^ item &rest args) (declare (ignore x item args)) -1) ;; TODO
 (def-py-method py-string.join (x^ seq-of-strings)
   (let* ((strings (mapcar #'py-val->string (py-iterate->lisp-list seq-of-strings))))
     
@@ -1433,9 +1475,13 @@
 ;;; Calling objects (functions, classes, instances)
 
 (defgeneric py-call (f &rest args)
+  (:method ((f null) &rest args)
+	   (error "PY-CALL of NIL"))
   (:method ((f t) &rest args)
 	   (let ((__call__ (recursive-class-dict-lookup (py-class-of f) '__call__)))
-	     (apply #'py-call __call__ f args)))
+	     (if __call__
+		 (apply #'py-call __call__ f args)
+	       (error "Don't know how to call: ~S (args: ~A)" f args))))
   (:method ((f function) &rest args) (apply f args)))
 
 

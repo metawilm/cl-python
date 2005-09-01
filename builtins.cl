@@ -665,3 +665,8 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
 (defconstant pybv:False          *the-false*          )
 (defconstant pybv:NotImplemented *the-notimplemented* )
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+;;; 4) CLPY extras
+
+(defun pyb-clpy:brek (&rest args) (break (format nil "~{~A~^; ~}" args)))
