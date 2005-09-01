@@ -604,7 +604,7 @@
 			
 			(macrolet
 			    ,(when (contains-call-p suite)
-			       `((.locals. ()  ;; lambdas and gen-exprs have 'locals()' too
+			       `((.locals. () ;; lambdas and gen-exprs have 'locals()' too
 					   '(excl:with-stack-list (vals ,@all-locals-and-arg-names)
 					     (make-locals-dict ',all-locals-and-arg-names vals)))))
 			  
@@ -618,12 +618,11 @@
 					 ,(append all-locals-and-arg-names
 						  (get-pydecl :lexically-visible-vars e))))
 			    
-			    (let (#+(or)(*cfm* +mod+))
-			      ,(if (generator-ast-p suite)
-				   
-				   `(return-stmt ,(rewrite-generator-funcdef-suite fname suite))
+			    ,(if (generator-ast-p suite)
 				 
-				 suite)))))))))
+				 `(return-stmt ,(rewrite-generator-funcdef-suite fname suite))
+			       
+			       suite))))))))
 	    
 	    (if (keywordp fname)
 		
@@ -929,37 +928,39 @@
   ;; The Exception class in a clause is evaluated only after an
   ;; exception is thrown. Can't use handler-case for that reason.
   
-  (flet ((handler->cond-clause (except-clause)
-	   (destructuring-bind (exc var handler-suite) except-clause
-	     (cond ((null exc)
-		    `(t (progn ,handler-suite
-			       (return-from :try-except-stmt nil))))
+  (with-gensyms (the-exc)
+    (flet ((handler->cond-clause (except-clause)
+	     (destructuring-bind (exc var handler-suite) except-clause
+	       (cond ((null exc)
+		      `(t (progn ,handler-suite
+				 (return-from :try-except-stmt nil))))
 		   
-		   ((eq (car exc) 'tuple-expr)
-		    `((some ,@(loop for cls in (second exc)
-				  collect `(typep exc ,cls)))
-		      (progn ,@(when var `((assign-stmt exc (,var))))
-			     ,handler-suite
-			     (return-from :try-except-stmt nil))))
+		     ((eq (car exc) 'tuple-expr)
+		      `((some ,@(loop for cls in (second exc)
+				    collect `(typep ,the-exc ,cls)))
+			(progn ,@(when var `((assign-stmt ,the-exc (,var))))
+			       ,handler-suite
+			       (return-from :try-except-stmt nil))))
 				
-		   (t
-		    `((typep exc ,exc)
-		      (progn ,@(when var `((assign-stmt exc (,var))))
-			     ,handler-suite
-			     (return-from :try-except-stmt nil))))))))
+		     (t
+		      `((typep ,the-exc ,exc)
+			(progn ,@(when var `((assign-stmt ,the-exc (,var))))
+			       ,handler-suite
+			       (return-from :try-except-stmt nil))))))))
     
-    (let ((handler-form `(lambda (exc) 
-			   (cond ,@(mapcar #'handler->cond-clause except-clauses)))))
+      (let ((handler-form `(lambda (,the-exc)
+			     (declare (ignorable ,the-exc))
+			     (cond ,@(mapcar #'handler->cond-clause except-clauses)))))
       
-      `(block :try-except-stmt
-	 (tagbody
-	   (handler-bind ((Exception ,handler-form))
-	     (progn ,suite
-		    ,@(when else-suite `((go :else)))))
+	`(block :try-except-stmt
+	   (tagbody
+	     (handler-bind ((Exception ,handler-form))
+	       (progn ,suite
+		      ,@(when else-suite `((go :else)))))
 	   
-	   ,@(when else-suite
-	       `(:else
-		 ,else-suite)))))))
+	     ,@(when else-suite
+		 `(:else
+		   ,else-suite))))))))
 
 
 (defmacro try-finally-stmt (try-suite finally-suite)
@@ -1724,7 +1725,7 @@ AST is either an AST list or Python code string."
 (defun rewrite-generator-funcdef-suite (fname suite)
   ;; Returns the function body
   (assert (symbolp fname))
-  (assert (eq (car suite) 'suite-stmt))
+  (assert (eq (car suite) 'suite-stmt) () "CAR of SUITE must be SUITE-STMT, but got: ~S" (car suite))
   (assert (generator-ast-p suite))
 
   (let ((yield-counter 0)
@@ -1994,6 +1995,35 @@ AST is either an AST list or Python code string."
 			,final-tag
 			(py-raise 'StopIteration "The generator has finished.")))))))))))))
 
+
+(defun suite->generator (fname suite)
+  (flet ((suite-walker (form &rest context)
+	   (declare (ignore context))
+	   (case (car form)
+	     
+	     ((funcdef-stmt classdef-stmt)
+	      (values form t))
+	     
+	     (return-stmt 
+	      (when (second form)
+		(error "SyntaxError: Inside generator, RETURN statement may not have ~
+                        an argument (got: ~S)" form))
+	      (values `(return-from :function-body :explicit-return)
+		      t))
+	     
+	     (t form))))
+	     
+    `(excl:named-function (:suite->generator ,fname)
+       (lambda ()
+	 ,(rewrite-generator-funcdef-suite
+	   fname
+	   `(suite-stmt (
+			 ;;,@(mapcar (lambda (x) (walk-py-ast x #'suite-walker)) (second suite))
+			 ,(walk-py-ast suite #'suite-walker)
+			 
+			 (return-from :function-body :implicit-return))))))))
+
+#+(or) ;; old
 (defun suite->generator (fname suite)
   ;; Lisp generator function that returns one of:
   ;;  VAL              -- value explicitly `yield'-ed
@@ -2026,7 +2056,6 @@ AST is either an AST list or Python code string."
 				  (t form)))))
 	       (second suite))
      (return-from :function-body :implicit-return))))
-
 
 
 (defun rewrite-generator-expr-ast (ast)

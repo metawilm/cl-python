@@ -976,8 +976,11 @@
 	(t (break :unexpected))))
 
 (def-py-method py-number.__add__ (x^ y^) (+ x y))
+(def-py-method py-number.__sub__ (x^ y^) (- x y))
 (def-py-method py-number.__neg__ (x^) (- x))
 (def-py-method py-number.__mul__ (x^ y^) (* x y))
+(def-py-method py-number.__div__ (x^ y^) (/ x y)) ;; overruled for integers
+(def-py-method py-number.__truediv__ (x^ y^) (/ x y)) ;; overruled for integers
 
 (def-py-method py-number.real :attribute (x^)
 	       (realpart x))
@@ -1019,8 +1022,12 @@
 (def-py-method py-int.__floordiv__ (x^ y^)
   (values (floor x y)))
 
-(def-py-method py-int.__mod__ (x^ y^)
-  (mod x y))
+(def-py-method py-int.__div__ (x^ y^) 
+  (if (and (integerp x) (integerp y))
+      (floor x y)
+    (/ x y)))
+       
+(def-py-method py-int.__mod__ (x^ y^) (mod x y))
 
 (def-proxy-class py-bool (py-int))
 
