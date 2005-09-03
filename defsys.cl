@@ -13,6 +13,7 @@
   ("pyprint" (:uses-definitions-from "package"))
   ("walk"    (:uses-definitions-from "package"))
   ("repl"    (:uses-definitions-from "package"))
+  ("formatstring"    (:uses-definitions-from "package"))
   
   ("builtin-classes" (:uses-definitions-from "package"))
   ("exceptions"      (:uses-definitions-from "builtin-classes"))

@@ -739,6 +739,9 @@
   ;; nothing
   )
 
+(def-py-method py-object.__class__ :attribute (x)
+	       (py-class-of x))
+
 (def-py-method py-object.__repr__ (x)
   (with-output-to-string (s)
     (print-unreadable-object (x s :identity t :type t))))
@@ -1059,6 +1062,12 @@
        
 (def-py-method py-int.__mod__ (x^ y^) (mod x y))
 
+(def-py-method py-int.__lshift__ (x^ y^)  (ash x y))
+(def-py-method py-int.__rshift__ (x^ y^)  (ash x (- y)))
+(def-py-method py-int.__xor__ (x^ y^) (logxor x y))
+(def-py-method py-int.__and__ (x^ y^) (logand x y))
+(def-py-method py-int.__or__  (x^ y^) (logior x y))
+
 (def-proxy-class py-bool (py-int))
 
 ;; Float
@@ -1301,7 +1310,7 @@
 	       (py-raise 'ValueError
 			 "<string>[i] : i outside range (got ~A, length string = ~A)"
 			 item (length x)))
-	     (aref x item))
+	     (string (char x item)))
     (py-slice (with-slots (start stop step) item
 		(setf start (deproxy start))
 		(setf stop  (deproxy stop))
@@ -1329,7 +1338,8 @@
 	(t              1)))
 
 (def-py-method py-string.__mod__ (x^ args)
-  (format nil "[[string-%  ~A  ~A]]" x (py-str-string args))) 
+  (let ((fs-struct (ensure-parsed-format-string x)))
+    (make-formatted-string fs-struct args)))
 
 
 (def-py-method py-string.isspace (x^)

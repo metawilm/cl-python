@@ -169,7 +169,7 @@
 					(return-from :try-parse))))
 				
 				  ;; try to parse as Lisp code second
-				  (let ((lisp-form (read-from-string total nil nil)))
+				  (let ((lisp-form (ignore-errors (read-from-string total nil nil))))
 				    (when (and lisp-form
 					       (not (member lisp-form '(def class for while if)))) 
 				      (let ((res (eval lisp-form)))

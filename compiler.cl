@@ -831,6 +831,10 @@
 	     else if (eq name '__name__)
 	     collect `(setf (svref +mod-globals-values+ ,i) ,(or module-name "__main__"))
 	     into setfs
+		     
+	     else if (eq name '__debug__)
+	     collect `(setf (svref +mod-globals-values+ ,i) 1)
+	     into setfs
 	       
 	     finally (when setfs
 		       (return `((progn ,@setfs))))))
@@ -964,12 +968,16 @@
 
 
 (defmacro try-finally-stmt (try-suite finally-suite)
-  `(progn (handler-case (values ,try-suite)
-	    (Exception ()))
-	  ,finally-suite)
+  `(unwind-protect
+       
+       (handler-case ,try-suite
+	 (Exception ())
+	 (error (e) (break "try/finally: in the TRY block, Lisp condition ~A occured" e)))
+     
+     ,finally-suite))
   
-  #+(or)
-  `(unwind-protect 
+#+(or)
+`(unwind-protect 
        
        (multiple-value-bind (val exc) (ignore-errors ,try-suite)
 	 (when (and (null val)
@@ -977,7 +985,7 @@
 		    (not (typep exc 'Exception)))
 	   (break "Try/finally: in the TRY block Lisp condition ~S occured" exc)))
      
-     ,finally-suite))
+     ,finally-suite)
 
 
 (defmacro tuple-expr (items)
@@ -1261,6 +1269,7 @@ AST is either an AST list or Python code string."
     #+(or)(warn "module vars: ~A" `(:l ,locals :dg ,declared-globals :os ,outer-scope))
     (let ((res (union (union locals declared-globals) outer-scope))) ;; !?
       (pushnew '__name__ res)
+      (pushnew '__debug__ res)
       res)))
 
 (defun module-make-globals-dict (names-vec values-vec dyn-globals-ht)
@@ -1581,7 +1590,7 @@ AST is either an AST list or Python code string."
 		  ;; Reconsing because %args might be dynamic-extent.
 		  (loop until (symbolp (car %args)) collect (pop %args)))
 
-	      (error "Too many pos args"))))
+	      (break "Too many pos args"))))
     
     ;; All remaining arguments are keyword arguments;
     ;; they have to be matched to the remaining pos and
@@ -1604,7 +1613,7 @@ AST is either an AST list or Python code string."
 			   until (= num-filled-by-pos-args max-to-fill-with-pos)
 				 
 			   do (if (svref arg-val-vec num-filled-by-pos-args)
-				  (error "Too many positional args (via * arg)")
+				  (break "Too many positional args (via * arg)")
 				(setf (svref arg-val-vec num-filled-by-pos-args)
 				  (pop extra-pos)))
 			      (incf num-filled-by-pos-args)
@@ -1613,13 +1622,13 @@ AST is either an AST list or Python code string."
 			     (when extra-pos
 			       (if (fa-*-arg fa)
 				   (setf for-* (nconc for-* extra-pos))
-				 (error "Too many positional args (via * arg)")))))
+				 (break "Too many positional args (via * arg)")))))
 		      
 		      ((fa-*-arg fa)  ;; no pos/key args, but *-arg
 		       (setf for-* (nconc for-* extra-pos)))
 		      
 		      (t
-		       (error "Too many positional args (via * arg)"))))))
+		       (break "Too many positional args (via * arg)"))))))
 	   
 	   ((eq key :**)
 	    ;; XXX largely untested
@@ -1650,25 +1659,25 @@ AST is either an AST list or Python code string."
 				(eq (svref kwname-vec i) key))
 			    
 		       do (when (svref arg-val-vec i)
-			    (error "Got multiple values (at least once via `key=' arg) ~%
-                                      for parameter `~A'" (svref name-vec i)))
+			    (break "Got multiple values (at least once via `key=' arg) ~%
+                                    for parameter `~A'" (svref name-vec i)))
 			  (setf (svref arg-val-vec i) val)
 			  (return)
 			  
 		       finally 
 			 (if (fa-**-arg fa)
 			     (push (cons key val) for-**)
-			   (error "Got unknown keyword arg and no **-arg: ~A ~A" key val))))
+			   (break "Got unknown keyword arg and no **-arg: ~A ~A" key val))))
 		  
 		  ((fa-**-arg fa)
 		   (push (cons key val) for-**))
 		  
-		  (t (error "Got unknown keyword arg and no **-arg: ~A ~A" key val))))))
+		  (t (break "Got unknown keyword arg and no **-arg: ~A ~A" key val))))))
     
     ;; Ensure all positional arguments covered
     (loop for i fixnum from num-filled-by-pos-args below (the fixnum (fa-num-pos-args fa))
 	unless (svref arg-val-vec i)
-	do (error "Positional arg ~A has no value" (svref (fa-arg-name-vec fa) i)))
+	do (break "Positional arg ~A has no value" (svref (fa-arg-name-vec fa) i)))
     
     ;; Use default values for missing keyword arguments
     (loop for i fixnum from (fa-num-pos-args fa) below (the fixnum (fa-num-pos-key-args fa))
@@ -1748,12 +1757,12 @@ AST is either an AST list or Python code string."
 		(case (first form)
 		  
 		  (break-stmt
-		   (unless stack (error "BREAK outside loop"))
+		   (unless stack (break "BREAK outside loop"))
 		   (values `(go ,(cdr (car stack)))
 			   t))
 		    
 		  (continue-stmt
-		   (unless stack (error "CONTINUE outside loop"))
+		   (unless stack (break "CONTINUE outside loop"))
 		   (values `(go ,(car (car stack)))
 			   t))
 		  
@@ -1826,7 +1835,7 @@ AST is either an AST list or Python code string."
 		    
 		  (return-stmt
 		   (when (second form)
-		     (error "SyntaxError: Inside generator, RETURN statement may not have ~
+		     (break "SyntaxError: Inside generator, RETURN statement may not have ~
                              an argument (got: ~S)" form))
 		    
 		   ;; from now on, we will always return to this state
@@ -1907,7 +1916,7 @@ AST is either an AST list or Python code string."
 		  (try-finally
 		   (destructuring-bind (try-suite finally-suite) (cdr form)
 		     (when (generator-ast-p try-suite)
-		       (error "SyntaxError: YIELD is not allowed in the TRY suite of ~
+		       (break "SyntaxError: YIELD is not allowed in the TRY suite of ~
                                a TRY/FINALLY statement (got: ~S)" form))
 		     
 		     (if nil

@@ -1,4 +1,4 @@
-__debug__ = 1
+#  __debug__ = 1
 
 def check(a, b):
     if not a == b:
@@ -73,6 +73,7 @@ class Scanner(object):
                 continue
             if col != self.indents[-1]:
                 while col < self.indents[-1]:
+                    print "yielding DEDENT-1"
                     yield DEDENT, ''
                     del self.indents[-1]
                 # This will yield DEDENT + INDENT for inconsistent dedent
@@ -127,6 +128,7 @@ class Scanner(object):
             nextc = getc()
             if not nextc:
                 while self.indents[-1]:
+                    print "yielding DEDENT-2"
                     yield DEDENT, ''
                     del self.indents[-1]
                 break
@@ -736,7 +738,7 @@ class OutputFile(object):
         self.softspace = True
     reset = __init__
     def write(self, s):
-        print "writing to OutputFile", self, s
+        #print "writing to OutputFile", self, s
         self.data.append(s)
     def getvalue(self):
         r = "".join(self.data)
@@ -746,6 +748,7 @@ class OutputFile(object):
 output = OutputFile()
 
 def cleanup(s):
+    #brek()
     return s ## XXX
     s = str(s).replace('<__main__.', '<').replace('<b0.', '<')
     i = s.find(' at 0x')
@@ -822,6 +825,7 @@ class instrumentCall(object):
         self.obj = obj
     def __call__(self, *args):
         global indent
+        print "*__call__ before, indent=", len(indent)
         oldindent = indent
         try:
             indent = indent + " "
@@ -845,6 +849,7 @@ class instrumentCall(object):
                 return result
         finally:
             indent = oldindent
+            print "*__call__ after, indent=", len(indent)
 
 def instrumentTree(base):
     instrumentClass(base)
@@ -885,7 +890,7 @@ def main():
 
     root = parser.parse()
     print "aap 1 "
-    checkoutput(1413352820)
+    checkoutput(1413352820) # using hash function 'strhash'
     print "aap 2"
     env = Dict()
     print "aap 3"
@@ -900,7 +905,7 @@ def main():
         check(strhash(x), myhash(x))
 
     strhash = myhash
-    checkoutput(3960406533)
+    checkoutput(3960406533)  # using hash function 'myhash'
 
     it = Clone(getcFromString(unicode(sample, "utf8")))
     it2 = Clone(it)
