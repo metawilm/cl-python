@@ -146,7 +146,7 @@
 	       (ecase (car tg)
 		 
 		 ((attributeref-expr subscription-expr)  `(setf ,tg ,val))
-		 
+		 		 
 		 ((list-expr tuple-expr)
 		  (let* ((targets (second tg))
 			 (num-targets (length targets)))
@@ -917,12 +917,12 @@
 	    `(etypecase ,the-exc
 	       (class (error (make-instance ,the-exc :args ,the-var)))
 	       (error (progn (warn "RAISE: ignored arg, as exc was already an ~
-                                        instance, not a class")
+                                    instance, not a class")
 			     (error ,the-exc))))
 	  
 	  `(etypecase ,the-exc
 	     (class    (error (make-instance ,the-exc)))
-	     (error    ,the-exc))))))
+	     (error    (error ,the-exc)))))))
 
 (defmacro try-except-stmt (suite except-clauses else-suite)
   ;; The Exception class in a clause is evaluated only after an

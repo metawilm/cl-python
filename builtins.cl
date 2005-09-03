@@ -323,8 +323,11 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
 (defun pybf:getattr (x attr &optional default)
   "Return the value of attribute NAME of X. ~@
    If attribute doesn't exist, returns supplied DEFAULT or raises AttributeError."
-  (declare (ignore x attr default))
-  (error "todo"))
+  (handler-case (py-object.__getattribute__ x (py-str-symbol attr))
+    (Exception (c)
+      (warn "getattr catched exception ~A" c)
+      (or default
+	  (py-raise 'AttributeError "[getattr:] ~A has no attr `~A'" x attr)))))
 
 (defun pybf:globals ()
   "Return a dictionary (namespace) representing the current global symbol table. ~@

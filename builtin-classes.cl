@@ -628,6 +628,9 @@
 
 ;;; User objects (Object, Module, File, Property)
 
+#+(or)
+(defmethod py-attr ((x py-user-object) attr)
+  (break "py-attr user-obj ~A ~A" x attr))
 
 
 ;; Object (User object)
@@ -843,8 +846,10 @@
 	(t (let* ((__new__ (recursive-class-dict-lookup cls '__new__))
 		  (inst (apply #'py-call __new__ cls args)))
 	     
-	     (when (typep inst cls)
-	       ;; don't do this when type(x) was executed
+	     (when
+		 (subtypep (py-class-of inst) cls)
+		 #+(or)(typep inst cls)
+	       ;; don't do this when inst is not of type cls
 	       (let ((__init__ (recursive-class-dict-lookup (py-class-of inst) '__init__)))
 		 (apply #'py-call __init__ inst args)))
 	     
@@ -950,8 +955,16 @@
   (:method ((x py-lisp-object))  (proxy-lisp-val x))
   (:method ((x t))               x))
 
+#+(or)
 (defmethod py-attr ((x py-lisp-object) attr)
-  (py-attr (proxy-lisp-val x) attr))
+  (if (typep x 'py-user-object)
+      
+      ;; user-defined class that derives from lisp class
+      (progn (warn "PY-ATTR: assuming ~A is instances of class derived from a Lisp class" x)
+	     (or (call-next-method)
+		 (py-attr (proxy-lisp-val x) attr)))
+    
+    (py-attr (proxy-lisp-val x) attr)))
 
 (defmethod (setf py-attr) (val (x py-lisp-object) attr)
   (setf (py-attr (proxy-lisp-val x) attr) val))
@@ -1153,9 +1166,10 @@
 
 (def-py-method py-list.__new__ :static (cls &optional iterable)
 	       (declare (ignore iterable))
-	       (if (eq cls (load-time-value (find-class 'py-list)))
-		   (make-array 0 :adjustable t :fill-pointer 0)
-		 (make-instance cls :lisp-object nil)))
+	       (let ((vec (make-array 0 :adjustable t :fill-pointer 0)))
+		 (if (eq cls (load-time-value (find-class 'py-list)))
+		     vec
+		   (make-instance cls :lisp-object vec))))
 		    
 (def-py-method py-list.__init__ (x^ &optional iterable)
   (when iterable
@@ -1225,6 +1239,20 @@
       do (setf (aref x i) (aref x (1+ i))))
   (decf (fill-pointer x)))
 
+(def-py-method py-list.__cmp__ (x^ y^)
+  (let ((x.len (length x))
+	(y.len (length y)))
+    
+    (cond ((< x.len y.len) -1)
+	  ((> x.len y.len) 1)
+	  (t (loop for xi across x and yi across y
+		 do (ecase (pybf:cmp xi yi)
+		      (0 ) ;; cont
+		      (-1 (return -1))
+		      (1  (return  1)))
+		 finally (return 0))))))
+		    
+  
 (def-py-method py-list.append (x^ y)
   (vector-push-extend y x))
 
@@ -1798,6 +1826,7 @@
 (defun py-str-string  (x) (py-val->string (py-str x)))
 
 (defun py-str-symbol  (x &optional (package #.*package*))
+  ;; {symbol,string} -> symbol
   (if (symbolp x) 
       x
     (let ((str (py-str-string x)))
@@ -1805,6 +1834,7 @@
 	  (intern (py-str-string x) package)))))
 
 (defun py-sym-string (x)
+  ;; {symbol,string} -> string
   (etypecase x
     (symbol (symbol-name x))
     (string x)))
@@ -1954,16 +1984,31 @@ next value gotten by iterating over X. Returns NIL, NIL upon exhaustion.")
 
 
 (defun py-print (dest items comma?)
-  (when dest
-    (warn "ignoring 'dest' arg of PRINT stmt (got: ~A)" dest))
   
-  (excl::fast
-   (let ((*print-pretty* nil))
-     (dolist (x items)
-       (format t "~A " (py-str-string x))
-       (write-char #\Space t))
-     
-     (unless comma?
-       (write-char #\Newline)))))
-
+  (let ((*print-pretty* nil))
+    
+    (if dest
+	
+	(let ((write-func (py-object.__getattribute__ dest 'write)
+			   #+(or)(recursive-class-lookup-and-bind dest 'write))
+	      (is-first t))
+	  (dolist (x items)
+	    (if is-first
+		(setf is-first nil)
+	      (py-call write-func " "))
+	    (py-call write-func (py-str-string x)))
+	  
+	  (unless comma?
+	    (py-call write-func #\Newline)))
+	     
+      (progn (let ((is-first t))
+	       (dolist (x items)
+		 (if is-first
+		     (setf is-first nil)
+		   (write-char #\Space t))
+		 (write-string (py-str-string x) t)))
+	     (unless comma?
+	       (write-char #\Newline t))))))
+  
+  
 

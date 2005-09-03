@@ -95,6 +95,7 @@
 						     (terpri)))
 					    (t (funcall helper-func))))))))))))
 		   (when val
+		     (remember-value val)
 		     (block :repr
 		       (loop
 			 (with-simple-restart
@@ -102,7 +103,6 @@
 			   (let ((str-val (py-str-string val)))
 			     (write-string (py-val->string str-val))
 			     (write-char #\Newline)
-			     (remember-value val)
 			     (return-from :repr))))))))))
     
       (loop
@@ -173,9 +173,9 @@
 				    (when (and lisp-form
 					       (not (member lisp-form '(def class for while if)))) 
 				      (let ((res (eval lisp-form)))
+					(remember-value res)
 					(write res)
-					(write-char #\Newline)
-					(remember-value res))
+					(write-char #\Newline))
 				      (setf acc nil)))))))))))))))
 
 (defun prof (f kind)
@@ -209,3 +209,17 @@
 			      (with-this-module-context (,*repl-mod*)
 				,ast)))))
     (funcall func)))
+
+
+(defun mod-make-fasl (mod-name)
+  (let* ((ast (parse-python-file (format nil "~A.py" mod-name)))
+	 (func (compile nil `(lambda () ,ast)))
+	 (fasl-file (format nil "~A.fasl" mod-name)))
+    (excl:fasl-write func fasl-file t t)))
+
+(defun mod-fasl (mod-name)
+  (let ((fasl-file (format nil "~A.fasl" mod-name)))
+    (car (excl:fasl-read fasl-file))))
+    
+(defun dummy (&rest args)
+  (warn "dummy: ~A" args))

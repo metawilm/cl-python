@@ -1,7 +1,10 @@
+__debug__ = 1
+
 def check(a, b):
-    print "checking ", a, b
     if not a == b:
         raise AssertionError("%.30r != %.30r" % (a, b))
+    else:
+        print "checking: ok!"
 
 def proto___new__(cls, name):
     if name in cls.name2num:
@@ -728,10 +731,12 @@ class Str(str):
 
 class OutputFile(object):
     def __init__(self):
+        print "OutputFile: __init__ or reset", self
         self.data = []
         self.softspace = True
     reset = __init__
     def write(self, s):
+        print "writing to OutputFile", self, s
         self.data.append(s)
     def getvalue(self):
         r = "".join(self.data)
@@ -851,6 +856,8 @@ def unInstrumentTree(base):
     for cls in base.__subclasses__():
         unInstrumentTree(cls)
 
+wb_instr = 0
+
 def main():
     output.reset()
 
@@ -867,8 +874,15 @@ def main():
     print "scanner:", scanner
     parser = Parser(scanner)
     print "parser:", parser
-    instrumentClass(Parser)
-    #print "class instrumented"
+
+    global wb_instr
+    if wb_instr == 0:
+      instrumentClass(Parser)
+      wb_instr = 1
+      print "class instrumented"
+    else:
+      print "class not instrumented"
+
     root = parser.parse()
     print "aap 1 "
     checkoutput(1413352820)
@@ -902,6 +916,7 @@ def main():
     writeln()
     checkoutput(3960406533)
 
+def main2():
     instrumentTree(Node)
     scanner = Clone(Scanner(it2.next).tokenize())
     scanner2 = Clone(scanner)
@@ -946,3 +961,5 @@ def main():
 
 if __name__ == '__main__':
     main()
+
+
