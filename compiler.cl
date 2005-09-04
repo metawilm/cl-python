@@ -106,7 +106,10 @@
   `(locally (declare (optimize (speed 3) (safety 0) (debug 0)))
      ,@body))
 
-;;; The macros corresponding to AST nodes
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;; 
+;;;  The macros corresponding to AST nodes
 
 (defmacro assert-stmt (test raise-arg)
   (when *__debug__*
@@ -177,17 +180,15 @@
 		    
 		      (ecase context
 		      
-			(:module    (if (member name (get-pydecl :lexically-visible-vars e))
-					(local-set)
-				      (module-set)))
+			(:module    (module-set))
 		      
-			(:function  (if (or (member name (get-pydecl :funcdef-scope-globals e))
+			(:function  (if (or (member name (get-pydecl :lexically-declared-globals e))
 					    (not (member name (get-pydecl :lexically-visible-vars e))))
 					(module-set)
 				      (local-set)))
 			
 			;; Inside a classdef, do not look at :lexically visible vars
-			(:class     (if (member name (get-pydecl :classdef-scope-globals e))
+			(:class     (if (member name (get-pydecl :lexically-declared-globals e))
 					(module-set)      
 				      (class-set))))))))))
 	
@@ -276,6 +277,32 @@
     (py-raise 'SyntaxError "BREAK was found outside loop")))
 
 
+(defun call-expr-special (func locals-dict globals-dict)
+  (lambda (&rest args)
+    
+    (cond ((and args
+		(member func (load-time-value (list #'pybf:locals #'pybf:globals))))
+	   (py-raise 'TypeError
+		     "Function ~A must be called without args (got: ~A)" func args))
+	  
+	  ((eq func (load-time-value #'pybf:locals)) 
+	   locals-dict)
+	  
+	  ((eq func (load-time-value #'pybf:globals))
+	   globals-dict)
+	  
+	  ((eq func (load-time-value #'pybf:eval))
+	   (if (or (some #'keywordp args)
+		   (not (<= 1 (length args) 3)))
+	     
+	       (py-raise 'TypeError
+			 "Function `eval' must be called with 1 to 3 pos args (got: ~A)" args)
+	     
+	     (pybf:eval (first args)
+			(or (second args) globals-dict)
+			(or (third args)  locals-dict)))))))
+
+
 (defmacro call-expr (primary (&whole all-args pos-args kwd-args *-arg **-arg))
   
   ;; XXX todo: check that key args are after pos args (or in parser?)
@@ -286,123 +313,75 @@
   ;; _caller_ (which is ugly).
   ;; 
   ;; At the module level, globals() and locals() are equivalent.
+
   (declare (ignore all-args))
-  (cond ((null (or kwd-args *-arg **-arg))
-	 `(py-call ,primary ,@pos-args))
-	
-	(t `(let* ((ev-prim ,primary)
-		   (pos-args (list ,@pos-args))
-		   (all-pos-args ,(if *-arg
-				      `(nconc pos-args (py-iterate->lisp-list ,*-arg))
-				    `pos-args))
-		   (more-key-args ,(if **-arg
-				       `(py-mapping->lisp-list-TODO ,**-arg)
-				     `())))
-	      
-	      (apply #'py-call ev-prim (nconc all-pos-args
-					      (list ,@(loop for ((i-e key) val) in kwd-args
-						  do (assert (eq i-e 'identifier-expr))
-						  collect (intern (symbol-name key) :keyword)
-						  collect val))
-					      more-key-args))))))
-#+(or)
-`((py-call prim
-	  ,@pos-args 
-	  ,@(loop for ((i-e key) val) in kwd-args
-		do (assert (eq i-e 'identifier-expr))
-		   ;; XXX tuples?
-		  
-		collect (intern (symbol-name key) :keyword)
-		collect val)
-	 
-	  ;; Because the * and ** arg may contain a huge
-	  ;; number of items, larger then max num of
-	  ;; lambda args, supply them using special :*
-	  ;; and :** keywords.
-	 
-	  ,@(when *-arg  `(:* ,*-arg))
-	  ,@(when **-arg `(:** ,**-arg)))
-
-
- `(cond ((eq prim (load-time-value #'pybf:locals))
-	 (if (and ,(not (or pos-args kwd-args))
-		  ,(or (null *-arg)  `(null (py-iterate->lisp-list ,*-arg)))
-		  ,(or (null **-arg) `(null (py-mapping->lisp-list ,**-arg))))
-	    
-	     (.locals.)
-	  
-	   (py-raise 'TypeError
-		     "locals() must be called without args (got: ~A)" ',all-args)))
-
-	((eq prim (load-time-value #'pybf:globals))
-	 (if (and ,(not (or pos-args kwd-args))
-		  ,(or (null *-arg)  `(null (py-iterate->lisp-list ,*-arg)))
-		  ,(or (null **-arg) `(null (py-mapping->lisp-list ,**-arg))))
-	     (.globals.)
-	   (py-raise 'TypeError
-		     "globals() must be called without args (got: ~A)" ',all-args)))
-
-	((eq prim (load-time-value #'pybf:eval))
-	 (let ((args (nconc (list ,@pos-args)
-			    ,(when *-arg `(py-iterate->lisp-list ,*-arg)))))
-	   (if (and ,(null kwd-args)
-		    ,(or (null **-arg)
-			 `(null (py-mapping->lisp-list ,**-arg)))
-		    (<= 1 (length args) 3))
-	      
-	       (funcall (load-time-value #'pybf:eval) ,(first pos-args)
-			,(or (second pos-args)
-			     `(.globals.))
-			,(or (third  pos-args)
-			     `(.locals.)))
-	    
-	     a(py-raise 'TypeError
-			"eval() must be called with 1 to 3 pos args (got: ~A)" ',all-args))))
+  
+  (let ((kw-args (loop for ((i-e key) val) in kwd-args
+		     do (assert (eq i-e 'identifier-expr))
+		     collect (intern (symbol-name key) :keyword)
+		     collect val)))
+    
+    `(let* ((prim ,primary))
        
-	(t (py-call prim
-		    ,@pos-args 
-		    ,@(loop for ((i-e key) val) in kwd-args
-			  do (assert (eq i-e 'identifier-expr))
-			     ;; XXX tuples?
-			    
-			  collect (intern (symbol-name key) :keyword)
-			  collect val)
-		   
-		    ;; Because the * and ** arg may contain a huge
-		    ;; number of items, larger then max num of
-		    ;; lambda args, supply them using special :*
-		    ;; and :** keywords.
-		   
-		    ,@(when *-arg  `(:* ,*-arg))
-		    ,@(when **-arg `(:** ,**-arg))))))
-
-
+       (when (or (eq prim (load-time-value #'pybf:locals))
+		 (eq prim (load-time-value #'pybf:globals))
+		 (eq prim (load-time-value #'pybf:eval)))
+	 (setf prim (call-expr-special prim (.locals.) (.globals.))))
+       
+       ,(cond ((and *-arg **-arg)
+	       `(apply #'py-call prim ,primary ,@pos-args
+		       (nconc (py-iterate->lisp-list ,*-arg)
+			      (list ,@kw-args)
+			      (py-mapping->lisp-list-TODO ,**-arg))))
+	      (*-arg
+	       `(apply #'py-call prim ,primary ,@pos-args
+		       (nconc (py-iterate->lisp-list ,*-arg)
+			      (list ,@kw-args))))
+	      
+	      (**-arg
+	       `(apply #'py-call prim ,@pos-args ,@kw-args
+		       (py-mapping->lisp-list-TODO ,**-arg)))
+	      
+	      (t
+	       `(py-call prim ,@pos-args ,@kw-args))))))
+       
 
 (defmacro classdef-stmt (name inheritance suite &environment e)
   ;; todo: define .locals. containing class vars
   (assert (eq (car name) 'identifier-expr))
   (assert (eq (car inheritance) 'tuple-expr))
   
-  (with-gensyms (cls)
-    `(let ((+cls-namespace+ (make-dict) #+(or)(make-hash-table :test #'eq)))
+  (multiple-value-bind (globals locals) (classdef-stmt-suite-globals-locals
+					 suite
+					 (get-pydecl :lexically-declared-globals e))
+    (declare (ignore locals))
+  
+    (with-gensyms (cls)
+      `(let ((+cls-namespace+ (make-dict)))
+	 
+	 (with-pydecl ((:context :class)
+		       (:lexically-declared-globals ,(append 
+						      (get-pydecl :lexically-declared-globals e)
+						      globals)))
+
+	   ;; Note that the local class variables are not locally visible
+	   ;; i.e. they don't extend ":lexically-visible-vars"
+	   
+	   ,suite)
        
-       (with-pydecl ((:context :class)
-		     (:classdef-scope-globals ',(classdef-globals suite)))
-	 ,suite)
-       
-       (let ((,cls (make-py-class :name ',(second name)
-				  :namespace +cls-namespace+
-				  :supers (list ,@(second inheritance))
-				  :cls-metaclass (gethash "__metaclass__" +cls-namespace+)
-				  :mod-metaclass
-				  ,(let ((ix (position '__metaclass__
-						       (get-pydecl :mod-globals-names e))))
-				     (if ix
-					 `(let ((val (svref +mod-globals-values+ ,ix)))
-					    (unless (eq val :unbound)
-					      val))
-				       `(gethash '__metaclass__ +mod-dyn-globals+))))))
-	 (assign-stmt ,cls (,name))))))
+	 (let ((,cls (make-py-class :name ',(second name)
+				    :namespace +cls-namespace+
+				    :supers (list ,@(second inheritance))
+				    :cls-metaclass (gethash "__metaclass__" +cls-namespace+)
+				    :mod-metaclass
+				    ,(let ((ix (position '__metaclass__
+							 (get-pydecl :mod-globals-names e))))
+				       (if ix
+					   `(let ((val (svref +mod-globals-values+ ,ix)))
+					      (unless (eq val :unbound)
+						val))
+					 `(gethash '__metaclass__ +mod-dyn-globals+))))))
+	   (assign-stmt ,cls (,name)))))))
 
 (defmacro comparison-expr (cmp left right)
   (let ((py-@ (get-binary-comparison-func-name cmp)))
@@ -459,9 +438,7 @@
 	 
 	 (ecase (get-pydecl :context e)
 	 
-	   (:module   (if (member name (get-pydecl :lexically-visible-vars e))
-			  (local-del)
-			(module-del)))
+	   (:module   (module-del))
 	   
 	   (:function (if (or (member name (get-pydecl :func-globals e))
 			      (not (member name (get-pydecl :lexically-visible-vars e))))
@@ -481,48 +458,46 @@
   ;;   - allow code object etc as CODE
   ;;   - when code is a constant string, parse it already at compile time etc
   
-  ;; An EXEC-STMT is translated into a function, that is compiled and
-  ;; then funcalled. Compiling is needed because otherwise the
-  ;; environment with pydecl it not passed properly.
-  ;; 
-  ;; XXX todo: understand how exactly environments work
-  ;; w.r.t. compilation.
+  ;; An EXEC-STMT is translated into a Python suite containing a
+  ;; function definition and a subsequent cal of the function.
   
   (let ((context (get-pydecl :context e)))
     
-    (with-gensyms (exec-helper-func)
-      
-      `(let* ((ast (parse-python-string ,code))
-	      (real-ast (destructuring-bind (module-stmt suite) ast
-			  (assert (eq module-stmt 'module-stmt))
-			  (assert (eq (car suite) 'suite-stmt))
-			  suite))
-	      (locals-ht  (convert-to-namespace-ht ,(or locals (if (eq context :module)
-								 `(.globals.)
-							       `(.locals.)))))
-	      (globals-ht (convert-to-namespace-ht ,(or globals `(.globals.))))
-	      (loc-kv-pairs (loop for k being the hash-key in locals-ht
-				using (hash-value val)
-				for k-sym = (typecase k
-					      (string (intern k #.*package*))
-					      (symbol k)
-					      (t (error "EXEC-STMT: the dict with locals ~
-                                                         must have keys or symbols as key ~
-                                                         (got: ~A, as ~A)" k (type-of k))))
-				collect `(,k-sym ,val)))
-	      (lambda-body
-	       `(with-module-context (#() #() ,globals-ht)
-		  
-		  ;; this assumes that there are not :lexically-visible-vars set yet
-		  (with-pydecl ((:lexically-visible-vars ,(mapcar #'car loc-kv-pairs)))
-		    ,real-ast))))
+    `(let* ((ast (parse-python-string ,code))
+	    (ast-suite (destructuring-bind (module-stmt suite) ast
+			 (assert (eq module-stmt 'module-stmt))
+			 (assert (eq (car suite) 'suite-stmt))
+			 suite))
+	      
+	    (locals-ht  (convert-to-namespace-ht 
+			 ,(or locals
+			      (if (eq context :module) `(.globals.) `(.locals.)))))
+	      
+	    (globals-ht (convert-to-namespace-ht ,(or globals `(.globals.))))
+	      
+	    (loc-kv-pairs (loop for k being the hash-key in locals-ht
+			      using (hash-value val)
+			      for k-sym = (py-string->symbol k)
+			      collect `(,k-sym ,val)))
+	      
+	    (lambda-body `(with-module-context (#() #() ,globals-ht)
+			    (suite-stmt
+			       
+			     ((funcdef-stmt  ;; helper function
+			       nil (identifier-expr exec-stmt-helper-func)
+			       (nil nil nil nil)
+			       (suite-stmt 
+				,(loop for (k v) in loc-kv-pairs ;; set local variables
+				     collect `(assign-stmt ,v ((identifier-expr ,k))))
+				,ast-suite)) ;; execute suite
+				
+			      ;; call function
+			      (call-expr (identifier-expr exec-stmt-helper-func)
+					 (nil nil nil nil)))))))
+	      
+       (warn "EXEC-STMT: lambda-body: ~A" lambda-body)
 	 
-	 (warn "EXEC-STMT: lambda-body: ~A" lambda-body)
-			  
-	 (let ((,exec-helper-func (compile nil `(lambda () ,lambda-body))))
-	   
-	   (funcall ,exec-helper-func))))))
-	 
+       (funcall (compile nil `(lambda () ,lambda-body))))))
 
 (defmacro for-in-stmt (target source suite else-suite)
   ;; potential special cases:
@@ -584,7 +559,10 @@
 	  (lambda-pos-args pos-arg-destruct-form) (lambda-args-and-destruct-form pos-args)
 	
 	(multiple-value-bind
-	    (func-explicit-globals func-locals) (funcdef-globals-and-locals all-arg-names suite)
+	    (func-explicit-globals func-locals) (funcdef-stmt-suite-globals-locals
+						 suite
+						 all-arg-names
+						 (get-pydecl :lexically-declared-globals e))
 	  
 	  (let* ((all-locals-and-arg-names (append all-arg-names func-locals))
 		 
@@ -602,15 +580,16 @@
 		      
 		      (block :function-body
 			
-			(macrolet
+			(flet
 			    ,(when (contains-call-p suite)
 			       `((.locals. () ;; lambdas and gen-exprs have 'locals()' too
-					   '(excl:with-stack-list (vals ,@all-locals-and-arg-names)
-					     (make-locals-dict ',all-locals-and-arg-names vals)))))
+					   (make-locals-dict 
+					    ',all-locals-and-arg-names
+					    (list ,@all-locals-and-arg-names)))))
 			  
-			  (with-pydecl ((:funcdef-scope-globals  ;; funcdef globals are also valid
+			  (with-pydecl ((:lexically-declared-globals  ;; funcdef globals are also valid
 					 ,(append func-explicit-globals  ;; for inner functions
-						  (get-pydecl :funcdef-scope-globals e)))
+						  (get-pydecl :lexically-declared-globals e)))
 					
 					(:context :function)
 					(:inside-function t)
@@ -663,6 +642,8 @@
 		     (identifier-expr ,fname)))))))))))
 
 
+
+
 (defmacro generator-expr (&whole whole item for-in/if-clauses)
   (declare (ignore item for-in/if-clauses))
   (rewrite-generator-expr-ast whole))
@@ -675,7 +656,7 @@
   (unless (get-pydecl :inside-function e)
     (warn "Bogus `global' statement found at top-level (not inside a function)")))
 
-
+#+(or)
 (defun identifier-expr-module-lookup (name ix +mod-globals-values+ +mod-dyn-globals+ builtin-value)
   (if ix
       (let ((val (svref +mod-globals-values+ ix)))
@@ -703,36 +684,19 @@
   (flet ((module-lookup ()
 	   (let ((ix (position name (get-pydecl :mod-globals-names e))))
 	     `(identifier-expr-module-lookup ',name
-					     ,ix +mod-globals-values+ +mod-dyn-globals+
+					     ,ix
 					     ,(when (builtin-name-p name)
-						(builtin-name-value name)))
-	     
-	     #+(or)
-	     (if ix
-		 `(let ((val (svref +mod-globals-values+ ,ix)))
-		    (if (eq val :unbound)
-			(py-raise 'NameError
-				  "Variable '~A' is unbound [glob]" ',name)
-		      val))
-	       `(or (gethash ',name +mod-dyn-globals+)
-		    ,(if (builtin-name-p name)
-			 (builtin-name-value name)
-		       `(py-raise 'NameError
-				  "Variable '~A' is unbound [dyn-glob]" ',name)))))))
-    
+						(builtin-name-value name))))))
     (ecase (get-pydecl :context e)
 
-      
-      (:function (if (or (member name (get-pydecl :funcdef-scope-globals e))
+      (:function (if (or (member name (get-pydecl :lexically-declared-globals e))
 			 (not (member name (get-pydecl :lexically-visible-vars e))))
 		     (module-lookup)
 		   name))
 		 
-      (:module   (if (member name (get-pydecl :lexically-visible-vars e)) ;; in exec-stmt
-		     name
-		   (module-lookup)))
+      (:module   (module-lookup))
       
-      (:class    `(or (gethash ,(symbol-name name) +cls-namespace+)
+      (:class    `(or (gethash ',(symbol-name name) +cls-namespace+)
 		      ,(if (member name (get-pydecl :lexically-visible-vars e))
 			   name
 			 (module-lookup)))))))
@@ -784,16 +748,21 @@
   
 
 (defmacro listcompr-expr (item for-in/if-clauses)
-  (with-gensyms (vec)
-    `(let ((,vec (make-array 0 :adjustable t :fill-pointer 0)))
+  (with-gensyms (list)
+    `(let ((,list ()))
        ,(loop
-	    with res = `(vector-push-extend ,item ,vec)
+	    with res = `(push ,item ,list)  ;; (vector-push-extend ,item ,vec)
 	    for clause in (reverse for-in/if-clauses)
 	    do (setf res (ecase (car clause)
 			   (for-in `(for-in-stmt ,(second clause) ,(third clause) ,res nil))
 			   (if     `(if-stmt (,(second clause) ,res) nil))))
-	  finally (return res))
-     (make-py-list-from-vec ,vec))))
+	    finally (return res))
+       (make-py-list-from-list (nreverse ,list)))))
+
+;;#+(or)(make-py-list-from-vec ,vec)
+;;`(let ((,vec (make-array 0 :adjustable t :fill-pointer 0)))
+
+
 
 (defmacro list-expr (items)
   `(make-py-list-unevaled-list ,items))
@@ -841,16 +810,34 @@
 
      (flet ((.globals. () (module-make-globals-dict
 			   ;; Updating this dict really modifies the globals.
-			   +mod-globals-names+ +mod-globals-values+ +mod-dyn-globals+)))
+			   +mod-globals-names+ +mod-globals-values+ +mod-dyn-globals+))
+	    
+	    (identifier-expr-module-lookup (name ix builtin-value)
+	      (if ix
+		  
+		  (let ((val (svref +mod-globals-values+ ix)))
+		    (if (eq val :unbound)
+			(py-raise 'NameError
+				  "Variable '~A' is unbound [glob]" name)
+		      val))
+		
+		(or (gethash name +mod-dyn-globals+)
+		    builtin-value
+		    (py-raise 'NameError
+			      "Variable '~A' is unbound [dyn-glob]" name)))))
        
-       #'.globals. ;; remove 'unused' warning
+       ;; remove 'unused' warnings
+       #'.globals.
+       #'identifier-expr-module-lookup
 
+       ;; "locals()" at the module level is equivalent to "globals()"
+       
        (macrolet ((.locals. () `(.globals.)))
 	 
 	 (with-pydecl
-	     ((:mod-globals-names      ,glob-names)
-	      (:context                :module)
-	      (:mod-futures            :todo-parse-module-ast-future-imports))
+	     ((:mod-globals-names  ,glob-names)
+	      (:context            :module)
+	      (:mod-futures        :todo-parse-module-ast-future-imports))
 	   
 	   ,@body)))
      
@@ -872,7 +859,7 @@
   ;; :exec-mod-locals-ht and :exec-mod-globals-ht are assumed declared
   ;; (hash-tables containing local and global scope).
   
-  (let* ((ast-globals (module-stmt-globals suite)))
+  (let* ((ast-globals (module-stmt-suite-globals suite)))
     
     `(with-module-context (,(make-array (length ast-globals) :initial-contents ast-globals)
 			   (make-array ,(length ast-globals) :initial-element :unbound) ;; not eval now
@@ -1022,8 +1009,18 @@
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;;  Helper functions for the compiler
+;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-;;; Helper functions for the compiler
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;
+;;; Detecting names and values of built-ins
 
 (defun builtin-name-p (x)
   (or (find-symbol (string x) (load-time-value (find-package :python-builtin-functions)))
@@ -1044,233 +1041,14 @@
 	    ((eq pkg (load-time-value (find-package :python-builtin-clpy)))
 	     (symbol-function sym))))))
 
-(defun describe-vars (ast)
-  "Print locals, global and outer scope variables of AST.
-AST is either an AST list or Python code string."
-  (when (stringp ast)
-    (setf ast (parse-python-string ast)))
-  (multiple-value-bind (locals globals outers) (ast-vars ast)
-    (setf locals  (sort locals #'string<))
-    (setf globals (sort globals #'string<))
-    (setf outers  (sort outers #'string<))
-    
-    (format t "locals      : ~{~:A ~}~%globals     : ~{~:A ~}~%outer scope : ~{~:A ~}~%"
-	    locals globals outers)))
 
-(defvar *ast-vars-where* nil)
-
-(defun ast-vars (ast &key value target
-			  params locals declared-globals outer-scope
-			  is-module-scope)
-  
-  ;; Returns: LOCALS, DECLARED-GLOBALS, OUTER-SCOPE which are lists of
-  ;; symbols denoting variable names.
-  ;; 
-  ;; If IS-MODULE-SCOPE, then all variables will be in LOCALS.
-  
-  (declare (optimize (debug 3)))
-  
-  (labels
-      ((recurse (ast &key value target)
-	 
-	 #+(or)(let ((*print-pretty* nil))
-		 (warn "(recurse ~A :value ~A :target ~A)" ast value target))
-	 
-	 (unless (listp ast)
-	   (return-from recurse))
-	 
-	 (with-py-ast ((form &key value target) ast :value value :target target) 
-	   (case (car form)
-	     
-	     (classdef-stmt (destructuring-bind
-				((identifier cname) (tuple-expr inheritance-list) suite)
-				(cdr form)
-			      
-				(declare (ignore suite))
-				(assert (eq identifier 'identifier-expr))
-				(assert (eq tuple-expr 'tuple-expr))
-				
-				(if (member cname declared-globals)
-				    (py-raise 'SyntaxError
-					      "A class name may not be declared `global' ~
-                                             (class: '~A')."
-					      cname)
-				  (pushnew cname locals))
-				
-				(loop for cls in inheritance-list 
-				    do (recurse cls :value t)))
-			    (values nil t))
-	     
-	     (funcdef-stmt  (destructuring-bind 
-				(decorators (identifier-expr fname) args suite) (cdr form)
-			      
-			      (assert (eq identifier-expr 'identifier-expr))
-			      
-			      (loop for deco in decorators
-				  do (recurse deco :value t))
-			      
-			      (if (member fname declared-globals)
-				  (error "SyntaxError: inner function name may not be ~
-                                            declared global (inner function: '~A', at ~A)."
-					 fname *ast-vars-where*)
-				(pushnew fname locals))
-			      
-			      ;; kwdarg default values
-			      (loop for (nil def-val) in (second args)
-				  do (recurse def-val :value t))
-			      
-			      
-			      (let ((all-args (apply #'funcdef-list-all-arg-names args)))
-				
-				(multiple-value-bind (f-locals f-globals f-outers)
-				    (let ((*ast-vars-where* `(funcdef ,fname)))
-				      (ast-vars suite :value t :params all-args))
-				  
-				  (declare (ignore f-locals f-globals))
-
-				  (loop for name in f-outers
-				      unless (or (member name params)
-						 (member name locals)
-						 
-						 ;; `global' decls leak to inner functions
-						 (member name declared-globals))
-					     
-				      do (if (eq *ast-vars-where* :module-scope) 
-					     (pushnew name locals)
-					   (pushnew name outer-scope))))))
-			    
-			    ;; When a function defines x as global, for inner
-			    ;; functions it's a global too:
-			    ;; ---
-			    ;; a = 'global'
-			    ;; 
-			    ;; def f():
-			    ;;   a = 'af'
-			    ;;   def g():
-			    ;;     global a
-			    ;;     def h():
-			    ;;       print a
-			    ;;     return h
-			    ;;   return g
-			    ;; ---
-			    ;; f()()() -> prints 'global', not 'af'
-			    
-			    (values nil t))
-	     
-	     
-	     (global-stmt (dolist (name (second form))
-			    (cond ((member name params)
-				   (error "SyntaxError: function param may not be declared ~
-                                           `global' (param '~A', at ~A)."
-					  name *ast-vars-where*))
-				  
-				  ((or (member name locals) (member name outer-scope))
-				   (error "SyntaxError: variable '~A' used before being ~
-                                           declared `global' (at ~A)." name *ast-vars-where*))
-				  
-				  (t (pushnew name declared-globals))))
-			  (values nil t))
-
-	     (identifier-expr (let ((name (second form)))
-				(unless (eq name '|...|)
-				  
-				  (when value
-				    (unless (or (member name params)
-						(member name locals)
-						(member name declared-globals))
-				      
-				      (if (eq *ast-vars-where* :module-scope)
-					  (pushnew name locals)
-					(pushnew name outer-scope))))
-				  
-				  (when target
-				    (when (member name outer-scope)
-				      (warn "Local variable '~A' referenced ~
-                                             before assignment (at ~A)."
-					    name *ast-vars-where*))
-				    (unless (or (member name params)
-						(member name locals)
-						(member name declared-globals))
-				      (pushnew name locals)))))
-				
-				(values nil t))
-	     
-	     (lambda-expr (destructuring-bind (args expr) (cdr form)
-			    (let ((all-args (apply #'funcdef-list-all-arg-names args)))
-			      
-			      (loop for (nil def-val) in (second args) ;; kwdarg default values
-				  do (recurse def-val :value t))
-			      
-			      (multiple-value-bind (f-locals f-globals f-outers)
-				  (ast-vars expr :value t :params all-args)
-				
-				(declare (ignore f-locals f-globals))
-				
-				(loop for name in f-outers
-				    unless (or (member name params)
-					       (member name locals)
-					       (member name declared-globals)) ;; `global' leaks inside
-				    do (pushnew name outer-scope)))))
-			  
-			  (values nil t))
-	     
-	     (t form)))))
-    
-    (let ((*ast-vars-where* (if is-module-scope :module-scope :not-module-scope)))
-      (recurse ast :value value :target target))
-    
-    (values locals declared-globals outer-scope)))
-
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;; 
+;;; Support for introspection: locals() and globals()
 
 (defun make-locals-dict (name-list value-list)
-  (make-py-dict
+  (make-py-dict ;; XXX check keys become strings
    (delete :unbound (mapcar #'cons name-list value-list) :key #'cdr)))
-
-(defun funcdef-list-all-arg-names (pos-args key-args *-arg **-arg)
-  (let ((res (nconc (funcdef-list-all-pos-arg-names pos-args)
-		    (loop for ((identifier-expr name) nil) in key-args
-			do (assert (eq identifier-expr 'identifier-expr))
-			collect name))))
-    (when *-arg  (push (second *-arg)  res))
-    (when **-arg (push (second **-arg) res))
-    res))
-    
-(defun funcdef-list-all-pos-arg-names (declared-pos-args)
-  (loop with todo = declared-pos-args and res = ()
-      while todo
-      do (let ((x (pop todo)))
-	   (ecase (first x)
-	     (identifier-expr (push (second x) res))
-	     (tuple-expr      (setf todo (nconc todo (second x))))))
-      finally (return res)))
-   
-
-(defun funcdef-globals-and-locals (all-arg-names suite)
-  "Given FUNCDEF ARGS and SUITE (or EXPR), return DECLARED-GLOBALS, LOCALS.
-   Does _not_ return ARGS (e.g. as part of LOCALS)."
-  
-  (assert (every #'symbolp all-arg-names))
-  
-  (multiple-value-bind
-      (locals declared-globals outer-scopes) (ast-vars suite :value t :params all-arg-names)
-    (declare (ignore outer-scopes))
-    (values declared-globals locals)))
-
-(defun classdef-globals (suite)
-  (multiple-value-bind
-      (locals declared-globals outer-scope) (ast-vars suite)
-    (declare (ignore locals outer-scope))
-    declared-globals))
-  
-
-(defun module-stmt-globals (suite)
-  (multiple-value-bind
-      (locals declared-globals outer-scope) (ast-vars suite :is-module-scope t)
-    #+(or)(warn "module vars: ~A" `(:l ,locals :dg ,declared-globals :os ,outer-scope))
-    (let ((res (union (union locals declared-globals) outer-scope))) ;; !?
-      (pushnew '__name__ res)
-      (pushnew '__debug__ res)
-      res)))
 
 (defun module-make-globals-dict (names-vec values-vec dyn-globals-ht)
   (make-py-dict ;; todo: proxy
@@ -1299,180 +1077,169 @@ AST is either an AST list or Python code string."
 				 (when (eq x x2) (error "invalid namespace: ~A" x))
 				 (convert-to-namespace-ht x2))))
 
-#+(or)
-(defmacro py-arg-function (name (pos-args key-args *-arg **-arg) &body body)
-  
-  ;; Non-consing argument parsing! (except when *-arg or **-arg
-  ;; present)
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;
+;;; Detecting the globals and locals of modules, functions and classes
+
+(defun module-stmt-suite-globals (suite)
+  "A list of the global variables of the module."
+
+  ;; We make use of the fact that every global variable must be _set_
+  ;; sometime: at the toplevel of the module, or in a function or
+  ;; classdef.
   ;; 
-  ;; POS-ARGS: list of symbols
-  ;; KEY-ARGS: list of (key-symbol default-val) pairs
-  ;; *-ARG, **-ARG: a symbol or NIL 
+  ;; The first way, at toplevel, can be detected by looking for the
+  ;; variables used at the top level. The latter two (func/class) can
+  ;; be detected by looking for the required `global' declaration.
   ;; 
-  ;; XXX todo: the generated code can be cleaned up a bit when there
-  ;; are no arguments (currently zero-length vectors are created).
+  ;; However, the resulting list of names is an _underestimate_ of the
+  ;; total list of global variables in the module, as more can be
+  ;; created dynamically from outside the module by another module,
+  ;; and also by code in an "exec" stmt in this module.
   
-  #+(or)(break "py-arg-function: args=~A ~A ~A ~A" pos-args key-args *-arg **-arg)
+  (declare (optimize (debug 3)))
+  (assert (eq (car suite) 'suite-stmt))
   
-  (assert (symbolp name))
-  
-  (let* ((num-pos-args (length pos-args))
-	 (num-key-args (length key-args))
-	 (num-pos-key-args  (+ num-pos-args num-key-args))
-	 
-	 
-	 (pos-key-arg-names (nconc (copy-list pos-args)
-				   (mapcar #'first key-args)))
-	 (key-arg-default-asts (mapcar #'second key-args))
-	 (arg-name-vec (when (> num-pos-key-args 0)
-			 (make-array num-pos-key-args :initial-contents pos-key-arg-names)))
-	 
-	 (arg-kwname-vec (when (> num-pos-key-args 0)
-			   (make-array
-			    num-pos-key-args
-			    :initial-contents (loop for x across arg-name-vec
-						  collect (intern x #.(find-package :keyword))))))
-	 (key-arg-defaults (unless (= num-key-args 0)
-			     (make-array num-key-args))))
+  (let ((globals ()))
     
-    `(locally #+(or)(declare (optimize (speed 3) (safety 1) (debug 3)))
-       (let (,@(when key-args
-		 `((key-arg-default-values ,key-arg-defaults))))
+    ;; Variables assigned/looked up at module level
+    
+    (with-py-ast  ((form &key value target) suite :value t :target nil)
+      (declare (ignore value target))
+      (case (car form)
+
+	((classdef-stmt funcdef-stmt) (values nil t))
+
+	(identifier-expr (let ((name (second form)))
+			   (pushnew name globals))
+			 (values nil t))
+	
+	(t form)))
+    
+    ;; Variables explicitly declared `global'
+
+    (with-py-ast ((form &key value target) suite :value t :target nil)
+      (declare (ignore value target))
+      (case (car form)
+
+	(global-stmt (dolist (name (second form))
+		       (pushnew name globals))
+		     (values nil t))
+	
+	(t form)))
+    
+    ;; Every module has some special names predefined
+    (dolist (n '(__name__ __debug__))
+      (pushnew n globals))
+    
+    globals))
+
+
+(defun funcdef-stmt-suite-globals-locals (suite params enclosing-declared-globals)
+  "Lists with the locals and globals of the function."
+  
+  ;; The local variables of a function are those variables that are
+  ;; set inside the function.
+  
+  (declare (optimize (debug 3)))
+  (assert (eq (car suite) 'suite-stmt))
+  
+  (let ((locals ())
+	(declared-globals ()))
+    
+    (with-py-ast ((form &key value target) suite :value t)
+      (declare (ignore value))
+      
+      (case (car form)
+
+	((classdef-stmt funcdef-stmt)  (check-class/func-not-global
+					form
+					declared-globals enclosing-declared-globals)
+				       (values nil t))
+	
+	(identifier-expr (let ((name (second form)))
+			   (when (and target
+				      (not (member* name params declared-globals)))
+			     (pushnew name locals)))
+			 (values nil t))
+	
+	(global-stmt     (dolist (name (second form))
+			   (cond ((member name params)
+				  (py-raise 'SyntaxError
+					    "Function param `~A' may not be declared `global'" name))
+			       
+				 ((member name locals)
+				  (py-raise 'SyntaxError
+					    "The `global' declaration of variable `~A' must be ~
+                                           lexically before it is first used." name))
+				 
+				 (t (pushnew name declared-globals))))
+			 (values nil t))
+	(t form)))
+    
+    (values declared-globals locals)))
+
+
+(defun classdef-stmt-suite-globals-locals (suite enclosing-declared-globals)
+  "Lists with the locals and globals of the class."
+  
+  ;; The local variables of a class are those variables that are set
+  ;; inside the class' suite.
+  
+  (funcdef-stmt-suite-globals-locals suite () enclosing-declared-globals))
+
+
+(defun check-class/func-not-global (ast &rest globals-lists)
+  (ecase (car ast)
+    
+    (classdef-stmt
+     (destructuring-bind
+	 ((identifier cname) inheritance csuite)  (cdr ast)
+       (declare (ignore inheritance csuite))
+       (assert (eq identifier 'identifier-expr))
+       (when (apply #'member* cname globals-lists)
+	 (py-raise 'SyntaxError
+		   "A class name may not be declared `global' (class: '~A')." cname))))
+    
+    (funcdef-stmt
+     (destructuring-bind (decorators (identifier-expr fname) args suite) (cdr ast)
+       (declare (ignore decorators suite args))
+       (assert (eq identifier-expr 'identifier-expr))
+       (when (apply #'member* fname globals-lists)
+	 (py-raise 'SyntaxError
+		   "SyntaxError: inner function name may not be declared global ~
+                    (function: '~A', at ~A)." fname))))))
+
+
+(defun member* (item &rest lists)
+  (dolist (list lists)
+    (when (member item list)
+      (return-from member* t)))
+  nil)
+
+(defun funcdef-list-all-arg-names (pos-args key-args *-arg **-arg)
+  (let ((pos-arg-names (loop with todo = pos-args and res = ()
+			   while todo
+			   do (let ((x (pop todo)))
+				(ecase (first x)
+				  (identifier-expr (push (second x) res))
+				  (tuple-expr      (setf todo (nconc todo (second x))))))
+			   finally (return res)))
 	 
-	 ;; Evaluate default argument values outside the lambda, at
-	 ;; function definition time.
-	 ,@(when key-args
-	     `((progn ,@(loop for i from 0 below num-key-args
-			    collect `(setf (svref key-arg-default-values ,i)
-				       ,(nth i key-arg-default-asts))))))
-
-	 (excl:named-function ,name
-	   (lambda (&rest %args)
-	     (declare (dynamic-extent %args))
-	   
-	     ;; args = (pos_1 pos_2 ... pos_p ; key_1 val_1 ... key_k val_k)
-	     ;; where key_i is a (regular, not :keyword) symbol
-	   
-	     ;; As the first step, the pos_i args are assigned to pos-args,
-	     ;; and if there are more pos_i args then pos-args, then the
-	     ;; remaining ones are assigned to the key-args.
-	   
-	     (let* (,@(when (> num-pos-key-args 0)
-			`((arg-val-vec (make-array ,num-pos-key-args :initial-element nil))
-			  (num-filled-by-pos-args 0)))
-		    ,@(when **-arg `((for-** ())))
-		    ,@(when *-arg `((for-* ()))))
-	     	     
-	       ,@(when (> num-pos-key-args 0)
-		   `((declare (dynamic-extent arg-val-vec)
-			      (type (integer 0 ,num-pos-key-args) num-filled-by-pos-args))))
-
-	       ;; Spread supplied positional args over pos-args and *-arg
-	     
-	       ,@(when (> num-pos-key-args 0)
-		   `((loop 
-			  until (or (= num-filled-by-pos-args ,(if *-arg num-pos-args num-pos-key-args))
-				    (symbolp (car %args))) ;; the empty list NIL is a symbol, too
-			  do (setf (svref arg-val-vec num-filled-by-pos-args) (pop %args))
-			     (incf num-filled-by-pos-args))))
-
-	       ;; Collect remaining pos-arg in *-arg, if present 
-	     
-	       (unless (symbolp (car %args))
-		 ,(if *-arg
-		      `(loop until (symbolp (car %args))
-			   do (push (pop %args) for-*))
-		    `(error "Too many pos args")))
-	       
-	       ,@(when *-arg
-		   `((setf for-* (nreverse for-*))))
-
-	       ;; All remaining arguments are keyword arguments;
-	       ;; they have to be matched to the remaining pos and
-	       ;; key args by name.
-	     
-	       (when %args
-		 (loop
-		     for key = (pop %args)
-		     for val = (pop %args)
-		     while key
-		     do
-		       (cond ((eq key :*)
-			      (let ((extra-pos (py-iterate->lisp-list val)))
-				(when extra-pos
-				  ,@(cond ((> num-pos-key-args 0)
-					   `((loop until (or (= num-filled-by-pos-args 
-								,(if *-arg num-pos-args num-pos-key-args))
-							     (null extra-pos))
-						 do (if (svref arg-val-vec num-filled-by-pos-args)
-							(error "Too many positional args (via * arg)")
-						      (setf (svref arg-val-vec num-filled-by-pos-args)
-							(pop extra-pos)))
-						    (incf num-filled-by-pos-args))
-					     (when extra-pos
-					       ,(if *-arg
-						    `(setf for-* (nconc for-* extra-pos))
-						  `(error "Too many positional args (via * arg)")))))
-					  
-					  (*-arg ;; no pos/key args, but * arg
-					   `((setf for-* (nconc for-* extra-pos))))
-					  
-					  (t `((error "Too many positional args (via * arg)")))))))
-			     
-			     ((eq key :**)
-			      ;; XXX untested
-			      (let* ((mapping val)
-				     (keys (py-iterate->lisp-list mapping)))
-				(loop 
-				    for k in keys
-				    for k-sym = (py-str-symbol k #.(find-package :keyword))
-				    for v = (py-subs mapping k)
-				    do (push k-sym %args)
-				       (push v %args))))
-			     
-		       (t ,(cond ((> num-pos-key-args 0)
-				  `(loop for i fixnum
-				       from num-filled-by-pos-args below ,num-pos-key-args
-				       when (or (eq (svref ,arg-name-vec i) key)
-						(eq (svref ,arg-kwname-vec i) key))
-				       do (setf (svref arg-val-vec i) val)
-					  (return)
-				       finally 
-					 ,(if **-arg
-					      `(push (cons key val) for-**)
-					    `(error
-					      "Got unknown keyword arg and no **-arg: ~A ~A"
-					      key val))))
-				 (**-arg
-				  `(push (cons key val) for-**))
-			    
-				 (t `(error "Got unknown keyword arg and no **-arg: ~A ~A"
-					    key val)))))))
-	     
-	       ;; Ensure all positional arguments covered
-	       ,@(when (> num-pos-args 0)
-		   `((loop for i fixnum from num-filled-by-pos-args below ,num-pos-args
-			  unless (svref arg-val-vec i)
-			  do (error "Positional arg ~A has no value" (svref ,arg-name-vec i)))))
-	     
-	       ;; Use default values for missing keyword arguments (if any)
-	       ,@(when key-args
-		   `((loop for i fixnum from ,num-pos-args below ,num-pos-key-args
-			  unless (svref arg-val-vec i)
-			  do (setf (svref arg-val-vec i)
-			       (svref key-arg-default-values (- i ,num-pos-args))))))
-	     
-	       ;; Initialize local variables
-	       (let (,@(loop for p in pos-key-arg-names and i from 0
-			   collect `(,p (svref arg-val-vec ,i))) ;; XXX p = (identifier ..) ?
-		     ,@(when  *-arg `((,*-arg  for-*)))
-		     ,@(when **-arg `((,**-arg for-**))))
-		 
-		 ,@body))))))))
+	(key-arg-names (loop for ((identifier-expr name) nil) in key-args
+			   do (assert (eq identifier-expr 'identifier-expr))
+			   collect name)))
+    
+    (nconc pos-arg-names
+	   key-arg-names
+	   (when *-arg  (list (second *-arg)))
+	   (when **-arg (list (second **-arg))))))
 
 
 
-;; NEW
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;
+;;; Function argument handling
 
 (defmacro py-arg-function (name (pos-args key-args *-arg **-arg) &body body)
   
@@ -1553,8 +1320,8 @@ AST is either an AST list or Python code string."
   (**-arg               :type symbol :read-only t))
   
 
-
 (defun parse-py-func-args (%args arg-val-vec fa)
+
   ;; %ARGS: the (&rest) list containing pos and ":key val" arguments
   ;; ARG-VAL-VEC: (dynamic extent) vector to store final argument values in
   ;;              => the penultimate item will get *-arg value (if any)
@@ -1600,6 +1367,8 @@ AST is either an AST list or Python code string."
 	for key = (pop %args) and val = (pop %args) 
 	while key do
 	  (cond
+	   
+	   #+(or)
 	   ((eq key :*)
 	    (let ((extra-pos (py-iterate->lisp-list val)))
 	      (when extra-pos
@@ -1630,6 +1399,7 @@ AST is either an AST list or Python code string."
 		      (t
 		       (break "Too many positional args (via * arg)"))))))
 	   
+	   #+(or)
 	   ((eq key :**)
 	    ;; XXX largely untested
 	    (let* ((**-arg val)
@@ -1638,7 +1408,6 @@ AST is either an AST list or Python code string."
 		  with bound-getitem = (recursive-class-lookup-and-bind **-arg '__getitem__)
 		  for k in **-arg-keys
 			   
-			   ;; PY-STR-SYMBOL raises error when k not string
 		  for k-sym = (py-str-symbol k #.(find-package :keyword))
 		  for v = (py-call bound-getitem k)
 			  
@@ -1692,12 +1461,11 @@ AST is either an AST list or Python code string."
       (setf (svref arg-val-vec (1+ (the fixnum (fa-num-pos-key-args fa)))) for-**)))
   
   (values))
-  
-      
+
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-;;; Generator rewriting
+;;; 
+;;;  Generator rewriting
 
 (defun generator-ast-p (ast)
   "Is AST a function definition for a generator?"
@@ -1706,16 +1474,12 @@ AST is either an AST list or Python code string."
     "GENERATOR-AST-P called with a MODULE ast.")
   
   (walk-py-ast ast 
-	       (lambda (x &key value target)
+	       (lambda (form &key value target)
 		 (declare (ignore value target))
-		 (case (car x)
-		   
+		 (case (car form)
 		   (yield-stmt (return-from generator-ast-p t))
-		   
-		   ;; don't look for 'yield' in inner functions and classes
 		   ((classdef-stmt funcdef-stmt) (values nil t))
-		   
-		   (t x))))
+		   (t form))))
   nil)
 
 
@@ -1723,16 +1487,11 @@ AST is either an AST list or Python code string."
   (with-py-ast ((form &key value target) ast)
     (declare (ignore value target))
     (case (car form)
-      
-      (call-expr       (return-from contains-call-p t))
-      
+      (call-expr (return-from contains-call-p t))
       ((classdef-stmt funcdef-stmt lambda-expr) (values nil t))
-      
       (t form)))
   nil)
 	
-  
-
 
 (defun rewrite-generator-funcdef-suite (fname suite)
   ;; Returns the function body
@@ -2035,41 +1794,6 @@ AST is either an AST list or Python code string."
 			 
 			 (return-from :function-body :implicit-return))))))))
 
-#+(or) ;; old
-(defun suite->generator (fname suite)
-  ;; Lisp generator function that returns one of:
-  ;;  VAL              -- value explicitly `yield'-ed
-  ;;  :implicit-return -- no more statements in the function body
-  ;;  :explicit-return -- explicit return from function
-  
-  (assert (eq (car suite) 'suite-stmt))
-  (assert (generator-ast-p suite))
-  
-  `(funcdef-stmt
-    nil (identifier-expr ,fname) (nil nil nil nil)
-    (suite-stmt
-     ,(mapcar (lambda (x)
-		 (walk-py-ast x
-			      (lambda (form &rest context)
-				(declare (ignore context))
-				(case (car form)
-				     
-				  ((funcdef-stmt classdef-stmt)
-				   (values form t))
-				     
-				  (return-stmt 
-				   (when (second form)
-				     (error "SyntaxError: Inside generator, RETURN ~
-                                             statement may not have an argument ~
-                                             (got: ~S)" form))
-				   (values `(return-from :function-body :explicit-return)
-					   t))
-				     
-				  (t form)))))
-	       (second suite))
-     (return-from :function-body :implicit-return))))
-
-
 (defun rewrite-generator-expr-ast (ast)
   ;; rewrite:  (x*y for x in bar if y)
   ;; into:     def f(src):  for x in src:  if y:  yield x*y
@@ -2113,9 +1837,6 @@ AST is either an AST list or Python code string."
 	       append (multiple-value-list (apply-splits elm))))))
 
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-
 #+(or)
 (defmacro with-py-error-handlers (&body body)
   `(handler-bind
@@ -2144,14 +1865,425 @@ AST is either an AST list or Python code string."
      ,@body))
 
 
+
+;; `global' in a class def leaks into the methods within:
+;; 
+;; def f():
+;;   x = 'fl'
+;;   class C:
+;;     global x
+;;     y = x
+;;     def m(self):
+;;       return x
+;;   print C().m()
+;;
+;; x = 'gl'
+;;
+;; f()
+;; => prints 'fl'
+
+
+;; When a function defines x as global, for inner
+;; functions it's a global too:
+;; ---
+;; a = 'global'
+;; 
+;; def f():
+;;   a = 'af'
+;;   def g():
+;;     global a
+;;     def h():
+;;       print a
+;;     return h
+;;   return g
+;; ---
+;; f()()() -> prints 'global', not 'af'
+
+
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; tests
+
+;;  OLD
 
 #+(or)
-(compile nil
-	 (lambda ()
-	   #.(parse-python-string "
-def f():
-  print 3, 4
-f()
-")))
+(defun ast-vars (ast &key value target
+			  mod-globals
+			  lexically-visible 
+			  loc-locals loc-declared-globals loc-outer-scopes)
+  
+  ;; Returns: LOCALS, DECLARED-GLOBALS, OUTER-SCOPE which are lists of
+  ;; symbols denoting variable names.
+  
+  (declare (optimize (debug 3)))
+  
+  (labels
+      ((recurse (ast &key value target)
+	 
+	 (unless (listp ast)
+	   (return-from recurse))
+	 
+	 (with-py-ast ((form &key value target) ast :value value :target target) 
+	   (case (car form)
+	     
+	     (classdef-stmt
+	      (destructuring-bind ((identifier cname) (tuple-expr inheritance-list) csuite)
+		  (cdr form)
+		(assert (and (eq identifier 'identifier-expr) (eq tuple-expr 'tuple-expr)))
+		
+		;; name of this class
+		(if (member cname declared-globals)
+		    (py-raise 'SyntaxError
+			      "A class name may not be declared `global' (class: '~A')." cname)
+		  (pushnew cname locals))
+
+		;; superclasses
+		(loop for cls in inheritance-list do (recurse cls :value t))
+		
+		;; class suite
+		(multiple-value-bind (c-locals c-globals c-outers)
+		    (let ((*ast-vars-where* (cons `(class ,cname) *ast-vars-where*)))
+		      (ast-vars csuite
+				:value nil :target nil
+				:lexically-visible lexically-visible
+				:mod-globals mod-globals))
+		  
+		  (declare (ignore c-locals c-globals))
+		  
+		  (dolist (name c-outers)
+		    (assert (not member name mod-globals))
+		    (unless (member name locals)
+		      (pushnew name outer-scopes)))))
+	      
+	      (values nil t))
+
+	     
+	     (funcdef-stmt
+	      (destructuring-bind (decorators (identifier-expr fname) args suite) (cdr form)
+		(assert (eq identifier-expr 'identifier-expr))
+		
+		;; decorators
+		(loop for deco in decorators do (recurse deco :value t))
+
+		;; function name
+		(if (member fname declared-globals)
+		    (error "SyntaxError: inner function name may not be declared global ~
+                            (inner function: '~A', at ~A)." fname *ast-vars-where*)
+		  (pushnew fname locals))
+			      
+		;; kwdarg default values
+		(loop for (nil def-val) in (second args) do (recurse def-val :value t))
+		
+		;; function body
+		(let ((all-args (apply #'funcdef-list-all-arg-names args))
+		      (all-lex-vis (append all-args lexically-visible)))
+		  
+		  (multiple-value-bind (f-locals f-globals f-outers)
+		      (let ((*ast-vars-where* (cons `(funcdef ,fname) *ast-vars-where*)))
+			(ast-vars suite
+				  :lexically-visible all-lex-vis
+				  :locals all-args
+				  :mod-globals mod-globals
+				  ))
+		    
+		    (declare (ignore f-locals f-globals))
+
+		    (loop for name in f-outers
+			do (assert (not (member name all-lex-vis)))
+			unless (or (member name params)
+				   (member name locals))
+			       
+			do (pushnew name outer-scope)))))
+	      
+	      
+	      (values nil t))
+	     
+	     
+	     (global-stmt (dolist (name (second form))
+			    (cond ((member name params)
+				   (error "SyntaxError: function param may not be declared ~
+                                           `global' (param '~A', at ~A)."
+					  name *ast-vars-where*))
+				  
+				  ((or (member name locals) (member name outer-scope))
+				   (error "SyntaxError: variable '~A' used before being ~
+                                           declared `global' (at ~A)." name *ast-vars-where*))
+				  
+				  (t (pushnew name declared-globals))))
+			  (values nil t))
+
+	     (identifier-expr (let ((name (second form)))
+				(unless (eq name '|...|)
+				  
+				  (when value
+				    (unless (or (member name lexically-visible)
+						(member name locals)
+						(member name declared-globals))
+				      
+				      (pushnew name outer-scope)))
+				  
+				  (when target
+				    (when (member name outer-scope)
+				      (warn "Local variable '~A' referenced ~
+                                             before assignment (at ~A)."
+					    name *ast-vars-where*))
+				    (unless (or (member name params)
+						(member name locals)
+						(member name declared-globals))
+				      (pushnew name locals)))))
+			      
+			      (values nil t))
+	     
+	     (lambda-expr (destructuring-bind (args expr) (cdr form)
+			      
+			      (loop for (nil def-val) in (second args) ;; kwdarg default values
+				  do (recurse def-val :value t))
+			      
+			      #+(or)(let ((all-args (apply #'funcdef-list-all-arg-names args)))) ;; WW
+			      (let ((all-args (nconc (apply #'funcdef-list-all-arg-names args)
+						     params)))
+				
+				(multiple-value-bind (f-locals f-globals f-outers)
+				    (ast-vars expr :value t :params all-args)
+				
+				(declare (ignore f-locals f-globals))
+				
+				(loop for name in f-outers
+				    unless (or (member name params)
+					       (member name locals)
+					       (member name declared-globals)) ;; `global' leaks inside
+				    do (pushnew name outer-scope)))))
+			  
+			  (values nil t))
+	     
+	     (t form)))))
+    
+    (let ((*ast-vars-where* (if is-module-scope :module-scope :not-module-scope)))
+      (recurse ast :value value :target target))
+    
+    (values locals declared-globals outer-scope)))
+
+
+
+#+(or)
+(defun funcdef-globals-and-locals (all-arg-names suite)
+  "Given FUNCDEF ARGS and SUITE (or EXPR), return DECLARED-GLOBALS, LOCALS.
+   Does _not_ return ARGS (e.g. as part of LOCALS)."
+  
+  (assert (every #'symbolp all-arg-names))
+  
+  (multiple-value-bind
+      (locals declared-globals outer-scopes)
+      (ast-vars suite :value t :params all-arg-names :recurse-for-globals nil)
+    (declare (ignore outer-scopes))
+    (values declared-globals locals)))
+
+#+(or)
+(defun classdef-globals (suite)
+  (multiple-value-bind
+      (locals declared-globals outer-scope) (ast-vars suite :recurse-for-globals nil)
+    (declare (ignore locals outer-scope))
+    declared-globals))
+  
+
+#+(or)
+(defun describe-vars (ast)
+  "Print locals, global and outer scope variables of AST.
+AST is either an AST list or Python code string."
+  (when (stringp ast)
+    (setf ast (parse-python-string ast)))
+  (multiple-value-bind (locals globals outers) (ast-vars ast :recurse-for-globals nil)
+    (setf locals  (sort locals #'string<))
+    (setf globals (sort globals #'string<))
+    (setf outers  (sort outers #'string<))
+    
+    (format t "locals      : ~{~:A ~}~%globals     : ~{~:A ~}~%outer scope : ~{~:A ~}~%"
+	    locals globals outers)))
+
+
+#+(or)
+(multiple-value-bind
+    (locals declared-globals outer-scope) (ast-vars suite :is-module-scope t :recurse-for-globals t)
+    #+(or)(warn "module vars: ~A" `(:l ,locals :dg ,declared-globals :os ,outer-scope))
+    (let ((res (union (union locals declared-globals) outer-scope))) ;; !?
+      (pushnew '__name__ res)
+      (pushnew '__debug__ res)
+      res))
+
+
+#+(or)
+(defmacro py-arg-function (name (pos-args key-args *-arg **-arg) &body body)
+  
+  ;; Non-consing argument parsing! (except when *-arg or **-arg
+  ;; present)
+  ;; 
+  ;; POS-ARGS: list of symbols
+  ;; KEY-ARGS: list of (key-symbol default-val) pairs
+  ;; *-ARG, **-ARG: a symbol or NIL 
+  ;; 
+  ;; XXX todo: the generated code can be cleaned up a bit when there
+  ;; are no arguments (currently zero-length vectors are created).
+  
+  #+(or)(break "py-arg-function: args=~A ~A ~A ~A" pos-args key-args *-arg **-arg)
+  
+  (assert (symbolp name))
+  
+  (let* ((num-pos-args (length pos-args))
+	 (num-key-args (length key-args))
+	 (num-pos-key-args  (+ num-pos-args num-key-args))
+	 
+	 
+	 (pos-key-arg-names (nconc (copy-list pos-args)
+				   (mapcar #'first key-args)))
+	 (key-arg-default-asts (mapcar #'second key-args))
+	 (arg-name-vec (when (> num-pos-key-args 0)
+			 (make-array num-pos-key-args :initial-contents pos-key-arg-names)))
+	 
+	 (arg-kwname-vec (when (> num-pos-key-args 0)
+			   (make-array
+			    num-pos-key-args
+			    :initial-contents (loop for x across arg-name-vec
+						  collect (intern x #.(find-package :keyword))))))
+	 (key-arg-defaults (unless (= num-key-args 0)
+			     (make-array num-key-args))))
+    
+    `(locally #+(or)(declare (optimize (speed 3) (safety 1) (debug 3)))
+       (let (,@(when key-args
+		 `((key-arg-default-values ,key-arg-defaults))))
+	 
+	 ;; Evaluate default argument values outside the lambda, at
+	 ;; function definition time.
+	 ,@(when key-args
+	     `((progn ,@(loop for i from 0 below num-key-args
+			    collect `(setf (svref key-arg-default-values ,i)
+				       ,(nth i key-arg-default-asts))))))
+
+	 (excl:named-function ,name
+	   (lambda (&rest %args)
+	     (declare (dynamic-extent %args))
+	   
+	     ;; args = (pos_1 pos_2 ... pos_p ; key_1 val_1 ... key_k val_k)
+	     ;; where key_i is a (regular, not :keyword) symbol
+	   
+	     ;; As the first step, the pos_i args are assigned to pos-args,
+	     ;; and if there are more pos_i args then pos-args, then the
+	     ;; remaining ones are assigned to the key-args.
+	   
+	     (let* (,@(when (> num-pos-key-args 0)
+			`((arg-val-vec (make-array ,num-pos-key-args :initial-element nil))
+			  (num-filled-by-pos-args 0)))
+		    ,@(when **-arg `((for-** ())))
+		    ,@(when *-arg `((for-* ()))))
+	     	     
+	       ,@(when (> num-pos-key-args 0)
+		   `((declare (dynamic-extent arg-val-vec)
+			      (type (integer 0 ,num-pos-key-args) num-filled-by-pos-args))))
+
+	       ;; Spread supplied positional args over pos-args and *-arg
+	     
+	       ,@(when (> num-pos-key-args 0)
+		   `((loop 
+			  until (or (= num-filled-by-pos-args ,(if *-arg num-pos-args num-pos-key-args))
+				    (symbolp (car %args))) ;; the empty list NIL is a symbol, too
+			  do (setf (svref arg-val-vec num-filled-by-pos-args) (pop %args))
+			     (incf num-filled-by-pos-args))))
+
+	       ;; Collect remaining pos-arg in *-arg, if present 
+	     
+	       (unless (symbolp (car %args))
+		 ,(if *-arg
+		      `(loop until (symbolp (car %args))
+			   do (push (pop %args) for-*))
+		    `(error "Too many pos args")))
+	       
+	       ,@(when *-arg
+		   `((setf for-* (nreverse for-*))))
+
+	       ;; All remaining arguments are keyword arguments;
+	       ;; they have to be matched to the remaining pos and
+	       ;; key args by name.
+	     
+	       (when %args
+		 (loop
+		     for key = (pop %args)
+		     for val = (pop %args)
+		     while key
+		     do
+		       (cond ((eq key :*)
+			      (let ((extra-pos (py-iterate->lisp-list val)))
+				(when extra-pos
+				  ,@(cond ((> num-pos-key-args 0)
+					   `((loop until (or (= num-filled-by-pos-args 
+								,(if *-arg num-pos-args num-pos-key-args))
+							     (null extra-pos))
+						 do (if (svref arg-val-vec num-filled-by-pos-args)
+							(error "Too many positional args (via * arg)")
+						      (setf (svref arg-val-vec num-filled-by-pos-args)
+							(pop extra-pos)))
+						    (incf num-filled-by-pos-args))
+					     (when extra-pos
+					       ,(if *-arg
+						    `(setf for-* (nconc for-* extra-pos))
+						  `(error "Too many positional args (via * arg)")))))
+					  
+					  (*-arg ;; no pos/key args, but * arg
+					   `((setf for-* (nconc for-* extra-pos))))
+					  
+					  (t `((error "Too many positional args (via * arg)")))))))
+			     
+			     ((eq key :**)
+			      ;; XXX untested
+			      (let* ((mapping val)
+				     (keys (py-iterate->lisp-list mapping)))
+				(loop 
+				    for k in keys
+				    for k-sym = (py-str-symbol k #.(find-package :keyword))
+				    for v = (py-subs mapping k)
+				    do (push k-sym %args)
+				       (push v %args))))
+			     
+		       (t ,(cond ((> num-pos-key-args 0)
+				  `(loop for i fixnum
+				       from num-filled-by-pos-args below ,num-pos-key-args
+				       when (or (eq (svref ,arg-name-vec i) key)
+						(eq (svref ,arg-kwname-vec i) key))
+				       do (setf (svref arg-val-vec i) val)
+					  (return)
+				       finally 
+					 ,(if **-arg
+					      `(push (cons key val) for-**)
+					    `(error
+					      "Got unknown keyword arg and no **-arg: ~A ~A"
+					      key val))))
+				 (**-arg
+				  `(push (cons key val) for-**))
+			    
+				 (t `(error "Got unknown keyword arg and no **-arg: ~A ~A"
+					    key val)))))))
+	     
+	       ;; Ensure all positional arguments covered
+	       ,@(when (> num-pos-args 0)
+		   `((loop for i fixnum from num-filled-by-pos-args below ,num-pos-args
+			  unless (svref arg-val-vec i)
+			  do (error "Positional arg ~A has no value" (svref ,arg-name-vec i)))))
+	     
+	       ;; Use default values for missing keyword arguments (if any)
+	       ,@(when key-args
+		   `((loop for i fixnum from ,num-pos-args below ,num-pos-key-args
+			  unless (svref arg-val-vec i)
+			  do (setf (svref arg-val-vec i)
+			       (svref key-arg-default-values (- i ,num-pos-args))))))
+	     
+	       ;; Initialize local variables
+	       (let (,@(loop for p in pos-key-arg-names and i from 0
+			   collect `(,p (svref arg-val-vec ,i))) ;; XXX p = (identifier ..) ?
+		     ,@(when  *-arg `((,*-arg  for-*)))
+		     ,@(when **-arg `((,**-arg for-**))))
+		 
+		 ,@body))))))))
+  
+      
+
+
+
+
+

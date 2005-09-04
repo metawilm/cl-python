@@ -93,6 +93,10 @@
 						    (prof:show-call-graph))
 					    (:time (prog1 (time (funcall helper-func))
 						     (terpri)))
+					    (:space (prof:with-profiling
+							(:type :space :count t) (funcall helper-func))
+						    (terpri)
+						    (prof:show-flat-profile))
 					    (t (funcall helper-func))))))))))))
 		   (when val
 		     (remember-value val)

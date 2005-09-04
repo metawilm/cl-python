@@ -15,7 +15,7 @@
   ("repl"    (:uses-definitions-from "package"))
   ("formatstring"    (:uses-definitions-from "package"))
   
-  ("builtin-classes" (:uses-definitions-from "package"))
+  ("builtin-classes" (:uses-definitions-from "package" "formatstring"))
   ("exceptions"      (:uses-definitions-from "builtin-classes"))
   ("builtins"        (:uses-definitions-from "exceptions" "builtin-classes"))
   ("optimize"        (:uses-definitions-from "builtin-classes" "builtins"))

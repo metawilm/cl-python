@@ -155,7 +155,7 @@ VALUE and TARGET context."
      #+(or)(assert (not (or target value)))
      (destructuring-bind (decorators fname (pos-args key-args *-arg **-arg) suite)
 	 (cdr form)
-       (break "WALK-PY-AST recursing into funcdef, allright?  ~A" form)
+       (warn "WALK-PY-AST recursing into funcdef, allright?")
        ;; XXX check compiler, that always recursing here is intended
        `(funcdef-stmt ,(loop for deco in decorators
 			   collect (funcall f deco :value t))

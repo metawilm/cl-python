@@ -1101,7 +1101,7 @@
 		for key = (pop kwargs)
 		for val = (pop kwargs)
 		while key
-		do (setf (gethash (py-sym-string key) ht) val)
+		do (setf (gethash (py-symbol->string key) ht) val)
 		finally (return ht))))
     (if (eq cls (load-time-value (find-class 'py-dict)))
 	ht
@@ -1182,8 +1182,16 @@
 		    
 (def-py-method py-list.__init__ (x^ &optional iterable)
   (when iterable
-    (loop for item in (py-iterate->lisp-list iterable)
-	do (vector-push-extend item x))))
+    (let* ((items (py-iterate->lisp-list iterable))
+	   (len (length items)))
+      (adjust-array x len)
+      (loop for i from 0 below len
+	  do (setf (aref x i) (pop items)))
+      (setf (fill-pointer x) len)
+      x)))
+
+#+(or)(loop for item in 
+	  do (vector-push-extend item x))
 
 (def-py-method py-list.__str__ (x^)
   (with-output-to-string (s)
@@ -1835,15 +1843,17 @@
 (defun py-repr-string (x) (py-val->string (py-repr x)))
 (defun py-str-string  (x) (py-val->string (py-str x)))
 
-(defun py-str-symbol  (x &optional (package #.*package*))
+(defun py-string->symbol  (x &optional (package #.*package*))
   ;; {symbol,string} -> symbol
   (if (symbolp x) 
       x
-    (let ((str (py-str-string x)))
-      (or (find-symbol str package)
-	  (intern (py-str-string x) package)))))
+    (let ((str (deproxy x)))
+      (if (stringp str)
+	  (or (find-symbol str package)
+	      (intern str package))
+	(py-raise 'TypeError "Object is not a string (or symbol): ~A" x)))))
 
-(defun py-sym-string (x)
+(defun py-symbol->string (x)
   ;; {symbol,string} -> string
   (etypecase x
     (symbol (symbol-name x))

@@ -25,28 +25,45 @@ an error on eof).
 UNREAD-CHAR is a function of one character that ensures the next call to READ-CHAR
 returns the given character. UNREAD-CHAR is called at most once after a call of
 READ-CHAR."
-  
+
   (let ((tokens-todo ())
 	(indentation-stack (list 0))
 	(open-lists ())
-	(curr-src-line 1))
+	(curr-src-line 1)
+	
+	;; The lexer does not currently detect leading whitespace on
+	;; the first line, if there is non-whitespace after it.
+	;; Therefore, with a hack, we act as if there were a #\Newline
+	;; as first character in the code. (CURR-SRC-LINE is not
+	;; impacted by this hack)
+	(curr-src-char-hack 0)) 
     
     (lambda (grammar &optional op)
       (declare (ignore grammar))
       
       (block lexer
 	
-	(when (eq op :report-location)
+	(when (eq op :report-location)  ;; used when GRAMMAR-PARSE-ERROR occurs
 	  (return-from lexer `((:line-no ,curr-src-line))))
 	
-	(let ((*lex-read-char* (lambda () (let ((ch (funcall read-chr)))
-					    (when (and ch (char= ch #\Newline))
-					      (incf curr-src-line))
-					    ch)))
+	(let ((*lex-read-char* (lambda ()
+				 (incf curr-src-char-hack)
+				 (if (= curr-src-char-hack 1)
+				     #\Newline
+				   
+				   (let ((ch (funcall read-chr)))
+				     (when (and ch (char= ch #\Newline))
+				       (incf curr-src-line))
+				     ch))))
+	      
 	      (*lex-unread-char* (lambda (ch)
-				   (when (char= ch #\Newline)
-				     (decf curr-src-line))
-				   (funcall unread-chr ch)))
+				   (if (= curr-src-char-hack 1)
+				       (decf curr-src-char-hack)
+				     
+				     (progn
+				       (when (char= ch #\Newline)
+					 (decf curr-src-line))
+				       (funcall unread-chr ch)))))
 	      
 	      (*curr-src-line* curr-src-line))
 	  
@@ -73,7 +90,7 @@ READ-CHAR."
 		       (find-token-code (token) ;; (find-token-code name)
 			 `(tcode-1 (load-time-value
 				    (find-class 'python-grammar)) ,token)))
-	      
+
 	      (tagbody next-char
 		(let ((c (read-chr-nil)))
 		  (cond
@@ -126,8 +143,6 @@ READ-CHAR."
 			       (values (find-token-code token) token)))
 			    
 			    (t
-			     #+(or)(when *lex-debug*
-				     (format t "lexer returns: identifier: ~s~%" read-id))
 			     (lex-return identifier token)))))
 
 		   ((char-member c '(#\' #\"))
@@ -150,7 +165,7 @@ READ-CHAR."
 			(( ] } \) ) (pop open-lists)))
 		      
 		      (when *lex-debug*
-			(format t "lexer returns: punctuation token ~s~%" token))
+			(format t "lexer returns: punctuation-token ~s~%" token))
 		      (return-from lexer 
 			(values (find-token-code token) token))))
 
@@ -214,13 +229,25 @@ READ-CHAR."
   `(locally (declare (optimize (speed 3) (safety 1) (debug 0)))
      (funcall *lex-read-char*)))
 
+
 (defun read-chr-error ()
   "Return a character, or raise a SyntaxError"
-  (or (read-chr-nil)
-      (py-raise 'SyntaxError "Unexpected end of file (line ~A)." *curr-src-line*)))
+  (or (read-chr-nil) (unexpected-eof)))
+
+(defun unexpected-eof ()
+  (py-raise 'SyntaxError "Unexpected end of file (line ~A)." *curr-src-line*))
+
+(define-compiler-macro read-chr-error ()
+  `(locally (declare (optimize (speed 3) (safety 1) (debug 0)))
+     (or (read-chr-nil) (unexpected-eof))))
+
 
 (defun unread-chr (ch)
   (funcall *lex-unread-char* ch))
+
+(define-compiler-macro unread-chr ()
+  `(locally (declare (optimize (speed 3) (safety 1) (debug 0)))
+     (funcall *lex-unread-char*)))
 
 
 (defun char-member (ch list)
@@ -282,8 +309,10 @@ C must be either a character or NIL."
 	      (and (< ,code 128)
 		   (= (aref ,arr ,code) 1)))))))
 
-
+#+(or)
 (defconstant +id-history-size+ 15 "Number of previous identifiers to cache.")
+
+#+(or)
 (defconstant +id-char-vec-length+ 15
   "Cached vector for identifier, used for looking up identifier in cache
 before allocating a vector on its own.")
@@ -360,7 +389,17 @@ second and later characters must be alphanumeric or underscore."
 				    (return (cache-symbol (or (find-symbol arr #.*package*)
 							      (intern arr #.*package*)))))))))))))
 
-#+(and) ;; Equivalent, but a bit slower, original code. Allocates an array for every identifier.
+(defun identifier-p (string-or-sym)
+  (let ((s (string string-or-sym)))
+    (and (>= (length s) 1)
+	 (identifier-char1-p (char s 0))
+	 (loop for i from 1 below (length s)
+	     unless (identifier-char2-p (char s i))
+	     return nil
+	     finally (return t)))))
+			    
+
+#+(or) ;; Equivalent, but a bit slower, original code. Allocates an array for every identifier.
 (defun read-identifier (first-char)
   "Returns the identifier read as string. ~@
    Identifiers start start with an underscore or alphabetic character; ~@
@@ -387,7 +426,7 @@ second and later characters must be alphanumeric or underscore."
     (let ((sym (find-symbol res #.*package*)))
       (cond ((and sym (constantp sym))
 	     
-	     ;; Oops... a symbol like `nil' or `pi'.
+	     ;; Oops... the symbol `nil', `pi' or 't'.
 	     ;; Use our own uninterned symbol, instead.
 	     ;; Maybe we should have used the package system for this...
 	     (let* ((ht (load-time-value (make-hash-table :test #'eq)))
@@ -399,6 +438,85 @@ second and later characters must be alphanumeric or underscore."
 		     new-sym))))
 	    (sym sym)
 	    (t (intern (simple-string-from-vec res) #.*package*))))))
+
+;; NEW
+
+
+(defconstant +id-cache-string-size+ 10)
+
+(defun identifier-ht-test (x y)
+  (loop for xi across x for yi across y
+      do (cond ((char= xi yi) )
+	       ((char= xi #\Space) (return-from identifier-ht-test nil))
+	       ((char= yi #\Space) (return-from identifier-ht-test nil))
+	       ((char/= xi yi)     (return-from identifier-ht-test nil)))
+      finally (return t)))
+
+(defun identifier-ht-hash (x)
+  (loop with res = 42
+      for ch across x
+      until (char= ch #\Space)
+      do (setf res (ash (logxor res (sxhash ch)) 4))
+      finally (return (mod res most-positive-fixnum))))
+
+(defparameter *identifier-ht* 
+    (let ((ht (make-hash-table :test 'identifier-ht-test
+			       :hash-function 'identifier-ht-hash)))
+      (loop for s in '("t" "nil" "pi")
+	  for spaced = (format nil "~vA" +id-cache-string-size+ s)
+	  do (setf (gethash spaced ht) (make-symbol s)))
+      ht))
+
+(defun read-identifier (first-char)
+  (declare (optimize (safety 3) (debug 3)))
+  (assert (identifier-char1-p first-char))
+  
+  (let* ((initial-string (make-array +id-cache-string-size+
+				     :element-type 'character
+				     :initial-element #\Space)))
+    (declare (dynamic-extent initial-string))
+    (setf (aref initial-string 0) first-char)
+    (let ((n-filled (loop for i from 1 below +id-cache-string-size+
+			for c = (read-chr-nil)
+			while (identifier-char2-p c)
+			do (setf (aref initial-string i) c)
+			finally (when (and c 
+					   (not (identifier-char2-p c)))
+				  (unread-chr c))
+				(return i))))
+      
+      (assert (<= 1 n-filled +id-cache-string-size+))
+      
+      (cond ((= n-filled +id-cache-string-size+) 
+	     ;; A quite long identifier..
+	     (let* ((more-chars (loop for c = (read-chr-nil)
+				    while (identifier-char2-p c)
+				    collect c into chars
+				    finally (when c (unread-chr c))
+					    (return chars)))
+		    (length-more (length more-chars))
+		    (full-string (make-array (+ length-more +id-cache-string-size+)
+					     :element-type 'character)))
+	       
+	       (loop for i from 0 below +id-cache-string-size+
+		   do (setf (aref full-string i) (aref initial-string i)))
+	       
+	       (loop for i from 0 below length-more
+		   do (setf (aref full-string (+ +id-cache-string-size+ i))
+			(pop more-chars)))
+	       
+	       (or (find-symbol full-string #.*package*)
+		   (intern full-string #.*package*))))
+	    
+	    ((< n-filled +id-cache-string-size+)
+	     (or (gethash initial-string *identifier-ht*)
+		   (let* ((trunc-str (make-array n-filled
+						 :element-type 'character
+						 :initial-contents
+						 (subseq initial-string 0 n-filled)))
+			  (sym (intern trunc-str #.*package*)))
+		     (setf (gethash trunc-str *identifier-ht*) sym)
+		     sym)))))))
 
 
 ;; String
@@ -915,7 +1033,7 @@ to *tab-width-spaces* spaces - so N >= 0.
 
 If no Newline was encountered before a non-whitespace character, or if EOF
 is encountered, NIL is returned."
-  
+
   (loop
       with found-newline = nil and n = 0
       for c = (read-chr-nil)
@@ -954,13 +1072,29 @@ is encountered, NIL is returned."
     
     (handler-case 
 	(parse grammar)
-
+      
+      ;; When a SyntaxError S is thrown by us in the lexer, the parser
+      ;; first signals S, then it raises a GRAMMAR-PARSE-ERROR.
+      
+      (SyntaxError (e) ;; signaled
+	(error e))
+      
       (grammar-parse-error (c)
-	(let ((pos (grammar-parse-error-position c))
-	      (token (yacc:grammar-parse-error-token c)))
+	(let* ((pos (grammar-parse-error-position c))
+	       (line (second (assoc :line-no pos)))
+	       (token (yacc:grammar-parse-error-token c))
+	       (encl-error (yacc::grammar-parse-error-enclosed-error c)))
 	  
-	  (py-raise 'SyntaxError "Parse error at line ~A, at token '~S'."
-		    (second (assoc :line-no pos)) token))))))
+	  (when encl-error
+	    (assert (not (typep encl-error 'SyntaxError)))
+	    (error encl-error))
+	  
+	  (py-raise 'SyntaxError
+		    (if encl-error
+			(format nil "Parse error at line ~A~@[, at token `~S'~].~%[inner error: ~A]"
+				line token encl-error)
+		      (format nil "At line ~A, parser got unexpected token `~S'."
+			      line token))))))))
 
 (defgeneric parse-python-file (source)
   (:method ((s stream))
@@ -977,6 +1111,7 @@ is encountered, NIL is returned."
 (defmethod parse-python-string ((s string))
   (let ((next-i 0)
 	(max-i (length s)))
+    
     (parse-python-with-lexer
      :read-chr (lambda ()
 		  (when (< next-i max-i)

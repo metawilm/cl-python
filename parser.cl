@@ -363,7 +363,7 @@
  (:comma--subscript*)
  (comma--subscript (|,| subscript) ($2))
  (subscript :or
-	    ((|...|)                    . (`(identifier-expr ,$1)))
+	    ((|...|)                    . (`(identifier-expr Ellipsis)))
 	    test
 	    ((test? |:| test? sliceop?) . (`(slice-expr ,$1 ,$3 ,$4))))
  (:sliceop?)
