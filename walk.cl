@@ -6,7 +6,10 @@
 ;;; represented by plain lists.
 
 
-(defun walk-py-ast (ast f &key (value nil) (target nil) (walk-lists-only t))
+(defun walk-py-ast (ast f &key (value nil) (target nil)
+			       (walk-lists-only t) 
+			       (build-result nil)
+			       (into-nested-namespaces nil))
   (declare (optimize (debug 3)))
   "Walk recursively through AST, calling F on each statement. F should have
 lambda list: (ast &key value target). F should return a new form to walk
@@ -34,7 +37,7 @@ Unless WALK-LISTS-ONLY, F will also be called on numbers and strings."
   (labels ((walk-py-ast-1 (ast &rest context)
 	     (declare (optimize (debug 3)))
 	     (assert ast)
-	     (if (and walk-lists-only (not (listp ast)))
+	     (if (and walk-lists-only (not (consp ast)))
 		 
 		 ;; Don't call user function on AST
 		 ast
@@ -46,21 +49,27 @@ Unless WALK-LISTS-ONLY, F will also be called on numbers and strings."
 		 
 		 (cond (final-p         ret-ast)
 		       
-		       ((or (listp ret-ast) (not walk-lists-only))
+		       ((null ret-ast) (break "User AST func returned NIL (for AST: ~S)"
+					      ast))
+		       
+		       ((or (consp ret-ast) (not walk-lists-only))
 			(apply #'ast-recurse-fun
 			       (lambda (ast &key value target)
 				 (declare (optimize (debug 3)))
 				 (walk-py-ast-1 ast :value value :target target))
 			       ret-ast
+			       build-result
+			       into-nested-namespaces
 			       context))
 		       
-		       (t (break "Walking AST: invalid return value ~A for ~A with ~A"
+		       (t (break "Walking AST: invalid return value ~S (AST: ~S, F: ~S)"
 				 ret-ast ast f)))))))
     
     (walk-py-ast-1 ast :value value :target target)))
 
 
-(defun ast-recurse-fun (f form &rest context &key value target)
+(defun ast-recurse-fun (f form build-result into-nested-namespaces
+			  &rest context &key value target)
   "Given function F and a FORM (AST), walks into subforms of FORM in the given
 VALUE and TARGET context."
   (declare (optimize (debug 3)))
@@ -68,105 +77,152 @@ VALUE and TARGET context."
   (case (car form)
       
     (assert-stmt
-     #+(or)(assert (not (or value target)))
-     `(assert-stmt ,(funcall f (second form) :value t) ,(funcall f (third form))))
+     (if build-result
+	 `(assert-stmt ,(funcall f (second form) :value t) ,(funcall f (third form)))
+       (progn (funcall f (second form) :value t)
+	      (funcall f (third form)))))
       
     (assign-stmt
-     #+(or)(assert (not (or value target)))
-     `(assign-stmt ,(funcall f (second form) :value t)
-		   ,(mapcar (lambda (x) (funcall f x :target t)) (third form))))
-      
+     (if build-result
+	 `(assign-stmt ,(funcall f (second form) :value t)
+		       ,(mapcar (lambda (x) (funcall f x :target t)) (third form)))
+       (progn (funcall f (second form) :value t)
+	      (mapc (lambda (x) (funcall f x :target t)) (third form)))))
+    
     (attributeref-expr
-     `(attributeref-expr ,(funcall f (second form)) ,(third form))) ;; don't recurse on attr name
-      
+     ;; don't recurse on attr name
+     (if build-result
+	 `(attributeref-expr ,(funcall f (second form)) ,(third form))
+       (funcall f (second form))))
+    
     (augassign-stmt
-     #+(or)(assert (not (or value target)))
-     `(augassign-stmt ,(second form)
-		      ,(funcall f (third form) :value t :target t) ;; is both v and tg
-		      ,(funcall f (fourth form))))
-      
+     (if build-result
+	 `(augassign-stmt ,(second form)
+			  ,(funcall f (third form) :value t :target t) ;; is both v and tg
+			  ,(funcall f (fourth form)))
+       (progn (funcall f (third form) :value t :target t)
+	      (funcall f (fourth form)))))
+    
     (backticks-expr
-     #+(or)(assert (not target))
-     `(backticks ,(funcall f (second form) :value t)))
+     (if build-result
+	 `(backticks ,(funcall f (second form) :value t))
+       (funcall f (second form) :value t))) 
       
     ((binary-expr binary-lazy-expr)
-     #+(or)(assert (not target))
-     `(,(first form) ,(second form)
-		     ,(funcall f (third form) :value t)
-		     ,(funcall f (fourth form) :value t)))
+     (if build-result
+	 `(,(first form) ,(second form)
+			 ,(funcall f (third form) :value t)
+			 ,(funcall f (fourth form) :value t))
+       (progn (funcall f (third form) :value t)
+	      (funcall f (fourth form) :value t))))
       
     ((break-stmt continue-stmt global-stmt identifier-expr pass-stmt) 
-     ;; Note that an identifier-expr may be for None, |...|, True, False
-     ;; The compiler will replace variable |...| by variable |Ellipsis|.
+     ;; Note that an identifier-expr may be for None, Ellipsis, True, False
      form)
       
     (call-expr
-     #+(or)(assert (not target))
      (destructuring-bind (primary (p-a k-a *-a **-a)) (cdr form)
-       `(call-expr ,(funcall f primary :value t)
-		   (,(mapcar (lambda (pos-arg) (funcall f pos-arg :value t)) p-a)
-		    ,(mapcar (lambda (kv) (list (first kv) (funcall f (second kv) :value t)))
-			     k-a)
-		    ,(when *-a (funcall f *-a :value t))
-		    ,(when **-a (funcall f **-a :value t))))))
-      
+       (if build-result
+	   `(call-expr ,(funcall f primary :value t)
+		       (,(mapcar (lambda (pos-arg) (funcall f pos-arg :value t))
+				 p-a)
+			,(mapcar (lambda (kv)
+				   (list (first kv) (funcall f (second kv) :value t)))
+				 k-a)
+			,(when *-a (funcall f *-a :value t))
+			,(when **-a (funcall f **-a :value t))))
+	 
+	 (progn (mapc (lambda (pos-arg) (funcall f pos-arg :value t)) p-a)
+		(mapc (lambda (kv) (funcall f (second kv) :value t)) k-a)
+		(when *-a (funcall f *-a :value t))
+		(when **-a (funcall f **-a :value t))))))
+    
     (classdef-stmt 
      (warn "walking classdef-stmt")
-     #+(or)(assert (not (or target value)))
      (destructuring-bind (cname inheritance suite) (cdr form)
        (assert (eq (car inheritance) 'tuple-expr))
-       `(classdef-stmt ,(funcall f cname :target t)
-		       ,(funcall f inheritance :value t)
-		       ,(funcall f suite))))
-      
-    (comparison-expr  
-     #+(or)(assert (not target))
-     `(comparison-expr ,(second form)
-		       ,(funcall f (third form) :value t)
-		       ,(funcall f (fourth form) :value t)))
-      
+       (if build-result
+	   `(classdef-stmt ,(funcall f cname :target t)
+			   ,(funcall f inheritance :value t)
+			   ,(if into-nested-namespaces
+				(funcall f suite)
+			      suite))
+	 (progn (funcall f cname :target t)
+		(funcall f inheritance :value t)
+		(when into-nested-namespaces
+		  (funcall f suite))))))
+    
+    (comparison-expr 
+     (destructuring-bind (op left right) (cdr form)
+       (if build-result
+	   `(comparison-expr ,op
+			     ,(funcall f left :value t)
+			     ,(funcall f right :value t))
+	 
+	 (progn (funcall f left :value t)
+		(funcall f right :value t)))))
+    
     (del-stmt
-     #+(or)(assert (not (or target value)))
-     `(del-stmt ,(funcall f (second form) :target t))) ;; ":target" hmm
+     (if build-result
+	 `(del-stmt ,(funcall f (second form) :target t)) ;; ":target" hmm
+       (funcall f (second form) :target t)))
       
     (dict-expr
-     #+(or)(assert (not target))
-     `(dict ,(loop for (k . v) in (second form)
-		 collect (cons (funcall f k :value t)
-			       (funcall f v :value t)))))
+     (if build-result
+	 `(dict ,(loop for (k . v) in (second form)
+		     collect (cons (funcall f k :value t)
+				   (funcall f v :value t))))
+       (loop for (k . v) in (second form)
+	   do (funcall f k :value t)
+	      (funcall f v :value t))))
     
     (exec-stmt
      (destructuring-bind (code globals locals) (cdr form)
-       `(exec-stmt ,(funcall f code    :value t)
-		   ,(when globals (funcall f globals :value t))
-		   ,(when locals (funcall f locals  :value t)))))
+       (if build-result
+	   `(exec-stmt ,(funcall f code :value t)
+		       ,(when globals (funcall f globals :value t))
+		       ,(when locals (funcall f locals  :value t)))
+	 (progn (funcall f code :value t)
+		(when globals (funcall f globals :value t))
+		(when locals (funcall f locals  :value t))))))
     
     (for-in-stmt
-     #+(or)(assert (not (or value target)))
      (destructuring-bind (targets sources suite else-suite)
 	 (cdr form)
-       `(for-in-stmt ,(funcall f targets :target t)
-		     ,(funcall f sources :value t)
-		     ,(funcall f suite)
-		     ,(when else-suite (funcall f else-suite)))))
-      
+       (if build-result
+	   `(for-in-stmt ,(funcall f targets :target t)
+			 ,(funcall f sources :value t)
+			 ,(funcall f suite)
+			 ,(when else-suite (funcall f else-suite)))
+	 (progn (funcall f targets :target t)
+		(funcall f sources :value t)
+		(funcall f suite)
+		(when else-suite (funcall f else-suite))))))
+    
     (funcdef-stmt
      (warn "walking funcdef-stmt")
-     #+(or)(assert (not (or target value)))
      (destructuring-bind (decorators fname (pos-args key-args *-arg **-arg) suite)
 	 (cdr form)
-       (warn "WALK-PY-AST recursing into funcdef, allright?")
-       ;; XXX check compiler, that always recursing here is intended
-       `(funcdef-stmt ,(loop for deco in decorators
-			   collect (funcall f deco :value t))
-		      ,(funcall f fname :target t)
-		      (,pos-args
-		       ,(mapcar (lambda (kv) (list (first kv)
-						   (funcall f (second kv) :value t)))
-				key-args)
-		       ,*-arg
-		       ,**-arg)
-		      ,suite))) ;; was: funcall on suite 2005.08.10
+       (if build-result
+	   `(funcdef-stmt ,(loop for deco in decorators
+			       collect (funcall f deco :value t))
+			  ,(funcall f fname :target t)
+			  (,pos-args
+			   ,(mapcar (lambda (kv) (list (first kv)
+						       (funcall f (second kv) :value t)))
+				    key-args)
+			   ,*-arg
+			   ,**-arg)
+			  (if into-nested-namespaces
+			      (funcall suite)
+			    suite))
+	 
+	 (progn (loop for deco in decorators
+		    do (funcall f deco :value t))
+		(funcall f fname :target t)
+		(mapc (lambda (kv) (funcall f (second kv) :value t)) key-args)
+		(when into-nested-namespaces
+		  (funcall suite))))))
     
     ((generator-expr listcompr-expr)
      (destructuring-bind (item for-in/if-clauses) (cdr form)
@@ -176,33 +232,51 @@ VALUE and TARGET context."
        ;; SyntaxError ("local variable used before assignment")
        ;; because the variable is bound in a `for-in' or `if' clause.
        
-       (let* ((rec-clauses
-	       (loop for for/if in for-in/if-clauses
-		   collect (ecase (car for/if)
-			     (for-in (destructuring-bind (expr iterable) (cdr for/if)
-				       ;; strictly spoken, LIST is evaluated before ITERABLE
-				       (let* ((rec-iterable (funcall f iterable :value t))
-					      (rec-expr     (funcall f expr     :target t)))
-					 `(for-in ,rec-expr ,rec-iterable))))
-			     (if (let* ((test (second for/if)))
-				   `(if ,(funcall f test :value t)))))))
-	      
-	      (rec-item (funcall f item :value t)))
+       (if build-result
+	   
+	   (let* ((rec-clauses
+		   (loop for for/if in for-in/if-clauses
+		       collect (ecase (car for/if)
+				 (for-in (destructuring-bind (expr iterable) (cdr for/if)
+					   (let* ((rec-iterable
+						   (funcall f iterable :value t))
+						  (rec-expr
+						   (funcall f expr :target t)))
+					     `(for-in ,rec-expr ,rec-iterable))))
+				 (if (let* ((test (second for/if)))
+				       `(if ,(funcall f test :value t)))))))
+		  
+		  (rec-item (funcall f item :value t)))
+	     
+	     `(generator-expr ,rec-item ,rec-clauses))
 	 
-	 `(generator-expr ,rec-item ,rec-clauses))))
+	 (progn (loop for for/if in for-in/if-clauses
+		    do (ecase (car for/if)
+			 (for-in (destructuring-bind (expr iterable) (cdr for/if)
+				   (funcall f iterable :value t)
+				   (funcall f expr     :target t)))
+			 (if (let ((test (second for/if)))
+			       (funcall f test :value t)))))
+		(funcall f item :value t)))))
     
     (if-stmt
-     #+(or)(assert (not (or value target)))
      (destructuring-bind
 	 (clauses else-suite) (cdr form)
-       `(if-stmt ,(loop for (test suite) in clauses
-		      collect (list (funcall f test :value t)
-				    (funcall f suite)))
-		 ,(when else-suite (funcall f else-suite)))))
-      
+       (if build-result
+	
+	   `(if-stmt ,(loop for (test suite) in clauses
+			  collect (list (funcall f test :value t)
+					(funcall f suite)))
+		     ,(when else-suite (funcall f else-suite)))
+	 
+	 (progn (loop for (test suite) in clauses
+		    do (funcall f test :value t)
+		       (funcall f suite))
+		(when else-suite (funcall f else-suite))))))
+    
     (import-stmt
      ;; XXX http://www.python.org/doc/essays/packages.html
-     (warn "walking import-stmt")
+     (warn "walking import-stmt: TODO")
      #+(or)(assert (not (or value target)))
      (values form t)
     
@@ -221,7 +295,7 @@ VALUE and TARGET context."
 			     "import walk not-as: todo")))))
       
     (import-from-stmt
-     (warn "walking import-from-stmt")
+     (warn "walking import-from-stmt: TODO")
      #+(or)(assert (not (or value target)))
      (values form t)
      
@@ -258,109 +332,129 @@ VALUE and TARGET context."
      #+(or)(assert (not target))
      (destructuring-bind
 	 ((pos-a key-a *-a **-a) expr) (cdr form)
-       `(lambda-expr (,pos-a
-		      ,(mapcar (lambda (kv) (funcall f (second kv) :value t)) key-a)
-		      ,*-a
-		      ,**-a)
-		     ,(funcall f expr :value t))))
-      
+       (if build-result
+	   `(lambda-expr (,pos-a
+			  ,(mapcar (lambda (kv) (funcall f (second kv) :value t)) key-a)
+			  ,*-a
+			  ,**-a)
+			 ,(if into-nested-namespaces
+			      (funcall f expr :value t)
+			    expr))
+	 (progn (mapc (lambda (kv) (funcall f (second kv) :value t)) key-a)
+		(when into-nested-namespaces
+		  (funcall f expr :value t))))))
+			 
     ((list-expr tuple-expr)
      ;; the items within are a target if the list itself is
-     `(,(first form)
-       ,(loop for x in (second form) collect
-	      (funcall f x :value value :target target))))
-    
-    #+(or) ;; part of generator-expr now
-    (listcompr-expr
-     (warn "walking listcompr-expr")
-     #+(or)(assert (not target))
-     `(listcompr-expr
-       ,(funcall f (second form) :value t) ;; XXX value ok...?
-       ,(loop for for/if in (third form) collect
-	      (ecase (car for/if)
-		(for-in
-		 `(for-in
-		   ,(funcall f (second for/if) :target t)
-		   ,(funcall f (third  for/if) :value t)))
-		(if
-		    `(if
-			 ,(funcall f (second for/if) :value t)))))))
+     (if build-result
+	 `(,(first form)
+	   ,(loop for x in (second form)
+		collect (funcall f x :value value :target target)))
+       (loop for x in (second form)
+	   do (funcall f x :value value :target target))))
     
     (module-stmt
-     #+(or)(assert (not (or value target)))
-     `(module-stmt ,(funcall f (second form) :value t)))
+     (if build-result
+	 `(module-stmt ,(funcall f (second form) :value t))
+       (funcall f (second form) :value t)))
       
     (print-stmt
-     #+(or)(assert (not (or target value)))
      (destructuring-bind (dest items comma?) (cdr form)
-       `(print-stmt 
-	 ,(when dest (funcall f dest :value t))
-	 ,(mapcar (lambda (x) (funcall f x :value t)) items)
-	 ,comma?)))
+       (if build-result
+	   `(print-stmt
+	     ,(when dest (funcall f dest :value t))
+	     ,(mapcar (lambda (x) (funcall f x :value t)) items)
+	     ,comma?)
+	 (progn (when dest (funcall f dest :value t))
+		(mapc (lambda (x) (funcall f x :value t)) items)))))
     
     (raise-stmt
-     #+(or)(assert (not (or target value)))
      (destructuring-bind (exc var tb) (cdr form)
-       `(raise-stmt ,(when exc (funcall f exc :value t))
-		    ,(when var (funcall f var :value t))
-		    ,(when tb  (funcall f var :value t)))))
-      
+       (if build-result
+	   `(raise-stmt ,(when exc (funcall f exc :value t))
+			,(when var (funcall f var :value t))
+			,(when tb  (funcall f var :value t)))
+	 (progn (when exc (funcall f exc :value t)
+		(when var (funcall f var :value t)
+		(when tb  (funcall f var :value t))))))))
+    
     (return-stmt
-     #+(or)(assert (not (or target value)))
-     `(return-stmt ,(when (second form)
-		      (funcall f (second form) :value t))))
+     (if build-result
+	 `(return-stmt ,(when (second form)
+			  (funcall f (second form) :value t)))
+       (when (second form)
+	 (funcall f (second form) :value t))))
       
     (slice-expr
-     #+(or)(assert (not target))
      (destructuring-bind (start stop step) (cdr form)
-       `(slice-expr ,(when start (funcall f start :value t))
-		    ,(when stop  (funcall f stop  :value t))
-		    ,(when step  (funcall f step  :value t)))))
+       (if build-result
+	   `(slice-expr ,(when start (funcall f start :value t))
+			,(when stop  (funcall f stop  :value t))
+			,(when step  (funcall f step  :value t)))
+	 (progn (when start (funcall f start :value t))
+		(when stop  (funcall f stop  :value t))
+		(when step  (funcall f step  :value t))))))
       
     (subscription-expr
-     `(subscription-expr ,(funcall f (second form) :value t)
-			 ,(funcall f (third form)  :value t)))
+     (if build-result
+	 `(subscription-expr ,(funcall f (second form) :value t)
+			     ,(funcall f (third form)  :value t))
+       (progn (funcall f (second form) :value t)
+	      (funcall f (third form)  :value t))))
       
     (suite-stmt
-     #+(or)(assert (not (or value target)))
-     `(suite-stmt ,(loop for x in (second form)
-		       collect (funcall f x))))
+     (if build-result
+	 `(suite-stmt ,(loop for x in (second form) collect (funcall f x)))
+       (loop for x in (second form) do (funcall f x))))
       
     (try-except-stmt
-     #+(or)(warn "walking try-except-stmt ~A" form)
-     #+(or)(assert (not (or value target)))
-     (destructuring-bind
-	 (suite except-clauses else-suite) (cdr form)
-       `(try-except-stmt
-	 ,(funcall f suite)
-	 (,@(loop for (exc var handler-form) in except-clauses 
-		collect `(,(when exc (funcall f exc :value t))
-			     ,(when var (funcall f var :target t))
-			   ,(funcall f handler-form))))
-	 ,(when else-suite
-	    (funcall f else-suite)))))
+     (destructuring-bind (suite except-clauses else-suite) (cdr form)
+       (if build-result
+	   
+	   `(try-except-stmt
+	     ,(funcall f suite)
+	     (,@(loop for (exc var handler-form) in except-clauses 
+		    collect `(,(when exc (funcall f exc :value t))
+				 ,(when var (funcall f var :target t))
+			       ,(funcall f handler-form))))
+	     ,(when else-suite
+		(funcall f else-suite)))
+	 
+	 (progn (funcall f suite)
+		(loop for (exc var handler-form) in except-clauses 
+		    do (when exc (funcall f exc :value t))
+		       (when var (funcall f var :target t))
+		       (funcall f handler-form))
+		(when else-suite
+		  (funcall f else-suite))))))
       
     (try-finally-stmt
-     #+(or)(warn "walking try-finally-stmt")
-     #+(or)(assert (not (or value target)))
      (destructuring-bind (try-suite finally-suite) (cdr form)
-       `(try-finally-stmt
-	 ,(funcall f try-suite) ,(funcall f finally-suite))))
-      
+       (if build-result
+	   `(try-finally-stmt
+	     ,(funcall f try-suite) ,(funcall f finally-suite))
+	 (progn (funcall f try-suite)
+		(funcall f finally-suite)))))
+    
     (unary-expr
-     #+(or)(assert (not target))
-     `(unary-expr ,(second form) ,(funcall f (third form) :value t)))
+     (if build-result
+	 `(unary-expr ,(second form) ,(funcall f (third form) :value t))
+       (funcall f (third form) :value t)))
       
     (while-stmt
-     #+(or)(assert (not (or value target)))
      (destructuring-bind (test suite else-suite) (cdr form)
-       `(while-stmt ,(funcall f test :value t)
-		    ,(funcall f suite)
-		    ,(when else-suite (funcall f else-suite)))))
+       (if build-result
+	   `(while-stmt ,(funcall f test :value t)
+			,(funcall f suite)
+			,(when else-suite (funcall f else-suite)))
+	 (progn (funcall f test :value t)
+		(funcall f suite)
+		(when else-suite (funcall f else-suite))))))
       
     (yield-stmt
-     #+(or)(assert (not (or value target)))
-     `(yield-stmt ,(funcall f (second form) :value t)))
+     (if build-result
+	 `(yield-stmt ,(funcall f (second form) :value t))
+       (funcall f (second form) :value t)))
     
     (t
      (warn "WALK: assuming ~S is a Lisp form: not walked into." form)
@@ -372,18 +466,57 @@ VALUE and TARGET context."
 
 ;; Handy functions for dealing with ASTs
 
-(defmacro with-py-ast ((subform ast &key value target (walk-lists-only t)) &body body)
-  "Example: (with-sub-ast ((form &key value target) ast t)"
-  `(walk-py-ast ,ast
-		(excl:named-function :with-py-ast-function
-		  (lambda ,subform
-		    (declare (optimize (debug 3)))
-		    ,@body))
-		:value ,value
-		:target ,target
-		:walk-lists-only ,walk-lists-only))
+(defmacro with-py-ast ((subform ast &rest options)
+					  ;; key value target walk-lists-only 
+					  ;; into-nested-namespaces
+		       &body body)
+  ;; (with-sub-ast ((form &key value target) ast)
+  ;;    ... form ... value ... target ...)
+  ;; 
+  ;; (with-sub-ast (form ast)
+  ;;   ... form...)
+  
+  (let ((context '#:context))
+    
+    (when (symbolp subform)
+      (setf subform `(,subform &rest ,context)))
+  
+    `(walk-py-ast ,ast
+		  (excl:named-function :with-py-ast-function
+		    (lambda ,subform
+		      (declare (optimize (debug 3))
+			       (ignore ,context))
+		      ,@body))
+		  
+		  ,@options ;; user-defined options take precedence...
+		  
+		  :build-result nil;; but these are the defaults
+		  :walk-lists-only t)))
 
 
+#+(or)
+(defmacro match-ast-nodes (ast &rest clauses)
+  ;; (match-ast-nodes ast
+  ;;	   (x   yield-stmt)           (... x...))
+  ;;	   (x   (if-stmt while-stmt)) (... x ..))
+  ;;       (nil (print-stmt))         (.....)))
+  
+  (let ((sub-ast '#:sub-ast))
+    
+    (flet ((make-cond-clause (c)
+	     (destructuring-bind (var nodenames &rest body) c
+	       `(,nodenames (let (,(when var
+				     `(,var ,sub-ast)))
+			      ,@body)))))
+      
+      `(walk-py-ast ,ast
+		    (lambda (,sub-ast)
+		      (case (car ,sub-ast)
+			,@(mapcar #'make-cond-clause clauses)
+			(t (values ,sub-ast))))
+		    :walk-lists-only t))))
+		    
+		    
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Walker applications
 
@@ -396,74 +529,3 @@ VALUE and TARGET context."
 	   ast)
 	 walk-options))
 
-	       
-
-#+(or)
-(defun guess-annotate-class-attributes (ast)
-  (with-sub-ast (classdef-ast 'classdef ast)
-    (with-sub-ast (funcdef-ast 'funcdef classdef-ast (:same-namespace t))
-      (when (has_>=1_args)
-        (let ((first-arg-name (first xxx)))
-          (with-sub-ast (attr-ref-ast 'attribute-ref funcdef-ast (:same-namespace t))
-            (when (eq (cadr attr-ref-ast) first-arg-name)
-              (register-attribute (cadr attr-ref-ast) classdef-ast))))))))
-
-;;;
-;; Derive from the AST the likely attributes of class instances, by
-;; looking for assignments of the form `self.x = y' in the body of
-;; methods that take `self' as first arg, inside classes.
-
-#+(or)
-(defun likely-class-attribs (ast)
-  (with-sub-ast (cls-ast class ast (:recurse-results t :check-self nil))
-    (with-sub-ast ((expr-ast &key value target) (binary unary) ast (:same-namespace t))
-      (do-something cls-ast meth-ast))))
-		   
-#+(or)
-(defun likely-class-attribs (ast)
-  (with-sub-ast (cls-ast class ast (:same-namespace t :recurse-results t :check-self nil))
-    (do-something cls-ast)))
-
-
-#+(or)
-(defun foo ()
-  (walk-py-ast
-   (parse-python-string (read-file "b0.py"))
-   (lambda (form &key value target)
-     (declare (ignore value target))
-     (when (eq (first form) 'classdef)
-       (let ((class-name (second (second form))))
-	 #+(or)(warn "classdef: ~A" class-name)
-	 
-	 (walk-py-ast
-	  form
-	  (lambda (form &key value target)
-	    (declare (ignore value target))
-	    (when (eq (first form) 'funcdef) ;; method definition XXX nested classes handled wrong
-	      (let ((meth-name (second (second form)))
-		    (self-param (caar (third form))))
-		(when self-param
-		  #+(or)(warn "  method with param: ~A" meth-name self-param)
-		  
-		  (walk-py-ast
-		   form
-		   (lambda (form &key value target)
-		     (declare (ignore value target))
-		     (when (eq (first form) 'assign-stmt)
-		       (let ((assign-stmt form))
-			 #+(or)(warn "    assign-stmt: ~A" assign-stmt)
-			 
-			 (walk-py-ast
-			  form
-			  (lambda (form &key value target)
-			    (declare (ignore value))
-			    (when (and (eq (first form) 'attributeref)
-				       (listp (second form))
-				       (eq (second (second form)) self-param)
-				       target)
-			      (format t "in method ~A.~A(~A, ...): ~A~%"
-				      class-name meth-name self-param (ast->python-code assign-stmt)))
-			    form))))
-		     form)))))
-	    form))))
-     form)))

@@ -910,7 +910,7 @@
 		   (py-raise 'AttributeError "Module ~A has no attribute ~A" x attr.sym)
 		 (return-from py-module.__getattribute__ val))))
       
-      (let ((val (gethash dyn-globals attr.sym)))
+      (let ((val (gethash attr.sym dyn-globals)))
 	(when (and val
 		   (not (eq val :unbound)))
 	  (return-from py-module.__getattribute__ val)))

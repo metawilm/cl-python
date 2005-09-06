@@ -1063,19 +1063,22 @@
       finally (return ht)))
 
 (defgeneric convert-to-namespace-ht (x)
-  (:method ((x hash-table)) (loop with d = (make-hash-table :test #'eq) ;; XXX sometimes not needed
-				for k being the hash-key in x using (hash-value v)
-				for k-sym = (typecase k
-					      (string (intern k #.*package*))
-					      (symbol k)
-					      (t (error "Not a valid namespace hash-table,
-                                                         as key is neither string or symbol: ~A ~A"
-							k (type-of k))))
-				do (setf (gethash k-sym d) v)
-				finally (return d)))
-  (:method ((x t))          (let ((x2 (deproxy x)))
-				 (when (eq x x2) (error "invalid namespace: ~A" x))
-				 (convert-to-namespace-ht x2))))
+  (:method ((x hash-table))
+	   (loop with d = (make-hash-table :test #'eq) ;; XXX sometimes not needed
+	       for k being the hash-key in x using (hash-value v)
+	       for k-sym = (typecase k
+			     (string (intern k #.*package*))
+			     (symbol k)
+			     (t (error "Not a valid namespace hash-table,
+                                        as key is neither string or symbol: ~A ~A"
+				       k (type-of k))))
+	       do (setf (gethash k-sym d) v)
+	       finally (return d)))
+  
+  (:method ((x t))
+	   (let ((x2 (deproxy x)))
+	     (when (eq x x2) (error "invalid namespace: ~A" x))
+	     (convert-to-namespace-ht x2))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;
@@ -1104,12 +1107,26 @@
     
     ;; Variables assigned/looked up at module level
     
-    (with-py-ast  ((form &key value target) suite :value t :target nil)
-      (declare (ignore value target))
+    (with-py-ast  (form suite)
       (case (car form)
 
-	((classdef-stmt funcdef-stmt) (values nil t))
+	((classdef-stmt) 
+	 ;; name of this class, but don't recurse
+	 (destructuring-bind
+	     ((identifier-expr cname) inheritance csuite)  (cdr form)
+	   (declare (ignore inheritance csuite))
+	   (assert (eq identifier-expr 'identifier-expr))
+	   (pushnew cname globals))
+	 (values nil t))
 
+	(funcdef-stmt
+	 ;; name of this function, but don't recurse
+	 (destructuring-bind (decorators (identifier-expr fname) args fsuite) (cdr form)
+	   (declare (ignore decorators fsuite args))
+	   (assert (eq identifier-expr 'identifier-expr))
+	   (pushnew fname globals))
+	 (values nil t))
+	
 	(identifier-expr (let ((name (second form)))
 			   (pushnew name globals))
 			 (values nil t))
@@ -1118,8 +1135,7 @@
     
     ;; Variables explicitly declared `global'
 
-    (with-py-ast ((form &key value target) suite :value t :target nil)
-      (declare (ignore value target))
+    (with-py-ast (form suite)
       (case (car form)
 
 	(global-stmt (dolist (name (second form))
@@ -1148,6 +1164,10 @@
 	(declared-globals ()))
     
     (with-py-ast ((form &key value target) suite :value t)
+
+      ;; :value, to be sure that is suite contains one expr
+      ;; (LAMBDA-EXPR) it is regarded as value
+            
       (declare (ignore value))
       
       (case (car form)
@@ -1166,12 +1186,14 @@
 	(global-stmt     (dolist (name (second form))
 			   (cond ((member name params)
 				  (py-raise 'SyntaxError
-					    "Function param `~A' may not be declared `global'" name))
+					    "Function param `~A' may not be declared ~
+                                             `global'" name))
 			       
 				 ((member name locals)
 				  (py-raise 'SyntaxError
-					    "The `global' declaration of variable `~A' must be ~
-                                           lexically before it is first used." name))
+					    "The `global' declaration of variable ~
+                                             `~A' must be lexically before it is ~
+                                             first used." name))
 				 
 				 (t (pushnew name declared-globals))))
 			 (values nil t))
@@ -1288,10 +1310,13 @@
 	 
 	 (lambda (&rest %args)
 	   (declare (dynamic-extent %args)
-		    (optimize (speed 3) (safety 0)))
+		    #+(or)(optimize (speed 3) (safety 0)))
 	   
-	   (let ((arg-val-vec (make-array ,(+ num-pos-key-args (if *-arg 1 0) (if **-arg 1 0))
-					  :initial-element nil)))
+	   ;; XXX todo: skip making ARG-VAL-VEC array if there are only positional args?
+	   
+	   (let ((arg-val-vec (make-array
+			       ,(+ num-pos-key-args (if *-arg 1 0) (if **-arg 1 0))
+			       :initial-element nil)))
 	     (declare (dynamic-extent arg-val-vec))
 	     
 	     (parse-py-func-args %args arg-val-vec ,fa)
@@ -1305,7 +1330,7 @@
 		   ,@(when **-arg
 		       `((,**-arg  (svref arg-val-vec ,(1+ num-pos-key-args))))))
 	       
-	       (locally (declare (optimize (speed 3) (safety 1)))
+	       (locally (declare #+(or)(optimize (speed 3) (safety 1)))
 		 ,@body))))))))
 
 (defstruct (func-args (:type vector) (:conc-name fa-) (:constructor make-fa))
@@ -1341,8 +1366,8 @@
     ;; Match standard pos-args and *-arg
     
     (loop
-	with max-to-fill-with-pos = (the fixnum 
-				      (if (fa-*-arg fa) (fa-num-pos-args fa) (fa-num-pos-key-args fa)))
+	with max-to-fill-with-pos =
+	  (the fixnum (if (fa-*-arg fa) (fa-num-pos-args fa) (fa-num-pos-key-args fa)))
 	until (or (= num-filled-by-pos-args max-to-fill-with-pos)
 		  (symbolp (car %args))) ;; the empty list NIL is a symbol, too
 	      
@@ -1375,9 +1400,10 @@
 		
 		(cond ((> (the fixnum (fa-num-pos-key-args fa)) 0)
 		       (loop
-			   with max-to-fill-with-pos = (the fixnum (if (fa-*-arg fa)
-								       (fa-num-pos-args fa)
-								     (fa-num-pos-key-args fa)))
+			   with max-to-fill-with-pos =
+			     (the fixnum (if (fa-*-arg fa) 
+					     (fa-num-pos-args fa)
+					   (fa-num-pos-key-args fa)))
 			   while extra-pos
 			   until (= num-filled-by-pos-args max-to-fill-with-pos)
 				 
@@ -1405,7 +1431,8 @@
 	    (let* ((**-arg val)
 		   (**-arg-keys (py-iterate->lisp-list **-arg)))
 	      (loop 
-		  with bound-getitem = (recursive-class-lookup-and-bind **-arg '__getitem__)
+		  with bound-getitem = (recursive-class-lookup-and-bind
+					**-arg '__getitem__)
 		  for k in **-arg-keys
 			   
 		  for k-sym = (py-str-symbol k #.(find-package :keyword))
@@ -1428,7 +1455,7 @@
 				(eq (svref kwname-vec i) key))
 			    
 		       do (when (svref arg-val-vec i)
-			    (break "Got multiple values (at least once via `key=' arg) ~%
+			    (break "Got multiple values (at least once via `key=arg' ~%
                                     for parameter `~A'" (svref name-vec i)))
 			  (setf (svref arg-val-vec i) val)
 			  (return)
@@ -1436,7 +1463,8 @@
 		       finally 
 			 (if (fa-**-arg fa)
 			     (push (cons key val) for-**)
-			   (break "Got unknown keyword arg and no **-arg: ~A ~A" key val))))
+			   (break "Got unknown keyword arg and no **-arg: ~A ~A"
+				  key val))))
 		  
 		  ((fa-**-arg fa)
 		   (push (cons key val) for-**))
@@ -1444,12 +1472,14 @@
 		  (t (break "Got unknown keyword arg and no **-arg: ~A ~A" key val))))))
     
     ;; Ensure all positional arguments covered
-    (loop for i fixnum from num-filled-by-pos-args below (the fixnum (fa-num-pos-args fa))
+    (loop for i fixnum from num-filled-by-pos-args below (the fixnum
+							   (fa-num-pos-args fa))
 	unless (svref arg-val-vec i)
 	do (break "Positional arg ~A has no value" (svref (fa-arg-name-vec fa) i)))
     
     ;; Use default values for missing keyword arguments
-    (loop for i fixnum from (fa-num-pos-args fa) below (the fixnum (fa-num-pos-key-args fa))
+    (loop for i fixnum from (fa-num-pos-args fa) below (the fixnum
+							 (fa-num-pos-key-args fa))
 	unless (svref arg-val-vec i)
 	do (setf (svref arg-val-vec i)
 	     (svref (fa-key-arg-default-vals fa) (- i (fa-num-pos-args fa)))))
@@ -1470,33 +1500,34 @@
 (defun generator-ast-p (ast)
   "Is AST a function definition for a generator?"
   
+  ;; Note that LAMBDA-EXPR can't contain (yield) statements
+  
   (assert (not (eq (car ast) 'module-stmt)) ()
     "GENERATOR-AST-P called with a MODULE ast.")
   
-  (walk-py-ast ast 
-	       (lambda (form &key value target)
-		 (declare (ignore value target))
-		 (case (car form)
-		   (yield-stmt (return-from generator-ast-p t))
-		   ((classdef-stmt funcdef-stmt) (values nil t))
-		   (t form))))
+  (with-py-ast (form ast)
+    (case (car form)
+      (yield-stmt                   (return-from generator-ast-p t))
+      ((classdef-stmt funcdef-stmt) (values nil t))
+      (t                            form)))
+  
   nil)
 
 
 (defun contains-call-p (ast)
-  (with-py-ast ((form &key value target) ast)
-    (declare (ignore value target))
+  (with-py-ast (form ast)
     (case (car form)
-      (call-expr (return-from contains-call-p t))
+      (call-expr                                (return-from contains-call-p t))
       ((classdef-stmt funcdef-stmt lambda-expr) (values nil t))
-      (t form)))
+      (t                                        form)))
   nil)
 	
 
 (defun rewrite-generator-funcdef-suite (fname suite)
   ;; Returns the function body
   (assert (symbolp fname))
-  (assert (eq (car suite) 'suite-stmt) () "CAR of SUITE must be SUITE-STMT, but got: ~S" (car suite))
+  (assert (eq (car suite) 'suite-stmt) ()
+    "CAR of SUITE must be SUITE-STMT, but got: ~S" (car suite))
   (assert (generator-ast-p suite))
 
   (let ((yield-counter 0)
@@ -1564,113 +1595,117 @@
 		  
 		  (if-stmt
 		   
-		   (if nil  ;; need to always rewrite, because of "while test: if foo: continue"
-		       #+(or)(not (generator-ast-p form))
-		       
-		       
-		       
-		       (values form t)
-		     (destructuring-bind (clauses else-suite) (cdr form)
-		       (loop
-			   with else-tag = (new-tag :else) and after-tag = (new-tag :after)
-									   
-			   for (expr suite) in clauses
-			   for then-tag = (new-tag :then)
-					  
-			   collect `((py-val->lisp-bool ,expr) (go ,then-tag)) into tests
-			   collect `(:split ,then-tag
-					    (:split ,(walk suite stack))
-					    (go ,after-tag)) into suites
-			   finally
-			     (return
-			       (values `(:split (cond ,@tests
-						      (t (go ,else-tag)))
-						(:split ,@suites)
-						,else-tag
-						,@(when else-suite
-						    `((:split ,(walk else-suite stack))))
-						,after-tag)
-				       t))))))
+		   ;; Rewriting of the IF-STMT used to be conditional on:
+		   ;; 
+		   ;;   (generator-ast-p form)
+		   ;; 
+		   ;; but it turns out that we always need to rewrite,
+		   ;; because of, for example:
+		   ;; 
+		   ;;  def f():
+		   ;;    while test:
+		   ;;      yield 1
+		   ;;        if foo:
+		   ;;        continue
+		   ;; 
+		   ;; where the 'continue' must be rewritten
+		   ;; correspondingly to the rewritten 'while'.
+		   
+		   (destructuring-bind (clauses else-suite) (cdr form)
+		     (loop
+			 with else-tag = (new-tag :else) and after-tag = (new-tag :after)
+									 
+			 for (expr suite) in clauses
+			 for then-tag = (new-tag :then)
+					
+			 collect `((py-val->lisp-bool ,expr) (go ,then-tag)) into tests
+			 collect `(:split ,then-tag
+					  (:split ,(walk suite stack))
+					  (go ,after-tag)) into suites
+			 finally
+			   (return
+			     (values `(:split (cond ,@tests
+						    (t (go ,else-tag)))
+					      (:split ,@suites)
+					      ,else-tag
+					      ,@(when else-suite
+						  `((:split ,(walk else-suite stack))))
+					      ,after-tag)
+				     t)))))
 		    
 		  (return-stmt
 		   (when (second form)
 		     (break "SyntaxError: Inside generator, RETURN statement may not have ~
                              an argument (got: ~S)" form))
 		    
-		   ;; from now on, we will always return to this state
+		   ;; From now on, we will always return to this state
 		   (values `(generator-finished)
 			   t))
 
 		  (suite-stmt
-		   (if nil
-		       #+(or)(not (generator-ast-p form))
-		       (values form t)
-		       
-		     (values `(:split ,@(loop for stmt in (second form)
-					    collect (walk stmt stack)))
-			     t)))
-		    
+		   (values `(:split ,@(loop for stmt in (second form)
+					  collect (walk stmt stack)))
+			   t))
+
+		  
 		  (try-except-stmt
-		   (if nil
-		       #+(or)(not (generator-ast-p form))
-		       
-		       (values form t)
-		     
-		     ;; Three possibilities:
-		     ;;  1. YIELD-STMT or RETURN-STMT in TRY-SUITE 
-		     ;;  2. YIELD-STMT or RETURN-STMT in some EXCEPT-CLAUSES
-		     ;;  3. YIELD-STMT or RETURN-STMT in ELSE-SUITE
-		     ;; 
-		     ;; We rewrite it such that all cases are covered,
-		     ;; so maybe there is more rewritten than strictly
-		     ;; needed.
-		     
-		     (destructuring-bind (try-suite except-clauses else-suite) (cdr form)
-		       (loop
-			   with try-tag = (new-tag :yield)
-			   with else-tag = (new-tag :else)
-			   with after-tag = (new-tag :after)
-			   with gen-maker = '#:helper-gen-maker and gen = '#:helper-gen
-				      				      
-			   initially (push gen vars)
-			     
-			   for (exc var suite) in except-clauses
-			   for tag = (new-tag :exc-suite)
-				     
-			   collect `(,exc ,var (go ,tag)) into jumps
-			   nconc `(,tag ,(walk suite stack) (go ,after-tag)) into exc-bodies
-									      
-			   finally
-			     (return
-			       (values
-				`(:split
-				  (setf ,gen (get-py-iterate-fun
-					      (funcall ,(suite->generator gen-maker try-suite))))
-				  (setf .state. ,try-tag)
-				  
-				  ;; yield all values returned by helpder function .gen.
-				  ,try-tag
-				  (try-except-stmt
+
+		   ;; Three possibilities:
+		   ;;  1. YIELD-STMT or RETURN-STMT in TRY-SUITE 
+		   ;;  2. YIELD-STMT or RETURN-STMT in some EXCEPT-CLAUSES
+		   ;;  3. YIELD-STMT or RETURN-STMT in ELSE-SUITE
+		   ;; 
+		   ;; We rewrite it once completely, such that all
+		   ;; cases are covered. Maybe there is more rewritten
+		   ;; going on than needed, but it doesn't hurt.
+		   
+		   (destructuring-bind (try-suite except-clauses else-suite) (cdr form)
+		     (loop
+			 with try-tag = (new-tag :yield)
+			 with else-tag = (new-tag :else)
+			 with after-tag = (new-tag :after)
+			 with gen-maker = '#:helper-gen-maker and gen = '#:helper-gen
+									
+			 initially (push gen vars)
 				   
-				   (let ((val (funcall ,gen))) ;; try-suite
-				     (case val
-				       (:explicit-return (generator-finished))
-				       (:implicit-return (go ,else-tag))
-				       (t (return-from :function-body val))))
+			 for (exc var suite) in except-clauses
+			 for tag = (new-tag :exc-suite)
 				   
-				   ,jumps ;; handlers
-				   
-				   nil) ;; else-suite
-				  
-				  ,@exc-bodies
-				  
-				  ,else-tag
-				  ,@(when else-suite
-				      `((:split ,(walk else-suite stack))))
-				  
-				  ,after-tag
-				  (setf ,gen nil))
-				t))))))
+			 collect `(,exc ,var (go ,tag)) into jumps
+			 nconc `(,tag ,(walk suite stack) (go ,after-tag)) into exc-bodies
+										
+			 finally
+			   (return
+			     (values
+			      `(:split
+				(setf ,gen (get-py-iterate-fun
+					    (funcall
+					     ,(suite->generator gen-maker try-suite))))
+				(setf .state. ,try-tag)
+				
+				;; yield all values returned by helpder function .gen.
+				,try-tag
+				(try-except-stmt
+				 
+				 (let ((val (funcall ,gen))) ;; try-suite
+				   (case val
+				     (:explicit-return (generator-finished))
+				     (:implicit-return (go ,else-tag))
+				     (t (return-from :function-body val))))
+				 
+				 ,jumps ;; handlers
+				 
+				 nil) ;; else-suite
+				
+				,@exc-bodies
+				
+				,else-tag
+				,@(when else-suite
+				    `((:split ,(walk else-suite stack))))
+				
+				,after-tag
+				(setf ,gen nil))
+			      t)))))
 		  
 		  (try-finally
 		   (destructuring-bind (try-suite finally-suite) (cdr form)
@@ -1678,27 +1713,22 @@
 		       (break "SyntaxError: YIELD is not allowed in the TRY suite of ~
                                a TRY/FINALLY statement (got: ~S)" form))
 		     
-		     (if nil
-			 #+(or)(not (generator-ast-p finally-suite))
-			 
-			 (values form t)
-
-		       (let ((fin-catched-exp '#:fin-catched-exc))
-			 
-			 (pushnew fin-catched-exp vars)
-			 (values
-			  `(:split
-			    (multiple-value-bind (val cond)
-				(ignore-errors ,try-suite ;; no need to walk
-					       (values))
-			      (setf ,fin-catched-exp cond))
-			    
-			    ,(walk finally-suite stack)
-			    
-			    (when ,fin-catched-exp
-			      (error ,fin-catched-exp)))
+		     (let ((fin-catched-exp '#:fin-catched-exc))
+		       
+		       (pushnew fin-catched-exp vars)
+		       (values
+			`(:split
+			  (multiple-value-bind (val cond)
+			      (ignore-errors ,try-suite ;; no need to walk
+					     (values))
+			    (setf ,fin-catched-exp cond))
 			  
-			  t)))))
+			  ,(walk finally-suite stack)
+			  
+			  (when ,fin-catched-exp
+			    (error ,fin-catched-exp)))
+			
+			t))))
 		  
 		  (while-stmt
 		   (destructuring-bind (test suite else-suite) (cdr form)
@@ -1733,7 +1763,8 @@
 			     t)))
 		  
 		  (t (values form
-			     t)))))))
+			     t))))
+	      :build-result t)))
 
 	(let ((walked-as-list (multiple-value-list (apply-splits (walk suite ()))))
 	      (final-tag -1))
@@ -1772,15 +1803,15 @@
 	   (declare (ignore context))
 	   (case (car form)
 	     
-	     ((funcdef-stmt classdef-stmt)
-	      (values form t))
+	     ((funcdef-stmt classdef-stmt) (values form t))
 	     
-	     (return-stmt 
-	      (when (second form)
-		(error "SyntaxError: Inside generator, RETURN statement may not have ~
-                        an argument (got: ~S)" form))
-	      (values `(return-from :function-body :explicit-return)
-		      t))
+	     (return-stmt (when (second form)
+			    (error "SyntaxError: Inside generator, RETURN ~
+                                    statement may not have an argument ~
+                                    (got: ~S)" form))
+			  
+			  (values `(return-from :function-body :explicit-return)
+				  t))
 	     
 	     (t form))))
 	     
@@ -1788,10 +1819,7 @@
        (lambda ()
 	 ,(rewrite-generator-funcdef-suite
 	   fname
-	   `(suite-stmt (
-			 ;;,@(mapcar (lambda (x) (walk-py-ast x #'suite-walker)) (second suite))
-			 ,(walk-py-ast suite #'suite-walker)
-			 
+	   `(suite-stmt (,(walk-py-ast suite #'suite-walker :build-result t)
 			 (return-from :function-body :implicit-return))))))))
 
 (defun rewrite-generator-expr-ast (ast)
@@ -1807,21 +1835,21 @@
       
       (assert (eq (car first-for) 'for-in))
       
-      (let ((stuff (loop with res = `(yield-stmt ,item)
-		       for clause in (reverse for-in/if-clauses)
-		       do (setf res
-			    (ecase (car clause)
-			      (for-in `(for-in-stmt
-					,(second clause) ,(third clause) ,res nil))
-			      (if     `(if-stmt ((,(second clause) ,res)) nil))))
-		       finally (return res))))
+      (let ((iteration-stuff (loop with res = `(yield-stmt ,item)
+				 for clause in (reverse for-in/if-clauses)
+				 do (setf res
+				      (ecase (car clause)
+					(for-in `(for-in-stmt
+						  ,(second clause) ,(third clause) ,res nil))
+					(if     `(if-stmt ((,(second clause) ,res)) nil))))
+				 finally (return res))))
 	
 	`(call-expr 
 	  (funcdef-stmt nil (identifier-expr :generator-expr-helper-func)
 			(((identifier-expr ,first-source)) nil nil nil)
 			(suite-stmt
 			 ((for-in-stmt ,(second first-for) (identifier-expr ,first-source)
-				       ,stuff nil))))
+				       ,iteration-stuff nil))))
 	  
 	  ((,(third first-for)) nil nil nil))))))
 
