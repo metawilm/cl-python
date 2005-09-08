@@ -814,7 +814,12 @@ class instrumentDescriptor(object):
         self.name = name
         self.obj = obj
     def __get__(self, *args):
+        #print "iD.__get__: "
+        #print "self.obj = ", self.obj
+        #print "self.obj.__get__ = ", self.obj.__get__
+        #print "args = ", args
         result = self.obj.__get__(*args)
+        #print "res = ", result
         if not hasattr(result, '__call__'):
             return result
         return instrumentCall(self.name, result)
@@ -829,6 +834,9 @@ class instrumentCall(object):
         oldindent = indent
         try:
             indent = indent + " "
+            print "=before argreps"
+            print " repr: ", repr
+            print " args: ", args
             argreprs = map(repr, args)
             for i, s in enumerate(argreprs):
                 s = cleanup(s)
@@ -837,7 +845,13 @@ class instrumentCall(object):
                 argreprs[i] = s
             writeln(indent + "%s(%r)" % (self.name, ", ".join(argreprs)))
             try:
+                #print "self: ", self
+                #raise "self, self.obj", (self, self.obj)
+                print "=2 self.obj: ", self.obj
+                #print "=2 args: ", args
+                #brek()
                 result = self.obj(*args)
+                #print "=2 res: ", result
             except Exception, exc:
                 writeln(indent + "raise %r" % (exc,))
                 raise

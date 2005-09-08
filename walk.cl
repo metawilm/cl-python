@@ -138,7 +138,7 @@ VALUE and TARGET context."
 		(when **-a (funcall f **-a :value t))))))
     
     (classdef-stmt 
-     (warn "walking classdef-stmt")
+     #+(or)(warn "walking classdef-stmt")
      (destructuring-bind (cname inheritance suite) (cdr form)
        (assert (eq (car inheritance) 'tuple-expr))
        (if build-result
@@ -200,7 +200,7 @@ VALUE and TARGET context."
 		(when else-suite (funcall f else-suite))))))
     
     (funcdef-stmt
-     (warn "walking funcdef-stmt")
+     #+(or)(warn "walking funcdef-stmt")
      (destructuring-bind (decorators fname (pos-args key-args *-arg **-arg) suite)
 	 (cdr form)
        (if build-result
@@ -328,7 +328,7 @@ VALUE and TARGET context."
 				 finally (return items))))))
     
     (lambda-expr
-     (warn "walking lambda-expr")
+     #+(or)(warn "walking lambda-expr")
      #+(or)(assert (not target))
      (destructuring-bind
 	 ((pos-a key-a *-a **-a) expr) (cdr form)

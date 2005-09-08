@@ -157,11 +157,13 @@
 
 ;;; dynamic class creation
 
-(defun make-py-class (&key name namespace supers cls-metaclass mod-metaclass)
+(defun make-py-class (&key name context-name namespace supers cls-metaclass mod-metaclass)
+  (declare (ignore context-name)) ;; XXX for now
+
   (assert (symbolp name))
   (assert (listp supers))
   (assert (hash-table-p namespace))
-
+  
   ;; XXX is this a true restriction?  Custom metaclasses may allow
   ;; more kinds of `bases' in their __new__(...) ?
   
@@ -280,11 +282,6 @@
 		    cls metaclass))
 	    
 	    cls))))))
-	  
-	  
-	  
-	   
-
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -420,24 +417,30 @@
 
 (defclass py-function (standard-generic-function py-core-object py-dict-mixin)
   ;; mop:funcallable-standard-class defines :name initarg, but I don't know how to access it...
-  ((name :initarg :name :accessor py-function-name))
+  ((name         :initarg :name         :accessor py-function-name)
+   (context-name :initarg :context-name :accessor py-function-context-name))
   (:metaclass funcallable-python-class))
 
-(defmethod make-py-function ((name symbol) (f function))
-  (let ((x (make-instance 'py-function :name name)))
-    (mop:set-funcallable-instance-function x f)
+(defun make-py-function (&key name context-name lambda)
+  (let ((x (make-instance 'py-function :name name :context-name context-name)))
+    (mop:set-funcallable-instance-function x lambda)
     ;; fill dict?
     x))
 
 (def-py-method py-function.__get__ (func obj class)
-  (if (or (null obj) (none-p obj))
-      (make-instance 'py-unbound-method :func func :class class)
-    (make-instance 'py-bound-method :func func :instance obj)))
+  (cond ((eq func #'py-function.__get__)
+	 (break "eq py-f.__get__"))
+	((or (null obj) (none-p obj))
+	 (make-instance 'py-unbound-method :func func :class class))
+	(t
+	 (make-instance 'py-bound-method :func func :instance obj))))
 
 (def-py-method py-function.__repr__ (func)
   (with-output-to-string (s)
     (print-unreadable-object (func s :identity t)
-      (format s "python-function ~A" (py-function-name func)))))
+      (format s "python-function ~A (~A)" 
+	      (py-function-name func)
+	      (py-function-context-name func)))))
 
 ;; Method (Core object)
 
@@ -446,7 +449,7 @@
   (:metaclass py-core-type))
 
 (def-py-method py-method.__get__ (func obj class)
-  (declare (ignore obj class))
+  (break "py-method.__get__ (func, .. ..) -> func?!  (~A and ~A)" obj class)
   func)
 
 (defclass py-bound-method (py-method)
@@ -462,6 +465,28 @@
 (def-py-method py-bound-method.__call__ (x &rest args)
   (with-slots (func instance) x
     (apply #'py-call func instance args)))
+
+(def-py-method py-bound-method.__get__ (x &rest args)
+  
+  ;; Somewhat surprisingly, when a bound method is __get__ again, the
+  ;; underlying function is bound again:
+  ;; 
+  ;; >>> class C:
+  ;; ...   def m(self): pass
+  ;; ... 
+  ;; >>> x,y = C(), C()
+  ;; >>> m = x.m
+  ;; >>> m
+  ;; <bound method C.m of <__main__.C instance at 0x4021e8ec>>
+  ;; >>> m2 = m.__get__(y,C)
+  ;; >>> m2
+  ;; <bound method C.m of <__main__.C instance at 0x4021e92c>>
+  ;; >>> x
+  ;; <__main__.C instance at 0x4021e8ec>
+  ;; >>> y
+  ;; <__main__.C instance at 0x4021e92c>
+  
+  (apply #'py-call (recursive-class-lookup-and-bind (py-method-func x) '__get__) args))
 
 (defclass py-unbound-method (py-method)
   ((class :initarg :class :accessor py-method-class))
@@ -636,10 +661,23 @@
 ;; Object (User object)
 
 (defun bind-val (val x x.class)
+  #+(or)
+  (when (eq val #'py-function.__get__)
+    (warn "bind-val of py-fuction.__get__")
+    ;; .__get__ is a "method-wrapper" in CPython. Special binding
+    ;; behaviour. For now, the following seems to fake it well enough.
+    (return-from bind-val
+      (excl:named-function (method-wrapper for __get__)
+	(lambda (&rest args)
+	  (assert (functionp (pop args)))  ;; it's the lambda itself
+	  (apply #'bind-val x args)))))
+  
+  #+(or)(break "bind-val of #'py-function.__get__: ~A ~A" x x.class)
+  
   (let ((get-meth (recursive-class-dict-lookup
 		   (py-class-of val) '__get__)))
     (if get-meth
-	(py-call get-meth val x x.class)
+	(py-call get-meth val (or x *the-none*) (or x.class *the-none*))
       val)))
 
 (def-py-method py-object.__getattribute__ (x attr)
@@ -916,11 +954,19 @@
 	  (return-from py-module.__getattribute__ val)))
       
       (py-raise 'AttributeError "Module ~A has no attribute ~A" x attr.sym))))
-			     
+
+
+(defvar *mod-func-ht* (make-hash-table :test #'equal))
+    
 (defun py-import (mod-name mod-globals-names mod-globals-values mod-dyn-globals-ht)
   (let* ((*current-module-name* (string mod-name))
 	 (file-ast (parse-python-file (format nil "~A.py" mod-name)))
-	 (mod-func (compile nil `(lambda () ,file-ast)))
+	 (mod-func (or (gethash file-ast *mod-func-ht*)
+		       (progn (warn "compiling module ~A (not in cache) ~A" mod-name *mod-func-ht*)
+			      (let ((f (compile nil `(lambda () ,file-ast))))
+				(setf (gethash file-ast *mod-func-ht*) f)
+				(warn "compiled module added to cache: ~A" *mod-func-ht*)
+				f))))
 	 (mod-obj (funcall mod-func)))
     (declare (special *current-module-name*))
     (loop for x across mod-globals-names and i from 0
@@ -1524,7 +1570,7 @@
   
   (:method :around (f &rest args)
 	   (if (some #'null args)
-	       (error "One of the arguments for (PY-CALL ~A ...) is NIL. Args: ~S"
+	       (break "One of the arguments for (PY-CALL ~A ...) is NIL. Args: ~S"
 		      f args)
 	     (call-next-method)))
 	   

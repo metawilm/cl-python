@@ -15,10 +15,10 @@
   ("repl"    (:uses-definitions-from "package"))
   ("formatstring"    (:uses-definitions-from "package"))
   
-  ("builtin-classes" (:uses-definitions-from "package" "formatstring"))
-  ("exceptions"      (:uses-definitions-from "builtin-classes"))
-  ("builtins"        (:uses-definitions-from "exceptions" "builtin-classes"))
-  ("optimize"        (:uses-definitions-from "builtin-classes" "builtins"))
+  ("classes"     (:uses-definitions-from "package" "formatstring"))
+  ("exceptions"  (:uses-definitions-from "classes"))
+  ("builtins"    (:uses-definitions-from "exceptions" "classes"))
+  ("optimize"    (:uses-definitions-from "classes" "builtins"))
   
   ("parser"  (:uses-definitions-from "package"))
   ("lexer"   (:uses-definitions-from "parser")) ;; parser macro: with-terminal-code
@@ -26,7 +26,7 @@
   
   ("compiler" (:uses-definitions-from "builtins" "walk" "run")) ;; fill asts, parse-python-string
   
-  ("builtin-classes" (:uses-definitions-from "pyprint")) ;; py-pprint
+  ("classes" (:uses-definitions-from "pyprint" "formatstring")) ;; py-pprint
   )
 
 

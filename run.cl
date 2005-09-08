@@ -1,6 +1,6 @@
 (in-package :python)
 
-;; Interface to the parser and lexer.
+;;; Interface to the parser and lexer.
 
 (defun parse-python-with-lexer (&rest lex-options)
   (let* ((lexer (apply #'make-py-lexer lex-options))
@@ -59,6 +59,19 @@
 		    (assert (and c (> next-i 0) (char= c (char s (1- next-i)))))
 		    (decf next-i)))))
 
-#+(or)
-(defun file->ast (fname)
-  (parse-python-string (read-file fname)))
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
