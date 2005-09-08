@@ -1521,6 +1521,13 @@
 ;;; Calling objects (functions, classes, instances)
 
 (defgeneric py-call (f &rest args)
+  
+  (:method :around (f &rest args)
+	   (if (some #'null args)
+	       (error "One of the arguments for (PY-CALL ~A ...) is NIL. Args: ~S"
+		      f args)
+	     (call-next-method)))
+	   
   (:method ((f null) &rest args)
 	   (error "PY-CALL of NIL"))
   (:method ((f t) &rest args)
