@@ -578,11 +578,12 @@
 				  #.*package*))
 		 
 		 (func-lambda
-		 `(py-arg-function
-		    ,fname (,lambda-pos-args 
-			    ,(loop for ((nil name) val) in key-args collect `(,name ,val))
-			    ,(when *-arg  (second *-arg))
-			    ,(when **-arg (second **-arg)))
+		  `(py-arg-function
+		    ,context-fname
+		    (,lambda-pos-args 
+		     ,(loop for ((nil name) val) in key-args collect `(,name ,val))
+		     ,(when *-arg  (second *-arg))
+		     ,(when **-arg (second **-arg)))
 		    
 		    (let ,(loop for loc in func-locals collect `(,loc :unbound))
 		      
@@ -611,9 +612,11 @@
 			    
 			    ,(if (generator-ast-p suite)
 				 
-				 `(return-stmt ,(rewrite-generator-funcdef-suite fname suite))
+				 `(return-stmt
+				   ,(rewrite-generator-funcdef-suite context-fname suite))
 			       
-			       suite))))))))
+			       `(progn ,suite
+				       *the-none*)))))))))
 	    
 	    (if (keywordp fname)
 		
@@ -758,7 +761,7 @@
   ;; XXX maybe the resulting LAMBDA results in more code than
   ;; necessary for the just one expression it contains.
   
-  `(funcdef-stmt nil :lambda ,args (suite-stmt (,expr))))
+  `(funcdef-stmt nil :lambda ,args (suite-stmt ((return-stmt ,expr)))))
   
 
 (defmacro listcompr-expr (item for-in/if-clauses)
@@ -892,7 +895,7 @@
 
 (defmacro return-stmt (val &environment e)
   (if (get-pydecl :inside-function-p e)
-      `(return-from :function-body ,val)
+      `(return-from :function-body ,(or val *the-none*))
     (py-raise 'SyntaxError "RETURN found outside function")))
 
 (defmacro slice-expr (start stop step)
@@ -972,7 +975,7 @@
   `(unwind-protect
        
        (handler-case ,try-suite
-	 (Exception ())
+	 (Exception (e) (warn "try/finally caught exception: ~S" e))
 	 (error (e) (break "try/finally: in the TRY block, Lisp condition ~A occured" e)))
      
      ,finally-suite))

@@ -73,7 +73,7 @@ class Scanner(object):
                 continue
             if col != self.indents[-1]:
                 while col < self.indents[-1]:
-                    print "yielding DEDENT-1"
+                    #print "yielding DEDENT-1"
                     yield DEDENT, ''
                     del self.indents[-1]
                 # This will yield DEDENT + INDENT for inconsistent dedent
@@ -128,7 +128,7 @@ class Scanner(object):
             nextc = getc()
             if not nextc:
                 while self.indents[-1]:
-                    print "yielding DEDENT-2"
+                    #print "yielding DEDENT-2"
                     yield DEDENT, ''
                     del self.indents[-1]
                 break
@@ -284,6 +284,7 @@ class Function(object):
 
 class Generator(Function):
     def __call__(self, *args):
+        #print "Generator.__call__ %r" % (args,)
         check(len(args), len(self.args))
         locals = self.makeLocals(zip(self.args, args))
         try:
@@ -451,6 +452,7 @@ class Binop(Node):
         return "%s(%r, %r, %r)" % (self.__class__.__name__,
                                    self.left, self.op, self.right)
     def eval(self, globals, locals):
+        #print "Binop.eval %s %s %s" % (self.op, self.left, self.right)
         return self.opeval(self.left.eval(globals, locals),
                            self.right.eval(globals, locals))
 class Attribute(Node):
@@ -491,6 +493,7 @@ class Literal(Node):
         self.literal = literal
         self.value = self.evalit()
     def eval(self, globals, locals):
+        #print "Literal.eval %r -> %r" % (self, self.value)
         return self.value
     def __repr__(self):
         return "%s(%r)" % (self.__class__.__name__, self.literal)
@@ -535,6 +538,7 @@ class String(Literal):
         return "".join(L)
 class Number(Literal):
     def evalit(self):
+        #print "Number.evalit %s -> %r -> %r" % (self, self.literal, int(self.literal))
         return int(self.literal)
 class Name(Node):
     def __init__(self, name):
@@ -542,14 +546,20 @@ class Name(Node):
     def __repr__(self):
         return "Name(%r)" % self.name
     def eval(self, globals, locals):
+        #print "Name.eval %s %s %s" % (self, globals, locals)
         if self.name in locals:
+            #print " ->locals: %r" % locals[self.name]
             return locals[self.name]
         if self.name in globals:
+            #print " ->globals: %r" % globals[self.name]
             return globals[self.name]
         if self.name == 'ord':
+            #print " -> func ord"
             return ord
         if self.name == 'len':
+            #print " -> func len"
             return len
+        #print "XXX no value found for %r!" % self.name
         raise NameError(self.name)
     def assign(self, value, globals, locals):
         locals[self.name] = value
@@ -733,14 +743,18 @@ class Str(str):
 
 class OutputFile(object):
     def __init__(self):
-        print "OutputFile: __init__ or reset", self
+        #print "OutputFile: __init__ or reset", self
         self.data = []
         self.softspace = True
     reset = __init__
     def write(self, s):
+        #print "write: %r" % s
+        #brek()
+        #raise Willem
         #print "writing to OutputFile", self, s
         self.data.append(s)
     def getvalue(self):
+        print "getvalue: data=%r" % self.data
         r = "".join(self.data)
         self.data = List()
         return r
@@ -784,8 +798,12 @@ def myhash(s, ord=ord):
     return x^len(s)
 
 def checkoutput(n=0):
-    brek("checkoutput", n, output)
+    #try:
+    #  brek("checkoutput", n, output)
+    #except NameError:
+    #  pass
     outputtext = output.getvalue()
+    print "outputtext: %r" % outputtext
     h = strhash(outputtext)
     print "checkoutput: strhash=", h, "n=", n
     check(h, n)
@@ -830,24 +848,27 @@ class instrumentCall(object):
         self.obj = obj
     def __call__(self, *args):
         global indent
-        print "*__call__ before, indent=", len(indent)
+        #print "*__call__ before, indent=", len(indent)
         oldindent = indent
         try:
             indent = indent + " "
-            print "=before argreps"
-            print " repr: ", repr
-            print " args: ", args
+            #print "=indent pre"
+            #print "=indent: %s" % len(indent)
+            #print " repr: ", repr
+            #print " args: ", args
             argreprs = map(repr, args)
             for i, s in enumerate(argreprs):
                 s = cleanup(s)
                 if len(s) >= 45:
                     s = s[:20] + "..." + s[-20:]
                 argreprs[i] = s
+            #print "indent=%r %r" % (indent, self.name)
             writeln(indent + "%s(%r)" % (self.name, ", ".join(argreprs)))
+            #writeln(">" + indent + "%s(%r)" % (self.name, ", ".join(argreprs)))
             try:
                 #print "self: ", self
                 #raise "self, self.obj", (self, self.obj)
-                print "=2 self.obj: ", self.obj
+                #print "=2 self.obj: ", self.obj
                 #print "=2 args: ", args
                 #brek()
                 result = self.obj(*args)
@@ -859,11 +880,12 @@ class instrumentCall(object):
                 if result is None:
                     writeln(indent + "return")
                 else:
+                    #print "result= ", result
                     writeln(indent + "return %r" % (result,))
                 return result
         finally:
             indent = oldindent
-            print "*__call__ after, indent=", len(indent)
+            #print "*__call__ after, indent=", len(indent)
 
 def instrumentTree(base):
     instrumentClass(base)
@@ -909,24 +931,44 @@ def main():
     env = Dict()
     print "aap 3"
     eval(root, env, env)
+    print "aap 4"
     g = env['pi']()
+    print "aap 5: g=%r" % g
     for i in range(1000):
         write(g.next())
+    print "aap 6"
     writeln('')
+    print "aap 7"
     strhash = env['strhash']
+    print "aap 8"
 
     for x in '', 'x', 'abc', 'abc'*100:
         check(strhash(x), myhash(x))
+    print "aap 9"
 
     strhash = myhash
     checkoutput(3960406533)  # using hash function 'myhash'
 
+    print "aap 10"
+
     it = Clone(getcFromString(unicode(sample, "utf8")))
+    print "aap 11"
+
     it2 = Clone(it)
+    print "aap 12"
+
     scanner = Scanner(it.next).tokenize()
+    print "aap 13"
+
     parser = Parser(scanner)
+    print "aap 14"
+
     root = parser.parse()
+    print "aap 15"
+
     checkoutput(1308798191)
+    print "aap 16"
+
     env = Dict()
     eval(root, env, env)
     g = env['pi']()
@@ -935,7 +977,6 @@ def main():
     writeln()
     checkoutput(3960406533)
 
-def main2():
     instrumentTree(Node)
     scanner = Clone(Scanner(it2.next).tokenize())
     scanner2 = Clone(scanner)

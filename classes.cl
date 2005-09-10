@@ -1142,22 +1142,67 @@
        ,dict)))
 
 (def-py-method py-dict.__new__ :static (cls &rest kwargs)
-  (let ((ht (loop 
-		with ht = (make-dict)
-		for key = (pop kwargs)
-		for val = (pop kwargs)
-		while key
-		do (setf (gethash (py-symbol->string key) ht) val)
-		finally (return ht))))
-    (if (eq cls (load-time-value (find-class 'py-dict)))
-	ht
-      (make-instance cls :lisp-object ht))))
+	       (let ((ht (make-dict)))
+		 (case (length kwargs)
+		   (0 (make-dict))
+		   (1 (let* ((a (car kwargs))
+			     (items-meth (recursive-class-lookup-and-bind a 'items))
+			     (items (if items-meth
+					(py-call items-meth)
+				      (py-iterate->lisp-list a))))
+			(loop for i in items
+			    for kv = (py-iterate->lisp-list i)
+			    if (= (length kv) 2)
+			    do (setf (gethash (pop kv) ht) (pop kv))
+			    else do (py-raise 'ValueError
+					      "dict.__new__: the items should be key-val ~
+                                               pairs; got ~S (in ~S)" kv a))))
+		   (t (loop 
+			  for key = (let ((k (pop kwargs)))
+				      (unless (symbolp k)
+					(py-raise 'TypeError
+						  "dict.__new__: invalid key-val arg format: ~
+                                                   ~S in ~S" k kwargs))
+				      k)
+			  for val = (when key
+				      (or (pop kwargs)
+					  (error "dict.__new__: no val for key ~S in ~S"
+						 key kwargs)))
+			  while key
+			  do (setf (gethash (py-symbol->string key) ht) val))))
+		 
+		 (if (eq cls (load-time-value (find-class 'py-dict)))
+		     ht
+		   (make-instance cls :lisp-object ht))))
 
-				
-(def-py-method py-dict.__str__ (x^)
-  (with-output-to-string (s)
-    (print-unreadable-object (x s :identity t)
-      (format s "dict with ~A items" (hash-table-count x)))))
+(def-py-method py-dict.__eq__ (dict^ dict2)
+  (assert (eq (class-of dict2)
+	      (load-time-value (find-class 'hash-table))) () "py-dict.__eq__ wants two real dicts")
+  (let ((res1 (sort (loop for k being the hash-key in dict
+			using (hash-value v)
+			collect (cons k v))
+		    #'< :key #'car))
+	(res2 (sort (loop for k being the hash-key in dict2
+			using (hash-value v)
+			collect (cons k v))
+		    #'< :key #'car)))
+    
+    #+(or)(warn "~A ~A" res1 res2)
+    (py-bool (equalp res1 res2))))
+
+(def-py-method py-dict.__getitem__ (dict^ key)
+  (let ((key2 (if (symbolp key) (symbol-name key) key)))
+    (or (gethash key2 dict)
+	(py-raise 'KeyError "Dict has no such key: ~A" key2))))
+
+(def-py-method py-dict.__iter__ (dict^)
+  (with-hash-table-iterator (next-func dict)
+    (make-iterator-from-function
+     :name :py-dict-iterator
+     :func (lambda () (multiple-value-bind (ret key val) 
+			  (next-func)
+			(declare (ignore val))
+			(when ret key))))))
 
 (def-py-method py-dict.__repr__ (x^)
   (with-output-to-string (s)
@@ -1177,34 +1222,11 @@
   (let ((key2 (if (symbolp key) (symbol-name key) key)))
     (setf (gethash key2 dict) val)))
 
-(def-py-method py-dict.__getitem__ (dict^ key)
-  (let ((key2 (if (symbolp key) (symbol-name key) key)))
-    (or (gethash key2 dict)
-	(py-raise 'KeyError "Dict has no such key: ~A" key2))))
+(def-py-method py-dict.__str__ (x^)
+  (with-output-to-string (s)
+    (print-unreadable-object (x s :identity t)
+      (format s "dict with ~A items" (hash-table-count x)))))
 
-(def-py-method py-dict.__iter__ (dict^)
-  (with-hash-table-iterator (next-func dict)
-    (make-iterator-from-function
-     :name :py-dict-iterator
-     :func (lambda () (multiple-value-bind (ret key val) 
-			  (next-func)
-			(declare (ignore val))
-			(when ret key))))))
-
-(def-py-method py-dict.__eq__ (dict^ dict2)
-  (assert (eq (class-of dict2)
-	      (load-time-value (find-class 'hash-table))) () "py-dict.__eq__ wants two real dicts")
-  (let ((res1 (sort (loop for k being the hash-key in dict
-			using (hash-value v)
-			collect (cons k v))
-		    #'< :key #'car))
-	(res2 (sort (loop for k being the hash-key in dict2
-			using (hash-value v)
-			collect (cons k v))
-		    #'< :key #'car)))
-    
-    #+(or)(warn "~A ~A" res1 res2)
-    (py-bool (equalp res1 res2))))
 
 (def-py-method py-dict.fromkeys :static (seq &optional val)
 	       (unless val
@@ -1213,7 +1235,11 @@
 		 (map-over-py-object (lambda (key) (setf (gethash key d) val))
 				     seq)
 		 d))
-  
+
+(def-py-method py-dict.keys (x^)
+  (make-py-list-from-list
+   (loop for k being the hash-key in x
+       collect k)))
 
 ;; List (Lisp object: adjustable array)
 
@@ -1346,7 +1372,15 @@
 		   val
 		 (make-instance cls :lisp-object val)))
 
-(def-py-method py-string.__len__  (x^)  (length x))
+
+(def-py-method py-string.__add__ (x^ y^) (concatenate 'string
+					   (the string x) (the string y)))
+
+(def-py-method py-string.__cmp__ (x^ y^)
+  (cond ((not (stringp y)) -1) ;; whatever
+	((string< x y) -1)
+	((string= x y)  0)
+	(t              1)))
 
 (def-py-method py-string.__iter__ (x^)
   (make-iterator-from-function :name :string-iterator
@@ -1377,23 +1411,31 @@
 		       (subseq x start (1- (length x))))
 		      (t (break "unhandled py-string.__getitem__ slice ~A" item)))))))
 
-    
-(def-py-method py-string.__str__  (x^)  x)
-(def-py-method py-string.__repr__ (x^)  (with-output-to-string (s)
-					  (py-pprint s x)))
-(def-py-method py-string.__add__ (x^ y^) (concatenate 'string
-					   (the string x) (the string y)))
 (def-py-method py-string.__hash__ (x^) (sxhash x))
 
-(def-py-method py-string.__cmp__ (x^ y^)
-  (cond ((not (stringp y)) -1) ;; whatever
-	((string< x y) -1)
-	((string= x y)  0)
-	(t              1)))
+(def-py-method py-string.__len__  (x^)  (length x))
 
 (def-py-method py-string.__mod__ (x^ args)
   (let ((fs-struct (ensure-parsed-format-string x)))
     (make-formatted-string fs-struct args)))
+
+(def-py-method py-string.__mul__ (x^ n^)
+  (unless (typep n '(integer 0 *))
+    (py-raise 'TypeError "str.__mul__: arg must be nonzero integer (got: ~S)" n))
+  (if (or (= n 0)
+	  (= (length x) 0))
+      ""
+    (let ((res (make-array (* n (length x)) :element-type 'character)))
+      (loop for i from 0 below n
+	  do (loop for xi from 0 below (length x)
+		 do (setf (aref res (+ (* i (length x)) xi))
+		      (aref x xi))))
+      res)))
+
+(def-py-method py-string.__repr__ (x^)  (with-output-to-string (s)
+					  (py-pprint s x)))
+
+(def-py-method py-string.__str__  (x^)  x)
 
 
 (def-py-method py-string.isspace (x^)
@@ -1469,6 +1511,9 @@
    :func (let ((i -1))
 	   (lambda ()
 	     (nth (incf i) x)))))
+
+(def-py-method py-tuple.__len__ (x^)
+  (length x))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;  
 
@@ -2055,33 +2100,64 @@ next value gotten by iterating over X. Returns NIL, NIL upon exhaustion.")
       (let ((f (get-py-iterate-fun x)))
 	(make-iterator-from-function f)))))
 
+(defvar *stdout-softspace* 0 "should a space be printed in front of next arg?")
 
 (defun py-print (dest items comma?)
   
   (let ((*print-pretty* nil))
     
-    (if dest
-	
-	(let ((write-func (py-object.__getattribute__ dest 'write)
-			   #+(or)(recursive-class-lookup-and-bind dest 'write))
-	      (is-first t))
-	  (dolist (x items)
-	    (if is-first
-		(setf is-first nil)
-	      (py-call write-func " "))
-	    (py-call write-func (py-str-string x)))
-	  
-	  (unless comma?
-	    (py-call write-func #\Newline)))
-	     
-      (progn (let ((is-first t))
-	       (dolist (x items)
-		 (if is-first
-		     (setf is-first nil)
-		   (write-char #\Space t))
-		 (write-string (py-str-string x) t)))
-	     (unless comma?
-	       (write-char #\Newline t))))))
-  
-  
+    (let* ((write-func (if dest 
+			   (py-object.__getattribute__ dest 'write)
+			 #'write-string))
+	   
+	   (softspace-val (if dest
+			      (handler-case 
+				  (py-attr dest 'softspace)
+			      
+				(Exception (c) (progn 
+						 (warn "PY-PRINT: exception while retrieving ~
+                                                    'softspace: ~S" c)
+						 nil))
+				(error (c) (progn (warn "PY-PRINT: getting attr 'softspace of ~S ~
+                                                     gave Lisp error: ~S" dest c)
+						  nil)))
+			    *stdout-softspace*))
+	   (softspace-p (py-val->lisp-bool softspace-val))
+	   
+	   (last-char-written nil))
+      
+      (loop
+	  for x in items
+	  for i from 0
+	  do (when (or (> i 0)
+		       (and (= i 0) softspace-p))
+	       (py-call write-func " "))
+
+	     (let ((s (py-str-string x)))
+	       (py-call write-func s)
+	       (setf last-char-written (aref s (1- (length s)))))) 
+      
+      (cond ((and comma? (not (eql last-char-written #\Newline))) ;; right logic? 
+	     (if dest 
+		 (setf (py-attr dest 'softspace) *the-true*)
+	       (setf *stdout-softspace* *the-true*)))
+	    
+	    ((and comma? (eql last-char-written #\Newline))
+	     (if dest
+		 (setf (py-attr dest 'softspace) *the-false*)
+	       (setf *stdout-softspace* *the-false*)))
+	    
+	    (t
+	     (if dest
+		 (setf (py-attr dest 'softspace) *the-false*)
+	       (setf *stdout-softspace* *the-false*))
+	     (py-call write-func (string #\Newline)))))))
+
+
+
+
+
+
+
+
 

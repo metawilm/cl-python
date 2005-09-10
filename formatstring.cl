@@ -11,21 +11,17 @@
 
 (defun make-formatted-string (fs arg)
   #+(or)(check-type fs format-string)
-  (let ((is-mapping-arg (not (subtypep (py-class-of arg) 'py-tuple)))
-	(is-mapping-fs  (ecase (fs-type-of-arg fs)
+  (let ((is-mapping-fs  (ecase (fs-type-of-arg fs)
 			  (:mapping t)
 			  (:list    nil))))
-    
-    (unless (eq is-mapping-arg is-mapping-fs)
-      (py-raise 'ValueError
-		(if is-mapping-fs 
-		    "Format string wants mapping arg, got tuple: ~A"
-		  "Format string wants tuple, got mapping arg: ~A.")
-		(fs-string fs)))
+    #+(or)
+    (when (and (not is-mapping-fs)
+	       (not (subtypep (py-class-of arg) 'py-tuple)))
+      (setf arg (make-tuple-from-list (list arg))))
     
     (loop
 	with string = (make-array 20 :element-type 'character :adjustable t :fill-pointer 0)
-		      
+	
 	with list-args = (unless is-mapping-fs
 			   (let ((args (deproxy arg)))
 			     
@@ -35,10 +31,12 @@
 			     (unless (= (length args) (fs-list-num-args fs))
 			       (py-raise 
 				'ValueError "Wrong number of arguments for format string ~
-                                             (wanted ~A, got ~A)" (fs-list-num-args fs) (length args)))
+                                             (wanted ~A, got ~A)"
+				(fs-list-num-args fs) (length args)))
 			     args))
 				 
-	with mapping-getitem = (when is-mapping-fs (recursive-class-lookup-and-bind arg '__getitem__))
+	with mapping-getitem = (when is-mapping-fs
+				 (recursive-class-lookup-and-bind arg '__getitem__))
 			       
 	for rec across (fs-recipes fs)
 	do (ecase (pop rec)
