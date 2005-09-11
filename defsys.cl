@@ -3,6 +3,8 @@
 
 (in-package :user)
 
+(declaim (optimize (debug 3)))
+
 ;; (setf compiler::*compile-with-compilation-unit-override* nil)
 
 (excl:defsystem :python

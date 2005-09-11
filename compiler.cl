@@ -1,5 +1,7 @@
 (in-package :python)
 
+(declaim (optimize (debug 3)))
+
 ;;; Python compiler
 
 ;; Translates a Python module AST into a Lisp function.
@@ -976,7 +978,9 @@
        
        (handler-case ,try-suite
 	 (Exception (e) (warn "try/finally caught exception: ~S" e))
-	 (error (e) (break "try/finally: in the TRY block, Lisp condition ~A occured" e)))
+	 
+	 #+(or)(error (e) ;; don't catch Lisp errors
+		 (warn "try/finally: in the TRY block, Lisp condition ~A occured" e)))
      
      ,finally-suite))
   
@@ -1348,7 +1352,7 @@
 		   ,@(when **-arg
 		       `((,**-arg  (svref arg-val-vec ,(1+ num-pos-key-args))))))
 	       
-	       (locally (declare #+(or)(optimize (speed 3) (safety 1)))
+	       (locally (declare (optimize (debug 3)))
 		 ,@body))))))))
 
 (defstruct (func-args (:type vector) (:conc-name fa-) (:constructor make-fa))

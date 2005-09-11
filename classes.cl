@@ -401,6 +401,8 @@
     (print-object func s)))
 
 (def-py-method py-lisp-function.__get__ (func inst cls)
+  (when (eq func #'py-lisp-function.__get__)
+      (break "py-lisp-fuction.__get__ self: ~S ~S" inst cls))
   (if (and inst (not (eq inst *the-none*)))
       (make-instance 'py-bound-method :instance inst :func func)
     (if (and cls (not (eq cls *the-none*)))
@@ -441,6 +443,9 @@
       (format s "python-function ~A (~A)" 
 	      (py-function-name func)
 	      (py-function-context-name func)))))
+
+(def-py-method py-function.__call__ (func)
+  func)
 
 ;; Method (Core object)
 
@@ -498,11 +503,15 @@
       (with-slots (class func) x
 	(format s "~A.~A" class func)))))
 
+(def-py-method py-unbound-method.__call__ (x &rest args)
+  (with-slots (class func) x
+    (apply #'py-call func x args)))
+
 (defclass py-static-method (py-method)
   ()
   (:metaclass py-core-type))
 
-(def-py-method py-static-method.__new__ (cls func)
+(def-py-method py-static-method.__new__ :static (cls func)
   (assert (eq cls (load-time-value (find-class 'py-static-method))))
   (make-instance 'py-static-method :func func))
 
@@ -581,13 +590,153 @@
   (:metaclass py-core-type))
 
 (defun make-slice (start stop step)
-  #+(or)(break "make-slice ~A ~A ~A" start stop step)
-  (when (eq start *the-none*) (setf start nil))
-  (when (eq stop *the-none*)  (setf stop nil))
-  (when (eq step *the-none*)  (setf step nil))
-	    
   (make-instance 'py-slice :start start :stop stop :step step))
+
+(def-py-method py-slice.indices (x^ length^)
+  "Return tuple of three integers: START, STOP, STEP.
+In case of empty range, returns (0,0,1)."
   
+  (setf length (py-val->integer length :min 0))
+  
+  (multiple-value-bind (start stop step)
+      (destructuring-bind (kind &rest args)
+	  (slice-indices x length)
+	(ecase kind
+	  
+	  ((:empty-slice-bogus :empty-slice-before :empty-slice-after :empty-slice-between)
+	   (values 0 0 1))
+	  
+	  (:nonempty-slice
+	   (destructuring-bind (start stop num) args
+	     (declare (ignore num))
+	     (values start (1+ stop) 1)))
+	  
+	  (:nonempty-stepped-slice
+	   (destructuring-bind (start stop step num) args
+	     (declare (ignore num))
+	     (values start stop step)))))
+    
+    (make-tuple-from-list (list start stop step))))
+
+
+;; XXX THis comment ignores fourth value for extended stepped slices
+;; 
+;; Function SLICE-INDICES returns multiple values, best explained by example:
+;; Assume x = [0,1,2] so LENGTH = 3
+;; 
+;;  -slice- -extr- -assignment-                -values- 
+;;  x[:0]    []     x[:0] = [42] => [42,0,1,2] :empty-slice-before
+;;  x[3:]    []     x[3:] = [42] => [0,1,2,42] :empty-slice-after
+;;  x[1:1]   []     x[1:1] = [42]=> [0,42,1,2] :empty-slice-between 0 1  = BEFORE-I, AFTER-I
+;;  x[1:2]   [1]    x[1:2] = [42]=> [0,42,2]   :nonempty-slice 1 1       = FIRST-I, LAST-I
+;;  x[1:]    [1,2]  x[1:] = [42] => [0,42]     :nonempty-slice 1 2
+;;  x[:1]    [0]    x[:1] = [42] => [42,1 2]   :nonempty-slice 0 0
+;;  x[:] [0,1,2](copy) x[:] = [42] => [42](modifies) :nonempty-slice 0 2
+;;  x[2:1]   []     (error)                    :empty-slice-bogus
+;;  x[100:200] []                              :empty-slice-bogus
+;; 
+;; These have implicit step=1. Other steps result in a `stepped-slice'
+;; Now with other step values, using x = range(10) = [0,1,2,3,4,5,6,7,8,9] so LENGTH = 10
+;;
+;;  -slice-   -extr-       -assignment-                -values- 
+;;  x[::0]    - - - - - step=0 is error - - - - - - - - - - - - - - - -
+;;  x[::2]    [0,2,4,6,8]  :extended-slice 0 9 2       = FIRST LAST STEP
+;;  x[::-2]   [9,7,5,4,1]  x[..] = [1,2,3,4,5] =>      :nonempty-stepped-slice 9 1 -2
+;;                           [0, 5, 2, 4, 4, 3, 6, 2, 8, 1]
+;;  x[0:2:-1] []           (error)                     (error)
+;;  x[100:200:2] []        (error)                     :empty-slice-bogus
+;;  x[0:0:4]  []           x[..] = [] => ok            :empty-slice-bogus
+;;  x[0:1:4]  [0]          x[..] = [42] => [42, 2, ..] :nonempty-stepped-slice 0 0 4
+;; 
+;; Assigning to a stepped-slice can only when the thing assigned
+;; containes the same number of items as teh stepped slice. For an
+;; empty-slice-bogus, this means only the empty list (or another
+;; iterable containing 0 items) can be assigned to it.
+
+(defmethod slice-indices ((x py-slice) (length integer))
+  "Return three integers: START, STOP, STEP.
+START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
+  (let* ((start      (or (slot-value x 'start) *the-none*)) ;; not with-slots: assigned to
+	 (stop       (or (slot-value x 'stop)  *the-none*))
+	 (step       (or (slot-value x 'step)  *the-none*))
+	 reversed-p)
+    
+    (setf step  (if (eq step *the-none*) 1 (py-val->integer step))
+	  
+	  reversed-p (< step 0)
+	  
+	  start (if (eq start *the-none*) 
+		    (if reversed-p (1- length) 0)
+		  (py-val->integer start))
+	  
+	  stop  (if (eq stop *the-none*)
+		    (if reversed-p -1 length)
+		  (py-val->integer stop)))
+    
+    (assert (every #'integerp (list start stop step)))
+    #+(or)(warn "a: start,stop = ~A,~A" start stop)
+    (when (< start 0) (incf start length))
+    (when (< stop  0) (unless (and reversed-p (= stop -1)) ;; XXX right?
+			(incf stop length)))
+    #+(or)(warn "b: start,stop = ~A,~A" start stop)
+    (cond ((= step 0)
+	   (py-raise 'ValueError "Slice step cannot be zero (got: ~S)" x))
+	  
+	  ((or (and (> step 0) (or (> start length)
+				   (< stop 0)
+				   (> start stop)))
+	       (and (< step 0) (or (< start 0)
+				   (>= stop length)
+				   (< start stop))))
+	   (values :empty-slice-bogus))
+	    
+	  ((= step 1)
+	   (setf start (max 0 start)
+		 stop (min length stop))
+	   (assert (<= 0 start stop length))
+	   (cond ((= start stop)
+		  (cond ((= start 0)      (values :empty-slice-before))
+			((= start length) (values :empty-slice-after))
+			(t                (values :empty-slice-between (1- start) start))))
+		 
+		 ((< start stop)
+		  (values :nonempty-slice start (1- stop) (- stop start)))))
+	  
+	  ((/= step 1)
+	   (cond ((= start stop) (values :empty-slice-bogus))
+		   
+		 ((and (> step 0) (< start stop))
+		  (let* ((start (max start 0))
+			 (stop  (min (1- stop) (1- length)))
+			 (num-increments (floor (- stop start) step))
+			 (real-stop (+ start (* step num-increments))))
+		    
+		    (assert (<= 0 start real-stop stop (1- length)) ()
+		      "not (<= 0 start real-stop stop (1- length)): ~A"
+		      `(<= 0 ,start ,real-stop ,stop (1- ,length)))
+		    
+		    (values :nonempty-stepped-slice
+			    start real-stop step (1+ num-increments))))
+		 
+		 ((and (< step 0) (> start stop))
+		  (let* ((start (min start (1- length)))
+			 (stop  (max (incf stop) 0))
+			 (num-increments (floor (- stop start) step))
+			 (real-stop (- start (* (- step) num-increments))))
+		    
+		    (assert (<= 0 stop real-stop start (1- length)) ()
+		      "not (<= 0 stop real-stop start (1- length)): ~A"
+		      `(<= 0 ,stop ,real-stop ,start (1- ,length)))
+		    
+		    (values :nonempty-stepped-slice
+			    start real-stop step (1+ num-increments))))
+		 
+		 (t (break :unexpected))))
+	  
+	  (t (break :unexpected)))))
+
+
+
 
 (defclass py-super (py-core-object) ;; subclassable?
   ()
@@ -761,10 +910,10 @@
   (check-type attr symbol)
   (let ((d (dict x)))
     (cond ((null d) (py-raise 'TypeError
-			      "Object ~A has not attribute `~A' (not even a dict)." 
+			      "Object ~S has not attribute `~A' (not even a dict)." 
 			      x attr))
 	  ((remhash attr d))
-	  (t (py-raise 'ValueError "Object ~A has not attribute `~A' (but there is a dict)."
+	  (t (py-raise 'ValueError "Object ~S has not attribute `~A' (but there is a dict)."
 		       x attr)))))
 	  
 
@@ -859,6 +1008,9 @@
 (def-py-method py-type.__mro__ :attribute (x)
 	       (mop:class-precedence-list x))
 
+(def-py-method py-type.__subclasses__ (x)
+  (make-py-list-from-list (mop:class-direct-subclasses x)))
+
 (def-py-method py-type.__repr__ (x) ;; XXX deproxy not needed?
   (with-output-to-string (s)
     (print-unreadable-object (x s :identity t)
@@ -885,14 +1037,17 @@
 	   (make-instance 'py-dictless-object)))
 	
 	(t (let* ((__new__ (recursive-class-dict-lookup cls '__new__))
-		  (inst (apply #'py-call __new__ cls args)))
-	     
+		  #+(or)(dummy (progn
+			   (warn "~A" `(recursive-class-dict-lookup ,cls '__new__))
+			   (warn "~S.__new__ => ~S" cls __new__)))
+		  (inst (apply #'py-call __new__ cls args))) ;; including CLS as arg!
+	     (declare (ignore dummy))
 	     (when
 		 (subtypep (py-class-of inst) cls)
 		 #+(or)(typep inst cls)
 	       ;; don't do this when inst is not of type cls
-	       (let ((__init__ (recursive-class-dict-lookup (py-class-of inst) '__init__)))
-		 (apply #'py-call __init__ inst args)))
+	       (let ((__init__ (recursive-class-lookup-and-bind inst '__init__)))
+		 (apply #'py-call __init__ args)))
 	     
 	     (return-from py-type.__call__
 	       inst)))))
@@ -1296,15 +1451,53 @@
 	     (when (<= (incf i) max-i)
 	       (aref x i))))))
 
-(def-py-method py-list.__getitem__ (x^ item)
-  (check-type item integer)
-  (when (< item 0)
-    (incf item (length x)))
-  (unless (<= 0 item (1- (length x)))
-    (py-raise 'ValueError
-	      "<list>[i] : i outside range (got ~A, length list = ~A)"
-	      item (length x)))
-  (aref x item))
+(def-py-method py-list.__getitem__ (x^ item^)
+  (vector-getitem x item (lambda (x single-p)
+			   (if single-p x (make-py-list-from-list x)))))
+
+(defun vector-getitem (x item make-seq-func)
+  (typecase item
+    
+    (integer (when (< item 0)
+	       (incf item (length x)))
+	     (unless (<= 0 item (1- (length x)))
+	       (py-raise 'ValueError
+			 "<string>[i] : i outside range (got ~A, length string = ~A)"
+			 item (length x)))
+	     (funcall make-seq-func (aref x item) t))
+    
+    (py-slice (destructuring-bind (kind &rest args)
+		  (multiple-value-list (slice-indices item (length x)))
+		
+		(ecase kind
+	  
+		  ((:empty-slice-bogus
+		    :empty-slice-before :empty-slice-after :empty-slice-between)
+		   (funcall make-seq-func () nil))
+		  
+		  ((:nonempty-slice :nonempty-stepped-slice)
+		   (multiple-value-bind (items exp-num)
+		       (ecase kind
+			 
+			 (:nonempty-slice
+			  (destructuring-bind (start stop num) args
+			    (values (loop for i from start upto stop
+					collect (aref x i))
+				    num)))
+			 
+			 (:nonempty-stepped-slice
+			  (destructuring-bind (start stop step num) args
+			    (values (loop for i from start upto stop by step
+					collect (char x i))
+				    num))))
+		     (assert (= exp-num (length items)) ()
+		       "Expected ~A items, got ~A" exp-num (length items))
+		     
+		     (funcall make-seq-func items nil))))))
+    
+    (t (py-raise 'TypeError "Expected integer or slice as subscript; got: ~S."
+		 item))))
+
 
 (def-py-method py-list.__setitem__ (x^ item val)
   (check-type item integer)
@@ -1345,6 +1538,11 @@
 (def-py-method py-list.append (x^ y)
   (vector-push-extend y x))
 
+(def-py-method py-list.sort (x^ &optional fn)
+  (when fn
+    (break "ignored: sort fn ~S" fn))
+  (sort x #'py-<))
+
 (defmacro make-py-list-unevaled-list (items)
   (let ((vec '#:vec))
     `(let ((,vec (make-array ,(length items) :adjustable t :fill-pointer ,(length items))))
@@ -1366,16 +1564,114 @@
 
 (def-proxy-class py-string)
 
-(def-py-method py-string.__new__ :static (cls &optional (val ""))
-	       (assert (stringp val))
-	       (if (eq cls (find-class 'py-string))
-		   val
-		 (make-instance cls :lisp-object val)))
+(def-py-method py-string.__new__ :static (cls &optional (val "") unicode-encoding)
+	       (unless (stringp val)
+		 (setf val (py-str-string val))) ;; convert to string using __str__
+	       
+	       (let ((the-val
+		      (if unicode-encoding
+			  (py-decode-unicode val (py-val->string unicode-encoding))
+			val)))
+		 
+		 (if (eq cls (find-class 'py-string))
+		     the-val
+		   (make-instance cls :lisp-object the-val))))
+
+(defun py-unicode-external-format->lisp-external-format (name)
+  ;; Returns NAME, MAX-CHAR-CODE, MAX-ENCODED-OCTET-CODE
+  
+  ;; Based on:
+  ;;  http://meta.kabel.utwente.nl/specs/Python-Docs-2.3.3/lib/node127.html
+  ;;  http://www.franz.com/support/documentation/7.0/doc/iacl.htm#external-formats-1
+  ;; For now only ASCII and UTF-8 are supported.
+  
+  (setf name (string-downcase name))
+  (cond 
+   ((member name '("ascii" "646" "us") :test 'string=) 
+    (values :latin1 127 127))
+   
+   ((member name '("latin" "latin1" "latin-1") :test 'string=) 
+    (values :latin1 255 255))
+   
+   ((member name '("utf8" "utf_8" "utf-8" "utf" "u8") :test 'string=)
+    (values :utf8 #16x0010FFFF 255))
+   
+   (t (py-raise 'UnicodeError "Unrecognized Unicode external format: ~S" name))))
+
+(defun py-encode-unicode (string &optional (external-format "ascii") errors)
+  ;; The result is a string (containing characters), not a vector of
+  ;; octets, because Python doesn't have vectors. Python could use
+  ;; regular lists, but strings are immutable so more efficient.
+  ;; 
+  ;; A future version of Python will have a `byte vector' data type.
+  
+  (when errors
+    (error "TODO: errors parameter for unicode.encode"))
+
+  (multiple-value-bind (ex-format max-code max-octet-code)
+      (py-unicode-external-format->lisp-external-format external-format)
+    (declare (ignore max-octet-code))
+
+    (let ((max-found-code (reduce #'max string :key #'char-code)))
+      (when (> max-found-code max-code)
+	(py-raise 'UnicodeEncodeError
+		  "During encoding of string, encountered a character whose ~
+                   code is out of the allowed range (got character code: ~A; ~
+                   external format: ~A; max code allowed for external format: ~A)"
+		   max-found-code external-format max-code)))
+
+    (multiple-value-bind (octets num-bytes-copied)
+	(excl:string-to-octets string
+			       :external-format ex-format
+			       :null-terminate nil)
+      
+      (when (< num-bytes-copied (length string))
+	(py-raise 'UnicodeEncodeError
+		  "During encoding (string -> bytes): Not all bytes valid"))
+
+      (let ((string (make-array (length octets) :element-type 'character)))
+	(map-into string #'code-char octets)
+	string))))
+
+(defun py-decode-unicode (string &optional (external-format "ascii") errors)
+  
+  (when errors
+    (error "TODO: `errors' parameter for unicode encode"))
+
+  ;; Python has no separate data type for the returned vector of
+  ;; octets: that's also a string.
+
+  (multiple-value-bind (ex-format max-code max-octet-code)
+      (py-unicode-external-format->lisp-external-format external-format)
+    (declare (ignore max-code))
+    
+    (let ((vec (make-array (length string) :element-type '(unsigned-byte 8))))
+      (map-into vec #'char-code string)
+
+      ;; EXCL:OCTETS-TO-STRING replaces characters out of range of
+      ;; external format with question marks #\?, but we want to get
+      ;; an error instead.
+
+      (let ((max-found-code (reduce #'max vec)))
+	(when (> max-found-code max-octet-code)
+	  (py-raise 'UnicodeDecodeError
+		    "During decoding of string, encountered a character whose ~
+                     code is out of allowed range (got character code: ~A; ~
+                     external format: ~A; max octet code allowed for external format: ~A)"
+		    max-found-code ex-format max-octet-code)))
+      
+      (multiple-value-bind (string chars-copied octets-used)
+	  (excl:octets-to-string vec :external-format ex-format)
+	(declare (ignore chars-copied))
+	
+	(when (< octets-used (length vec))
+	  (py-raise 'UnicodeDecodeError
+		    "In unicode.decode (bytes -> string): Not all octets valid"))
+	string))))
 
 
 (def-py-method py-string.__add__ (x^ y^) (concatenate 'string
 					   (the string x) (the string y)))
-
 (def-py-method py-string.__cmp__ (x^ y^)
   (cond ((not (stringp y)) -1) ;; whatever
 	((string< x y) -1)
@@ -1391,25 +1687,10 @@
 							(incf i)))))))
 
 (def-py-method py-string.__getitem__ (x^ item^)
-  (etypecase item
-    (integer (when (< item 0)
-	       (incf item (length x)))
-	     (unless (<= 0 item (1- (length x)))
-	       (py-raise 'ValueError
-			 "<string>[i] : i outside range (got ~A, length string = ~A)"
-			 item (length x)))
-	     (string (char x item)))
-    (py-slice (with-slots (start stop step) item
-		(setf start (deproxy start))
-		(setf stop  (deproxy stop))
-		(setf step  (deproxy step))
-		(cond ((and (null start) stop (null step))
-		       (subseq x 0 stop))
-		      ((and start (null stop) (null step))
-		       (subseq x start))
-		      ((and start stop (= stop -1) (null step))
-		       (subseq x start (1- (length x))))
-		      (t (break "unhandled py-string.__getitem__ slice ~A" item)))))))
+  (vector-getitem x item (lambda (char[s] single-p)
+			   (if single-p
+			       (string char[s])
+			     (coerce char[s] 'string)))))
 
 (def-py-method py-string.__hash__ (x^) (sxhash x))
 
@@ -1558,7 +1839,7 @@
   (let ((ga-meth (recursive-class-lookup-and-bind x '__getattribute__)))
     
     (assert ga-meth ()
-      "Object ~A (py-class: ~A) does not have a __getattribute__ method"
+      "Object ~S (py-class: ~A) does not have a __getattribute__ method"
       x (py-class-of x))
     
     (py-call ga-meth attr)))
@@ -1570,7 +1851,7 @@
   (:method (x attr)
 	   (let ((da-meth (recursive-class-lookup-and-bind x '__delattr__)))
 	     (assert da-meth ()
-	       "Object ~A (py-class: ~A) does not have a __delattr__ method"
+	       "Object ~S (py-class: ~A) does not have a __delattr__ method"
 	       x (py-class-of x))
 	     
 	     (py-call da-meth attr))))
@@ -1621,12 +1902,23 @@
 	   
   (:method ((f null) &rest args)
 	   (error "PY-CALL of NIL"))
+  
   (:method ((f t) &rest args)
-	   (let ((__call__ (recursive-class-dict-lookup (py-class-of f) '__call__)))
+	   (let ((__call__ (recursive-class-lookup-and-bind f '__call__)))
 	     (if __call__
-		 (apply #'py-call __call__ f args)
+		 (apply #'py-call __call__ args)
 	       (error "Don't know how to call: ~S (args: ~A)" f args))))
-  (:method ((f function) &rest args) (apply f args)))
+  
+
+  ;; Avoid infinite recursion:
+  
+  (:method ((f function) &rest args) (apply f args))
+  
+  (:method ((f py-bound-method) &rest args)
+	   (apply #'py-bound-method.__call__ f args))
+  
+  (:method ((f py-unbound-method) &rest args)
+	   (apply #'py-unbound-method.__call__ f args)))
 
 
 ;;; Subscription of items (sequences, mappings)
@@ -1636,14 +1928,14 @@
 	   (let ((gi (recursive-class-dict-lookup (py-class-of x) '__getitem__)))
 	     (if gi
 		 (py-call gi x item)
-	       (py-raise 'TypeError "Object ~A does not support item extraction" x)))))
+	       (py-raise 'TypeError "Object ~S does not support item extraction" x)))))
 
 (defgeneric (setf py-subs) (new-val x item)
   (:method (new-val x item)
 	   (let ((si (recursive-class-dict-lookup (py-class-of x) '__setitem__)))
 	     (if si
 		 (py-call si x item new-val)
-	       (py-raise 'TypeError "Object ~A does not support item assignment" x)))))
+	       (py-raise 'TypeError "Object ~S does not support item assignment" x)))))
 	  
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -1908,14 +2200,14 @@
 
 (defmacro def-py-shortcut-func (funcname method &key error)
   `(defgeneric ,funcname (x)
-     (:method ((x t)) (let* ((x.cls (py-class-of x))
-			     (,method (recursive-class-dict-lookup x.cls ',method)))
+     (:method ((x t)) (let* ((,method (recursive-class-lookup-and-bind x ',method)))
 			(if ,method
-			    (py-call ,method x)
+			    (py-call ,method)
 			  ,(or error
 			       `(py-raise 'TypeError
 					  "Object ~A (a ~A) has no `~A' method"
-					  x (class-name (py-class-of x)) ,(symbol-name method))))))))
+					  x (class-name (py-class-of x))
+					  ',method)))))))
 
 (def-py-shortcut-func py-abs  __abs__ )
 (def-py-shortcut-func py-repr __repr__)
@@ -1937,6 +2229,12 @@
     (if (stringp s)
 	s
       (py-raise 'TypeError "Expected a string, but got: ~A" x))))
+
+(defun py-val->integer (x &key min)
+  (let ((i (deproxy x)))
+    (if (and (integerp i) (if min (>= i min) t))
+	i
+      (py-raise 'TypeError "Expected an integer ~@[>= ~A~]; got: ~S" min x))))
 
 (defun py-repr-string (x) (py-val->string (py-repr x)))
 (defun py-str-string  (x) (py-val->string (py-str x)))
@@ -2152,12 +2450,3 @@ next value gotten by iterating over X. Returns NIL, NIL upon exhaustion.")
 		 (setf (py-attr dest 'softspace) *the-false*)
 	       (setf *stdout-softspace* *the-false*))
 	     (py-call write-func (string #\Newline)))))))
-
-
-
-
-
-
-
-
-
