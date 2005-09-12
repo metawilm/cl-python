@@ -45,7 +45,7 @@
 			   (map-key conv-flags min-field-width precision conv-type) rec
 			 
 			 (when (or conv-flags min-field-width precision)
-			   (warn "Ignoring some format string params (make-formatted-string)"))
+			   #+(or)(warn "Ignoring some format string params (make-formatted-string)"))
 			 
 			 (when (eq min-field-width :arg) (setf min-field-width (pop list-args)))
 			 

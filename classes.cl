@@ -401,8 +401,8 @@
     (print-object func s)))
 
 (def-py-method py-lisp-function.__get__ (func inst cls)
-  (when (eq func #'py-lisp-function.__get__)
-      (break "py-lisp-fuction.__get__ self: ~S ~S" inst cls))
+  #+(or)(when (eq func #'py-lisp-function.__get__)
+	  (break "py-lisp-fuction.__get__ self: ~S ~S" inst cls))
   (if (and inst (not (eq inst *the-none*)))
       (make-instance 'py-bound-method :instance inst :func func)
     (if (and cls (not (eq cls *the-none*)))
@@ -590,7 +590,10 @@
   (:metaclass py-core-type))
 
 (defun make-slice (start stop step)
-  (make-instance 'py-slice :start start :stop stop :step step))
+  (make-instance 'py-slice
+    :start (or start *the-none*)
+    :stop  (or stop  *the-none*)
+    :step  (or step  *the-none*)))
 
 (def-py-method py-slice.indices (x^ length^)
   "Return tuple of three integers: START, STOP, STEP.
@@ -737,10 +740,73 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 
 
 
+;; super( <B class>, <C instance> ) where C derives from B:
+;;   :object = <C instance>
+;;   :current-class = <B class>
+;; 
+;; A typical use for calling a cooperative superclass method is:
+;; 
+;;  class C(B):
+;;    def meth(self, arg):
+;;      super(C, self).meth(arg)
 
 (defclass py-super (py-core-object) ;; subclassable?
-  ()
+  ((object        :initarg :object)
+   (current-class :initarg :current-class))
   (:metaclass py-core-type))
+
+
+(def-py-method py-super.__new__ :static (cls class-arg &optional second-arg)
+	       (cond ((not (typep class-arg 'class))
+		      (py-raise 'TypeError
+				"First arg to super.__new__() must be class (got: ~A)"
+				class-arg))
+		     
+		     ((null second-arg)
+		      (warn "super() with one arg is TODO (faking for now)")
+		      (lambda (sec-arg) (py-super.__new__ cls class-arg sec-arg)))
+		     
+		     ((typep second-arg class-arg)
+		      ;; like:  super( <B class>, <C instance> )
+		      ;; in the CPL of class C, find the class preceding class B
+		      ;; 
+		      ;; CPython returns a `super' instance and not directly the
+		      ;; class to allow subclassing class `super' and overriding
+		      ;; the __getattribute__ method.
+		      
+		      (make-instance cls :object second-arg :current-class class-arg))
+		     
+		     ((typep second-arg 'class)
+		      (unless (subtypep second-arg class-arg)
+			(py-raise 'TypeError
+				  "When calling `super' with two classes: second must be ~
+                                   subclass of first (got: ~A, ~A)" class-arg second-arg))
+		      (make-instance cls :object second-arg :current-class class-arg))
+		     
+		     (t (error "TODO super clause?"))))
+
+
+(def-py-method py-super.__getattribute__ (x attr)
+  (flet ((find-preceding-class-in-mro (mro cls)
+	   (loop until (eq (pop mro) cls)
+	       finally (return (pop mro)))))
+    
+    ;; XXX check when attribute is static method and super is bound to class, etc
+    (with-slots (object current-class) x
+      (let ((class (find-preceding-class-in-mro
+		    (py-type.__mro__ (if (typep object 'class)
+					 object
+				       (py-class-of object)))
+		    current-class)))
+	
+	(let ((val (recursive-class-dict-lookup class attr)))
+	  (if val
+	      (bind-val val
+			(if (eq object class) *the-none* object)
+			class)
+	    (py-raise 'AttributeError
+		      "No such attribute found for `super' object: ~S.~S ~
+                       (looked up attr ~S in class ~S" x attr attr class)))))))
 
 
 (defclass py-xrange (py-core-object)
@@ -781,7 +847,9 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 ;; None
 
 (defclass py-none (py-core-object) () (:metaclass py-core-type))
+
 (setf *the-none* (make-instance 'py-none))
+
 (defun none-p (x) (eq x *the-none*))
 
 (def-py-method py-none.__repr__ (x)
@@ -1078,6 +1146,9 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
   (with-output-to-string (s)
     (print-unreadable-object (x s :identity t)
       (format s "module ~A" (slot-value x 'name)))))
+
+
+
 
 (defun py-string-val->symbol (attr)
   (if (symbolp attr)
@@ -1437,11 +1508,11 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
   (with-output-to-string (s)
     (format s "[")
     (loop for item across x and i from 0
-	do (unless (= i 0)
-	     (format s ", "))
-	   (repr-fmt s item))
+ 	do (unless (= i 0)
+ 	     (format s ", "))
+ 	   (repr-fmt s item))
     (format s "]")))
-
+  
 (def-py-method py-list.__iter__ (x^)
   (let ((i -1)
 	(max-i (1- (length x))))
@@ -1533,8 +1604,14 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 		      (-1 (return -1))
 		      (1  (return  1)))
 		 finally (return 0))))))
-		    
-  
+
+(def-py-method py-list.__eq__ (x^ y^)
+  (py-bool (and (= (length x) (length y))
+		(loop for xi across x and yi across y
+		    unless (py-==->lisp-val xi yi)
+		    do (return nil)
+		    finally (return t)))))
+
 (def-py-method py-list.append (x^ y)
   (vector-push-extend y x))
 
@@ -1576,6 +1653,16 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 		 (if (eq cls (find-class 'py-string))
 		     the-val
 		   (make-instance cls :lisp-object the-val))))
+
+(defvar *py-char-strings* (make-array 256
+				      :element-type 'string
+				      :initial-element nil))
+(defun py-string-from-char (ch)
+  (let ((code (char-code ch)))
+    (if (<= 0 code 255)
+	(or (aref *py-char-strings* (char-code ch))
+	    (setf (aref *py-char-strings* (char-code ch)) (string ch)))
+      (string ch))))
 
 (defun py-unicode-external-format->lisp-external-format (name)
   ;; Returns NAME, MAX-CHAR-CODE, MAX-ENCODED-OCTET-CODE
@@ -1683,14 +1770,14 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 			       :func (let ((i 0)) (lambda ()
 						    (when (< i (length x))
 						      (prog1
-							  (string (char x i))
+							  (py-string-from-char (schar x i))
 							(incf i)))))))
 
 (def-py-method py-string.__getitem__ (x^ item^)
-  (vector-getitem x item (lambda (char[s] single-p)
+  (vector-getitem x item (lambda (char/charlist single-p)
 			   (if single-p
-			       (string char[s])
-			     (coerce char[s] 'string)))))
+			       (py-string-from-char char/charlist)
+			     (coerce char/charlist 'string)))))
 
 (def-py-method py-string.__hash__ (x^) (sxhash x))
 
@@ -1713,8 +1800,8 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 		      (aref x xi))))
       res)))
 
-(def-py-method py-string.__repr__ (x^)  (with-output-to-string (s)
-					  (py-pprint s x)))
+(def-py-method py-string.__repr__ (x^)
+  (with-output-to-string (s) (py-pprint s x))) ;; XXX todo: optimize
 
 (def-py-method py-string.__str__  (x^)  x)
 
@@ -1760,7 +1847,8 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 (def-proxy-class py-tuple)
 
 (def-py-method py-tuple.__new__ :static (cls &optional iterable)
-	       (let ((tup (make-tuple-from-list (when iterable
+	       
+	       (let ((tup (make-tuple-from-list (when iterable 
 						  (py-iterate->lisp-list iterable)))))
 		 
 		 (cond ((eq cls (load-time-value (find-class 'py-tuple))) tup)
@@ -1786,6 +1874,9 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 	((null (cdr x)) (format nil "(~/python:repr-fmt/,)" (car x)))
 	(t              (format nil "(~{~/python:repr-fmt/~^, ~})" x))))
 
+(def-py-method py-tuple.__str__ (x^)
+  (py-tuple.__repr__ x))
+
 (def-py-method py-tuple.__iter__ (x^)
   (make-iterator-from-function
    :name :tuple-iterator
@@ -1796,6 +1887,30 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 (def-py-method py-tuple.__len__ (x^)
   (length x))
 
+(def-py-method py-tuple.__cmp__ (x^ y^)
+  (let ((x.len (length x))
+	(y.len (length y)))
+    
+    (cond ((= x.len y.len)
+	   (loop for xi in x and yi in y
+	       do (ecase (pybf:cmp xi yi)
+		    (-1 (return -1))
+		    (1  (return 1))
+		    (0  ))
+	       finally (return 0)))
+	  
+	  ((< x.len y.len) -1)
+	  (t                1))))
+
+(def-py-method py-tuple.__eq__ (x^ y^)
+  (py-bool (loop 
+	       for xi = (pop x)
+	       for yi = (pop y)
+	       do (cond ((null (or xi yi))        (return t))
+			((or (null xi) (null yi)) (return nil))
+			((py-==->lisp-val xi yi))
+			(t (return nil))))))
+   
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;  
 
 (defgeneric py-class-of (x)
@@ -1894,6 +2009,7 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 
 (defgeneric py-call (f &rest args)
   
+  #+(or)
   (:method :around (f &rest args)
 	   (if (some #'null args)
 	       (break "One of the arguments for (PY-CALL ~A ...) is NIL. Args: ~S"
@@ -1925,6 +2041,7 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 
 (defgeneric py-subs (x item)
   (:method ((x t) (item t))
+	   #+(or)(warn "py-subs T T: ~S ~S" x item)
 	   (let ((gi (recursive-class-dict-lookup (py-class-of x) '__getitem__)))
 	     (if gi
 		 (py-call gi x item)
@@ -1932,6 +2049,7 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 
 (defgeneric (setf py-subs) (new-val x item)
   (:method (new-val x item)
+	   #+(or)(warn "(setf py-subs) T T: ~S ~S" x item)
 	   (let ((si (recursive-class-dict-lookup (py-class-of x) '__setitem__)))
 	     (if si
 		 (py-call si x item new-val)
@@ -2116,6 +2234,7 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 
 (defgeneric py-in (x seq)
   (:method ((x t) (seq t))
+	   #+(or)(warn "py-in T T: ~S ~S" x seq)
 	   ;; use __contains__, fall back on iterator
 	   (let ((contains-meth (recursive-class-dict-lookup
 				 (py-class-of seq) '__contains__)))
@@ -2127,8 +2246,7 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 	       (loop with f = (get-py-iterate-fun seq)
 		   for seq-item = (funcall f)
 		   while seq-item
-		   when (py-val->lisp-bool (py-== x seq-item))
-		   return (load-time-value *the-true*)
+		   when (py-==->lisp-val x seq-item) return (load-time-value *the-true*)
 		   finally (return (load-time-value *the-false*)))))))
 	     
 (defgeneric py-not-in (x seq)
@@ -2175,6 +2293,7 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
   `(progn (defgeneric ,func (x y)
 	    (:method ((x t) (y t))
 		     #+(or)(declare (optimize (speed 3) (safety 1) (debug 0)))
+		     #+(or)(warn "~A T T: ~S ~S" ',func x y)
 		     (if ,test-x-y
 			 (load-time-value *the-true*)
 		       (load-time-value *the-false*))))
@@ -2200,7 +2319,9 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 
 (defmacro def-py-shortcut-func (funcname method &key error)
   `(defgeneric ,funcname (x)
-     (:method ((x t)) (let* ((,method (recursive-class-lookup-and-bind x ',method)))
+     (:method ((x t))
+	      #+(or)(warn "~A T: ~S" ',funcname x)
+	      (let* ((,method (recursive-class-lookup-and-bind x ',method)))
 			(if ,method
 			    (py-call ,method)
 			  ,(or error
@@ -2304,7 +2425,7 @@ finished; F will then not be called again."
 			nil))))
       (if res
 	  (return-from py-func-iterator.next res)
-	(py-raise 'StopIteration "Iterator ~S has finished" fi)))))
+	(raise-StopIteration)))))
 
 (def-py-method py-func-iterator.__repr__ (fi)
   (with-output-to-string (s)
@@ -2371,7 +2492,7 @@ next value gotten by iterating over X. Returns NIL, NIL upon exhaustion.")
    "Iterate over OBJECT, calling the Lisp function FUNC on each value. Returns nothing.")
   
   (:method ((func function) (object t))
-	   (break "map over ~A" object)
+	   #+(or)(break "map over ~A" object)
 	   (loop with it-fun = (get-py-iterate-fun object)
 	       for val = (funcall it-fun)
 	       while val do (funcall func val))))
@@ -2398,12 +2519,11 @@ next value gotten by iterating over X. Returns NIL, NIL upon exhaustion.")
       (let ((f (get-py-iterate-fun x)))
 	(make-iterator-from-function f)))))
 
+
 (defvar *stdout-softspace* 0 "should a space be printed in front of next arg?")
 
 (defun py-print (dest items comma?)
-  
   (let ((*print-pretty* nil))
-    
     (let* ((write-func (if dest 
 			   (py-object.__getattribute__ dest 'write)
 			 #'write-string))
@@ -2421,7 +2541,6 @@ next value gotten by iterating over X. Returns NIL, NIL upon exhaustion.")
 						  nil)))
 			    *stdout-softspace*))
 	   (softspace-p (py-val->lisp-bool softspace-val))
-	   
 	   (last-char-written nil))
       
       (loop
@@ -2431,16 +2550,16 @@ next value gotten by iterating over X. Returns NIL, NIL upon exhaustion.")
 		       (and (= i 0) softspace-p))
 	       (py-call write-func " "))
 
-	     (let ((s (py-str-string x)))
+	     (let ((s (if (stringp x) x (py-str-string x))))
 	       (py-call write-func s)
-	       (setf last-char-written (aref s (1- (length s)))))) 
+	       (setf last-char-written (aref s (1- (length s))))))
       
-      (cond ((and comma? (not (eql last-char-written #\Newline))) ;; right logic? 
+      (cond ((and comma? (not (char= last-char-written #\Newline))) ;; right logic? 
 	     (if dest 
 		 (setf (py-attr dest 'softspace) *the-true*)
 	       (setf *stdout-softspace* *the-true*)))
 	    
-	    ((and comma? (eql last-char-written #\Newline))
+	    ((and comma? (char= last-char-written #\Newline))
 	     (if dest
 		 (setf (py-attr dest 'softspace) *the-false*)
 	       (setf *stdout-softspace* *the-false*)))
@@ -2449,4 +2568,7 @@ next value gotten by iterating over X. Returns NIL, NIL upon exhaustion.")
 	     (if dest
 		 (setf (py-attr dest 'softspace) *the-false*)
 	       (setf *stdout-softspace* *the-false*))
-	     (py-call write-func (string #\Newline)))))))
+	     (py-call write-func (py-string-from-char #\Newline)))))))
+
+
+

@@ -95,3 +95,12 @@
 (def-py-method Exception.__repr__ (x)
   (with-output-to-string (s)
     (print-object x s)))
+
+
+(defvar *cached-StopIteration*
+    (make-instance 'StopIteration :args "Iterator has finished"))
+
+(defun raise-StopIteration ()
+  (assert *cached-StopIteration*)
+  (error *cached-StopIteration*))
+

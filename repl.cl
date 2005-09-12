@@ -97,6 +97,10 @@
 							(:type :space :count t) (funcall helper-func))
 						    (terpri)
 						    (prof:show-flat-profile))
+					    (:pspace (prof:with-profiling (:type :space)
+						       (funcall helper-func))
+						     (terpri)
+						     (prof:show-call-graph))
 					    (t (funcall helper-func))))))))))))
 		   (when val
 		     (remember-value val)

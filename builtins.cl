@@ -134,8 +134,9 @@ POS-ARGS is any iterable object; KW-DICT must be of type PY-DICT."
   (:documentation
    "Compare two objects, of which at least one is a user-defined-object.
 Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
+  
   (:method ((x t) (y t))
-   
+	   #+(or)(warn "cmp ~S ~S" x y)
 	   ;; This function is used in comparisons like <, <=, ==.
 	   ;; 
 	   ;; The CPython logic is a bit complicated; hopefully the following

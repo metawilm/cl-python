@@ -1,6 +1,6 @@
 (in-package :python)
 
-(declaim (optimize (debug 3)))
+;(declaim (optimize (debug 3)))
 
 ;;; Python compiler
 
@@ -901,7 +901,7 @@
     (py-raise 'SyntaxError "RETURN found outside function")))
 
 (defmacro slice-expr (start stop step)
-  `(make-slice ,(or start pybv:None) ,(or stop pybv:None) ,(or step pybv:None)))
+  `(make-slice ,start ,stop ,step))
 
 (defmacro subscription-expr (item subs)
   `(py-subs ,item ,subs))
@@ -1284,6 +1284,7 @@
 ;;;
 ;;; Function argument handling
 
+#+(or) ;; old
 (defmacro py-arg-function (name (pos-args key-args *-arg **-arg) &body body)
   
   ;; Non-consing argument parsing! (except when *-arg or **-arg
@@ -1331,9 +1332,10 @@
 	 
 	 (lambda (&rest %args)
 	   (declare (dynamic-extent %args)
-		    #+(or)(optimize (speed 3) (safety 0)))
+		    (optimize (speed 1) (safety 3) (debug 0)))
 	   
 	   ;; XXX todo: skip making ARG-VAL-VEC array if there are only positional args?
+
 	   
 	   (let ((arg-val-vec (make-array
 			       ,(+ num-pos-key-args (if *-arg 1 0) (if **-arg 1 0))
@@ -1352,8 +1354,104 @@
 		   ,@(when **-arg
 		       `((,**-arg  (svref arg-val-vec ,(1+ num-pos-key-args))))))
 	       
-	       (locally (declare (optimize (debug 3)))
-		 ,@body))))))))
+	       (locally #+(or)(declare (optimize (debug 3)))
+			,@body))))))))
+
+;; New
+;#+(or)
+(defun only-pos-args (args)
+  (loop with num = 0
+      for a in args
+      if (symbolp a) return nil
+      else do (incf num)		     
+      finally (return num)))
+
+;#+(or)
+(defmacro py-arg-function (name (pos-args key-args *-arg **-arg) &body body)
+  
+  ;; Non-consing argument parsing! (except when *-arg or **-arg
+  ;; present)
+  ;; 
+  ;; POS-ARGS: list of symbols
+  ;; KEY-ARGS: list of (key-symbol default-val) pairs
+  ;; *-ARG, **-ARG: a symbol or NIL 
+  ;; 
+  ;; XXX todo: the generated code can be cleaned up a bit when there
+  ;; are no arguments (currently zero-length vectors are created).
+  
+  #+(or)(break "py-arg-function: args=~A ~A ~A ~A" pos-args key-args *-arg **-arg)
+  
+  (assert (symbolp name))
+  
+  (let* ((num-pos-args (length pos-args))
+	 (num-key-args (length key-args))
+	 (num-pos-key-args  (+ num-pos-args num-key-args))
+	 (pos-key-arg-names (nconc (copy-list pos-args) (mapcar #'first key-args)))
+	 (key-arg-default-asts (mapcar #'second key-args))
+	 (arg-name-vec (make-array num-pos-key-args :initial-contents pos-key-arg-names))
+	 
+	 (arg-kwname-vec (make-array
+			  num-pos-key-args
+			  :initial-contents (loop for x across arg-name-vec
+						collect (intern x #.(find-package :keyword)))))
+    
+	 (fa (make-fa :num-pos-args     num-pos-args
+		      :num-key-args     num-key-args
+		      :num-pos-key-args num-pos-key-args
+		      :pos-key-arg-names (make-array (length pos-key-arg-names)
+						     :initial-contents pos-key-arg-names)
+		      :key-arg-default-vals :py-will-be-filled-at-load-time
+		      :arg-name-vec     arg-name-vec
+		      :arg-kwname-vec   arg-kwname-vec
+		      :*-arg            *-arg
+		      :**-arg           **-arg)))
+    
+    `(progn
+       (setf (fa-key-arg-default-vals ,fa)
+	 (make-array ,num-key-args :initial-contents (list ,@key-arg-default-asts)))
+       
+       (excl:named-function ,name
+	 
+	 (lambda (&rest %args)
+	   (declare (dynamic-extent %args)
+		    (optimize (safety 3) (debug 3)))
+	   
+	   ;; XXX todo: skip making ARG-VAL-VEC array if there are only positional args?
+
+	   (let (,@pos-key-arg-names ,@(when *-arg `(,*-arg)) ,@(when **-arg `(,**-arg))
+		 (only-pos-args (only-pos-args %args)))
+	     
+	     (cond ((or (null only-pos-args)
+			(/= only-pos-args ,num-pos-key-args)
+			',*-arg
+			',**-arg)
+		    
+		    (warn "nonhit")
+		    (let ((arg-val-vec (make-array
+					,(+ num-pos-key-args (if *-arg 1 0) (if **-arg 1 0))
+					:initial-element nil)))
+		      (declare (dynamic-extent arg-val-vec))
+		      
+		      (parse-py-func-args %args arg-val-vec ,fa)
+		      
+		      ,@(loop for p in pos-args and i from 0
+			    collect `(setf ,p (or (svref arg-val-vec ,i) (error "nil!"))))
+		      ,@(when  *-arg `((setf  ,*-arg 
+					 (or (svref arg-val-vec ,num-pos-key-args)
+					     (error "nil!")))))
+		      ,@(when **-arg `((setf ,**-arg 
+					 (or (svref arg-val-vec ,(1+ num-pos-key-args))
+					     (error "nil!")))))))
+		   
+		   ((= only-pos-args ,num-pos-key-args)
+		    (warn "hit")
+		    ,@(loop for p in pos-key-arg-names and i from 0
+			  collect `(setf ,p (or (pop %args) (break "got too few values")))))
+		   
+		   (t
+		    (break "unexpected: args:~S only:~S" %args only-pos-args)))
+	     
+	     ,@body))))))
 
 (defstruct (func-args (:type vector) (:conc-name fa-) (:constructor make-fa))
   (num-pos-args         :type fixnum :read-only t)
@@ -1511,6 +1609,7 @@
 	(make-tuple-from-list for-*)))
 
     (when (fa-**-arg fa)
+      (break "XXX make dict")
       (setf (svref arg-val-vec (1+ (the fixnum (fa-num-pos-key-args fa)))) for-**)))
   
   (values))
@@ -1818,7 +1917,8 @@
 			(generator-finished)
 			
 			,final-tag
-			(py-raise 'StopIteration "The generator has finished.")))))))))))))
+			(raise-StopIteration)
+			#+(or)(py-raise 'StopIteration "The generator has finished.")))))))))))))
 
 
 (defun suite->generator (fname suite)
