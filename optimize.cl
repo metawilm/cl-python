@@ -229,7 +229,7 @@
 
 
 ;;; Calling objects
-#+(or)
+
 (define-compiler-macro py-call (x &rest args)
   `(let ((.x ,x))
      (if (functionp .x)
@@ -262,4 +262,5 @@
 (defmethod py-len ((x string)) (length x))
 (defmethod py-len ((x vector)) (length x))
 (defmethod py-len ((x list))   (length x))
+
 

@@ -251,11 +251,7 @@
 
 (defmacro binary-expr (op left right)
   (let ((py-@ (get-binary-op-func-name op)))
-    `(funcall (function ,py-@) ,left ,right))
-  
-  #+(or)
-  (let ((py-@ (get-binary-op-func op)))
-    `(funcall ,py-@ ,left ,right)))
+    `(funcall (function ,py-@) ,left ,right)))
 
 (defmacro binary-lazy-expr (op left right)
   (ecase op
@@ -303,6 +299,11 @@
 			(or (second args) globals-dict)
 			(or (third args)  locals-dict)))))))
 
+(defun call-expr-special-p (prim)
+  (declare (optimize (speed 3) (safety 0) (debug 0)))
+  (or (eq prim (load-time-value #'pybf:locals))
+      (eq prim (load-time-value #'pybf:globals))
+      (eq prim (load-time-value #'pybf:eval))))
 
 (defmacro call-expr (primary (&whole all-args pos-args kwd-args *-arg **-arg))
   
@@ -324,28 +325,32 @@
     
     `(let* ((prim ,primary))
        
-       (when (or (eq prim (load-time-value #'pybf:locals))
-		 (eq prim (load-time-value #'pybf:globals))
-		 (eq prim (load-time-value #'pybf:eval)))
+       (when (call-expr-special-p prim)
 	 (setf prim (call-expr-special prim (.locals.) (.globals.))))
        
-       ,(cond ((and *-arg **-arg)
-	       `(apply #'py-call prim ,@pos-args
-		       (nconc (py-iterate->lisp-list ,*-arg)
-			      (list ,@kw-args)
-			      (py-mapping->lisp-list-TODO ,**-arg))))
-	      (*-arg
-	       `(apply #'py-call prim ,@pos-args
-		       (nconc (py-iterate->lisp-list ,*-arg)
-			      (list ,@kw-args))))
+       ,(cond ((or kw-args **-arg)
+	       `(call-expr%pos+*+kw+** prim (list ,@pos-args) ,*-arg ,**-arg))
 	      
-	      (**-arg
-	       `(apply #'py-call prim ,@pos-args ,@kw-args
-		       (py-mapping->lisp-list-TODO ,**-arg)))
+	      ((and pos-args *-arg)
+	       `(call-expr%pos+* prim (list ,@pos-args) ,*-arg))
+	      
+	      (*-arg
+	       `(call-expr%* prim ,*-arg))
 	      
 	      (t
-	       `(py-call prim ,@pos-args ,@kw-args))))))
-       
+	       `(py-call prim ,@pos-args))))))
+
+(defun call-expr%pos+*+kw+** (prim pos-args *-arg kw-args **-arg)
+  (apply #'py-call prim
+	 (nconc pos-args (py-iterate->lisp-list *-arg)
+		kw-args (py-mapping->lisp-list-TODO **-arg))))
+
+(defun call-expr%pos+* (prim pos-args *-arg)
+  (apply #'py-call prim (nconc pos-args (py-iterate->lisp-list *-arg))))
+
+(defun call-expr%* (prim *-args)
+  (apply #'py-call prim (py-iterate->lisp-list *-args)))
+
 
 (defmacro classdef-stmt (name inheritance suite &environment e)
   ;; todo: define .locals. containing class vars
@@ -935,6 +940,7 @@
 	     (error    (error ,the-exc)))))))
 
 (defmacro try-except-stmt (suite except-clauses else-suite)
+
   ;; The Exception class in a clause is evaluated only after an
   ;; exception is thrown. Can't use handler-case for that reason.
   
@@ -1068,20 +1074,16 @@
 ;;; Support for introspection: locals() and globals()
 
 (defun make-locals-dict (name-list value-list)
-  (make-py-dict ;; XXX check keys become strings
+  (make-dict-from-symbol-alist
    (delete :unbound (mapcar #'cons name-list value-list) :key #'cdr)))
 
 (defun module-make-globals-dict (names-vec values-vec dyn-globals-ht)
-  (make-py-dict ;; todo: proxy
+  (warn "todo: module-make-globals-dict as proxy")
+  (make-dict-from-symbol-alist
    (nconc (loop for name across names-vec and val across values-vec
 	      unless (eq val :unbound) collect (cons name val))
 	  (loop for k being the hash-key in dyn-globals-ht using (hash-value v)
 	      collect (cons k v)))))
-
-(defun make-py-dict (list)
-  (loop with ht = (make-hash-table :test #'eq)
-      for (k . v) in list do (setf (gethash k ht) v)
-      finally (return ht)))
 
 (defgeneric convert-to-namespace-ht (x)
   (:method ((x hash-table))
@@ -1360,11 +1362,43 @@
 ;; New
 ;#+(or)
 (defun only-pos-args (args)
+  "Returns NIL if not only pos args;
+Non-negative integer denoting the number of args otherwise."
   (loop with num = 0
       for a in args
       if (symbolp a) return nil
       else do (incf num)		     
       finally (return num)))
+
+
+#+(or)
+(defconstant +slow-arg-cache-size+ 16)
+#+(or)
+(defparameter *slow-arg-create-array-funcs* (make-array +slow-arg-cache-size+ :initial-element nil))
+
+#+(or)
+(defun slow-arg-parsing (%args fa arr-sz)
+  (declare (optimize (speed 3) (safety 0) (debug 0)))
+  (let ((f (if (< arr-sz +slow-arg-cache-size+)
+	       
+	       (or (svref *slow-arg-create-array-funcs* arr-sz)
+		   (setf (svref *slow-arg-create-array-funcs* arr-sz)
+		     (compile nil `(lambda (%args fa)
+				     
+				     (declare (optimize (speed 3) (safety 1) (debug 1)))
+				     
+				     ;; XXX The (safety 1) is ACL-specific, necessary to let
+				     ;; the array live just long enough.
+				     ;; It's a hack, but a very efficient one ;-)
+				     
+				     (let ((arg-val-vec (make-array ,arr-sz :initial-element nil)))
+				       (declare (dynamic-extent arg-val-vec))
+				       (parse-py-func-args %args arg-val-vec fa))))))
+	     (lambda (%args fa)
+	       (let ((arg-val-vec (make-array arr-sz :initial-element nil)))
+		 (parse-py-func-args %args arg-val-vec fa))))))
+    (funcall f %args fa)))
+	       
 
 ;#+(or)
 (defmacro py-arg-function (name (pos-args key-args *-arg **-arg) &body body)
@@ -1386,6 +1420,7 @@
   (let* ((num-pos-args (length pos-args))
 	 (num-key-args (length key-args))
 	 (num-pos-key-args  (+ num-pos-args num-key-args))
+	 (some-args-p (or pos-args key-args *-arg **-arg))
 	 (pos-key-arg-names (nconc (copy-list pos-args) (mapcar #'first key-args)))
 	 (key-arg-default-asts (mapcar #'second key-args))
 	 (arg-name-vec (make-array num-pos-key-args :initial-contents pos-key-arg-names))
@@ -1414,44 +1449,41 @@
 	 
 	 (lambda (&rest %args)
 	   (declare (dynamic-extent %args)
-		    (optimize (safety 3) (debug 3)))
+		    (optimize (speed 3) (safety 1) (debug 0)))
 	   
-	   ;; XXX todo: skip making ARG-VAL-VEC array if there are only positional args?
-
 	   (let (,@pos-key-arg-names ,@(when *-arg `(,*-arg)) ,@(when **-arg `(,**-arg))
-		 (only-pos-args (only-pos-args %args)))
+		 ,@(when (and some-args-p (not *-arg) (not **-arg))
+		     `((only-pos-args (only-pos-args %args)))))
 	     
-	     (cond ((or (null only-pos-args)
-			(/= only-pos-args ,num-pos-key-args)
-			',*-arg
-			',**-arg)
+	     ,(let ((the-array-way
+		     
+		     `(let ((arg-val-vec (make-array ,(+ num-pos-key-args
+							 (if (or *-arg **-arg) 1 0)
+							 (if **-arg 1 0))   :initial-element nil)))
+			(declare (dynamic-extent arg-val-vec))
+			(parse-py-func-args %args arg-val-vec ,fa)
+			
+			,@(loop for p in pos-key-arg-names and i from 0
+			      collect `(setf ,p (svref arg-val-vec ,i)))
+			
+			,@(when  *-arg
+			    `((setf  ,*-arg (svref arg-val-vec ,num-pos-key-args))))
+			    
+			,@(when **-arg
+			    `((setf ,**-arg (svref arg-val-vec ,(1+ num-pos-key-args)))))))
 		    
-		    (warn "nonhit")
-		    (let ((arg-val-vec (make-array
-					,(+ num-pos-key-args (if *-arg 1 0) (if **-arg 1 0))
-					:initial-element nil)))
-		      (declare (dynamic-extent arg-val-vec))
-		      
-		      (parse-py-func-args %args arg-val-vec ,fa)
-		      
-		      ,@(loop for p in pos-args and i from 0
-			    collect `(setf ,p (or (svref arg-val-vec ,i) (error "nil!"))))
-		      ,@(when  *-arg `((setf  ,*-arg 
-					 (or (svref arg-val-vec ,num-pos-key-args)
-					     (error "nil!")))))
-		      ,@(when **-arg `((setf ,**-arg 
-					 (or (svref arg-val-vec ,(1+ num-pos-key-args))
-					     (error "nil!")))))))
-		   
-		   ((= only-pos-args ,num-pos-key-args)
-		    (warn "hit")
-		    ,@(loop for p in pos-key-arg-names and i from 0
-			  collect `(setf ,p (or (pop %args) (break "got too few values")))))
-		   
-		   (t
-		    (break "unexpected: args:~S only:~S" %args only-pos-args)))
+		    (the-pop-way
+		     `(progn ,@(loop for p in pos-key-arg-names collect `(setf ,p (pop %args))))))
+		
+		(cond ((or *-arg **-arg)  the-array-way)
+		      (some-args-p        `(if (or (null only-pos-args)
+						   (/= only-pos-args ,num-pos-key-args))
+					       ,the-array-way
+					     ,the-pop-way))
+		      (t `(when %args (error "too many args")))))
 	     
-	     ,@body))))))
+	     (locally (declare (optimize (speed 2) (safety 2) (debug 0)))
+	       ,@body)))))))
 
 (defstruct (func-args (:type vector) (:conc-name fa-) (:constructor make-fa))
   (num-pos-args         :type fixnum :read-only t)
@@ -1466,6 +1498,8 @@
   
 
 (defun parse-py-func-args (%args arg-val-vec fa)
+  (declare (dynamic-extent %args)
+	   (optimize (speed 3) (safety 1) (debug 0)))
 
   ;; %ARGS: the (&rest) list containing pos and ":key val" arguments
   ;; ARG-VAL-VEC: (dynamic extent) vector to store final argument values in
@@ -1473,8 +1507,9 @@
   ;;                 the last item **-arg value (if any)
   ;;                 so ARG-VAL-VEC must be larger than just num-pos-and-key-args! 
   ;; FA: func-args struct
+  ;; Return ARG-VAL-VEC
   
-  (declare (optimize (speed 3) (safety 1) (debug 0))
+  (declare (optimize (safety 3) (debug 3))
 	   (type list %args))
   
   (let ((num-filled-by-pos-args 0)
@@ -1609,8 +1644,8 @@
 	(make-tuple-from-list for-*)))
 
     (when (fa-**-arg fa)
-      (break "XXX make dict")
-      (setf (svref arg-val-vec (1+ (the fixnum (fa-num-pos-key-args fa)))) for-**)))
+      (setf (svref arg-val-vec (1+ (the fixnum (fa-num-pos-key-args fa))))
+	(make-dict-from-symbol-alist for-**))))
   
   (values))
 

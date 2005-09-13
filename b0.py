@@ -118,6 +118,7 @@ class Scanner(object):
                 else:
                     c1 = nextc
                     nextc = getc()
+                    # print "if %r in %s" % c1+nextc, longops
                     if c1+nextc in longops:
                         c2 = nextc
                         nextc = getc()

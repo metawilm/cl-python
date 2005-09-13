@@ -1367,6 +1367,13 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 	     collect `(setf (gethash ,k ,dict) ,v))
        ,dict)))
 
+(defun make-dict-from-symbol-alist (alist)
+  (loop with ht = (make-dict)
+      for (k . v) in alist 
+      do (setf (gethash (py-symbol->string k) ht) v)
+      finally (return ht)))
+
+
 (def-py-method py-dict.__new__ :static (cls &rest kwargs)
 	       (let ((ht (make-dict)))
 		 (case (length kwargs)

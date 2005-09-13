@@ -444,13 +444,21 @@ second and later characters must be alphanumeric or underscore."
 
 (defconstant +id-cache-string-size+ 10)
 
+(defun spacy-length (x)
+  (loop with i = 0
+      for xi across x
+      unless (char= xi #\Space)
+      do (incf i)
+      finally (return i)))
+
 (defun identifier-ht-test (x y)
-  (loop for xi across x for yi across y
-      do (cond ((char= xi yi) )
-	       ((char= xi #\Space) (return-from identifier-ht-test nil))
-	       ((char= yi #\Space) (return-from identifier-ht-test nil))
-	       ((char/= xi yi)     (return-from identifier-ht-test nil)))
-      finally (return t)))
+  (let ((x.len (spacy-length x))
+	(y.len (spacy-length y)))
+    
+    (and (= x.len y.len)
+	 (dotimes (i x.len t)
+	   (when (char/= (aref x i) (aref y i))
+	     (return nil))))))
 
 (defun identifier-ht-hash (x)
   (loop with res = 42
