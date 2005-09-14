@@ -367,12 +367,6 @@
 ;; By default, when an object has a dict, attributes are looked up in
 ;; the dict.
 
-#+(or);; attributs classes should go via metatype, not directly like this
-(defmethod py-attr ((x py-dict-mixin) attr)
-  (if (typep x 'class)
-      (recursive-class-dict-lookup x attr)
-    (dict-get x attr)))
-
 ;; allowed for now...
 (defmethod (setf py-attr) (val (x py-dict-mixin) attr)
   (setf (dict-get x attr) val))
@@ -870,10 +864,6 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 
 ;;; User objects (Object, Module, File, Property)
 
-#+(or)
-(defmethod py-attr ((x py-user-object) attr)
-  (break "py-attr user-obj ~A ~A" x attr))
-
 
 ;; Object (User object)
 
@@ -1229,17 +1219,6 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 (defgeneric deproxy (x)
   (:method ((x py-lisp-object))  (proxy-lisp-val x))
   (:method ((x t))               x))
-
-#+(or)
-(defmethod py-attr ((x py-lisp-object) attr)
-  (if (typep x 'py-user-object)
-      
-      ;; user-defined class that derives from lisp class
-      (progn (warn "PY-ATTR: assuming ~A is instances of class derived from a Lisp class" x)
-	     (or (call-next-method)
-		 (py-attr (proxy-lisp-val x) attr)))
-    
-    (py-attr (proxy-lisp-val x) attr)))
 
 (defmethod (setf py-attr) (val (x py-lisp-object) attr)
   (setf (py-attr (proxy-lisp-val x) attr) val))

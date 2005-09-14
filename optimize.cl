@@ -231,6 +231,8 @@
 ;;; Calling objects
 
 (define-compiler-macro py-call (x &rest args)
+  #+(or)(when (and (listp x) (eq (car x) 'py-attr))
+	  (warn "py-call-attr ~A" x))
   `(let ((.x ,x))
      (if (functionp .x)
 	 (excl::fast (funcall (the function .x) ,@args))

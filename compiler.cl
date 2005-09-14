@@ -274,6 +274,59 @@
     (py-raise 'SyntaxError "BREAK was found outside loop")))
 
 
+(defmacro call-expr (primary (pos-args kwd-args *-arg **-arg))
+  
+  ;; XXX todo: check that key args are after pos args (or in parser?)
+  
+  ;; For complete Python semantics, we should check for every call if
+  ;; the function being called is one of the built-in functions EVAL,
+  ;; LOCALS or GLOBALS, because they access the variable scope of the
+  ;; _caller_ (which is ugly).
+  ;; 
+  ;; At the module level, globals() and locals() are equivalent.
+
+  (let ((kw-args (loop for ((i-e key) val) in kwd-args
+		     do (assert (eq i-e 'identifier-expr))
+		     collect (intern (symbol-name key) :keyword)
+		     collect val)))
+    
+    (if (and (listp primary)
+	     (eq (car primary) 'attributeref-expr)
+	     (null (or kwd-args *-arg **-arg)))
+	
+	(destructuring-bind (obj (identifier-expr attr)) (cdr primary)
+	  (assert (eq identifier-expr 'identifier-expr))
+	  `(py-attr-call ,obj ,attr ,@pos-args))
+	
+      `(let* ((prim ,primary))
+	 
+	 
+	 (when (call-expr-special-p prim)
+	   (setf prim (call-expr-special prim (.locals.) (.globals.))))
+	 
+	 ,(cond ((or kw-args **-arg)
+		 `(call-expr%pos+*+kw+** prim (list ,@pos-args) ,*-arg ,**-arg))
+		
+		((and pos-args *-arg)
+		 `(call-expr%pos+* prim (list ,@pos-args) ,*-arg))
+		
+		(*-arg
+		 `(call-expr%* prim ,*-arg))
+		
+		(t
+		 `(py-call prim ,@pos-args)))))))
+
+(defun call-expr%pos+*+kw+** (prim pos-args *-arg kw-args **-arg)
+  (apply #'py-call prim
+	 (nconc pos-args (py-iterate->lisp-list *-arg)
+		kw-args (py-mapping->lisp-list-TODO **-arg))))
+
+(defun call-expr%pos+* (prim pos-args *-arg)
+  (apply #'py-call prim (nconc pos-args (py-iterate->lisp-list *-arg))))
+
+(defun call-expr%* (prim *-args)
+  (apply #'py-call prim (py-iterate->lisp-list *-args)))
+
 (defun call-expr-special (func locals-dict globals-dict)
   (lambda (&rest args)
     
@@ -305,51 +358,49 @@
       (eq prim (load-time-value #'pybf:globals))
       (eq prim (load-time-value #'pybf:eval))))
 
-(defmacro call-expr (primary (&whole all-args pos-args kwd-args *-arg **-arg))
-  
-  ;; XXX todo: check that key args are after pos args (or in parser?)
-  
-  ;; For complete Python semantics, we check for every call if the
-  ;; function being called is one of the built-in functions EVAL,
-  ;; LOCALS or GLOBALS, because they access the variable scope of the
-  ;; _caller_ (which is ugly).
-  ;; 
-  ;; At the module level, globals() and locals() are equivalent.
 
-  (declare (ignore all-args))
-  
-  (let ((kw-args (loop for ((i-e key) val) in kwd-args
-		     do (assert (eq i-e 'identifier-expr))
-		     collect (intern (symbol-name key) :keyword)
-		     collect val)))
+(defmacro py-attr-call (prim attr &rest pos-args)
+  #+(or)(warn "py-attr-call ~A ~A" prim attr)
+  (let ((len (length pos-args)))
     
-    `(let* ((prim ,primary))
-       
-       (when (call-expr-special-p prim)
-	 (setf prim (call-expr-special prim (.locals.) (.globals.))))
-       
-       ,(cond ((or kw-args **-arg)
-	       `(call-expr%pos+*+kw+** prim (list ,@pos-args) ,*-arg ,**-arg))
+    (multiple-value-bind (test outcome)
+	(cond ((and (eq attr 'isspace) (= len 0))
+	       (values `(stringp prim) `(py-string.isspace prim)))
 	      
-	      ((and pos-args *-arg)
-	       `(call-expr%pos+* prim (list ,@pos-args) ,*-arg))
+	      ((and (eq attr 'append) (= len 1))
+	       (values `(vectorp prim) `(py-list.append prim ,@pos-args)))
 	      
-	      (*-arg
-	       `(call-expr%* prim ,*-arg))
+	      ((and (eq attr 'isalpha) (= len 0))
+	       (values `(stringp prim) `(py-string.isalpha prim)))
 	      
-	      (t
-	       `(py-call prim ,@pos-args))))))
-
-(defun call-expr%pos+*+kw+** (prim pos-args *-arg kw-args **-arg)
-  (apply #'py-call prim
-	 (nconc pos-args (py-iterate->lisp-list *-arg)
-		kw-args (py-mapping->lisp-list-TODO **-arg))))
-
-(defun call-expr%pos+* (prim pos-args *-arg)
-  (apply #'py-call prim (nconc pos-args (py-iterate->lisp-list *-arg))))
-
-(defun call-expr%* (prim *-args)
-  (apply #'py-call prim (py-iterate->lisp-list *-args)))
+	      ((and (eq attr 'isalnum) (= len 0))
+	       (values `(stringp prim) `(py-string.isalnum prim)))
+	      
+	      ((and (eq attr 'isdigit) (= len 0))
+	       (values `(stringp prim) `(py-string.isdigit prim)))
+	      
+	      ((and (eq attr 'keys) (= len 0))
+	       (values `(hash-table-p prim) `(py-dict.keys prim)))
+	      
+	      ((and (eq attr 'sort) (= len 0))
+	       (values `(vectorp prim) `(py-list.sort prim)))
+	      
+	      ((and (eq attr 'next) (= len 0))
+	       (values `(typep prim ,(find-class 'py-func-iterator))
+		       `(py-func-iterator.next prim))))
+      
+      `(block :call-expr-block
+	 (let* ((prim ,prim))
+	   
+	   ,(when test `(when ,test (return-from :call-expr-block ,outcome)))
+	   
+	   (let ((prim-attr (py-attr prim ',attr)))
+	     
+	     (when (call-expr-special-p prim-attr)
+	       (setf prim-attr (call-expr-special prim-attr (.locals.) (.globals.))))
+	     
+	     (py-call prim-attr ,@pos-args)))))))
+  
 
 
 (defmacro classdef-stmt (name inheritance suite &environment e)
