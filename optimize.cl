@@ -53,6 +53,14 @@
   (loop for key being the hash-key in x
       do (funcall f key)))
 
+(defmethod map-over-py-object ((f function) (x py-xrange))
+  (with-slots (start stop step) x
+    (cond ((and (<= start stop) (> step 0))
+	   (loop for i from start below stop by step do (funcall f i)))
+	  ((and (>= start stop) (< step 0))
+	   (loop for i from stop downto start by (- step) do (funcall f i)))
+	  (t (call-next-method)))))
+      
 ;; Membership test
 
 (defmethod py-in (x (ht hash-table))

@@ -1,6 +1,6 @@
 (in-package :python)
 
-;(declaim (optimize (debug 3)))
+(declaim (optimize (debug 3)))
 
 ;;; Python compiler
 
@@ -104,7 +104,7 @@
 
 
 (defmacro fast (&body body)
-  `(locally (declare (optimize (speed 3) (safety 0) (debug 0)))
+  `(locally (declare (optimize (safety 3) (debug 3)))
      ,@body))
 
 
@@ -353,7 +353,6 @@
 			(or (third args)  locals-dict)))))))
 
 (defun call-expr-special-p (prim)
-  (declare (optimize (speed 3) (safety 0) (debug 0)))
   (or (eq prim (load-time-value #'pybf:locals))
       (eq prim (load-time-value #'pybf:globals))
       (eq prim (load-time-value #'pybf:eval))))
@@ -440,9 +439,7 @@
 				      ,(let ((ix (position '__metaclass__
 							   (get-pydecl :mod-globals-names e))))
 					 (if ix
-					     `(let ((val (svref +mod-globals-values+ ,ix)))
-						(unless (eq val :unbound)
-						  val))
+					     `(svref +mod-globals-values+ ,ix)
 					   `(gethash '__metaclass__ +mod-dyn-globals+))))))
 	     (assign-stmt ,cls (,name))))))))
 
@@ -475,29 +472,16 @@
        (flet ((module-del ()
 		;; reset module-level vars with built-in names to their built-in value
 		(let ((ix (position name (get-pydecl :mod-globals-names e))))
-		  (if ix
-		      `(let ((old-val (svref +mod-globals-values+ ,ix)))
-			 (if (eq old-val :unbound)
-			     (py-raise 'NameError "Cannot delete variable '~A': ~
-                                                   it is unbound [static global]" ',name)
-			   (setf (svref +mod-globals-values+ ,ix) 
-			     ,(if (builtin-name-p name)
-				  (builtin-name-value name)
-				:unbound))))
-		    `(or (remhash ',name +mod-dyn-globals+)
-			 (py-raise 'NameError "Cannot delete variable '~A': ~
-                                               it is unbound [dyn global]" ',name)))))
+		  `(delete-identifier-at-module-level
+		    ',name ,ix ,(when (builtin-name-p name)
+				  (builtin-name-value name)))))
+	      
 	      (local-del ()
-		`(if (eq ,name :unbound)
-		     (py-raise 'NameError
-			       "Cannot delete variable '~A': it is unbound [local]" ',name)
-		   (setf ,name :unbound)))
+		`(progn (check-del-bound ',name ,name)
+			(setf ,name nil)))
 	      
 	      (class-del ()
-		`(or (py-del-subs +cls-namespace+ ,(symbol-name name))
-		     (py-raise 'NameError
-			       "Cannot delete variable '~A': it is unbound [dyn class]"
-			       ',name))))
+		`(class-del ,(symbol-name name) +cls-namespace+)))
 	 
 	 (ecase (get-pydecl :context e)
 	 
@@ -643,7 +627,7 @@
 		     ,(when *-arg  (second *-arg))
 		     ,(when **-arg (second **-arg)))
 		    
-		    (let ,(loop for loc in func-locals collect `(,loc :unbound))
+		    (let ,func-locals
 		      
 		      ,@(when pos-arg-destruct-form
 			  `(,pos-arg-destruct-form))
@@ -731,20 +715,6 @@
   (unless (get-pydecl :inside-function-p e)
     (warn "Bogus `global' statement found at top-level (not inside a function)")))
 
-#+(or)
-(defun identifier-expr-module-lookup (name ix +mod-globals-values+ +mod-dyn-globals+ builtin-value)
-  (if ix
-      (let ((val (svref +mod-globals-values+ ix)))
-	(if (eq val :unbound)
-	    (py-raise 'NameError
-		      "Variable '~A' is unbound [glob]" name)
-	  val))
-    (or (gethash name +mod-dyn-globals+)
-	builtin-value
-	(py-raise 'NameError
-		  "Variable '~A' is unbound [dyn-glob]" name))))
-
-
 (defmacro identifier-expr (name &environment e)
   
   ;; The identifier is used for its value; it is not an assignent
@@ -752,28 +722,28 @@
   
   (assert (symbolp name))
   
-  (when (eq name '|...|)
-    (return-from identifier-expr
-      `pybv:Ellipsis))
-  
   (flet ((module-lookup ()
 	   (let ((ix (position name (get-pydecl :mod-globals-names e))))
 	     `(identifier-expr-module-lookup ',name
 					     ,ix
 					     ,(when (builtin-name-p name)
-						(builtin-name-value name))))))
+						(builtin-name-value name)))))
+	 
+	 (local-lookup ()
+	   `(check-local-bound ',name ,name)))
+    
     (ecase (get-pydecl :context e)
 
       (:function (if (or (member name (get-pydecl :lexically-declared-globals e))
 			 (not (member name (get-pydecl :lexically-visible-vars e))))
 		     (module-lookup)
-		   name))
+		   (local-lookup)))
 		 
       (:module   (module-lookup))
       
       (:class    `(or (gethash ',(symbol-name name) +cls-namespace+)
 		      ,(if (member name (get-pydecl :lexically-visible-vars e))
-			   name
+			   (local-lookup)
 			 (module-lookup)))))))
 
 (defmacro if-stmt (if-clauses else-clause)
@@ -888,18 +858,40 @@
 			   +mod-globals-names+ +mod-globals-values+ +mod-dyn-globals+))
 	    
 	    (identifier-expr-module-lookup (name ix builtin-value)
-	      (if ix
-		  
-		  (let ((val (svref +mod-globals-values+ ix)))
-		    (if (eq val :unbound)
-			(py-raise 'NameError
-				  "Variable '~A' is unbound [glob]" name)
-		      val))
-		
-		(or (gethash name +mod-dyn-globals+)
-		    builtin-value
-		    (py-raise 'NameError
-			      "Variable '~A' is unbound [dyn-glob]" name)))))
+	      (excl::fast
+	       (if ix
+		   (or (svref +mod-globals-values+ ix)
+		       (py-raise 'NameError "Variable '~A' is unbound [glob]" name))
+		 
+		 (or (gethash name +mod-dyn-globals+)
+		     builtin-value
+		     (py-raise 'NameError
+			       "Variable '~A' is unbound [dyn-glob]" name)))))
+	    
+	    (delete-identifier-at-module-level (name ix builtin-value)
+	      (excl::fast
+	       (or (if ix
+		       (prog1 (svref +mod-globals-values+ ix)
+			 (setf (svref +mod-globals-values+ ix) builtin-value))
+		     (prog1 (remhash name +mod-dyn-globals+)
+		       (when builtin-value
+			 (setf (gethash name +mod-dyn-globals+) builtin-value))))
+		   (py-raise 'NameError "Cannot delete variable '~A': it is unbound [global]" name))))
+	    
+	    (check-del-bound (name val)
+	      (excl::fast
+	       (unless val 
+		 (py-raise 'NameError "Cannot delete variable '~A': it is unbound [local]" name))))
+	    
+	    (check-local-bound (name val)
+	      (excl::fast
+	       (or val (py-raise 'NameError "Local variable ~A is unbound" name))))
+	    
+	    (class-del (name cls-namespace)
+	      (excl::fast
+	       (unless (py-del-subs cls-namespace name)
+		 (py-raise 'NameError "Cannot delete variable '~A': it is unbound [class]" name)))))
+
        
        ;; remove 'unused' warnings
        #'.globals.
@@ -937,7 +929,7 @@
   (let* ((ast-globals (module-stmt-suite-globals suite)))
     
     `(with-module-context (,(make-array (length ast-globals) :initial-contents ast-globals)
-			   (make-array ,(length ast-globals) :initial-element :unbound) ;; not eval now
+			   (make-array ,(length ast-globals) :initial-element nil) ;; not eval now
 			   ,(make-hash-table :test #'eq)
 			   :set-builtins t
 			   :create-return-mod t
@@ -1022,36 +1014,22 @@
 	`(block :try-except-stmt
 	   (tagbody
 	     (handler-bind ((Exception ,handler-form))
-	       (progn ,suite
-		      ,@(when else-suite `((go :else)))))
-	   
-	     ,@(when else-suite
-		 `(:else
-		   ,else-suite))))))))
+	       
+	       (progn (with-py-errors ,suite)
+		      ,@(when else-suite `((go :else))))
+	     
+	       ,@(when else-suite
+		   `(:else ,else-suite)))))))))
 
 
 (defmacro try-finally-stmt (try-suite finally-suite)
   `(unwind-protect
        
-       (handler-case ,try-suite
-	 (Exception (e) (warn "try/finally caught exception: ~S" e))
-	 
-	 #+(or)(error (e) ;; don't catch Lisp errors
-		 (warn "try/finally: in the TRY block, Lisp condition ~A occured" e)))
+       (handler-case (with-py-errors ,try-suite)
+	 (Exception (e) (warn "try/finally caught exception: ~S" e)))
      
      ,finally-suite))
   
-#+(or)
-`(unwind-protect 
-       
-       (multiple-value-bind (val exc) (ignore-errors ,try-suite)
-	 (when (and (null val)
-		    (typep exc 'condition)
-		    (not (typep exc 'Exception)))
-	   (break "Try/finally: in the TRY block Lisp condition ~S occured" exc)))
-     
-     ,finally-suite)
-
 
 (defmacro tuple-expr (items)
   `(make-tuple-unevaled-list ,items))
@@ -1126,13 +1104,13 @@
 
 (defun make-locals-dict (name-list value-list)
   (make-dict-from-symbol-alist
-   (delete :unbound (mapcar #'cons name-list value-list) :key #'cdr)))
+   (delete nil (mapcar #'cons name-list value-list) :key #'cdr)))
 
 (defun module-make-globals-dict (names-vec values-vec dyn-globals-ht)
   (warn "todo: module-make-globals-dict as proxy")
   (make-dict-from-symbol-alist
    (nconc (loop for name across names-vec and val across values-vec
-	      unless (eq val :unbound) collect (cons name val))
+	      unless (null val) collect (cons name val))
 	  (loop for k being the hash-key in dyn-globals-ht using (hash-value v)
 	      collect (cons k v)))))
 
@@ -1385,7 +1363,7 @@
 	 
 	 (lambda (&rest %args)
 	   (declare (dynamic-extent %args)
-		    (optimize (speed 1) (safety 3) (debug 0)))
+		    (optimize (safety 3) (debug 0)))
 	   
 	   ;; XXX todo: skip making ARG-VAL-VEC array if there are only positional args?
 
@@ -1410,8 +1388,6 @@
 	       (locally #+(or)(declare (optimize (debug 3)))
 			,@body))))))))
 
-;; New
-;#+(or)
 (defun only-pos-args (args)
   "Returns NIL if not only pos args;
 Non-negative integer denoting the number of args otherwise."
@@ -1422,36 +1398,6 @@ Non-negative integer denoting the number of args otherwise."
       finally (return num)))
 
 
-#+(or)
-(defconstant +slow-arg-cache-size+ 16)
-#+(or)
-(defparameter *slow-arg-create-array-funcs* (make-array +slow-arg-cache-size+ :initial-element nil))
-
-#+(or)
-(defun slow-arg-parsing (%args fa arr-sz)
-  (declare (optimize (speed 3) (safety 0) (debug 0)))
-  (let ((f (if (< arr-sz +slow-arg-cache-size+)
-	       
-	       (or (svref *slow-arg-create-array-funcs* arr-sz)
-		   (setf (svref *slow-arg-create-array-funcs* arr-sz)
-		     (compile nil `(lambda (%args fa)
-				     
-				     (declare (optimize (speed 3) (safety 1) (debug 1)))
-				     
-				     ;; XXX The (safety 1) is ACL-specific, necessary to let
-				     ;; the array live just long enough.
-				     ;; It's a hack, but a very efficient one ;-)
-				     
-				     (let ((arg-val-vec (make-array ,arr-sz :initial-element nil)))
-				       (declare (dynamic-extent arg-val-vec))
-				       (parse-py-func-args %args arg-val-vec fa))))))
-	     (lambda (%args fa)
-	       (let ((arg-val-vec (make-array arr-sz :initial-element nil)))
-		 (parse-py-func-args %args arg-val-vec fa))))))
-    (funcall f %args fa)))
-	       
-
-;#+(or)
 (defmacro py-arg-function (name (pos-args key-args *-arg **-arg) &body body)
   
   ;; Non-consing argument parsing! (except when *-arg or **-arg
@@ -1500,7 +1446,7 @@ Non-negative integer denoting the number of args otherwise."
 	 
 	 (lambda (&rest %args)
 	   (declare (dynamic-extent %args)
-		    (optimize (speed 3) (safety 1) (debug 0)))
+		    (optimize (safety 3) (debug 3)))
 	   
 	   (let (,@pos-key-arg-names ,@(when *-arg `(,*-arg)) ,@(when **-arg `(,**-arg))
 		 ,@(when (and some-args-p (not *-arg) (not **-arg))
@@ -1533,8 +1479,10 @@ Non-negative integer denoting the number of args otherwise."
 					     ,the-pop-way))
 		      (t `(when %args (error "too many args")))))
 	     
-	     (locally (declare (optimize (speed 2) (safety 2) (debug 0)))
+	     (locally (declare (optimize (safety 3) (debug 3)))
 	       ,@body)))))))
+
+
 
 (defstruct (func-args (:type vector) (:conc-name fa-) (:constructor make-fa))
   (num-pos-args         :type fixnum :read-only t)
@@ -1550,7 +1498,7 @@ Non-negative integer denoting the number of args otherwise."
 
 (defun parse-py-func-args (%args arg-val-vec fa)
   (declare (dynamic-extent %args)
-	   (optimize (speed 3) (safety 1) (debug 0)))
+	   (optimize (safety 3) (debug 3)))
 
   ;; %ARGS: the (&rest) list containing pos and ":key val" arguments
   ;; ARG-VAL-VEC: (dynamic extent) vector to store final argument values in
@@ -1700,6 +1648,62 @@ Non-negative integer denoting the number of args otherwise."
   
   (values))
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;
+;;; Exceptions: convert Lisp conditions to Python exceptions
+
+(defparameter *max-py-error-level* 2) ;; should be >= 1000 later on (for b1.py)
+(defvar *with-py-error-level* 0)
+
+(defun check-max-with-py-error-level ()
+  (when (> *with-py-error-level* *max-py-error-level*)
+    (py-raise 'RuntimeError "Stack overflow (~A)" *max-py-error-level*)))
+
+(defmacro with-py-errors (&body body)
+  `(let ((*with-py-error-level* (1+ *with-py-error-level*)))
+     (check-max-with-py-error-level)
+     
+     (handler-case ,@body
+       
+       (division-by-zero ()
+	 (py-raise 'ZeroDivisionError "Division or modulo by zero"))
+       
+       (excl:synchronous-operating-system-signal (c)
+	 (if (string= (simple-condition-format-control c) "~1@<Stack overflow (signal 1000)~:@>")
+	     (py-raise 'RuntimeError "Stack overflow")
+	   (py-raise 'RuntimeError "Synchronous OS signal: ~A" c)))
+       
+       (excl:interrupt-signal (c)
+	 (let ((args (simple-condition-format-arguments c)))
+	   (when (string= (cadr args) "Keyboard interrupt")
+	     (py-raise 'KeyboardInterrupt "Keyboard interrupt")))))))
+  
+
+#+(or)
+(defmacro with-py-errors (&body body)
+  `(handler-bind
+       ((division-by-zero
+	 (lambda (c)
+	   (declare (ignore c))
+	   (py-raise 'ZeroDivisionError "Division or modulo by zero")))
+	
+	#+allegro
+	(excl:synchronous-operating-system-signal
+	 (lambda (c)
+	   (break "sync: ~A" c)
+	   (when (string= (simple-condition-format-control c) "~1@<Stack overflow (signal 1000)~:@>")
+	     (py-raise 'RuntimeError "Stack overflow"))))
+	
+	#+allegro
+	(excl:interrupt-signal
+	 (lambda (c)
+	   (let ((args (simple-condition-format-arguments c)))
+	     (when (string= (cadr args) "Keyboard interrupt")
+	       (py-raise 'KeyboardInterrupt "Keyboard interrupt"))))))
+	
+	;; more?
+	
+     ,@body))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; 
@@ -2074,32 +2078,7 @@ Non-negative integer denoting the number of args otherwise."
 	       append (multiple-value-list (apply-splits elm))))))
 
 
-#+(or) ;; TODO: set these after "try:"
-(defmacro with-py-error-handlers (&body body)
-  `(handler-bind
-       ((division-by-zero
-	 (lambda (c)
-	   (declare (ignore c))
-	   (py-raise 'ZeroDivisionError "Division or modulo by zero")))
-	
-	#+allegro
-	(excl:synchronous-operating-system-signal
-	 (lambda (c)
-	   (when (string= (simple-condition-format-control c)
-			  #+(or)(slot-value c 'excl::format-control)
-			  "~1@<Stack overflow (signal 1000)~:@>")
-	     (py-raise 'RuntimeError "Stack overflow"))))
-	
-	#+allegro
-	(excl:interrupt-signal
-	 (lambda (c)
-	   (let ((fa (simple-condition-format-arguments c)))
-	     (when (string= (second fa) "Keyboard interrupt")
-	       (py-raise 'KeyboardInterrupt "Keyboard interrupt")))))
-	
-	;; more?
-	)
-     ,@body))
+
 
 
 

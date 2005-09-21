@@ -1,4 +1,5 @@
 def depth0(n):
+    print "depth0: %s" % n
     try:
         n = depth0(n+1)
     except RuntimeError:
@@ -6,6 +7,7 @@ def depth0(n):
     return n
 
 def depth1(n, pea):
+    print "depth1: %s" % n
     p = (pea, pea)
     for i in xrange(n):
         p = (p, pea)
@@ -19,7 +21,6 @@ def main():
     print depth0(0) >= 996
     pea = []
     base, p = depth1(0, pea)
-    print base >= 996
     pea.append(p)
     while p[1] is not pea:
         q = p[1]
@@ -30,8 +31,10 @@ def main():
         if n != base+1:
             raise RuntimeError, (n, base)
         base -= 1
-    print base
+    print base == 0
     del pea[:]
 
 if __name__ == '__main__':
     main()
+
+

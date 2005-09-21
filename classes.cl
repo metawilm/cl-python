@@ -816,8 +816,8 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 	  step nil)
     (ecase (length args)
       (0 (py-raise 'TypeError "xrange: >= 1 arg needed"))
-      (1 (unless (> (car args) 0)
-	   (break "xrange: invalid only val: ~A" (car args)))
+      (1 (unless (>= (car args) 0)
+	   (break "xrange: invalid 1-arg: ~A" (car args)))
 	 (setf start 0 
 	       stop (car args)
 	       step 1))
@@ -829,7 +829,8 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
     (let ((i start))
       (make-iterator-from-function :name :xrange-iterator
 				   :func (lambda ()
-					   (unless (>= i stop)
+					   (unless (or (and (<= start stop) (>= i stop))
+						       (and (<= stop start) (<= i stop)))
 					     (prog1 i
 					       (incf i step))))))))
 
@@ -1160,13 +1161,12 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 	  for n across globals-names
 	  when (eq n attr.sym) 
 	  do (let ((val (svref globals-values i)))
-	       (if (eq val :unbound)
+	       (if (null val)
 		   (py-raise 'AttributeError "Module ~A has no attribute ~A" x attr.sym)
 		 (return-from py-module.__getattribute__ val))))
       
       (let ((val (gethash attr.sym dyn-globals)))
-	(when (and val
-		   (not (eq val :unbound)))
+	(when val
 	  (return-from py-module.__getattribute__ val)))
       
       (py-raise 'AttributeError "Module ~A has no attribute ~A" x attr.sym))))
@@ -1479,13 +1479,8 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 
 (def-py-method py-list.__str__ (x^)
   (with-output-to-string (s)
-    (write-char #\[ s)
-    (loop with len = (length x)
-	for item across x and i from 0
-	do (write-string (py-repr-string item) s)
-	   (unless (= i (1- len))
-	     (write-string ", " s)))
-    (write-char #\] s)))
+    (print-unreadable-object (x s :type nil :identity t)
+      (format s "list with ~A items" (length x)))))
 
 (def-py-method py-list.__len__ (x^)
   (length x))
@@ -1567,16 +1562,22 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
   (setf (aref x item) val))
 
 (def-py-method py-list.__delitem__ (x^ item)
-  (check-type item integer)
-  (when (< item 0)
-    (incf item (length x)))
-  (unless (<= 0 item (1- (length x)))
-    (py-raise 'ValueError
-	      "del <list>[i] : i outside range (got ~A, length list = ~A)"
-	      item (length x)))
-  (loop for i from item below (1- (length x))
-      do (setf (aref x i) (aref x (1+ i))))
-  (decf (fill-pointer x)))
+  (typecase item
+    (integer (when (< item 0)
+	       (incf item (length x)))
+	     (unless (<= 0 item (1- (length x)))
+	       (py-raise 'ValueError
+			 "del <list>[i] : i outside range (got ~A, length list = ~A)"
+			 item (length x)))
+	     (loop for i from item below (1- (length x))
+		 do (setf (aref x i) (aref x (1+ i))))
+	     (decf (fill-pointer x)))
+    (py-slice (with-slots (start stop step) item
+		(cond ((and (eq start *the-none*) (eq stop *the-none*) (eq step *the-none*))
+		       (loop for i from 0 below (length x) do (setf (aref x i) nil))
+		       (setf (fill-pointer x) 0))
+		      (t (break "unexpected")))))))
+
 
 (def-py-method py-list.__cmp__ (x^ y^)
   (let ((x.len (length x))
@@ -1599,7 +1600,8 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 		    finally (return t)))))
 
 (def-py-method py-list.append (x^ y)
-  (vector-push-extend y x))
+  (vector-push-extend y x)
+  *the-none*)
 
 (def-py-method py-list.sort (x^ &optional fn)
   (when fn
@@ -1845,7 +1847,7 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 			  x))
 		       
 		       (t (error "invalid py-tuple.__new__ cls: ~A" cls)))))
-		   
+
 
 (defvar *the-empty-tuple* (make-instance 'py-tuple :lisp-object nil))
 
@@ -1860,8 +1862,17 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 	((null (cdr x)) (format nil "(~/python:repr-fmt/,)" (car x)))
 	(t              (format nil "(~{~/python:repr-fmt/~^, ~})" x))))
 
+(def-py-method py-tuple.__getitem__ (x^ item)
+  (check-type item integer)
+  (cond ((<= 0 item (1- (length x)))
+	 (nth item x))
+	(t (error "unexpected"))))
+      
+  
 (def-py-method py-tuple.__str__ (x^)
-  (py-tuple.__repr__ x))
+  (with-output-to-string (s)
+    (print-unreadable-object (x s :type nil :identity t)
+      (format s "tuple with ~A items" (length x)))))
 
 (def-py-method py-tuple.__iter__ (x^)
   (make-iterator-from-function
@@ -2027,7 +2038,6 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 
 (defgeneric py-subs (x item)
   (:method ((x t) (item t))
-	   #+(or)(warn "py-subs T T: ~S ~S" x item)
 	   (let ((gi (recursive-class-dict-lookup (py-class-of x) '__getitem__)))
 	     (if gi
 		 (py-call gi x item)
@@ -2278,8 +2288,6 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 (defmacro def-comparison (syntax func test-x-y)
   `(progn (defgeneric ,func (x y)
 	    (:method ((x t) (y t))
-		     #+(or)(declare (optimize (speed 3) (safety 1) (debug 0)))
-		     #+(or)(warn "~A T T: ~S ~S" ',func x y)
 		     (if ,test-x-y
 			 (load-time-value *the-true*)
 		       (load-time-value *the-false*))))
