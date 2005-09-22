@@ -1652,7 +1652,7 @@ Non-negative integer denoting the number of args otherwise."
 ;;;
 ;;; Exceptions: convert Lisp conditions to Python exceptions
 
-(defparameter *max-py-error-level* 2) ;; should be >= 1000 later on (for b1.py)
+(defparameter *max-py-error-level* 1000) ;; should be >= 1000 later on (for b1.py)
 (defvar *with-py-error-level* 0)
 
 (defun check-max-with-py-error-level ()

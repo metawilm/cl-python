@@ -1,5 +1,4 @@
 def depth0(n):
-    print "depth0: %s" % n
     try:
         n = depth0(n+1)
     except RuntimeError:
@@ -7,7 +6,6 @@ def depth0(n):
     return n
 
 def depth1(n, pea):
-    print "depth1: %s" % n
     p = (pea, pea)
     for i in xrange(n):
         p = (p, pea)

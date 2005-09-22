@@ -927,28 +927,41 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
     ;; `__set__' attribute) has higher priority than an instance
     ;; attribute.
     
-    #+(or)(warn "po.__ga__: ~S" `(:class-attr-val ,class-attr-val :__getattr__ ,__getattr__))
+    #+(or)
+    (warn "po.__ga__: ~S" `(:class-attr-val ,class-attr-val :__getattr__ ,__getattr__))
 
     (when (and class-attr-val (data-descriptor-p class-attr-val))
       (return-from py-object.__getattribute__
 	(bind-val class-attr-val x x.class)))
     
     ;; Try instance dict
-    (when (dict x)
-      (let ((val (dict-get x attr)))
-	(when val
-	  
-	  (cond ((subtypep (py-class-of x) 'py-type)
-		 
-		 ;; XXX check the exact condition under which binding
-		 ;; of instance dict item occurs
+    
+    (if (typep x 'class)
+	
+	(loop for c in (mop:class-precedence-list x)
+	    until (or (eq c (load-time-value (find-class 'standard-class)))
+		      (eq c (load-time-value (find-class 'py-dict-mixin)))
+		      (eq c (load-time-value (find-class 'py-class-mixin))))
+		  
+	    for c.dict = (dict c) ;; may be NIL
+	    for val = (when c.dict
+			(sym-gethash attr c.dict))
+	    when val do (return-from py-object.__getattribute__ val))
+      
+      (when (dict x)
+	(let ((val (dict-get x attr)))
+	  (when val
+	    (cond ((subtypep (py-class-of x) 'py-type)
+		   
+		   ;; XXX check the exact condition under which binding
+		   ;; of instance dict item occurs
 
-		 (let ((bound-val (bind-val val nil x)))
-		   (when bound-val ;; attribute-method bounded to class -> NIL
-		     (return-from py-object.__getattribute__ bound-val))))
+		   (let ((bound-val (bind-val val nil x)))
+		     (when bound-val ;; attribute-method bounded to class -> NIL
+		       (return-from py-object.__getattribute__ bound-val))))
 
-		(t (return-from py-object.__getattribute__ 
-		     val))))))
+		  (t (return-from py-object.__getattribute__ 
+		       val)))))))
     
     ;; Fall back to a class attribute that is not a `data descriptor'.
     (when class-attr-val
@@ -1278,7 +1291,7 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 ;; Real
 
 (def-proxy-class py-real (py-number))
-
+(def-py-method py-real.__mod__ (x^ y^) (mod x y))
 
 ;; Integer
 
@@ -1289,10 +1302,11 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 		   
 		   (etypecase arg
 		     (integer arg)
+		     (float  (truncate arg))
 		     (string (let ((*read-base* (if (= base 0) 10 
 						  (progn (check-type base (integer 2 36))
 							 base))))
-			       (read-from-string arg))))
+			       (truncate (read-from-string arg)))))
 		 
 		 (make-instance cls :lisp-object arg)
 		 
@@ -1311,6 +1325,7 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
       (floor x y)
     (/ x y)))
        
+#+(or) ;; to REAL
 (def-py-method py-int.__mod__ (x^ y^) (mod x y))
 
 (def-py-method py-int.__lshift__ (x^ y^)  (ash x y))
