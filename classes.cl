@@ -3,6 +3,8 @@
 ;;;; Python classes and metaclasses; the built-in classes including
 ;;;; their methods.
 
+(defvar *py-print-safe* nil)
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 ;;; Class frameword:  py-meta-type, py-type, py-dictless-object
@@ -382,65 +384,6 @@
 
 
 
-;; Function (Core object)
-
-(defclass py-lisp-function (py-core-object)
-  ()
-  (:metaclass py-core-type))
-
-(mop:finalize-inheritance (find-class 'py-lisp-function))
-
-(def-py-method py-lisp-function.__repr__ (func)
-  (with-output-to-string (s)
-    (print-object func s)))
-
-(def-py-method py-lisp-function.__get__ (func inst cls)
-  #+(or)(when (eq func #'py-lisp-function.__get__)
-	  (break "py-lisp-fuction.__get__ self: ~S ~S" inst cls))
-  (if (and inst (not (eq inst *the-none*)))
-      (make-instance 'py-bound-method :instance inst :func func)
-    (if (and cls (not (eq cls *the-none*)))
-	(make-instance 'py-unbound-method :class cls :func func)
-      (py-raise 'ValueError
-		"Method function.__get__(self, inst, cls) must be called with at ~
-                 least one of inst or cls arguments not-none (got: ~A ~A ~A)"
-		func inst cls))))
-
-(defclass funcallable-python-class (mop:funcallable-standard-class py-core-type)
-  ;; When subclassable python classes also get such a metatype,
-  ;; s/py-core-type/py-type/
-  ())
-
-(defclass py-function (standard-generic-function py-core-object py-dict-mixin)
-  ;; mop:funcallable-standard-class defines :name initarg, but I don't know how to access it...
-  ((name         :initarg :name         :accessor py-function-name)
-   (context-name :initarg :context-name :accessor py-function-context-name))
-  (:metaclass funcallable-python-class))
-
-(defun make-py-function (&key name context-name lambda)
-  (let ((x (make-instance 'py-function :name name :context-name context-name)))
-    (mop:set-funcallable-instance-function x lambda)
-    ;; fill dict?
-    x))
-
-(def-py-method py-function.__get__ (func obj class)
-  (cond ((eq func #'py-function.__get__)
-	 (break "eq py-f.__get__"))
-	((or (null obj) (none-p obj))
-	 (make-instance 'py-unbound-method :func func :class class))
-	(t
-	 (make-instance 'py-bound-method :func func :instance obj))))
-
-(def-py-method py-function.__repr__ (func)
-  (with-output-to-string (s)
-    (print-unreadable-object (func s :identity t)
-      (format s "python-function ~A (~A)" 
-	      (py-function-name func)
-	      (py-function-context-name func)))))
-
-(def-py-method py-function.__call__ (func)
-  func)
-
 ;; Method (Core object)
 
 (defclass py-method (py-core-object)
@@ -552,11 +495,81 @@
   (with-output-to-string (s)
     (print-unreadable-object (x s :type t :identity t))))
 
+
+;; Function (Core object)
+
+(defclass py-lisp-function (py-core-object)
+  ()
+  (:metaclass py-core-type))
+
+(mop:finalize-inheritance (find-class 'py-lisp-function))
+
+(def-py-method py-lisp-function.__repr__ (func)
+  (with-output-to-string (s)
+    (print-object func s)))
+
+(def-py-method py-lisp-function.__get__ (func inst cls)
+  #+(or)(when (eq func #'py-lisp-function.__get__)
+	  (break "py-lisp-function.__get__ self: ~S ~S" inst cls))
+  (if (and inst (not (eq inst *the-none*)))
+      (make-instance 'py-bound-method :instance inst :func func)
+    (if (and cls (not (eq cls *the-none*)))
+	(make-instance 'py-unbound-method :class cls :func func)
+      (py-raise 'ValueError
+		"Method function.__get__(self, inst, cls) must be called with at ~
+                 least one of inst or cls arguments not-none (got: ~A ~A ~A)"
+		func inst cls))))
+
+(def-py-method py-lisp-function.__name__ :attribute (func)
+ (string (excl::func_name func)))
+
+(defclass funcallable-python-class (mop:funcallable-standard-class py-core-type)
+  ;; When subclassable python classes also get such a metatype,
+  ;; s/py-core-type/py-type/
+  ())
+
+(defclass py-function (standard-generic-function py-core-object py-dict-mixin)
+  ;; mop:funcallable-standard-class defines :name initarg, but I don't know how to access it...
+  ((name         :initarg :name         :accessor py-function-name)
+   (context-name :initarg :context-name :accessor py-function-context-name))
+  (:metaclass funcallable-python-class))
+
+(defun make-py-function (&key name context-name lambda)
+  (let ((x (make-instance 'py-function :name (string name)  :context-name context-name)))
+    (mop:set-funcallable-instance-function x lambda)
+    ;; fill dict?
+    x))
+
+(def-py-method py-function.__get__ (func obj class)
+  (cond ((eq func #'py-function.__get__)
+	 (break "eq py-f.__get__"))
+	((or (null obj) (none-p obj))
+	 (make-instance 'py-unbound-method :func func :class class))
+	(t
+	 (make-instance 'py-bound-method :func func :instance obj))))
+
+(def-py-method py-function.__repr__ (func)
+  (with-output-to-string (s)
+    (print-unreadable-object (func s :identity t)
+      (format s "python-function ~A (~A)" 
+	      (py-function-name func)
+	      (py-function-context-name func)))))
+
+(def-py-method py-function.__name__ :attribute (func)
+	       (py-function-name func))
+
+(def-py-method py-function.__call__ (func)
+  func)
+
+
+;; Enumerate (core object)
+
 (defclass py-enumerate (py-core-object)
   ((gener :initarg :gener))
   (:metaclass py-core-type))
 
 (mop:finalize-inheritance (find-class 'py-enumerate))
+
 
 (def-py-method py-enumerate.__new__ :static (cls iterable)
 	       (assert (subtypep cls 'py-enumerate))
@@ -1493,9 +1506,11 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 	  do (vector-push-extend item x))
 
 (def-py-method py-list.__str__ (x^)
-  (with-output-to-string (s)
-    (print-unreadable-object (x s :type nil :identity t)
-      (format s "list with ~A items" (length x)))))
+  (if *py-print-safe*
+      (with-output-to-string (s)
+	(print-unreadable-object (x s :type nil :identity t)
+	  (format s "list with ~A items" (length x))))
+    (py-list.__repr__ x)))
 
 (def-py-method py-list.__len__ (x^)
   (length x))
@@ -1885,9 +1900,11 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
       
   
 (def-py-method py-tuple.__str__ (x^)
-  (with-output-to-string (s)
-    (print-unreadable-object (x s :type nil :identity t)
-      (format s "tuple with ~A items" (length x)))))
+  (if *py-print-safe*
+      (with-output-to-string (s)
+	(print-unreadable-object (x s :type nil :identity t)
+	  (format s "tuple with ~A items" (length x))))
+    (py-tuple.__repr__ x)))
 
 (def-py-method py-tuple.__iter__ (x^)
   (make-iterator-from-function

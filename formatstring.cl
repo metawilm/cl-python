@@ -9,16 +9,11 @@
 (defun fs-extend-vec (str vec)
   (loop for ch across str do (vector-push-extend ch vec)))
 
-(defun make-formatted-string (fs arg)
-  #+(or)(check-type fs format-string)
-  (let ((is-mapping-fs  (ecase (fs-type-of-arg fs)
-			  (:mapping t)
-			  (:list    nil))))
-    #+(or)
-    (when (and (not is-mapping-fs)
-	       (not (subtypep (py-class-of arg) 'py-tuple)))
-      (setf arg (make-tuple-from-list (list arg))))
-    
+(defmethod make-formatted-string (fs arg)
+  (check-type fs format-string)
+  (let ((is-mapping-fs (ecase (fs-type-of-arg fs)
+			 (:mapping t)
+			 (:list    nil))))
     (loop
 	with string = (make-array 20 :element-type 'character :adjustable t :fill-pointer 0)
 	
@@ -44,8 +39,8 @@
 	     (:format  (destructuring-bind
 			   (map-key conv-flags min-field-width precision conv-type) rec
 			 
-			 (when (or conv-flags min-field-width precision)
-			   #+(or)(warn "Ignoring some format string params (make-formatted-string)"))
+			 (when precision
+			   (warn "Formatting: ignoring 'precision' field value (~S)." precision))
 			 
 			 (when (eq min-field-width :arg) (setf min-field-width (pop list-args)))
 			 
@@ -55,18 +50,112 @@
 					 (py-call mapping-getitem map-key) 
 				       (pop list-args)))
 				
-				(obj.str (case conv-type
-					   (#\s (py-str-string obj))
-					   (#\r (py-repr-string obj))
-					   (t (warn "ignoring conv-type ~A (make-formatted-string)"
-						    conv-type)
-					      (py-str-string obj)))))
+				(obj.f (format-obj conv-type obj))
+				(obj.f2 (if (some #'identity (cdr rec)
+						  (apply-fmt-ops conv-type obj obj.f
+								 conv-flags min-field-width))
+					    obj.f)))
 			   
-			   (fs-extend-vec obj.str string)))))
+			   (fs-extend-vec string obj.f2)))))
 	   
 	finally (return string))))
 
 
+(defun format-object (conv-type obj)
+  (ecase conv-type
+    (#\s (py-str-string obj))
+    (#\r (py-repr-string obj))
+    (#\c (setf obj (deproxy obj))
+	 (typecase obj
+	   (integer (pybf:chr obj))
+	   (string  (unless (= (length obj) 1)
+		      (py-raise 'TypeError
+				"The %c formatting code wants 1-char string (got: ~S)."
+				obj))
+		    obj)
+	   (t (py-raise 'TypeError "Invalid object for %c format convertion: ~S." obj))))
+    (#\i (format nil "~D" (deproxy obj)))
+    (#\o (format nil "~O" (deproxy obj)))
+    
+    (#\x (nstring-downcase (format nil "~X" (deproxy obj))))
+    (#\X (nstring-upcase   (format nil "~X" (deproxy obj))))
+    
+    (#\e (nstring-downcase (format nil "~e" (deproxy obj))))
+    (#\E (nstring-upcase   (format nil "~e" (deproxy obj))))
+    
+    (#\f (nstring-downcase (format nil "~f" (deproxy obj))))
+    (#\F (nstring-upcase   (format nil "~f" (deproxy obj))))
+    
+    (#\g (nstring-downcase (format nil "~g" (deproxy obj))))
+    (#\G (nstring-upcase   (format nil "~g" (deproxy obj))))))
+									      
+
+(defun apply-fmt-ops (conv-type obj obj.f conv-flags min-field-width)
+  (setf obj (deproxy obj))
+  (flet ((pad (str from-ix times char)
+	   (dotimes (i times)
+	     (setf (aref str (+ from-ix i)) char))))
+    
+    (let* ((alt-form-p     (member #\# conv-flags))
+	   (right-padded-p (member #\- conv-flags))
+	   (zero-padded-p  (unless right-padded-p (member #\0 conv-flags)))
+	   (sign-p         (member #\+ conv-flags))
+	   (blank-prefix-for-pos-num (unless sign-p (member #\Space conv-flags)))
+	   
+	   (stuff-before ())
+	   (stuff-after ()))
+      
+      (when (or alt-form-p sign-p blank-prefix-for-pos-num)
+	(unless (numberp obj)
+	  (py-raise 'TypeError
+		    "The `#', `+' and ` ' (space) conversion flags may only be used ~
+                     for numeric arguments (got: ~S)." obj)))
+      
+      (when (and alt-form-p (/= 0 obj))
+	(push (case conv-type
+		(#\o #\0)
+		(#\x "0x")
+		(#\X "0X"))
+	      stuff-before))
+      
+      (when (and sign-p (< obj 0))
+	(push #\- stuff-before))
+      
+      (when (and blank-prefix-for-pos-num (> obj 0))
+	(push #\Space stuff-before))
+
+      (flet ((count-extras (e) (loop for x in e
+				   for x.len = (etypecase x
+						 (string    (length x))
+						 (character 1))
+				   sum x.len)))
+	(let* ((extra-len-before (count-extras stuff-before))
+	       (extra-len-after (count-extras stuff-after))
+	       (core-length (+ extra-len-before (length obj.f) extra-len-after))
+	       (num-pad-char (max 0 
+				  (- min-field-width core-length)))
+	       (tot-len (+ core-length num-pad-char))
+	       (pad-char (if zero-padded-p #\0 #\Space)))
+	  
+	  
+	  (dotimes (i num-pad-char)
+	    (if right-padded-p
+		(push pad-char stuff-after)
+	      (push pad-char stuff-before)))
+	  
+	  (let ((res (make-array tot-len :element-type 'character))
+		(i 0))
+	    (loop for item in (nconc stuff-before (cons obj.f stuff-after)) 
+		do (etypecase item
+		     (string (loop for ch across item
+				 do (setf (aref res i) ch) 
+				    (incf i)))
+		     (character (setf (aref res i) item)
+				(incf i))))
+	    (assert (= i tot-len))
+	    res))))))
+
+	     
 (defvar *parsed-format-strings* (make-hash-table :test #'equal))
 
 (defun ensure-parsed-format-string (string)
@@ -103,69 +192,73 @@
 	    ((nil) (return))
 	    
 	    (#\% 
-	     (let* ((mapping-key (if (char= (next-ch-error) #\( ) ;; "%(name)s" % {'name': 'john'}
-				     (coerce (loop for c = (next-ch-error)
-						 until (char= c #\) )
-						 collect c)
-					     'string)
-				   (progn (unread-ch)
-					  nil)))
+	     (let* ((mapping-key
+		     (if (char= (next-ch-error) #\( ) ;; "%(name)s" % {'name': 'john'}
+			 (coerce (loop for c = (next-ch-error) until (char= c #\)) collect c)
+				 'string)
+		       (progn (unread-ch)
+			      nil)))
 		    
-		    (conversion-flags (loop for c = (next-ch-error)
-					  while (member c '( #\# #\0 #\- #\Space #\+ )
-							:test #'char=)
-					  collect c into flags
-					  finally (unread-ch)
-						  (return flags)))
+		    (conversion-flags
+		     (loop for c = (next-ch-error)
+			 while (member c '( #\# #\0 #\- #\Space #\+ ) :test #'char=)
+			 collect c into flags
+			 finally (unread-ch)
+				 (return flags)))
 		    
-		    (minimum-field-width (let ((c (next-ch-error)))
-					   (cond ((char= c #\*) ;; to be supplied as argument
-						  :arg) 
-						 
-						 ((digit-char-p c 10)
-						  (loop with res = 0
-						      while (digit-char-p c 10) 
-						      do (setf res (+ (* 10 res) (digit-char-p c 10))
-							       c (next-ch-error))
-						      finally (unread-ch)
-							      (return res)))
-						 
-						 (t (unread-ch)
-						    nil))))
+		    (minimum-field-width
+		     (let ((c (next-ch-error)))
+		       (cond ((char= c #\*) ;; to be supplied as argument
+			      :arg) 
+			     
+			     ((digit-char-p c 10)
+			      (loop with res = 0
+				  while (digit-char-p c 10) 
+				  do (setf res (+ (* 10 res) (digit-char-p c 10))
+					   c (next-ch-error))
+				  finally (unread-ch)
+					  (return res)))
+			     
+			     (t (unread-ch)
+				nil))))
 		    
-		    (precision (if (char= (next-ch-error) #\.)
-				   (progn
-				     (let ((c (next-ch-error)))
-				       (cond ((digit-char-p c)
-					      (loop with res = 0
-						  while (digit-char-p c 10) 
-						  do (setf res (+ (* 10 res) (digit-char-p c 10))
-							   c (next-ch-error))
-						  finally (unread-ch)
-							  (return res)))
+		    (precision
+		     (if (char= (next-ch-error) #\.)
+			 
+			 (let ((c (next-ch-error)))
+			   (cond ((digit-char-p c)
+				  (loop with res = 0
+				      while (digit-char-p c 10) 
+				      do (setf res (+ (* 10 res) (digit-char-p c 10))
+					       c (next-ch-error))
+				      finally (unread-ch)
+					      (return res)))
 					     
-					     ((char= c #\*) ;; to be supplied as argument
-					      :arg)
-					     
-					     (t (py-raise
-						 'ValueError
-						 "Format string contains illegal precision ~@
-                                                  (got ~A after dot; expected number)." c)))))
+				 ((char= c #\*) ;; to be supplied as argument
+				  :arg)
 				 
-				 (progn (unread-ch)
-					nil)))
+				 (t (py-raise 'ValueError
+					      "Format string contains illegal precision ~@
+                                               (got ~A after dot; expected number)." c))))
+		       
+		       (progn (unread-ch)
+			      nil)))
 		    
 		    
-		    (ignored-C-synax-length-modifier (unless (member (next-ch-error) '( #\h #\l #\L )
-								     :test #'char=)
-						       (unread-ch)))
+		    (ignored-C-synax-length-modifier
+		     (unless (member (next-ch-error) '( #\h #\l #\L ) :test #'char=)
+		       (unread-ch)))
 		    
-		    (conversion-type (let ((c (next-ch-error)))
-				       (unless (position c "diouxXeEfFgGcrs%" :test #'char=)
-					 (py-raise 'ValueError
-						   "In format string, unrecognized conversion ~
-                                                    type found: `~A'." c))
-				       c)))
+		    (conversion-type
+		     (let ((c (next-ch-error)))
+		       (unless (position c "diouxXeEfFgGcrs%" :test #'char=)
+			 (py-raise 'ValueError
+				   "In format string, unrecognized conversion type found: `~A'." c))
+		       
+		       (case c ;; Some codes are redundant
+			 ((#\d #\u) #\i)  
+			 (#\F       #\f)
+			 (t         c)))))
 	       
 	       (declare (ignore ignored-C-synax-length-modifier))
 	       
@@ -175,7 +268,7 @@
 	    
 	    (t ;; string literal
 	     (let ((end-ix (position #\% string :start i)))
-	       (push (list :literal (subseq string (1- i) end-ix))
+	       (push (list :literal (subseq string (1- i) end-ix)) 
 		     res)
 	       (setf i (or end-ix (length string)))))))))
     
@@ -214,159 +307,7 @@
 	       :list-num-args num-args))))
    
 
-#+(or)
-(defmethod py-format-string ((x string) arg)
-  
-  ;; String formatting; similar to C's sprintf().
-  ;; http://docs.python.org/lib/typesseq-strings.html
-  
-  ;; If ARG is a tuple, the items it contains are the values to
-  ;; use.
-  ;; 
-  ;; If ARG is not a tuple, ARG is the one object to use as argument:
-  ;; either by including a string representation of ARG itself, or
-  ;; using ARG as mapping; this is determined by the format string.
-  ;; 
-  ;; Note that if ARG is an iterable other than a tuple, it is still
-  ;; treated as the one argument to use. Thus only with tuples, a list
-  ;; of arguments can be supplied.
-  ;; 
-  ;; The number of string directives and the number of args must
-  ;; match.
-  
-  (multiple-value-bind (args is-mapping-arg)
-      (if (subtypep (py-class-of arg) 'py-tuple)
-	  (values (deproxy arg) nil)
-	(values (list arg) arg))
-    
-    (let* ((res (make-array 20 :element-type 'character :adjustable t :fill-pointer 0))
-	   (next-ch-index 0)
-	   (max-index (1- (length x)))
-	   (mapping-arg-used nil)
-	   (arg-vector-i (if (vectorp args) 0 nil)))
-      
-      (labels ((next-ch-nil () (if (> next-ch-index max-index) nil
-				   (prog1 (aref x next-ch-index) (incf next-ch-index))))
-	       (next-ch-error () (or (next-ch-nil)
-				       (py-raise 'ValueError "Unfinished format string")))
-	       (next-arg () (if mapping-arg-used
-				(py-raise 'ValueError "In format string, both non-mapping ~@
-                                                       and mapping operators found")
-			      (typecase args
-				(list (or (pop args)
-					  (py-raise 'TypeError
-						    "Not enough arguments for format string")))
-				(vector (if (<= arg-vector-i (length args))
-					    (prog1 (aref args arg-vector-i)
-					      (incf arg-vector-i))
-					  (py-raise 'TypeError
-						    "Not enough arguments for format string")))))))
-	(let ((c (next-ch-nil)))
-	  (tagbody start-parsing
-	    
-	    (loop while (and c (not (char= c #\%))) ;; collect regular characters
-		do (vector-push-extend c res)
-		   (setf c (next-ch-nil)))
-	    
-	    (unless c (return-from py-format-string res)) ;; eof
-	    
-	    (assert (char= c #\%))
-	    (setf c (next-ch-error))
-	    
-	    (let* ((mapping-key
-		    (when (char= c #\( )  ;; example: "%(name)s" % {'name': 'john'}
-		      (loop with p = (next-ch-error)
-			  with mapping-key = (make-array 4 :element-type 'character
-							 :adjustable t :fill-pointer 0)
-			  until (char= p #\) )
-			  do (vector-push-extend p mapping-key)
-			     (setf p (next-ch-error))
-			  finally (assert (char= p #\) ))
-				  (setf c (next-ch-error)
-					mapping-arg-used t)
-				  (return mapping-key))))
-		   
-		   (conversion-flags
-		    (loop while (member c `( #\# #\0 #\- #\Space #\+ ))
-			collect c
-			do (setf c (next-ch-error))))
-		   
-		   (minimum-field-width
-		    (cond ((char= c #\*)
-			   (let ((w (next-arg)))
-			     (ensure-py-type w integer
-					     "Format string: field width must be ~@
-                                             integer (got: ~A)")
-			     (setf c (next-ch-error))
-			     w))
-			  
-			  ((digit-char-p c 10)
-			   (loop with res = 0
-			       while (digit-char-p c 10) 
-			       do (setf res (+ (* 10 res) (digit-char-p c 10))
-					c (next-ch-error))
-			       finally (return res)))
-			  
-			  (t 0)))
-		   
-		   (precision
-		    (if (char= c #\.)
-			(progn
-			  (setf c (next-ch-error))
-		      
-			  (cond  ((digit-char-p c) 			  
-				  (loop with res = 0
-				      while (digit-char-p c 10) 
-				      do (setf res (+ (* 10 res) (digit-char-p c 10))
-					       c (next-ch-error))
-				      finally (return res)))
-			     
-				 ((char= c #\*)
-				  (let ((w (next-arg)))
-				    (ensure-py-type w integer
-						    "Format string: precision must be ~@
-                                                 integer (got: ~A)")
-				    (setf c (next-ch-error))
-				    w))
-			     
-				 (t (py-raise 'ValueError
-					      "Format string contains illegal precision ~@
-                                           (got ~A after dot; expecting number)" c))))
-		      0))
-		   
-		   ;; skip useless length modifiers (a C thing)
-		   (ignored (loop while (member c '( #\h #\l #\L ))
-				do (setf c (next-ch-error))))
-		   
-		   (conversion-type
-		    (if (position c "diouxXeEfFgGcrs%")
-			c
-		      (py-raise 'ValueError "Unrecognized conversion type: ~A" c))))
-	      
-	      (declare (ignore ignored))
-	      
-	      #+(or)(warn "mapping-key: ~S conversion-flags: ~S minimum-field-width: ~A"
-			  mapping-key conversion-flags minimum-field-width)
-	      #+(or)(warn "precision: ~A  conversion-type: ~A" precision conversion-type)
 
-	      (when (and mapping-key (not mapping-arg))
-		(py-raise 'TypeError "Format string requiers mapping arg (got: ~A)" arg))
-	      
-	      (let ((converted-object
-		     (py-format
-		      :flags conversion-flags
-		      :minimum-field-width minimum-field-width
-		      :precision precision
-		      :type conversion-type
-		      :object
-		      (if mapping-key
-			  (call-attribute-via-class mapping-arg '__getitem__ mapping-key)
-			(next-arg)))))
-		(loop for ch across converted-object
-		    do (vector-push-extend ch res))))
-	    
-	    (setf c (next-ch-nil))
-	    (go start-parsing)))))))
 
 #+(or)
 (defun py-format (&key type flags minimum-field-width precision object)
