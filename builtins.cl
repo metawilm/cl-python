@@ -154,7 +154,7 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
 	     (let ((x.class (py-class-of x))
 		   (y.class (py-class-of y)))
       
-	       (when (member (find-class 'py-type) (list x.class y.class))
+	       (when (member (load-time-value (find-class 'py-type)) (list x.class y.class))
 		 (return-from pybf::cmp
 		   (if (eq x y)
 		       0
@@ -163,7 +163,7 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
 	       ;; If the class is equal and it defines __cmp__, use that.
       
 	       (when (eq x.class y.class)
-		 (let* ((__cmp__ (recursive-class-dict-lookup x.class '__cmp__))
+		 (let* ((__cmp__ (recursive-class-dict-lookup x.class '__cmp__)) ;; XXX bind
 			(cmp-res (when __cmp__ (py-call __cmp__ x y))))
 		   (when (and cmp-res
 			      (not (eq cmp-res *the-notimplemented*)))

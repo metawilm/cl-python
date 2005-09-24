@@ -208,7 +208,7 @@
 			 mod-metaclass
 			 (load-time-value (find-class 'py-type)))))
       
-      (warn "metaclass: ~A" metaclass)
+      #+(or)(warn "metaclass: ~A" metaclass)
       
       (unless (typep metaclass 'class)
 	(py-raise 'TypeError "Metaclass must be a class (got: ~A)" metaclass))
@@ -252,7 +252,7 @@
 				(bind-val __new__ metaclass (py-class-of metaclass)))))
 
 	  (assert bound-_new_ () "bound __new__ failed")
-	  (warn "Calling this __new__ method: ~S" bound-_new_)
+	  #+(or)(warn "Calling this __new__ method: ~S" bound-_new_)
 	  
 	  ;; If __new__ is a static method, then bound-_new_ will
 	  ;; be the underlying function.
@@ -265,7 +265,7 @@
 			      (make-tuple-from-list supers)
 			      namespace)))
 	    
-	    (warn "The __new__ method returned class: ~S" cls)
+	    #+(or)(warn "The __new__ method returned class: ~S" cls)
 	    (assert cls () "__new__ returned NIL: ~A" bound-_new_)
 	    
 	    ;; Call __init__ when the "thing" returned by
@@ -275,12 +275,12 @@
 		
 		(let ((__init__ (recursive-class-dict-lookup metaclass '__init__)))
 		  (if __init__
-		      (progn (warn "  __init__ method is: ~A" __init__)
+		      (progn #+(or)(warn "  __init__ method is: ~A" __init__)
 			     (py-call __init__ cls))
-		    (warn "No __init__ found, for class ~A returned by metaclass ~A"
+		    #+(or)(warn "No __init__ found, for class ~A returned by metaclass ~A"
 			  cls metaclass)))
 	      
-	      (warn "Not calling __init__ method, as class ~A is not instance of metaclass ~A"
+	      #+(or)(warn "Not calling __init__ method, as class ~A is not instance of metaclass ~A"
 		    cls metaclass))
 	    
 	    cls))))))
@@ -405,8 +405,11 @@
 	(format s "~A.~A" instance func)))))
 
 (def-py-method py-bound-method.__call__ (x &rest args)
-  (with-slots (func instance) x
-    (apply #'py-call func instance args)))
+  (excl::fast
+   (with-slots (func instance) x
+     (if (functionp func)
+	 (apply (the function func) instance args)
+       (apply #'py-call func instance args)))))
 
 (def-py-method py-bound-method.__get__ (x &rest args)
   
@@ -1204,10 +1207,10 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
   (let* ((*current-module-name* (string mod-name))
 	 (file-ast (parse-python-file (format nil "~A.py" mod-name)))
 	 (mod-func (or (gethash file-ast *mod-func-ht*)
-		       (progn (warn "compiling module ~A (not in cache) ~A" mod-name *mod-func-ht*)
+		       (progn #+(or)(warn "compiling module ~A (not in cache) ~A" mod-name *mod-func-ht*)
 			      (let ((f (compile nil `(lambda () ,file-ast))))
 				(setf (gethash file-ast *mod-func-ht*) f)
-				(warn "compiled module added to cache: ~A" *mod-func-ht*)
+				#+(or)(warn "compiled module added to cache: ~A" *mod-func-ht*)
 				f))))
 	 (mod-obj (funcall mod-func)))
     (declare (special *current-module-name*))
@@ -1263,6 +1266,11 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 
 (def-py-method py-number.__eq__  (x^ y^) (py-bool (and (numberp y) (= x y))))
 
+(def-py-method py-number.__cmp__ (x^ y^) 
+  (cond ((< x y) -1)
+	((= x y) 0)
+	(t       1)))
+	
 (def-py-method py-number.__hash__ (x^)
   (cond ((integerp x)   (sxhash x))
 	
@@ -1634,9 +1642,24 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
   *the-none*)
 
 (def-py-method py-list.sort (x^ &optional fn)
-  (when fn
-    (break "ignored: sort fn ~S" fn))
-  (sort x #'py-<))
+  
+  ;; XXX Here it is assumed that SORT does not return a vector that is
+  ;; different from the original one. This is explicitly not
+  ;; guaranteed by ANSI.
+  
+  (let* ((sort-fun (if fn
+		       (lambda (x y) (< (signum (deproxy (py-call fn x y))) 0))
+		     (lambda (x y) (< (signum (pybf:cmp x y)) 0))))
+	 (res (sort x sort-fun)))
+
+    ;; It's not guaranteed by ANSI that (eq res x).
+    (unless (eq res x)
+      (loop for i from 0
+	  for res.i across res
+	  do (setf (aref x i) res.i)))
+    
+    *the-none*))
+
 
 (defmacro make-py-list-unevaled-list (items)
   (let ((vec '#:vec))
@@ -2038,13 +2061,6 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 
 (defgeneric py-call (f &rest args)
   
-  #+(or)
-  (:method :around (f &rest args)
-	   (if (some #'null args)
-	       (break "One of the arguments for (PY-CALL ~A ...) is NIL. Args: ~S"
-		      f args)
-	     (call-next-method)))
-	   
   (:method ((f null) &rest args)
 	   (error "PY-CALL of NIL"))
   
@@ -2054,13 +2070,13 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 		 (apply #'py-call __call__ args)
 	       (error "Don't know how to call: ~S (args: ~A)" f args))))
   
-
   ;; Avoid infinite recursion:
   
   (:method ((f function) &rest args) (apply f args))
   
   (:method ((f py-bound-method) &rest args)
-	   (apply #'py-bound-method.__call__ f args))
+	   (excl::fast
+	    (apply #'py-bound-method.__call__ f args)))
   
   (:method ((f py-unbound-method) &rest args)
 	   (apply #'py-unbound-method.__call__ f args)))

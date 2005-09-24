@@ -41,7 +41,7 @@ def icmp(a, b):
     compares += 1
     return T.__cmp__(a, b)
 
-N = 20000
+N = 1000
 K = 1
 
 ##if __debug__: import time
@@ -79,3 +79,8 @@ def main():
 
 if __name__ == '__main__':
     main()
+
+
+
+
+

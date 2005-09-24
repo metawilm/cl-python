@@ -730,7 +730,8 @@
 						(builtin-name-value name)))))
 	 
 	 (local-lookup ()
-	   `(check-local-bound ',name ,name)))
+	   `(or ,name
+		(check-local-bound ',name ,name))))
     
     (ecase (get-pydecl :context e)
 
@@ -1016,10 +1017,10 @@
 	     (handler-bind ((Exception ,handler-form))
 	       
 	       (progn (with-py-errors ,suite)
-		      ,@(when else-suite `((go :else))))
+		      ,@(when else-suite `((go :else)))))
 	     
-	       ,@(when else-suite
-		   `(:else ,else-suite)))))))))
+	     ,@(when else-suite
+		 `(:else ,else-suite))))))))
 
 
 (defmacro try-finally-stmt (try-suite finally-suite)
