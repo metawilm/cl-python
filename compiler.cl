@@ -149,8 +149,17 @@
       (flet ((assign-one (tg)
 	       (ecase (car tg)
 		 
+		 #+(or)
 		 ((attributeref-expr subscription-expr)  `(setf ,tg ,val))
-		 		 
+		 
+		 (attributeref-expr 
+		  (destructuring-bind (item attr) (cdr tg)
+		    `(setf-py-attr ,item ',(second attr) ,val)))
+		 
+		 (subscription-expr
+		  (destructuring-bind (item subs) (cdr tg)
+		    `(setf-py-subs ,item ,subs ,val)))
+		 		  
 		 ((list-expr tuple-expr)
 		  (let* ((targets (second tg))
 			 (num-targets (length targets)))
@@ -228,9 +237,10 @@
 						 ((attributeref-expr ev-prim ,attr))))))))
 			 
       (subscription-expr (destructuring-bind (item sub) (cdr place)
-			   `(let* ((ev-item ,item)
+			   `(let* ((ev-prim ,item)
 				   (ev-sub  ,sub)
-				   (place-val-now (subscription-expr ev-item ev-sub)))
+				   (ev-val  ,val)
+				   (place-val-now (subscription-expr ev-prim ev-sub)))
 			  
 			      (or (funcall (function ,py-@=) place-val-now ev-val)
 				  (let ((new-val (funcall (function ,py-@)
@@ -756,11 +766,12 @@
 (defmacro import-stmt (args)
   `(progn ,@(loop for x in args
 		collect (if (eq (first x) 'not-as)
-			    `(py-import ',(second (second x))
-					+mod-globals-names+
-					+mod-globals-values+
-					+mod-dyn-globals+)
-			  `(warn "unsupported import: ~A" ',x)))))
+			    
+			    (let ((mod-name (second (second x))))
+			      `(let ((module-obj (py-import ',mod-name)))
+				 (assign-stmt module-obj ((identifier-expr ,mod-name)))))
+			
+			  `(warn "XXX unsupported import: ~A" ',x)))))
   
 (defmacro import-from-stmt (source-name items)
   (if (eq (car source-name) 'identifier-expr)
@@ -834,7 +845,8 @@
 	  (+mod+ ,(when create-return-mod
 		    `(make-module :globals-names  +mod-globals-names+
 				  :globals-values +mod-globals-values+
-				  :dyn-globals    +mod-dyn-globals+))))
+				  :dyn-globals    +mod-dyn-globals+
+				  :name ,module-name))))
      (declare (ignorable +mod+))
 	      
      ,@(when set-builtins
@@ -934,7 +946,7 @@
 			   ,(make-hash-table :test #'eq)
 			   :set-builtins t
 			   :create-return-mod t
-			   :module-name *current-module-name*)
+			   :module-name ,*current-module-name*)
        ,suite)))
 
 (defmacro pass-stmt ()
@@ -977,11 +989,17 @@
 	       (class (error (make-instance ,the-exc :args ,the-var)))
 	       (error (progn (warn "RAISE: ignored arg, as exc was already an ~
                                     instance, not a class")
-			     (error ,the-exc))))
+			     (error ,the-exc)))
+	       (t (when (typep ,the-exc 'error)
+		    (break "Exc ~S is instance of 'error, but not accepted in etypecase"
+			   ,the-exc))))
 	  
 	  `(etypecase ,the-exc
 	     (class    (error (make-instance ,the-exc)))
-	     (error    (error ,the-exc)))))))
+	     (error    (error ,the-exc))
+	     (t (when (typep ,the-exc 'error)
+		    (break "Exc ~S is instance of 'error, but not accepted in etypecase"
+			   ,the-exc))))))))
 
 (defmacro try-except-stmt (suite except-clauses else-suite)
 

@@ -58,20 +58,3 @@
      :unread-chr (lambda (c)
 		    (assert (and c (> next-i 0) (char= c (char s (1- next-i)))))
 		    (decf next-i)))))
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

@@ -861,6 +861,12 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 
 (setf *the-none* (make-instance 'py-none))
 
+(defmethod make-load-form ((x (eql *the-none*)) &optional e)
+  (declare (ignore e))
+  `(locally (declare (special *the-none*))
+     *the-none*))
+
+
 (defun none-p (x) (eq x *the-none*))
 
 (def-py-method py-none.__repr__ (x)
@@ -872,9 +878,19 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 (defclass py-ellipsis (py-core-type) () (:metaclass py-core-type))
 (setf *the-ellipsis* (make-instance 'py-ellipsis))
 
+(defmethod make-load-form ((x (eql *the-ellipsis*)) &optional e)
+  (declare (ignore e))
+  `(locally (declare (special *the-ellipsis*))
+     *the-ellipsis*))
+
 ;; NotImlemented
 (defclass py-notimplemented (py-core-type) () (:metaclass py-core-type))
 (setf *the-notimplemented* (make-instance 'py-notimplemented))
+
+(defmethod make-load-form ((x (eql *the-notimplemented*)) &optional e)
+  (declare (ignore e))
+  `(locally (declare (special *the-notimplemented*))
+     *the-notimplemented*))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -1201,26 +1217,105 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
       (py-raise 'AttributeError "Module ~A has no attribute ~A" x attr.sym))))
 
 
-(defvar *mod-func-ht* (make-hash-table :test #'equal))
+(defun py-import (mod-name)
+  
+  (labels ((safe-file-mtime (fname)
+	     (let ((stat (handler-case (excl.osi:stat fname)
+			   (excl:syscall-error () nil))))
+	       (when stat
+		 (excl.osi:stat-mtime stat))))
+	 
+	   (recompile-py-and-write (mod-name py-fname cl-fname fasl-fname)
+	     (let* ((*current-module-name* (string mod-name))
+		    (file-ast (progn (warn "Parsing ~A ..." py-fname)
+				     (parse-python-file py-fname)))
+		    (mod-func (progn (warn "Compiling ~A ..." py-fname)
+				     (let ((*compile-print* t))
+				       (compile nil `(lambda () ,file-ast))))))
+	     
+	       ;; MOD-FUNC is a lambda that returns a module object.
+	       ;; This function will be written as literal object in the
+	       ;; FASL file. To that end, we need (?) to create a
+	       ;; temporary Lisp file, which will be compiled to FASL.
+	     
+	       (warn "Writing ~A ..." cl-fname)
+	     
+	       (with-open-file (f cl-fname
+				:direction :output
+				:if-exists :supersede
+				:if-does-not-exist :create)
+	       
+		 (format f "(in-package :python)~%")
+		 (format f "(locally (declare (special %py-import-hook%)) ~%")
+		 (format f "  (funcall %py-import-hook% ~%")
+		 (format f "    (funcall #.(locally (declare (special %mod-func%)) ~%")
+		 (format f "      %mod-func%))))"))
+	     
+	       (warn "Compiling ~A ..." cl-fname)
+	       
+	       (let ((%mod-func% mod-func))
+		 (declare (special %mod-func%))
+		 (compile-file cl-fname :output-file fasl-fname :verbose nil))
+	     
+	       (let ((fasl-mtime (safe-file-mtime fasl-fname)))
+		 (assert (and fasl-mtime
+			      (safe-file-mtime py-fname)
+			      (>= fasl-mtime (safe-file-mtime py-fname)))))
+	     
+	       t)))
     
-(defun py-import (mod-name mod-globals-names mod-globals-values mod-dyn-globals-ht)
-  (let* ((*current-module-name* (string mod-name))
-	 (file-ast (parse-python-file (format nil "~A.py" mod-name)))
-	 (mod-func (or (gethash file-ast *mod-func-ht*)
-		       (progn #+(or)(warn "compiling module ~A (not in cache) ~A" mod-name *mod-func-ht*)
-			      (let ((f (compile nil `(lambda () ,file-ast))))
-				(setf (gethash file-ast *mod-func-ht*) f)
-				#+(or)(warn "compiled module added to cache: ~A" *mod-func-ht*)
-				f))))
-	 (mod-obj (funcall mod-func)))
-    (declare (special *current-module-name*))
-    (loop for x across mod-globals-names and i from 0
-	when (eq x mod-name)
-	do (setf (svref mod-globals-values i) mod-obj)
-	   (return)
-	finally (setf (gethash mod-name mod-dyn-globals-ht) mod-obj))
-    nil))
+    ;; XXX need to look for file in all directories of sys.path
+    
+    (let* ((py-fname (format nil "~A.py" mod-name))
+	   (py-mtime (safe-file-mtime py-fname))
+	   
+	   (cl-fname (format nil "~A.cl" mod-name))
+	   
+	   (fasl-fname (format nil "~A.fasl" mod-name))
+	   (fasl-mtime (safe-file-mtime fasl-fname))
+	   (fasl-ok-p (and fasl-mtime
+			   (<= py-mtime fasl-mtime))))
+      
+      (unless py-mtime
+	(py-raise 'ImportError
+		  "Python source file '~A' not found (in current directory)."
+		  py-fname))
+      
+      
+      (if fasl-ok-p
+	  
+	  (warn "Cache file ~A is still up to date" fasl-fname)
+	
+	(progn 
+	  (unless (recompile-py-and-write mod-name py-fname cl-fname fasl-fname)
+	    (py-raise 'ImportError
+		      "Compiling, or writing compiled code, failed."))
+	  
+	  (setf fasl-mtime (safe-file-mtime fasl-fname)
+		fasl-ok-p (and fasl-mtime
+			       (<= py-mtime fasl-mtime)))
+	  
+	  (assert fasl-ok-p ()
+	    "Something strange with file timestamps going on: just modified file ~
+             ~A mtime ~A, while existing file ~A has mtime ~A." 
+	    fasl-fname fasl-mtime py-fname py-mtime)))
+      
+      
+      (let* ((module-object nil)
+	     (%py-import-hook% (lambda (mod) (setf module-object mod))))
+	
+	(declare (special %py-import-hook%))
 
+	(warn "Loading ~A ..." fasl-fname)
+	
+	(load fasl-fname :verbose nil)
+	
+	(unless module-object
+	  (break "imported module ~A did not call %py-import-hook%" mod-name))
+	
+	module-object))))
+
+      
 ;; File (User object)
 
 (defclass py-file (py-user-object py-dict-mixin)
@@ -1640,6 +1735,24 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 (def-py-method py-list.append (x^ y)
   (vector-push-extend y x)
   *the-none*)
+
+
+(def-py-method py-list.pop (x^ &optional index)
+  "Remove and return item at index (default: last item)"
+  (let* ((x.len (length x)))
+    (setf index (if index
+		    (deproxy index)
+		  (1- x.len)))
+					   
+    (let ((ix (if (< index 0) (+ index x.len) index)))
+      (if (<= 0 ix (1- x.len))
+	  (prog1 (aref x ix)
+	    (loop for i from (1+ ix) below x.len
+		do (setf (aref x (1- i)) (aref x i)))
+	    (decf (fill-pointer x)))
+	(py-raise 'ValueError
+		  "list.pop(x, i): ix wrong (got: ~A; x.len: ~A)"
+		  ix x.len)))))
 
 (def-py-method py-list.sort (x^ &optional fn)
   
@@ -2098,7 +2211,26 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 	     (if si
 		 (py-call si x item new-val)
 	       (py-raise 'TypeError "Object ~S does not support item assignment" x)))))
-	  
+
+(defun setf-py-subs (x item new-val)
+  (setf (py-subs x item) new-val))
+
+(defun setf-py-attr (x attr val)
+  (declare (notinline (setf py-attr)))
+  (setf (py-attr x attr) val))
+
+(defmethod make-load-form ((x (eql #'setf-py-attr)) &optional e)
+  (break "mlf setf-py-attr"))
+
+(defmethod make-load-form ((x (eql #'(setf py-attr))) &optional e)
+  (break "mlf (sef py-atrt)"))
+
+#+(or)
+(defmethod make-load-form ((x (eql #'(setf py-subs))) &optional e)
+  (declare (ignore e))
+  (break "mlf")
+  nil)
+
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -2354,7 +2486,9 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 
 (defgeneric py-val->lisp-bool (x)
   (:method ((x number)) (/= x 0))
-  (:method ((x string)) (> (length x) 0)))
+  (:method ((x string)) (> (length x) 0))
+  (:method ((x vector)) (> (length x) 0))
+  (:method (x)          (py-val->lisp-bool (py-nonzero x))))
 
 
 ;; Shortcut functions
@@ -2378,6 +2512,7 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 (def-py-shortcut-func py-hex  __hex__ )
 (def-py-shortcut-func py-oct  __oct__ )
 (def-py-shortcut-func py-len  __len__ )
+(def-py-shortcut-func py-nonzero __nonzero__ )
 
 #+(or)
 (defun py-hash (x)

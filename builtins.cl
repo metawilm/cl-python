@@ -130,7 +130,10 @@ POS-ARGS is any iterable object; KW-DICT must be of type PY-DICT."
 
 
 ;; compare numbers 
-(defgeneric pybf:cmp (x y)
+(defun pybf:cmp (x y)
+  (pybf::cmp-1 x y))
+
+(defgeneric pybf::cmp-1 (x y)
   (:documentation
    "Compare two objects, of which at least one is a user-defined-object.
 Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
@@ -155,7 +158,7 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
 		   (y.class (py-class-of y)))
       
 	       (when (member (load-time-value (find-class 'py-type)) (list x.class y.class))
-		 (return-from pybf::cmp
+		 (return-from pybf::cmp-1
 		   (if (eq x y)
 		       0
 		     -1)))
@@ -167,7 +170,7 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
 			(cmp-res (when __cmp__ (py-call __cmp__ x y))))
 		   (when (and cmp-res
 			      (not (eq cmp-res *the-notimplemented*)))
-		     (return-from pybf::cmp (normalize cmp-res)))))
+		     (return-from pybf::cmp-1 (normalize cmp-res)))))
 
 	       ;; The "rich comparison" operations __lt__, __eq__, __gt__ are
 	       ;; now called before __cmp__ is called.
@@ -202,7 +205,7 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
 			  (when (and res (not (eq res *the-notimplemented*)))
 			    (let ((true? (py-val->lisp-bool res)))
 			      (when true?
-				(return-from pybf::cmp
+				(return-from pybf::cmp-1
 				  (if y-sub-of-x (- res-value) res-value))))))))
       
 	       ;; So the rich comparison operations didn't lead to a result.
@@ -217,14 +220,14 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
 			     (py-call meth x y))))
 		 (when (and res (not (eq res *the-notimplemented*)))
 		   (let ((norm-res (normalize res)))
-		     (return-from pybf::cmp norm-res))))
+		     (return-from pybf::cmp-1 norm-res))))
 
 	       (let* ((meth (recursive-class-dict-lookup y.class '__cmp__))
 		      (res (when meth
 			     (py-call meth y x))))
 		 (when (and res (not (eq res *the-notimplemented*)))
 		   (let ((norm-res (- (normalize res))))
-		     (return-from pybf::cmp norm-res))))
+		     (return-from pybf::cmp-1 norm-res))))
       
 	       ;; CPython now does some number coercion attempts that we don't
 	       ;; have to do because we have first-class numbers. (I think.)
@@ -238,7 +241,7 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
 	       (when (eq x.class y.class)
 		 (let ((x.id (pybf:id x))
 		       (y.id (pybf:id y)))
-		   (return-from pybf::cmp 
+		   (return-from pybf::cmp-1 
 		     (cond ((< x.id y.id) -1)
 			   ((= x.id y.id) 0)
 			   (t             1)))))
@@ -247,8 +250,8 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
 	       ;; is catched above already, when testing for same class;
 	       ;; NoneType is not subclassable).
       
-	       (cond ((eq x *the-none*) (return-from pybf::cmp -1))
-		     ((eq y *the-none*) (return-from pybf::cmp  1)))
+	       (cond ((eq x *the-none*) (return-from pybf::cmp-1 -1))
+		     ((eq y *the-none*) (return-from pybf::cmp-1  1)))
       
 	       ;; Instances of different class are compared by class name, but
 	       ;; numbers are always smaller.
@@ -258,7 +261,7 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
       
 	       (warn "[debug] CMP can't properly compare ~A and ~A." x y)
       
-	       (return-from pybf::cmp
+	       (return-from pybf::cmp-1
 		 (if (string< (class-name x.class) (class-name y.class))
 		     -1
 		   1))
@@ -266,7 +269,7 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
 	       ;; Finally, we have either two instances of different non-number
 	       ;; classes, or two instances that are of incomparable numeric
 	       ;; types.
-	       (return-from pybf::cmp
+	       (return-from pybf::cmp-1
 		 (cond ((eq x y)                   0)
 		       ((< (pybf:id x) (pybf:id y)) -1)
 		       (t                          1)))))))
@@ -549,13 +552,16 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
   m)
 
 
-(defmethod pybf:repr (x)
+(defun pybf:repr (x)
   (py-repr x))
 
-(defmethod pybf:round (x &optional (ndigits 0))
+(defun pybf:round (x &optional (ndigits 0))
   "Round number X to a precision with NDIGITS decimal digits (default: 0).
    Returns float. Precision may be negative"
-  (declare (ignore x ndigits))
+  (py-round x ndigits))
+
+#|
+(declare (ignore x ndigits))
   
   #+(or)
   (progn
@@ -590,11 +596,11 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
       ;; By only coercing here at the end, the result could be more
       ;; exact than what CPython gives.
       (coerce x 'double-float))))
-
+|#
 
 (defun pybf:setattr (x attr val)
   ;; XXX attr symbol/string
-  (setf (py-attr x attr) val))
+  (setf-py-attr x attr val))
 
 (defun pybf:sorted (x)
   ;;; over sequences, or over all iterable things?
