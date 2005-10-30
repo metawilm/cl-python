@@ -26,11 +26,11 @@
 ;;  :mod-globals-names          : vector of variable names at the module level
 ;;  :mod-futures                : the features imported form the __future__ module
 ;;
-;;  :context                    : one of (:class :module :function)
+;;  :context                    : innermost context, one of (:class :module :function)
 ;;  :context-stack              : list of class and function names, innermost first
 ;;  
 ;;  :lexically-declared-globals : list of variable names declared global in an outer scope
-;;                                (so they are also global in inner scopes)
+;;                                (which makes them also global in inner scopes)
 ;;  :lexically-visible-vars     : list of variable names that can be closed over
 ;; 
 ;;  :inside-loop-p              : T iff inside WHILE of FOR  (to check BREAK, CONTINUE)
@@ -57,7 +57,8 @@
 
 
 (defmacro with-gensyms (list &body body)
-  ;; Actually, the new symbols are uninterned fresh symbols, not gensyms.
+  ;; Actually, the new symbols are uninterned fresh symbols with
+  ;; the same name, not gensyms.
   `(let ,(loop for x in list
 	     collect `(,x ',(make-symbol (symbol-name x))))
      ,@body))
@@ -82,9 +83,6 @@
 
 (defvar *current-module-name* "__main__")
 
-;; Module of the function currently executing
-
-(defvar *cfm* nil)
 
 ;; Compiler debugging and optimization options.
 ;; XXX not used yet
@@ -120,16 +118,24 @@
 					`(format nil "Failing test: ~A"
 						 (with-output-to-string (s)
 						   (py-pprint s ',test)))))))))
-  
+
+(defun assign-stmt-list-vals (iterable num-targets)
+  (let ((val-list (py-iterate->lisp-list iterable)))
+    (unless (= (length val-list) num-targets)
+      (py-raise 'ValueError
+		"Assignment to several vars: wanted ~A values, but got ~A"
+		num-targets (length val-list)))
+    val-list))
+    
 (defmacro assign-stmt (value targets &environment e)
 
   (when (and (listp value) (member (car value) '(tuple-expr list-expr))
 	     (= (length targets) 1) (member (caar targets) '(tuple-expr list-expr))
 	     (= (length (second value)) (length (second (car targets)))))
-    #+(or)(warn "inlining ~A = ~A" targets value)
+
     ;; Shortcut the case "a,b,.. = 1,2,.." where left and right same
-    ;; number of items. Note that RHS is evaluated before assignment
-    ;; to LHS takes place.
+    ;; number of items. Note that all RHS values are evaluated before
+    ;; assignment to LHS places takes place.
     
     (let* ((value-items (second value))
 	   (tg-items    (second (car targets)))
@@ -149,9 +155,6 @@
       (flet ((assign-one (tg)
 	       (ecase (car tg)
 		 
-		 #+(or)
-		 ((attributeref-expr subscription-expr)  `(setf ,tg ,val))
-		 
 		 (attributeref-expr 
 		  (destructuring-bind (item attr) (cdr tg)
 		    `(setf-py-attr ,item ',(second attr) ,val)))
@@ -164,11 +167,7 @@
 		  (let* ((targets (second tg))
 			 (num-targets (length targets)))
 		    ;; for now KISS
-		    `(let ((val-list (py-iterate->lisp-list ,val)))
-		       (unless (= (length val-list) ,num-targets)
-			 (py-raise 'ValueError
-				   "Assignment to several vars: wanted ~A values, but got ~A"
-				   ,num-targets (length val-list)))
+		    `(let ((val-list (assign-stmt-list-vals ,val ,num-targets)))
 		       ,@(loop for target in targets
 			     collect `(assign-stmt (pop val-list) (,target))))))
 		 
@@ -197,7 +196,7 @@
 					(module-set)
 				      (local-set)))
 			
-			;; Inside a classdef, do not look at :lexically visible vars
+			;; Inside a classdef, do not look at lexically visible vars
 			(:class     (if (member name (get-pydecl :lexically-declared-globals e))
 					(module-set)      
 				      (class-set))))))))))
@@ -315,7 +314,7 @@
 	   (setf prim (call-expr-special prim (.locals.) (.globals.))))
 	 
 	 ,(cond ((or kw-args **-arg)
-		 `(call-expr%pos+*+kw+** prim (list ,@pos-args) ,*-arg ,**-arg))
+		 `(call-expr%pos+*+kw+** prim (list ,@pos-args) ,*-arg (list ,@kw-args) ,**-arg))
 		
 		((and pos-args *-arg)
 		 `(call-expr%pos+* prim (list ,@pos-args) ,*-arg))
@@ -367,10 +366,15 @@
       (eq prim (load-time-value #'pybf:globals))
       (eq prim (load-time-value #'pybf:eval))))
 
-
 (defmacro py-attr-call (prim attr &rest pos-args)
-  #+(or)(warn "py-attr-call ~A ~A" prim attr)
+  ;; A method call with only positional args: <prim>.<attr>(p1, p2, .., pi)
   (let ((len (length pos-args)))
+
+    ;; Inline calls to commonly called methods.
+    ;; 
+    ;; XXX This optimization should be considered for all methods on
+    ;; built-in types, by looking for bi-classes that have a method
+    ;; (or attribute) <ATTR>.
     
     (multiple-value-bind (test outcome)
 	(cond ((and (eq attr 'isspace) (= len 0))
@@ -429,17 +433,24 @@
       (with-gensyms (cls)
 	`(let ((+cls-namespace+ (make-dict)))
 	   
+	   ;; First, run the statements in the body of the class
+	   ;; definition. This will fill +cls-namespace+ with the
+	   ;; class attributes and methods.
+	   
 	   (with-pydecl ((:context :class)
 			 (:context-stack ,new-context-stack)
 			 (:lexically-declared-globals ,(append 
 							(get-pydecl :lexically-declared-globals e)
 							globals)))
 
-	   ;; Note that the local class variables are not locally visible
-	   ;; i.e. they don't extend ":lexically-visible-vars"
+	     ;; Note that the local class variables are not locally visible
+	     ;; i.e. they don't extend ":lexically-visible-vars"
 	   
-	   ,suite)
-       
+	     ,suite)
+	   
+	   ;; Second, now that +cls-namespace+ is filled, make the
+	   ;; class with that as namespace.
+	   
 	   (let ((,cls (make-py-class :name ',cname
 				      :context-name ',context-cname
 				      :namespace +cls-namespace+
@@ -516,7 +527,7 @@
   ;;   - when code is a constant string, parse it already at compile time etc
   
   ;; An EXEC-STMT is translated into a Python suite containing a
-  ;; function definition and a subsequent cal of the function.
+  ;; function definition and a subsequent call of the function.
   
   (let ((context (get-pydecl :context e)))
     
@@ -539,16 +550,21 @@
 	      
 	    (lambda-body `(with-module-context (#() #() ,globals-ht)
 			    (suite-stmt
-			       
-			     ((funcdef-stmt  ;; helper function
+
+			     ;; Create helper function
+			     ((funcdef-stmt  
 			       nil (identifier-expr exec-stmt-helper-func)
 			       (nil nil nil nil)
 			       (suite-stmt 
-				,(loop for (k v) in loc-kv-pairs ;; set local variables
+
+				;; set local variables
+				,(loop for (k v) in loc-kv-pairs
 				     collect `(assign-stmt ,v ((identifier-expr ,k))))
-				,ast-suite)) ;; execute suite
-				
-			      ;; call function
+
+				;; execute suite
+				,ast-suite))
+			      
+			      ;; Call helper function
 			      (call-expr (identifier-expr exec-stmt-helper-func)
 					 (nil nil nil nil)))))))
 	      
@@ -798,8 +814,8 @@
     `(error "TODO: dotted import, like:  from x.y import ...")))
 
 (defmacro lambda-expr (args expr)
-  ;; XXX maybe the resulting LAMBDA results in more code than
-  ;; necessary for the just one expression it contains.
+  ;; XXX Maybe treating lambda as a funcdef-stmt results in way more
+  ;; code than necessary for the just one expression it contains.
   
   `(funcdef-stmt nil :lambda ,args (suite-stmt ((return-stmt ,expr)))))
   
@@ -808,17 +824,13 @@
   (with-gensyms (list)
     `(let ((,list ()))
        ,(loop
-	    with res = `(push ,item ,list)  ;; (vector-push-extend ,item ,vec)
+	    with res = `(push ,item ,list)
 	    for clause in (reverse for-in/if-clauses)
 	    do (setf res (ecase (car clause)
 			   (for-in `(for-in-stmt ,(second clause) ,(third clause) ,res nil))
 			   (if     `(if-stmt (,(second clause) ,res) nil))))
 	    finally (return res))
        (make-py-list-from-list (nreverse ,list)))))
-
-;;#+(or)(make-py-list-from-vec ,vec)
-;;`(let ((,vec (make-array 0 :adjustable t :fill-pointer 0)))
-
 
 
 (defmacro list-expr (items)
@@ -972,42 +984,45 @@
       (car stmts)
     `(progn ,@stmts)))
 
-(defmacro raise-stmt (exc var tb)
-  (with-gensyms (the-exc the-var)
+(defvar *last-raised-exception* nil)
+
+(defun raise-stmt-1 (exc var tb)
+  (when tb (warn "Traceback arg to RAISE ignored"))
+  
+  ;; ERROR does not support _classes_ as first condition argument; it
+  ;; must be an _instance_ or condition type _name_.
+  (flet ((do-error (e)
+	   (setf *last-raised-exception* e)
+	   (error e)))
     
-    `(let ((,the-exc ,exc)
-	   (,the-var ,var))
-       (declare (ignorable ,the-var))
-       
-       ,@(when tb `((warn "Traceback arg to RAISE ignored")))
-       
-       ;; ERROR cannot deal with _classes_ as first condition argument;
-       ;; it must be an _instance_ or condition type _name_.
-       
-       ,(if var
-	    `(etypecase ,the-exc
-	       (class (error (make-instance ,the-exc :args ,the-var)))
-	       (error (progn (warn "RAISE: ignored arg, as exc was already an ~
-                                    instance, not a class")
-			     (error ,the-exc)))
-	       (t (when (typep ,the-exc 'error)
-		    (break "Exc ~S is instance of 'error, but not accepted in etypecase"
-			   ,the-exc))))
-	  
-	  `(etypecase ,the-exc
-	     (class    (error (make-instance ,the-exc)))
-	     (error    (error ,the-exc))
-	     (t (when (typep ,the-exc 'error)
-		    (break "Exc ~S is instance of 'error, but not accepted in etypecase"
-			   ,the-exc))))))))
+    (cond ((and exc var)
+	 (etypecase exc
+	   (class  (do-error (make-instance exc :args var)))
+	   (error  (progn (warn "RAISE: ignored arg, as exc was already an instance, not a class")
+			  (do-error exc)))))
+	(exc
+	 (etypecase exc
+	   (class    (do-error (make-instance exc)))
+	   (error    (do-error exc))))
+	
+	(t
+	 (if *last-raised-exception*
+	     (error *last-raised-exception*)
+	   (py-raise 'ValueError "There is not exception to re-raise (got bare `raise')."))))))
+    
+(defmacro raise-stmt (exc var tb)
+  `(raise-stmt-1 ,exc ,var ,tb))
+
 
 (defmacro try-except-stmt (suite except-clauses else-suite)
 
   ;; The Exception class in a clause is evaluated only after an
-  ;; exception is thrown. Can't use handler-case for that reason.
+  ;; exception is thrown.
   
   (with-gensyms (the-exc)
+      
     (flet ((handler->cond-clause (except-clause)
+	
 	     (destructuring-bind (exc var handler-suite) except-clause
 	       (cond ((null exc)
 		      `(t (progn ,handler-suite
@@ -1021,7 +1036,10 @@
 			       (return-from :try-except-stmt nil))))
 				
 		     (t
-		      `((typep ,the-exc ,exc)
+		      `((progn (assert (typep ,exc 'class) ()
+				 "try/except: except clause should select a class (got: ~A)"
+				 ,exc)
+			       (typep ,the-exc ,exc))
 			(progn ,@(when var `((assign-stmt ,the-exc (,var))))
 			       ,handler-suite
 			       (return-from :try-except-stmt nil))))))))
@@ -1043,12 +1061,8 @@
 
 (defmacro try-finally-stmt (try-suite finally-suite)
   `(unwind-protect
-       
-       (handler-case (with-py-errors ,try-suite)
-	 (Exception (e) (warn "try/finally caught exception: ~S" e)))
-     
+       ,try-suite
      ,finally-suite))
-  
 
 (defmacro tuple-expr (items)
   `(make-tuple-unevaled-list ,items))
@@ -1090,7 +1104,6 @@
 ;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -1334,86 +1347,13 @@
 ;;;
 ;;; Function argument handling
 
-#+(or) ;; old
-(defmacro py-arg-function (name (pos-args key-args *-arg **-arg) &body body)
-  
-  ;; Non-consing argument parsing! (except when *-arg or **-arg
-  ;; present)
-  ;; 
-  ;; POS-ARGS: list of symbols
-  ;; KEY-ARGS: list of (key-symbol default-val) pairs
-  ;; *-ARG, **-ARG: a symbol or NIL 
-  ;; 
-  ;; XXX todo: the generated code can be cleaned up a bit when there
-  ;; are no arguments (currently zero-length vectors are created).
-  
-  #+(or)(break "py-arg-function: args=~A ~A ~A ~A" pos-args key-args *-arg **-arg)
-  
-  (assert (symbolp name))
-  
-  (let* ((num-pos-args (length pos-args))
-	 (num-key-args (length key-args))
-	 (num-pos-key-args  (+ num-pos-args num-key-args))
-	 (pos-key-arg-names (nconc (copy-list pos-args) (mapcar #'first key-args)))
-	 (key-arg-default-asts (mapcar #'second key-args))
-	 (arg-name-vec (make-array num-pos-key-args :initial-contents pos-key-arg-names))
-	 
-	 (arg-kwname-vec (make-array
-			  num-pos-key-args
-			  :initial-contents (loop for x across arg-name-vec
-						collect (intern x #.(find-package :keyword)))))
-    
-	 (fa (make-fa :num-pos-args     num-pos-args
-		      :num-key-args     num-key-args
-		      :num-pos-key-args num-pos-key-args
-		      :pos-key-arg-names (make-array (length pos-key-arg-names)
-						     :initial-contents pos-key-arg-names)
-		      :key-arg-default-vals :py-will-be-filled-at-load-time
-		      :arg-name-vec     arg-name-vec
-		      :arg-kwname-vec   arg-kwname-vec
-		      :*-arg            *-arg
-		      :**-arg           **-arg)))
-    
-    `(progn
-       (setf (fa-key-arg-default-vals ,fa)
-	 (make-array ,num-key-args :initial-contents (list ,@key-arg-default-asts)))
-       
-       (excl:named-function ,name
-	 
-	 (lambda (&rest %args)
-	   (declare (dynamic-extent %args)
-		    (optimize (safety 3) (debug 0)))
-	   
-	   ;; XXX todo: skip making ARG-VAL-VEC array if there are only positional args?
-
-	   
-	   (let ((arg-val-vec (make-array
-			       ,(+ num-pos-key-args (if *-arg 1 0) (if **-arg 1 0))
-			       :initial-element nil)))
-	     (declare (dynamic-extent arg-val-vec))
-	     
-	     (parse-py-func-args %args arg-val-vec ,fa)
-
-	     ;; arg-val-vec is now filled with values for local variables
-	     (let (,@(loop for p in pos-key-arg-names and i from 0
-			 collect `(,p (svref arg-val-vec ,i)))
-		   ,@(when  *-arg
-		       `((,*-arg  (or (svref arg-val-vec ,num-pos-key-args)
-				      (break "*-arg of function ~A got NIL" ',name)))))
-		   
-		   ,@(when **-arg
-		       `((,**-arg  (svref arg-val-vec ,(1+ num-pos-key-args))))))
-	       
-	       (locally #+(or)(declare (optimize (debug 3)))
-			,@body))))))))
-
 (defun only-pos-args (args)
   "Returns NIL if not only pos args;
 Non-negative integer denoting the number of args otherwise."
   (loop with num = 0
       for a in args
-      if (symbolp a) return nil
-      else do (incf num)		     
+      if (symbolp a) return nil ;; regular Python values are never symbols,
+      else do (incf num)   ;; so a symbol indicates a key-value, * or ** argument 
       finally (return num)))
 
 
@@ -1471,11 +1411,22 @@ Non-negative integer denoting the number of args otherwise."
 		 ,@(when (and some-args-p (not *-arg) (not **-arg))
 		     `((only-pos-args (only-pos-args %args)))))
 	     
+	     ;; There are two ways to parse the argument list:
+	     ;;    
+	     ;; - The pop way, which quickly assigns the variables a
+	     ;;   local name (only usable when there are only
+	     ;;   positional arguments supplied, and the number of
+	     ;;   them is correct);
+	     ;;   
+	     ;; - The array way, where a temporary array is created
+	     ;;   and a arg-parse function is called (used everywhere
+	     ;;   else).
+	    
 	     ,(let ((the-array-way
 		     
 		     `(let ((arg-val-vec (make-array ,(+ num-pos-key-args
 							 (if (or *-arg **-arg) 1 0)
-							 (if **-arg 1 0))   :initial-element nil)))
+							 (if **-arg 1 0)) :initial-element nil)))
 			(declare (dynamic-extent arg-val-vec))
 			(parse-py-func-args %args arg-val-vec ,fa)
 			
@@ -1498,7 +1449,7 @@ Non-negative integer denoting the number of args otherwise."
 					     ,the-pop-way))
 		      (t `(when %args (error "too many args")))))
 	     
-	     (locally (declare (optimize (safety 3) (debug 3)))
+	     (locally #+(or)(declare (optimize (safety 3) (debug 3)))
 	       ,@body)))))))
 
 
@@ -1525,7 +1476,9 @@ Non-negative integer denoting the number of args otherwise."
   ;;                 the last item **-arg value (if any)
   ;;                 so ARG-VAL-VEC must be larger than just num-pos-and-key-args! 
   ;; FA: func-args struct
-  ;; Return ARG-VAL-VEC
+  ;; Returns nothing
+  ;; 
+  ;; XXX make it raise Python exceptions on errors
   
   (declare (optimize (safety 3) (debug 3))
 	   (type list %args))
@@ -1555,7 +1508,7 @@ Non-negative integer denoting the number of args otherwise."
 		  ;; Reconsing because %args might be dynamic-extent.
 		  (loop until (symbolp (car %args)) collect (pop %args)))
 
-	      (break "Too many pos args"))))
+	      (error "Too many pos args"))))
     
     ;; All remaining arguments are keyword arguments;
     ;; they have to be matched to the remaining pos and
@@ -1564,91 +1517,42 @@ Non-negative integer denoting the number of args otherwise."
     (loop
 	for key = (pop %args) and val = (pop %args) 
 	while key do
-	  (cond
-	   
-	   #+(or)
-	   ((eq key :*)
-	    (let ((extra-pos (py-iterate->lisp-list val)))
-	      (when extra-pos
+
+	  ;; key is either a symbol |foo| or keyword symbol |:foo|
+	  
+	  (cond ((> (the fixnum (fa-num-pos-key-args fa)) 0)
+		 (loop 
+		     with name-vec = (fa-arg-name-vec fa)
+		     with kwname-vec = (fa-arg-kwname-vec fa)
+				       
+		     for i fixnum from num-filled-by-pos-args below 
+		       (the fixnum (fa-num-pos-key-args fa))
+		       
+		     when (or (eq (svref name-vec   i) key) 
+			      (eq (svref kwname-vec i) key))
+			  
+		     do (when (svref arg-val-vec i)
+			  (error "Got multiple values (at least once via `key=arg' ~%
+                                  for parameter `~A'" (svref name-vec i)))
+			(setf (svref arg-val-vec i) val)
+			(return)
+			
+		     finally 
+		       (if (fa-**-arg fa)
+			   (push (cons key val) for-**)
+			 (error "Got unknown keyword arg and no **-arg: ~A ~A"
+				key val))))
 		
-		(cond ((> (the fixnum (fa-num-pos-key-args fa)) 0)
-		       (loop
-			   with max-to-fill-with-pos =
-			     (the fixnum (if (fa-*-arg fa) 
-					     (fa-num-pos-args fa)
-					   (fa-num-pos-key-args fa)))
-			   while extra-pos
-			   until (= num-filled-by-pos-args max-to-fill-with-pos)
-				 
-			   do (if (svref arg-val-vec num-filled-by-pos-args)
-				  (break "Too many positional args (via * arg)")
-				(setf (svref arg-val-vec num-filled-by-pos-args)
-				  (pop extra-pos)))
-			      (incf num-filled-by-pos-args)
-			      
-			   finally
-			     (when extra-pos
-			       (if (fa-*-arg fa)
-				   (setf for-* (nconc for-* extra-pos))
-				 (break "Too many positional args (via * arg)")))))
-		      
-		      ((fa-*-arg fa)  ;; no pos/key args, but *-arg
-		       (setf for-* (nconc for-* extra-pos)))
-		      
-		      (t
-		       (break "Too many positional args (via * arg)"))))))
-	   
-	   #+(or)
-	   ((eq key :**)
-	    ;; XXX largely untested
-	    (let* ((**-arg val)
-		   (**-arg-keys (py-iterate->lisp-list **-arg)))
-	      (loop 
-		  with bound-getitem = (recursive-class-lookup-and-bind
-					**-arg '__getitem__)
-		  for k in **-arg-keys
-			   
-		  for k-sym = (py-str-symbol k #.(find-package :keyword))
-		  for v = (py-call bound-getitem k)
-			  
-		  do (push k-sym %args) ;; the KISS way
-		     (push v %args))))
-	   
-	   (t 
-	    ;; regular key arg: either a symbol |foo| or keyword symbol |:foo|
-	    (cond ((> (the fixnum (fa-num-pos-key-args fa)) 0)
-		   (loop 
-		       with name-vec = (fa-arg-name-vec fa)
-		       with kwname-vec = (fa-arg-kwname-vec fa)
-					 
-		       for i fixnum from num-filled-by-pos-args below 
-			 (the fixnum (fa-num-pos-key-args fa))
-			 
-		       when (or (eq (svref name-vec   i) key) 
-				(eq (svref kwname-vec i) key))
-			    
-		       do (when (svref arg-val-vec i)
-			    (break "Got multiple values (at least once via `key=arg' ~%
-                                    for parameter `~A'" (svref name-vec i)))
-			  (setf (svref arg-val-vec i) val)
-			  (return)
-			  
-		       finally 
-			 (if (fa-**-arg fa)
-			     (push (cons key val) for-**)
-			   (break "Got unknown keyword arg and no **-arg: ~A ~A"
-				  key val))))
-		  
-		  ((fa-**-arg fa)
-		   (push (cons key val) for-**))
-		  
-		  (t (break "Got unknown keyword arg and no **-arg: ~A ~A" key val))))))
+		((fa-**-arg fa)
+		 (push (cons key val) for-**))
+		
+		(t (error "Got unknown keyword arg and no **-arg: ~A ~A" key val))))
     
     ;; Ensure all positional arguments covered
     (loop for i fixnum from num-filled-by-pos-args below (the fixnum
 							   (fa-num-pos-args fa))
 	unless (svref arg-val-vec i)
-	do (break "Positional arg ~A has no value" (svref (fa-arg-name-vec fa) i)))
+	do (error "Positional arg ~A has no value" (svref (fa-arg-name-vec fa) i)))
     
     ;; Use default values for missing keyword arguments
     (loop for i fixnum from (fa-num-pos-args fa) below (the fixnum
@@ -1682,47 +1586,33 @@ Non-negative integer denoting the number of args otherwise."
   `(let ((*with-py-error-level* (1+ *with-py-error-level*)))
      (check-max-with-py-error-level)
      
-     (handler-case ,@body
+     ;; Using handler-bind, so uncatched errors are shown in precisely
+     ;; the context where they occur.
+     
+     (handler-bind
+	 
+	 ((division-by-zero (lambda (c) 
+			      (declare (ignore c))
+			      (py-raise 'ZeroDivisionError "Division or modulo by zero")))
+	  
+	  (excl:synchronous-operating-system-signal
+	   (lambda (c)
+	     (if (string= (simple-condition-format-control c)
+			  "~1@<Stack overflow (signal 1000)~:@>")
+		 (py-raise 'RuntimeError "Stack overflow")
+	       (py-raise 'RuntimeError "Synchronous OS signal: ~A" c))))
+	  
+	  (excl:interrupt-signal
+	   (lambda (c)
+	     (let ((args (simple-condition-format-arguments c)))
+	       (when (string= (cadr args) "Keyboard interrupt")
+		 (py-raise 'KeyboardInterrupt "Keyboard interrupt")))))
        
-       (division-by-zero ()
-	 (py-raise 'ZeroDivisionError "Division or modulo by zero"))
+	  #+(or)
+	  (error (lambda (c)
+		   (warn "with-py-handlers passed on error: ~A" c))))
        
-       (excl:synchronous-operating-system-signal (c)
-	 (if (string= (simple-condition-format-control c) "~1@<Stack overflow (signal 1000)~:@>")
-	     (py-raise 'RuntimeError "Stack overflow")
-	   (py-raise 'RuntimeError "Synchronous OS signal: ~A" c)))
-       
-       (excl:interrupt-signal (c)
-	 (let ((args (simple-condition-format-arguments c)))
-	   (when (string= (cadr args) "Keyboard interrupt")
-	     (py-raise 'KeyboardInterrupt "Keyboard interrupt")))))))
-  
-
-#+(or)
-(defmacro with-py-errors (&body body)
-  `(handler-bind
-       ((division-by-zero
-	 (lambda (c)
-	   (declare (ignore c))
-	   (py-raise 'ZeroDivisionError "Division or modulo by zero")))
-	
-	#+allegro
-	(excl:synchronous-operating-system-signal
-	 (lambda (c)
-	   (break "sync: ~A" c)
-	   (when (string= (simple-condition-format-control c) "~1@<Stack overflow (signal 1000)~:@>")
-	     (py-raise 'RuntimeError "Stack overflow"))))
-	
-	#+allegro
-	(excl:interrupt-signal
-	 (lambda (c)
-	   (let ((args (simple-condition-format-arguments c)))
-	     (when (string= (cadr args) "Keyboard interrupt")
-	       (py-raise 'KeyboardInterrupt "Keyboard interrupt"))))))
-	
-	;; more?
-	
-     ,@body))
+       ,@body)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; 
@@ -1887,7 +1777,7 @@ Non-negative integer denoting the number of args otherwise."
 		   ;;  3. YIELD-STMT or RETURN-STMT in ELSE-SUITE
 		   ;; 
 		   ;; We rewrite it once completely, such that all
-		   ;; cases are covered. Maybe there is more rewritten
+		   ;; cases are covered. Maybe there is more rewriting
 		   ;; going on than needed, but it doesn't hurt.
 		   
 		   (destructuring-bind (try-suite except-clauses else-suite) (cdr form)
@@ -1914,7 +1804,7 @@ Non-negative integer denoting the number of args otherwise."
 					     ,(suite->generator gen-maker try-suite))))
 				(setf .state. ,try-tag)
 				
-				;; yield all values returned by helpder function .gen.
+				;; yield all values returned by helper function .gen.
 				,try-tag
 				(try-except-stmt
 				 

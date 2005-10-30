@@ -76,6 +76,7 @@ def main():
     data = [1, 3, 5, 7, 9, 2, 4, 6, 8, 0]
     for item in data:
         heappush(heap, item)
+    print "main heap 1:", heap
     sort = []
     while heap:
         sort.append(heappop(heap))

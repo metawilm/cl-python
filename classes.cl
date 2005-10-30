@@ -1232,6 +1232,7 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 		    (mod-func (progn (warn "Compiling ~A ..." py-fname)
 				     (let ((*compile-print* t))
 				       (compile nil `(lambda () ,file-ast))))))
+	       (declare (special *current-module-name*))
 	     
 	       ;; MOD-FUNC is a lambda that returns a module object.
 	       ;; This function will be written as literal object in the
@@ -1605,36 +1606,42 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
       (setf (fill-pointer x) len)
       x)))
 
-#+(or)(loop for item in 
-	  do (vector-push-extend item x))
+(def-py-method py-list.__cmp__ (x^ y^)
+  (let ((x.len (length x))
+	(y.len (length y)))
+    
+    (cond ((< x.len y.len) -1)
+	  ((> x.len y.len) 1)
+	  (t (loop for xi across x and yi across y
+		 do (ecase (pybf:cmp xi yi)
+		      (0 ) ;; cont
+		      (-1 (return -1))
+		      (1  (return  1)))
+		 finally (return 0))))))
 
-(def-py-method py-list.__str__ (x^)
-  (if *py-print-safe*
-      (with-output-to-string (s)
-	(print-unreadable-object (x s :type nil :identity t)
-	  (format s "list with ~A items" (length x))))
-    (py-list.__repr__ x)))
+(def-py-method py-list.__delitem__ (x^ item)
+  (typecase item
+    (integer (when (< item 0)
+	       (incf item (length x)))
+	     (unless (<= 0 item (1- (length x)))
+	       (py-raise 'ValueError
+			 "del <list>[i] : i outside range (got ~A, length list = ~A)"
+			 item (length x)))
+	     (loop for i from item below (1- (length x))
+		 do (setf (aref x i) (aref x (1+ i))))
+	     (decf (fill-pointer x)))
+    (py-slice (with-slots (start stop step) item
+		(cond ((and (eq start *the-none*) (eq stop *the-none*) (eq step *the-none*))
+		       (loop for i from 0 below (length x) do (setf (aref x i) nil))
+		       (setf (fill-pointer x) 0))
+		      (t (break "unexpected")))))))
 
-(def-py-method py-list.__len__ (x^)
-  (length x))
-
-(def-py-method py-list.__repr__ (x^)
-  (with-output-to-string (s)
-    (format s "[")
-    (loop for item across x and i from 0
- 	do (unless (= i 0)
- 	     (format s ", "))
- 	   (repr-fmt s item))
-    (format s "]")))
-  
-(def-py-method py-list.__iter__ (x^)
-  (let ((i -1)
-	(max-i (1- (length x))))
-    (make-iterator-from-function
-     :name :list-iterator
-     :func (lambda ()
-	     (when (<= (incf i) max-i)
-	       (aref x i))))))
+(def-py-method py-list.__eq__ (x^ y^)
+  (py-bool (and (= (length x) (length y))
+		(loop for xi across x and yi across y
+		    unless (py-==->lisp-val xi yi)
+		    do (return nil)
+		    finally (return t)))))
 
 (def-py-method py-list.__getitem__ (x^ item^)
   (vector-getitem x item (lambda (x single-p)
@@ -1683,6 +1690,38 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
     (t (py-raise 'TypeError "Expected integer or slice as subscript; got: ~S."
 		 item))))
 
+(def-py-method py-list.__iter__ (x^)
+  (let ((i -1)
+	(max-i (1- (length x))))
+    (make-iterator-from-function
+     :name :list-iterator
+     :func (lambda ()
+	     (when (<= (incf i) max-i)
+	       (aref x i))))))
+
+(def-py-method py-list.__len__ (x^)
+  (length x))
+
+(def-py-method py-list.__mul__ (x^ y)
+  (let* ((n (py-val->integer y :min 0))
+	 (x.len (length x))
+	 (res.len (* n x.len))
+	 (res (make-array res.len :adjustable t :fill-pointer res.len)))
+    
+    (loop for ni from 0 below res.len by x.len
+	do (loop for i from 0 below x.len
+	       do (setf (aref res (+ ni i)) (aref x i))))
+    
+    res))
+
+(def-py-method py-list.__repr__ (x^)
+  (with-output-to-string (s)
+    (format s "[")
+    (loop for item across x and i from 0
+ 	do (unless (= i 0)
+ 	     (format s ", "))
+ 	   (repr-fmt s item))
+    (format s "]")))
 
 (def-py-method py-list.__setitem__ (x^ item val)
   (check-type item integer)
@@ -1694,43 +1733,13 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 	      item (length x)))
   (setf (aref x item) val))
 
-(def-py-method py-list.__delitem__ (x^ item)
-  (typecase item
-    (integer (when (< item 0)
-	       (incf item (length x)))
-	     (unless (<= 0 item (1- (length x)))
-	       (py-raise 'ValueError
-			 "del <list>[i] : i outside range (got ~A, length list = ~A)"
-			 item (length x)))
-	     (loop for i from item below (1- (length x))
-		 do (setf (aref x i) (aref x (1+ i))))
-	     (decf (fill-pointer x)))
-    (py-slice (with-slots (start stop step) item
-		(cond ((and (eq start *the-none*) (eq stop *the-none*) (eq step *the-none*))
-		       (loop for i from 0 below (length x) do (setf (aref x i) nil))
-		       (setf (fill-pointer x) 0))
-		      (t (break "unexpected")))))))
+(def-py-method py-list.__str__ (x^)
+  (if *py-print-safe*
+      (with-output-to-string (s)
+	(print-unreadable-object (x s :type nil :identity t)
+	  (format s "list with ~A items" (length x))))
+    (py-list.__repr__ x)))
 
-
-(def-py-method py-list.__cmp__ (x^ y^)
-  (let ((x.len (length x))
-	(y.len (length y)))
-    
-    (cond ((< x.len y.len) -1)
-	  ((> x.len y.len) 1)
-	  (t (loop for xi across x and yi across y
-		 do (ecase (pybf:cmp xi yi)
-		      (0 ) ;; cont
-		      (-1 (return -1))
-		      (1  (return  1)))
-		 finally (return 0))))))
-
-(def-py-method py-list.__eq__ (x^ y^)
-  (py-bool (and (= (length x) (length y))
-		(loop for xi across x and yi across y
-		    unless (py-==->lisp-val xi yi)
-		    do (return nil)
-		    finally (return t)))))
 
 (def-py-method py-list.append (x^ y)
   (vector-push-extend y x)
@@ -2703,7 +2712,7 @@ next value gotten by iterating over X. Returns NIL, NIL upon exhaustion.")
   (let ((*print-pretty* nil))
     (let* ((write-func (if dest 
 			   (py-object.__getattribute__ dest 'write)
-			 #'write-string))
+			 (lambda (s) (write-string s) (finish-output))))
 	   
 	   (softspace-val (if dest
 			      (handler-case 

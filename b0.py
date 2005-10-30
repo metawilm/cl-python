@@ -857,6 +857,7 @@ class instrumentCall(object):
                 argreprs[i] = s
             writeln(indent + "%s(%r)" % (self.name, ", ".join(argreprs)))
             try:
+                #print "iC.__call__: self, self.obj, args:", self, self.obj, args
                 result = self.obj(*args)
             except Exception, exc:
                 writeln(indent + "raise %r" % (exc,))
