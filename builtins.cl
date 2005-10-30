@@ -511,11 +511,10 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
   (py-** x y z))
 
 (defun pybf:range (x &optional y z)
-  (when (or y z)
-    (error "todo: range with more than 1 arg"))
-  (unless (excl:fixnump x)
-    (py-raise 'ValueError "range(x): x must be integer (fixnum) (got: ~A)" x))
-  (make-py-list-from-list (loop for i from 0 below x collect i)))
+  (let ((lst (cond (z (error "todo: range with 3 args"))
+		   (y (loop for i from x below (py-val->integer y) collect i))
+		   (x (loop for i from 0 below x collect i)))))
+    (make-py-list-from-list lst)))
 
 (defun pybf:raw_input (&optional prompt)
   "Pops up a GUI entry window to type text; returns entered string"
