@@ -318,10 +318,12 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
          If list is a string or a tuple, the result also has that type,
          otherwise it is always a list.
    FUNC: if None, identity function is assumed"
+  
   (when (eq func *the-none*)
     (setf func #'identity))
+  
   (make-py-list-from-list (loop for x in (py-iterate->lisp-list iterable)
-			   when (py-val->lisp-bool (py-call func (list x)))
+			   when (py-val->lisp-bool (py-call func x))
 			   collect x)))
 
 (defun pybf:getattr (x attr &optional default)

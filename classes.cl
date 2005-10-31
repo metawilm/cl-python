@@ -1358,15 +1358,24 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 
 (def-proxy-class py-number)
 
-(def-py-method py-number.__repr__ (x^) (format nil "~A" x))
+;; Seems that no py-number.__new__ method is needed: Python does not
+;; have a corresponding 'number' class, so user is always
+;; instantiating a subclass (int, real, ...).
 
-(def-py-method py-number.__eq__  (x^ y^) (py-bool (and (numberp y) (= x y))))
+(def-py-method py-number.__abs__ (x^) (abs x))
+
+(def-py-method py-number.__add__ (x^ y^) (+ x y))
 
 (def-py-method py-number.__cmp__ (x^ y^) 
   (cond ((< x y) -1)
 	((= x y) 0)
 	(t       1)))
-	
+
+(def-py-method py-number.__div__ (x^ y^) (/ x y))  ;; overruled for integers
+
+(def-py-method py-number.__divmod__ (x y)
+  (make-tuple-from-list (list (py-/ x y) (py-% x y))))
+
 (def-py-method py-number.__hash__ (x^)
   (cond ((integerp x)   (sxhash x))
 	
@@ -1383,12 +1392,23 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 	
 	(t (break :unexpected))))
 
-(def-py-method py-number.__add__ (x^ y^) (+ x y))
-(def-py-method py-number.__sub__ (x^ y^) (- x y))
-(def-py-method py-number.__neg__ (x^) (- x))
+(def-py-method py-number.__eq__  (x^ y^) (py-bool (and (numberp y) (= x y))))
+
 (def-py-method py-number.__mul__ (x^ y^) (* x y))
-(def-py-method py-number.__div__ (x^ y^) (/ x y)) ;; overruled for integers
+
+(def-py-method py-number.__neg__ (x^) (- x))
+
+(def-py-method py-number.__pow__ (x^ y^) 
+  (expt x y))
+
+(def-py-method py-number.__repr__ (x^) (format nil "~A" x))
+(def-py-method py-number.__sub__ (x^ y^) (- x y))
+
 (def-py-method py-number.__truediv__ (x^ y^) (/ x y)) ;; overruled for integers
+
+
+;; In CPython, only complex numbers have 'real','imag' and 'conjugate'
+;; attributes, here all numbers have them:
 
 (def-py-method py-number.real :attribute (x^)
 	       (realpart x))
@@ -1404,6 +1424,12 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 ;; Complex
 
 (def-proxy-class py-complex (py-number))
+
+(def-py-method py-complex.__new__ :static (cls &optional (real 0) (complex 0))
+	       (let ((c (complex real complex)))
+		 (if (eq cls (load-time-value (find-class 'py-complex)))
+		     c
+		   (make-instance 'cls :lisp-object c))))
 
 ;; Real
 
@@ -1442,21 +1468,34 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
       (floor x y)
     (/ x y)))
        
-#+(or) ;; to REAL
-(def-py-method py-int.__mod__ (x^ y^) (mod x y))
-
 (def-py-method py-int.__lshift__ (x^ y^)  (ash x y))
 (def-py-method py-int.__rshift__ (x^ y^)  (ash x (- y)))
 (def-py-method py-int.__xor__ (x^ y^) (logxor x y))
 (def-py-method py-int.__and__ (x^ y^) (logand x y))
 (def-py-method py-int.__or__  (x^ y^) (logior x y))
 
+
 (def-proxy-class py-bool (py-int))
+
+(def-py-method py-bool.__new__ :static (cls &optional (val 0))
+	       (let ((bool-val (if (py-val->lisp-bool val) *the-true* *the-false*)))
+		 (if (eq cls (load-time-value (find-class 'py-bool)))
+		     bool-val
+		   (make-instance 'cls :lisp-object bool-val))))
 
 ;; Float
 
 (def-proxy-class py-float (py-real))
 
+(def-py-method py-float.__new__ :static (cls &optional (val 0))
+	       (setf val (deproxy val))
+	       (when  (stringp val)
+		 (setf val (read-from-string val)))
+	       (let* ((num (py-val->number val))
+		      (f   (coerce num 'double-float)))
+		 (if (eq cls (load-time-value (find-class 'py-float)))
+		     f
+		   (make-instance 'cls :lisp-object f))))
 
 ;;; non-numberic classes
 
@@ -1519,20 +1558,13 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 		     ht
 		   (make-instance cls :lisp-object ht))))
 
-(def-py-method py-dict.__eq__ (dict^ dict2)
-  (assert (eq (class-of dict2)
-	      (load-time-value (find-class 'hash-table))) () "py-dict.__eq__ wants two real dicts")
-  (let ((res1 (sort (loop for k being the hash-key in dict
-			using (hash-value v)
-			collect (cons k v))
-		    #'< :key #'car))
-	(res2 (sort (loop for k being the hash-key in dict2
-			using (hash-value v)
-			collect (cons k v))
-		    #'< :key #'car)))
-    
-    #+(or)(warn "~A ~A" res1 res2)
-    (py-bool (equalp res1 res2))))
+(def-py-method py-dict.__eq__ (dict1^ dict2^)
+  (py-bool (and (typep dict2 (load-time-value (find-class 'hash-table)))
+		(= (hash-table-count dict1) (hash-table-count dict2))
+		(loop for d1.k being the hash-key in dict1 using (hash-value d1.v)
+		    for d2.v = (gethash d1.k dict2)
+		    when (py-val->lisp-bool (py-!= d1.v d2.v)) return nil
+		    finally (return t)))))
 
 (def-py-method py-dict.__getitem__ (dict^ key)
   (let ((key2 (if (symbolp key) (symbol-name key) key)))
@@ -1547,6 +1579,9 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 			  (next-func)
 			(declare (ignore val))
 			(when ret key))))))
+
+(def-py-method py-dict.__nonzero__ (dict^)
+  (py-bool (> (hash-table-count dict) 0)))
 
 (def-py-method py-dict.__repr__ (x^)
   (with-output-to-string (s)
@@ -1706,12 +1741,13 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
   (let* ((n (py-val->integer y :min 0))
 	 (x.len (length x))
 	 (res.len (* n x.len))
-	 (res (make-array res.len :adjustable t :fill-pointer res.len)))
-    
-    (loop for ni from 0 below res.len by x.len
-	do (loop for i from 0 below x.len
-	       do (setf (aref res (+ ni i)) (aref x i))))
-    
+	 (res (make-array res.len :adjustable t :fill-pointer res.len
+			  :initial-elemnent (when (= x.len 1) 
+					      (aref x 0)))))
+    (unless (= x.len 1)
+      (loop for ni from 0 below res.len by x.len
+	  do (loop for i from 0 below x.len
+		 do (setf (aref res (+ ni i)) (aref x i)))))
     res))
 
 (def-py-method py-list.__repr__ (x^)
@@ -2032,35 +2068,8 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 (defmacro make-tuple-unevaled-list (items)
   `(make-tuple-from-list (list ,@items)))
 
-(def-py-method py-tuple.__repr__ (x^)
-  (cond ((null x)       "()")
-	((null (cdr x)) (format nil "(~/python:repr-fmt/,)" (car x)))
-	(t              (format nil "(~{~/python:repr-fmt/~^, ~})" x))))
 
-(def-py-method py-tuple.__getitem__ (x^ item)
-  (check-type item integer)
-  (cond ((<= 0 item (1- (length x)))
-	 (nth item x))
-	(t (error "unexpected"))))
       
-  
-(def-py-method py-tuple.__str__ (x^)
-  (if *py-print-safe*
-      (with-output-to-string (s)
-	(print-unreadable-object (x s :type nil :identity t)
-	  (format s "tuple with ~A items" (length x))))
-    (py-tuple.__repr__ x)))
-
-(def-py-method py-tuple.__iter__ (x^)
-  (make-iterator-from-function
-   :name :tuple-iterator
-   :func (let ((i -1))
-	   (lambda ()
-	     (nth (incf i) x)))))
-
-(def-py-method py-tuple.__len__ (x^)
-  (length x))
-
 (def-py-method py-tuple.__cmp__ (x^ y^)
   (let ((x.len (length x))
 	(y.len (length y)))
@@ -2084,7 +2093,38 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 			((or (null xi) (null yi)) (return nil))
 			((py-==->lisp-val xi yi))
 			(t (return nil))))))
-   
+
+(def-py-method py-tuple.__getitem__ (x^ item)
+  (check-type item integer)
+  (cond ((<= 0 item (1- (length x)))
+	 (nth item x))
+	(t (error "unexpected"))))
+
+(def-py-method py-tuple.__iter__ (x^)
+  (make-iterator-from-function
+   :name :tuple-iterator
+   :func (let ((i -1))
+	   (lambda ()
+	     (nth (incf i) x)))))
+
+(def-py-method py-tuple.__len__ (x^)
+  (length x))
+
+(def-py-method py-tuple.__nonzero__ (x^)
+  (py-bool x))
+
+(def-py-method py-tuple.__repr__ (x^)
+  (cond ((null x)       "()")
+	((null (cdr x)) (format nil "(~/python:repr-fmt/,)" (car x)))
+	(t              (format nil "(~{~/python:repr-fmt/~^, ~})" x))))
+
+(def-py-method py-tuple.__str__ (x^)
+  (if *py-print-safe*
+      (with-output-to-string (s)
+	(print-unreadable-object (x s :type nil :identity t)
+	  (format s "tuple with ~A items" (length x))))
+    (py-tuple.__repr__ x)))
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;  
 
 (defgeneric py-class-of (x)
@@ -2228,18 +2268,6 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
   (declare (notinline (setf py-attr)))
   (setf (py-attr x attr) val))
 
-(defmethod make-load-form ((x (eql #'setf-py-attr)) &optional e)
-  (break "mlf setf-py-attr"))
-
-(defmethod make-load-form ((x (eql #'(setf py-attr))) &optional e)
-  (break "mlf (sef py-atrt)"))
-
-#+(or)
-(defmethod make-load-form ((x (eql #'(setf py-subs))) &optional e)
-  (declare (ignore e))
-  (break "mlf")
-  nil)
-
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -2342,7 +2370,7 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 (def-math-func &   py-&    __and__      __rand__       &=   py-&=   __iand__      )
 (def-math-func \|  py-\|   __or__       __ror__        \|=  py-\|=  __ior__       )
 (def-math-func ^   py-^    __xor__      __rxor__       ^=   py-^=   __ixor__      )
-(def-math-func nil py-divmod __divmod__ __rdivmod__    nil  nil     nil           )
+(def-math-func <divmod> py-divmod __divmod__ __rdivmod__    nil  nil     nil           )
 
 ;; a**b (to-the-power) is a special case:
 ;;   
@@ -2357,11 +2385,10 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 ;;   the built-in function POW.
 
 (defun py-** (x y &optional z)
-  (let* ((x.class (py-class-of x))
-	 (op-meth (recursive-class-dict-lookup x.class '__pow__))
+  (let* ((op-meth (recursive-class-lookup-and-bind x '__pow__))
 	 (res (and op-meth (if z
-			       (py-call op-meth x y z)
-			     (py-call op-meth x y)))))
+			       (py-call op-meth y z)
+			     (py-call op-meth y)))))
     
     (if (and res (not (eq res (load-time-value *the-notimplemented*))))
 	res
@@ -2542,6 +2569,13 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
     (if (and (integerp i) (if min (>= i min) t))
 	i
       (py-raise 'TypeError "Expected an integer ~@[>= ~A~]; got: ~S" min x))))
+
+(defun py-val->number (x)
+  (let ((n (deproxy x)))
+    (if (numberp n)
+	n
+      (py-raise 'TypeError "Expected a number; got: ~S" x))))
+
 
 (defun py-repr-string (x) (py-val->string (py-repr x)))
 (defun py-str-string  (x) (py-val->string (py-str x)))

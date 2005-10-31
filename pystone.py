@@ -36,12 +36,12 @@ LOOPS = 500
 
 # from time import clock
 
-clock_i = 0
+clock_i = 42
 
 def clock():
   print "(clock)"
   global clock_i
-  clock_i += 1
+  clock_i += 100 + clock_i
   return clock_i
 
 

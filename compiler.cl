@@ -314,26 +314,30 @@
 	   (setf prim (call-expr-special prim (.locals.) (.globals.))))
 	 
 	 ,(cond ((or kw-args **-arg)
-		 `(call-expr%pos+*+kw+** prim (list ,@pos-args) ,*-arg (list ,@kw-args) ,**-arg))
+		 `(call-expr-pos+*+kw+** prim (list ,@pos-args) ,*-arg (list ,@kw-args) ,**-arg))
 		
 		((and pos-args *-arg)
-		 `(call-expr%pos+* prim (list ,@pos-args) ,*-arg))
+		 `(call-expr-pos+* prim (list ,@pos-args) ,*-arg))
 		
 		(*-arg
-		 `(call-expr%* prim ,*-arg))
+		 `(call-expr-* prim ,*-arg))
 		
 		(t
 		 `(py-call prim ,@pos-args)))))))
 
-(defun call-expr%pos+*+kw+** (prim pos-args *-arg kw-args **-arg)
+(defun call-expr-pos+*+kw+** (prim pos-args *-arg kw-args **-arg)
   (apply #'py-call prim
-	 (nconc pos-args (py-iterate->lisp-list *-arg)
-		kw-args (py-mapping->lisp-list-TODO **-arg))))
+	 (nconc pos-args
+		(when *-arg (py-iterate->lisp-list *-arg))
+		kw-args
+		(when **-arg (py-**-mapping->lisp-arg-list **-arg)))))
 
-(defun call-expr%pos+* (prim pos-args *-arg)
-  (apply #'py-call prim (nconc pos-args (py-iterate->lisp-list *-arg))))
+(defun call-expr-pos+* (prim pos-args *-arg)
+  (apply #'py-call
+	 prim
+	 (nconc pos-args (py-iterate->lisp-list *-arg))))
 
-(defun call-expr%* (prim *-args)
+(defun call-expr-* (prim *-args)
   (apply #'py-call prim (py-iterate->lisp-list *-args)))
 
 (defun call-expr-special (func locals-dict globals-dict)
@@ -1147,6 +1151,10 @@
 	      collect (cons k v)))))
 
 (defgeneric convert-to-namespace-ht (x)
+
+  ;; Convert a Python dict to a namespace, by replacing all string
+  ;; keys by corresponding symbols.
+  
   (:method ((x hash-table))
 	   (loop with d = (make-hash-table :test #'eq) ;; XXX sometimes not needed
 	       for k being the hash-key in x using (hash-value v)
@@ -1164,6 +1172,26 @@
 	     (when (eq x x2) (error "invalid namespace: ~A" x))
 	     (convert-to-namespace-ht x2))))
 
+(defun py-**-mapping->lisp-arg-list (**-arg)
+  ;; Return list: ( |key1| <val1> |key2| <val2> ... )
+  (let* ((items-meth (or (recursive-class-lookup-and-bind **-arg 'items)
+			 (py-raise 'TypeError
+				   "The ** arg in call must be mapping, ~
+                                   supporting 'items' (got: ~S)" **-arg)))
+	 (items-list (py-iterate->lisp-list (py-call items-meth))))
+    
+    (loop with res = ()
+	for k-v in items-list
+	do (let ((k-and-v (py-iterate->lisp-list k-v)))
+	     (unless (= (length k-and-v) 2)
+	       (py-raise 'TypeError
+			 "The ** arg must be list of 2-element tuples (got: ~S)"
+			 k-v))
+	     (destructuring-bind (k v) k-and-v
+	       (push (py-string-val->symbol k) res)
+	       (push v res)))
+	finally (return res))))
+	     
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;
 ;;; Detecting the globals and locals of modules, functions and classes
