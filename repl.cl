@@ -108,10 +108,12 @@
 		       (loop
 			 (with-simple-restart
 			     (:continue "Retry printing the object.")
-			   (let ((str-val (py-str-string val)))
-			     (write-string (py-val->string str-val))
-			     (write-char #\Newline)
-			     (return-from :repr))))))))))
+			   (if (stringp val)
+			       (write-string (py-repr val)) ;; write string with quotes around it;
+			     (let ((str-val (py-str-string val)))     ;; convert other objects using __str__
+			       (write-string (py-val->string str-val)))) ;; and print without quotes
+			   (write-char #\Newline))
+			 (return-from :repr))))))))
     
       (loop
 	  initially (format t "[CLPython -- type `:q' to quit, `:help' for help]~%")

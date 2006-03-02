@@ -19,6 +19,7 @@
 		      (complex      py-complex      )
 		      (dict         py-dict         )
 		      (enumerate    py-enumerate    )
+		      (file         py-file         )
 		      (float        py-float        )
 		      (int          py-int          )
 		      (list         py-list         )

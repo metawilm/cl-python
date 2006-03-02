@@ -87,6 +87,11 @@
   "Raise a Python exception with given format string"
   (error exc-type :args (apply #'format nil string format-args)))
 
+(defun py-raise-runtime-error ()
+  ;; RuntimeError object is allocated at load-time, to prevent causing
+  ;; a new error.
+  (error (load-time-value (make-instance 'RuntimeError))))
+
 (defmethod print-object ((x Exception) stream)
   (format stream "~A~@[: ~@{~A~^, ~}~]"
 	  (class-name (class-of x))
@@ -98,7 +103,8 @@
 
 
 (defvar *cached-StopIteration*
-    (make-instance 'StopIteration :args "Iterator has finished"))
+    (make-instance 'StopIteration :args "Iterator has finished")
+  "Shared instance of this commonly used exception")
 
 (defun raise-StopIteration ()
   (assert *cached-StopIteration*)
