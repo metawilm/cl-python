@@ -1275,7 +1275,7 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
   ((file-handle :initform nil   :accessor py-file-handle)
    (mode        :initform nil   :accessor py-file-mode)
    (binary-mode-p :initform nil :accessor py-file-binary-mode-p)
-   (closed-p    :initform t     :accessor py-file-closedp))
+   (closed-p    :initform t     :accessor py-file-closed-p))
   (:metaclass py-user-type))
 
 (defun ensure-open-file (f)
@@ -1307,44 +1307,57 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
   
   (declare (ignore buffering))
   
-  (if (stringp mode)
-      (setf mode (string-downcase mode))
-    (py-raise 'ValueError "Invalid file mode: ~S" mode))
-
   (unless (stringp name)
     (py-raise 'TypeError "Invalid file name: ~S" name))
 
-  (let* ((binary-mode-p (member #\b mode))
+  (setf mode (if mode
+		 (string-downcase (py-val->string mode))
+	       "r"))
+  
+  (let* ((binary-mode-p (find #\b mode))
 	 (rest-mode (coerce (loop for ch across mode unless (char= ch #\b) collect ch) 'string))
 	 (modes '(("r"  . :read)  ("w"  . :write) ("a"  . :append)
 		  ("r+" . :read+) ("w+" . :write) ("a+" . :append)
 		  ("u"  . :read)  ("ur" . :read)))
-	 (fmode (or (cdr (assoc mode rest-mode :test #'string-equal))
+	 (fmode (or (cdr (assoc rest-mode modes :test #'string-equal))
 		    (py-raise 'ValueError "Invalid file mode: ~S" mode)))
 	 (stream (open name
 		       ;;;; XXX Check is the options are set correctly
-		       :direction (ecase mode                  
+		       :direction (ecase fmode                  
 				    ((:read :read+) :input)
 				    ( :write        :output)
 				    ( :append       :io))
 		       :element-type 'character
-		       :if-exists (ecase mode
+		       :if-exists (ecase fmode
 				    ((:read :read+) nil)
 				    ( :write        :truncate)
 				    ( :append       :append))
-		       :if-does-not-exist (ecase mode
-					    ((:read read+) :error)
+		       :if-does-not-exist (ecase fmode
+					    ((:read read+) nil)
 					    (:write        :create)
 					    (:append       :create))))) ;; ?
+    (unless stream
+      (py-raise 'IOError "Opening file failed: ~S" name))
+       
     (when (eq mode :read+)
       (unless (file-position stream :end)
 	(py-raise 'IOError "Moving to end of file failed")))
     
     (setf (py-file-handle f)        stream
 	  (py-file-binary-mode-p f) binary-mode-p
-	  (py-file-closed-p f)      nil)
+	  (py-file-closed-p f)      nil
+	  (py-file-mode f)          mode)
     
     *the-none*))
+
+(def-py-method py-file.__repr__ (f)
+  (with-output-to-string (s)
+    (print-unreadable-object (f s :identity t)
+      (with-slots (file-handle mode closed-p) f
+	(format s "file ~A :mode ~S" (py-file.name f) mode)
+	(when closed-p
+	  (write-string " :closed t" s))))))
+
 
 (def-py-method py-file.close (f)
   ;; Calling close() more than once is allowed.
@@ -1369,7 +1382,7 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
   ;; this method should not be implemented. [pydoc]
   (py-bool (excl.osi:isatty (py-file-handle f))))
 
-(def-py-method py-file.iter (f)
+(def-py-method py-file.__iter__ (f)
   (ensure-open-file f)
   f)
   
@@ -1382,7 +1395,11 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
   ;; reposition the file to an absolute position will flush the
   ;; read-ahead buffer. [pydoc]
   (ensure-open-file f)
-  :todo)
+  (multiple-value-bind (line eof-p)
+      (py-file.readline f)
+    (if eof-p
+	(raise-StopIteration)
+      line)))
 
 (def-py-method py-file.read (f^ &optional size^)
   ;; Read at most size bytes from the file (less if the read hits EOF
@@ -1397,19 +1414,41 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
   ;; than what was requested may be returned, even if no size
   ;; parameter was given.
   (ensure-open-file f)
-  :todo)
+  (let* ((size (if size
+		   (py-val->integer size)
+		 100))
+	 (check-size-p (>= size 0))
+	 (chars (loop
+		    for i from 0
+		    while (or (null check-size-p) (< i size))
+		    for ch = (read-char (py-file-handle f) nil nil)
+		    while ch 
+		    collect ch)))
+    (coerce chars 'string)))
 
 (def-py-method py-file.readline (f^ &optional size^)
   ;; Read one entire line from the file. A trailing newline character
   ;; is kept in the string (but may be absent when a file ends with an
-  ;; incomplete line).2.11 If the size argument is present and
+  ;; incomplete line). If the size argument is present and
   ;; non-negative, it is a maximum byte count (including the trailing
   ;; newline) and an incomplete line may be returned. An empty string
   ;; is returned only when EOF is encountered immediately. Note:
   ;; Unlike stdio's fgets(), the returned string contains null
   ;; characters ('\0') if they occurred in the input.
+  
+  ;; XXX Currently every kind of newline char (sequence) is replaced
+  ;; by whatever #\Newline is for the platform.
+  ;;
+  ;; Second value returned indicates EOF-P.
+  
   (ensure-open-file f)
-  :todo)
+  (when size
+    (warn ":size arg to file.readline currently ignored XXX"))
+  (multiple-value-bind (line eof-p)
+      (read-line (py-file-handle f) nil nil)
+    (cond ((null line) (values "" t))
+	  (eof-p       line)
+	  (t           (concatenate 'string line (string #\Newline))))))
 
 (def-py-method py-file.readlines (f &optional sizehint^)
   ;; Read until EOF using readline() and return a list containing the
@@ -1419,15 +1458,25 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
   ;; size) are read. Objects implementing a file-like interface may
   ;; choose to ignore sizehint if it cannot be implemented, or cannot
   ;; be implemented efficiently.
+  (declare (ignore sizehint)) ;; XXX
   (ensure-open-file f)
-  :todo)
+  (make-py-list-from-list (loop for line = (multiple-value-bind (line eof-p) 
+					       (py-file.readline f)
+					     (and (null eof-p) line))
+			      while line 
+			      collect line)))
 
 (def-py-method py-file.xreadlines (f)
   ;; This method returns the same thing as iter(f). New in version
   ;; 2.1. Deprecated since release 2.3. Use "for line in file"
   ;; instead.
   (ensure-open-file f)
-  :todo)
+  (make-iterator-from-function :func (lambda ()
+				       (multiple-value-bind (line eof-p) 
+					   (py-file.readline f)
+					 (and (null eof-p) line)))
+			       :name :file.xreadlines))
+
 
 (def-py-method py-file.seek (f offset^ &optional whence)
   ;; Set the file's current position, like stdio's fseek(). The whence
@@ -1483,7 +1532,7 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
   ;; bool indicating the current state of the file object. This is a
   ;; read-only attribute; the close() method changes the value. It may
   ;; not be available on all file-like objects.
-  :todo)
+  (py-bool (py-file-closed-p f)))
 
 (def-py-method py-file.encoding :attribute (f)
   ;; The encoding that this file uses. When Unicode strings are
@@ -1500,15 +1549,16 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 (def-py-method py-file.mode :attribute (f)
   ;; The I/O mode for the file. If the file was created using the
   ;; open() built-in function, this will be the value of the mode
-  ;; parameter. This is a read-only attribute and may not be present on all file-like objects. 
-  :todo)
+  ;; parameter. This is a read-only attribute and may not be present
+  ;; on all file-like objects. 
+  (py-file-mode f))
 
 (def-py-method py-file.name :attribute (f)
   ;; If the file object was created using open(), the name of the
   ;; file. Otherwise, some string that indicates the source of the
   ;; file object, of the form "<...>". This is a read-only attribute
   ;; and may not be present on all file-like objects.
-  :todo)
+  (namestring (truename (py-file-handle f))))
 
 (def-py-method py-file.newlines :attribute (f)
   ;; If Python was built with the --with-universal-newlines option to
@@ -2943,7 +2993,7 @@ next value gotten by iterating over X. Returns NIL, NIL upon exhaustion.")
 	(py-call __iter__ x)
       
       (let ((f (get-py-iterate-fun x)))
-	(make-iterator-from-function f)))))
+	(make-iterator-from-function :func f)))))
 
 
 (defvar *stdout-softspace* 0 "should a space be printed in front of next arg?")
@@ -2978,7 +3028,8 @@ next value gotten by iterating over X. Returns NIL, NIL upon exhaustion.")
 
 	     (let ((s (if (stringp x) x (py-str-string x))))
 	       (py-call write-func s)
-	       (setf last-char-written (aref s (1- (length s))))))
+	       (when (> (length s) 0)
+		 (setf last-char-written (aref s (1- (length s)))))))
       
       (cond ((and comma? (not (char= last-char-written #\Newline))) ;; right logic? 
 	     (if dest 
