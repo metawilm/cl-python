@@ -377,7 +377,8 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
   (let ((cls (deproxy cls)))
     (if (listp cls)
 	(some (lambda (c) (pybf:isinstance x c)) cls)
-      (py-bool (or (typep x cls)
+      (py-bool (or (eq cls (load-time-value (find-class 'py-object)))
+		   (typep x cls)
 		   (subtypep (py-class-of x) cls))))))
 
 (defmethod pybf::isinstance-1 (x cls)
@@ -477,29 +478,23 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
 			      (py-call func curr-items))))))))))
 
 (defun pybf:max (item &rest items)
-  (let ((res nil))
-    (if (null items)
-	(map-over-py-object (lambda (k) (when (or (null res) (py-> k res))
-					  (setf res k)))
-			    item)
-      (progn (setf res item)
-	     (dolist (k items)
-	       (when (or (py-> k res))
-		 (setf res k)))))
-    res))
+  (pybf::maxmin #'py-> item items))
 
 (defun pybf:min (item &rest items)
-  (let ((res nil))
-    (if (null items)
-	(map-over-py-object (lambda (k) (when (or (null res) (py-< k res))
-					  (setf res k)))
-			    item)
-      (progn (setf res item)
-	     (dolist (k items)
-	       (when (or (py-< k res))
-		 (setf res k)))))
-    res))
+  (pybf::maxmin #'py-< item items))
 
+(defun pybf::maxmin (cmpfunc item items)
+  (let ((res nil))
+    
+    (map-over-py-object (lambda (k)
+			  (when (or (null res) (py-val->lisp-bool (funcall cmpfunc k res)))
+			    (setf res k)))
+			
+			(if (null items) 
+			    item
+			  (cons item items)))
+    res))
+    
 (defun pybf:oct (n)
   (py-oct n))
 
@@ -529,11 +524,11 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
     (if initial
 	
 	(progn (setf res initial)
-	       (map-over-py-object (lambda (x) (setf res (py-call func (list res x))))
+	       (map-over-py-object (lambda (x) (setf res (py-call func res x)))
 				   seq))
       
       (map-over-py-object (lambda (x) (cond ((null res) (setf res x))
-					    (t (setf res (py-call func (list res x))))))
+					    (t (setf res (py-call func res x)))))
 			  seq))
     (or res
 	(py-raise 'TypeError "reduce() of empty sequence with no initial value"))))
@@ -560,45 +555,24 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
 (defun pybf:round (x &optional (ndigits 0))
   "Round number X to a precision with NDIGITS decimal digits (default: 0).
    Returns float. Precision may be negative"
-  (py-round x ndigits))
-
-#|
-(declare (ignore x ndigits))
+  (setf ndigits (py-val->integer ndigits))
   
-  #+(or)
-  (progn
-    (multiple-value-bind (x-des x2)
-	(py-number-designator-p x)
-    
-      (multiple-value-bind (nd-des ndigits2)
-	  (py-number-designator-p ndigits)
+  ;; implementation taken from: bltinmodule.c - builtin_round()
+  ;; idea: round(12.3456, 2) ->
+  ;;       12.3456 * 10**2 = 1234.56  ->  1235  ->  1235 / 10**2 = 12.35
+  
+  (let ((f (expt 10 (abs ndigits))))
+    (let* ((x-int (if (< ndigits 0) 
+		      (/ x f)
+		    (* x f )))
+	   (x-int-rounded (round x-int))
+	   (x-rounded (if (< ndigits 0)
+			  (* x-int-rounded f)
+			(/ x-int-rounded f))))
       
-	(if (and x-des nd-des)
-	    (setf x x2
-		  ndigits ndigits2)
-	  (py-raise 'TypeError
-		    "Function round() must be given one or two numbers as ~
-                   arguments (got: ~A ~A)" x ndigits))))
-  
-    ;; implementation taken from: bltinmodule.c - builtin_round()
-    ;; idea: round(12.3456, 2) ->
-    ;;       12.3456 * 10**2 = 1234.56  ->  1235  ->  1235 / 10**2 = 12.35
-  
-    (let ((f (expt 10 (abs ndigits))))
-      (setf x (if (< ndigits 0)
-		  (/ x f)
-		(* x f )))
-      (setf x (if (>= x 0)
-		  (floor (+ x 0.5))
-		(ceiling (- x 0.5))))
-      (setf x (if (< ndigits 0)
-		  (* x f)
-		(/ x f)))
-    
       ;; By only coercing here at the end, the result could be more
       ;; exact than what CPython gives.
-      (coerce x 'double-float))))
-|#
+      (coerce x-rounded 'double-float))))
 
 (defun pybf:setattr (x attr val)
   ;; XXX attr symbol/string
@@ -610,19 +584,10 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
   (error "todo: sorted"))
 
 (defun pybf:sum (seq &optional (start 0))
-  (declare (ignore seq start))
-  (error "todo")
-  #+(or) 
-  (progn (ensure-py-type start number
-			 "Sum() requires number value as START argument (got: ~A)")
-	 (let ((res start))
-	   (ensure-py-type res number
-			   "Sum() only takes numbers (got as start: ~A)")
-	   (map-over-py-object
-	    (lambda (x) (ensure-py-type x number "Sum() only takes numbers (got: ~A)")  
-		    (incf res x))
-	    seq)
-	   res)))
+  (let ((total (py-val->number start)))
+    (map-over-py-object (lambda (x) (incf total (py-val->number x)))
+			seq)
+    total))
 
 (defun pybf:unichr (i)
   ;; -> unicode char i

@@ -30,3 +30,19 @@ class d(dict):
 
 x = d(a=3, b=5)
 # ignores keyword args, but should use them in __init__
+
+
+20060302
+--------
+
+>>> class C: pass
+... 
+#<class C @ #x7ddf2302>
+>>> x = C()
+#<C @ #x7e45594a>
+>>> x.__dict__
+Error: AttributeError: No such attribute: #<C> `__dict__' (class: #<py-type C>)
+  [condition type: AttributeError]
+
+--------
+

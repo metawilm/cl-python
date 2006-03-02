@@ -346,6 +346,33 @@
   (break "py-method.__get__ (func, .. ..) -> func?!  (~A and ~A)" obj class)
   func)
 
+(defclass py-class-method (py-method)
+  ((class :initarg :class))
+  (:metaclass py-core-type))
+
+(defclass py-attribute-method (py-method)
+  ()
+  (:metaclass py-core-type))
+
+(def-py-method py-attribute-method.__get__ (x inst class)
+  (declare (ignore class))
+  (if inst
+      (py-call (slot-value x 'func) inst)
+    nil))
+
+(def-py-method py-attribute-method.__set__ (x inst class)
+  (if inst
+      (py-raise 'TypeError
+		"Attribute ~A of object ~A is read-only (value: ~A)"
+		x inst (py-call (slot-value x 'func) inst))
+    (py-raise 'TypeError
+	      "Class ~A has no attribute ~A" class x)))
+
+(def-py-method py-attribute-method.__repr__ (x)
+  (with-output-to-string (s)
+    (print-unreadable-object (x s :type t :identity t))))
+
+
 (defclass py-bound-method (py-method)
   ((instance :initarg :instance :accessor py-method-instance))
   (:metaclass py-core-type))
@@ -354,7 +381,7 @@
   (with-output-to-string (s)
     (print-unreadable-object (x s :identity t :type t)
       (with-slots (instance func) x
-	(format s "~A.~A" instance func)))))
+	(format s "~A ~A" instance func)))))
 
 (def-py-method py-bound-method.__call__ (x &rest args)
   (excl::fast
@@ -385,6 +412,10 @@
   
   (apply #'py-call (recursive-class-lookup-and-bind (py-method-func x) '__get__) args))
 
+(def-py-method py-bound-method.__name__ :attribute (x)
+  (py-bound-method.__repr__ x))	       
+    
+    
 (defclass py-unbound-method (py-method)
   ((class :initarg :class :accessor py-method-class))
   (:metaclass py-core-type))
@@ -423,33 +454,6 @@
   (print-unreadable-object (x stream :identity t :type t)
     (format stream ":func ~A" (slot-value x 'func))))
     
-
-(defclass py-class-method (py-method)
-  ((class :initarg :class))
-  (:metaclass py-core-type))
-
-(defclass py-attribute-method (py-method)
-  ()
-  (:metaclass py-core-type))
-
-(def-py-method py-attribute-method.__get__ (x inst class)
-  (declare (ignore class))
-  (if inst
-      (py-call (slot-value x 'func) inst)
-    nil))
-
-(def-py-method py-attribute-method.__set__ (x inst class)
-  (if inst
-      (py-raise 'TypeError
-		"Attribute ~A of object ~A is read-only (value: ~A)"
-		x inst (py-call (slot-value x 'func) inst))
-    (py-raise 'TypeError
-	      "Class ~A has no attribute ~A" class x)))
-
-(def-py-method py-attribute-method.__repr__ (x)
-  (with-output-to-string (s)
-    (print-unreadable-object (x s :type t :identity t))))
-
 
 ;; Function (Core object)
 
@@ -958,7 +962,7 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 	(py-call (bind-val __getattr__ x x.class) (symbol-name attr))))
     
     ;; Give up.
-    (error "No such attribute: ~A . ~A" x attr)))
+    (py-raise 'AttributeError "No such attribute: ~A `~A' (class: ~A)" x attr (py-class-of x))))
 
 
 
@@ -1654,8 +1658,11 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 
 (def-py-method py-number.__neg__ (x^) (- x))
 
-(def-py-method py-number.__pow__ (x^ y^) 
-  (expt x y))
+(def-py-method py-number.__pow__ (x^ y^ &optional z^) 
+  (if z
+      (progn (setf z (py-val->integer z))
+	     (mod (expt x y) z))
+    (expt x y)))
 
 (def-py-method py-number.__repr__ (x^) (format nil "~A" x))
 (def-py-method py-number.__sub__ (x^ y^) (- x y))
@@ -1699,11 +1706,23 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 (def-py-method py-int.__new__ :static (cls &optional (arg 0) (base 0))
 	       (if (eq cls (find-class (load-time-value 'py-int)))
 		   
-		   (etypecase arg
+		   (typecase arg
 		     (integer arg)
 		     (float  (truncate arg))
-		     (string (let ((*read-base* (if (= base 0) 10 
-						  (progn (check-type base (integer 2 36))
+		     (t      (setf arg (py-val->string arg)
+				   base (py-val->integer base :min 0))
+			     (let ((*read-base* (cond ((and (>= (length arg) 2)
+							    (char= (aref arg 0) #\0)
+							    (member (aref arg 1) '(#\x #\X) :test #'char=))
+						       (setf arg (subseq arg 2))
+						       16)
+						      ((and (>= (length arg) 1)
+							    (char= (aref arg 0) #\0))
+						       (setf arg (subseq arg 1))
+						       8)
+						      ((= base 0) 
+						       10)
+						      (t (check-type base (integer 2 36))
 							 base))))
 			       (truncate (read-from-string arg)))))
 		 
@@ -1730,6 +1749,8 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 (def-py-method py-int.__and__ (x^ y^) (logand x y))
 (def-py-method py-int.__or__  (x^ y^) (logior x y))
 
+(def-py-method py-int.__hex__ (x^) (format nil "0x~x" x))
+(def-py-method py-int.__oct__ (x^) (format nil "0~o" x))
 
 (def-proxy-class py-bool (py-int))
 
@@ -1848,6 +1869,7 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 	for i from 1
 	do (write-string (py-repr-string key) s)
 	   (write-char #\: s)
+	   (write-char #\Space s)
 	   (write-string (py-repr-string val) s)
 	   (unless (= i c)
 	     (write-string ", " s)))
@@ -2292,6 +2314,12 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 				      (incf res-i)))
       res)))
 
+(def-py-method py-string.lower (x^)
+  (string-downcase x))
+
+(def-py-method py-string.upper (x^)
+  (string-upcase x))
+   
 (def-py-method py-string.replace (x^ old new &optional count^)
   (let ((olds (py-val->string old))
 	(news (py-val->string new)))
@@ -2392,7 +2420,7 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
     (:method ((x list))    (load-time-value (find-class 'py-tuple  )))
     (:method ((x hash-table)) (load-time-value (find-class 'py-dict)))
     
-    (:method ((x function))    (load-time-value (find-class 'py-lisp-function)))
+    (:method ((x function))    (load-time-value (find-class 'py-function)))
     (:method ((x py-function)) (load-time-value (find-class 'py-function)))
     
     (:method ((x py-lisp-type)) (load-time-value (find-class 'py-type)))

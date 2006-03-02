@@ -499,7 +499,7 @@
 		(let ((ix (position name (get-pydecl :mod-globals-names e))))
 		  `(delete-identifier-at-module-level
 		    ',name ,ix ,(when (builtin-name-p name)
-				  (builtin-name-value name)))))
+				  `(builtin-name-value ',name)))))
 	      
 	      (local-del ()
 		`(progn (check-del-bound ',name ,name)
@@ -757,7 +757,7 @@
 	     `(identifier-expr-module-lookup ',name
 					     ,ix
 					     ,(when (builtin-name-p name)
-						(builtin-name-value name)))))
+						`(builtin-name-value ',name)))))
 	 
 	 (local-lookup ()
 	   `(or ,name
@@ -869,7 +869,7 @@
 	 (loop for name across glob-names and i from 0
 	     if (builtin-name-p name)
 	     collect `(setf (svref +mod-globals-values+ ,i)
-			,(builtin-name-value name)) into setfs
+			(builtin-name-value ',name)) into setfs
 							 
 	     else if (eq name '__name__)
 	     collect `(setf (svref +mod-globals-values+ ,i) ,(or module-name "__main__"))
