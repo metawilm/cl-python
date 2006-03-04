@@ -61,6 +61,8 @@
 	       (format t "~%"))
 	     
 	     (remember-value (val)
+	       ;; Make last three return values available as _, __, ___
+	       ;; for both Python (repl module namespace) and Lisp (dynamic vars).
 	       (shiftf ___ __ _ val)
 	       (shiftf (gethash '___ dyn-globals)
 		       (gethash '__  dyn-globals)
@@ -108,10 +110,12 @@
 		       (loop
 			 (with-simple-restart
 			     (:continue "Retry printing the object.")
+			   ;; Write string with quotes around it; convert other objects
+			   ;; using __str__ and print without quotes.
 			   (if (stringp val)
-			       (write-string (py-repr val)) ;; write string with quotes around it;
-			     (let ((str-val (py-str-string val)))     ;; convert other objects using __str__
-			       (write-string (py-val->string str-val)))) ;; and print without quotes
+			       (write-string (py-repr val)) 
+			     (let ((str-val (py-str-string val)))
+			       (write-string (py-val->string str-val)))) 
 			   (write-char #\Newline))
 			 (return-from :repr))))))))
     
@@ -147,8 +151,8 @@
 				    acc)
 
 			      ;; Try to parse; if that returns a "simple" AST
-			      ;; (just inspecting the value of a variable), the
-			      ;; input is complete and ther's no need to wait for
+			      ;; (like just inspecting the value of a variable), the
+			      ;; input is complete and there's no need to wait for
 			      ;; an empty line.
 			    
 			      (let* ((total (apply #'concatenate 'string (reverse acc))))
@@ -167,9 +171,9 @@
 						     (or (not (listp (car items)))
 							 (not 
 							  (member (caar items)
-								  '(classdef-stmt
-								    for-in-stmt
-								    funcdef-stmt
+								  '(classdef-stmt ;; Wait for empty line
+								    for-in-stmt   ;; for perhaps multi-line
+								    funcdef-stmt  ;; statements
 								    if-stmt
 								    try-except-stmt
 								    try-finally-stmt
@@ -205,7 +209,7 @@
     (:time (time (funcall f)))))
 
 
-;; stuff used by emacs
+;; stuff (possibly) used by emacs
 
 (defun run-py-code-string (str)
   (let ((ast (parse-python-string str)))
@@ -233,3 +237,8 @@
     
 (defun dummy (&rest args)
   (warn "dummy: ~A" args))
+
+
+
+
+

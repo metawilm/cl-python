@@ -26,7 +26,11 @@
       (gethash key d))))
 
 (defun dict-del (x key)
-  (remhash (dict x) key))
+  (let ((d (dict x)))
+    (assert d () "dict-del: object ~A has no dict (key ~A)" x key)
+    (if (and (symbolp key) (hash-table-is-dict-p d))
+	(remhash (symbol-name key) d)
+      (remhash key d))))
 
 (defun (setf dict-get) (new-val x key)
   (let ((d (dict x)))
@@ -149,7 +153,7 @@
 
     ;; Python class `object' corresponds to Lisp class 'py-dictless-object
     ;; but the new class should have a dict:
-    
+    ;; [XXX perhaps not needed anymore, as py-object has a dict?]
     (substitute (load-time-value (find-class 'py-object))
 		(load-time-value (find-class 'py-dictless-object))
 		supers)
@@ -325,7 +329,6 @@
 (defmethod (setf py-attr) (val (x py-dict-mixin) attr)
   (setf (dict-get x attr) val))
 
-#+(or)
 (defmethod py-del-attr ((x py-dict-mixin) attr)
   (dict-del x attr))
 
@@ -2149,7 +2152,11 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
   ;;  http://www.franz.com/support/documentation/7.0/doc/iacl.htm#external-formats-1
   ;; For now only ASCII and UTF-8 are supported.
   
+  (when (null name)
+    (setf name "ascii"))
+  
   (setf name (string-downcase name))
+  
   (cond 
    ((member name '("ascii" "646" "us") :test 'string=) 
     (values :latin1 127 127))
@@ -2282,18 +2289,23 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 
 (def-py-method py-string.__str__  (x^)  x)
 
+(def-py-method py-string.decode (x^ &optional encoding^ errors)
+  (py-decode-unicode x encoding errors))
 
-(def-py-method py-string.isspace (x^)
-  (py-bool (and (> (length x) 0) ;; empty string is defiend as "not space"
-		(every (lambda (ch) (member ch '(#\Space #\Tab #\Newline)))
-		       x))))
+
+(def-py-method py-string.find (x^ item &rest args) (declare (ignore x item args)) -1) ;; TODO
 
 (def-py-method py-string.isalpha (x^) (py-bool (every #'alpha-char-p x)))
 (def-py-method py-string.isalnum (x^) (py-bool (every #'alphanumericp x)))
 (def-py-method py-string.isdigit (x^) (py-bool (every #'digit-char-p x)))
 (def-py-method py-string.islower (x^) (py-bool (every #'lower-case-p x)))
 
-(def-py-method py-string.find (x^ item &rest args) (declare (ignore x item args)) -1) ;; TODO
+(def-py-method py-string.isspace (x^)
+  (py-bool (and (> (length x) 0) ;; empty string is defiend as "not space"
+		(every (lambda (ch) (member ch '(#\Space #\Tab #\Newline)))
+		       x))))
+
+
 (def-py-method py-string.join (x^ seq-of-strings)
   (let* ((strings (mapcar #'py-val->string (py-iterate->lisp-list seq-of-strings))))
     
@@ -2379,6 +2391,7 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 			(t (return nil))))))
 
 (def-py-method py-tuple.__getitem__ (x^ item)
+  ;; XXX item may be a slice
   (check-type item integer)
   (cond ((<= 0 item (1- (length x)))
 	 (nth item x))

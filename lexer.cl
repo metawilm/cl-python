@@ -124,7 +124,7 @@ READ-CHAR."
 			     ;; `u' must appear before 'r' if both are present
 			     
 			     (let ((ch (read-chr-nil)))
-			       (if (char-member ch '(#\' #\"))
+			       (if (and ch (char-member ch '(#\' #\")))
 				   
 				   (let ((is-unicode
 					  (member token '(u ur U UR)))
@@ -447,9 +447,19 @@ second and later characters must be alphanumeric or underscore."
 (defun spacy-length (x)
   (loop with i = 0
       for xi across x
-      unless (char= xi #\Space)
-      do (incf i)
+      if (char= xi #\Space) return i
+      else do (incf i)
       finally (return i)))
+
+#+(or) ;; faster, more dangerous version
+(defun spacy-length-1 (x)
+  (declare (optimize (speed 3) (safety 0) (debug 0)))
+  (the fixnum
+    (let ((len (the fixnum (length (the string x)))))
+      (loop for i fixnum from 0 below (min +id-cache-string-size+ len)
+	  if (char= (schar (the string x) i) #\Space)
+	  do (return-from spacy-length-1 i))
+      len)))
 
 (defun identifier-ht-test (x y)
   (let ((x.len (spacy-length x))
@@ -592,7 +602,8 @@ second and later characters must be alphanumeric or underscore."
   (let* ((second (read-chr-error))
 	 (third (read-chr-nil)))
     (cond 
-     ((char= first-char second third)      ;; """ or ''': a probably long multi-line string
+     ((and third
+	   (char= first-char second third))  ;; """ or ''': a probably long multi-line string
       (loop
 	  with res = (load-time-value 
 		      (make-array 50 :element-type 'character :adjustable t :fill-pointer 0))
@@ -604,7 +615,7 @@ second and later characters must be alphanumeric or underscore."
 	       
 	  finally (return-from read-string (simple-string-from-vec res))))
        
-     ((char= first-char second)  ;; ""/'' but not """/''' --> empty string
+     ((char= first-char second)  ;; "" or '', but not """ or ''' --> empty string
       (when third
 	(unread-chr third))
       (return-from read-string ""))
@@ -794,7 +805,7 @@ second and later characters must be alphanumeric or underscore."
 			   (return (read-from-string vec))))
 	     
 	     #+(or)
-	     ;; Equivalent code, but not calling the lisp reader, so
+	     ;; Equivalent code, but not calling the lisp reader,
 	     ;; slightly slower than the above.
 	     (loop with ch = (read-chr-nil)
 			while (and ch (digit-char-p ch base))
@@ -968,7 +979,7 @@ second and later characters must be alphanumeric or underscore."
 	     (svref vec c.code))))
     
     (let ((c2 (read-chr-nil)))
-      (if (punct-char2-p c1 c2)
+      (if (and c2 (punct-char2-p c1 c2))
 	  
 	  (let ((c3 (read-chr-nil)))
 	    (if (punct-char3-p c1 c2 c3)
@@ -992,7 +1003,6 @@ second and later characters must be alphanumeric or underscore."
 				 *curr-src-line*))))))))
 
 (defun punct-char1-p (c)
-  ;; table-based lookup is way faster
   (let ((arr (load-time-value
 	      (loop
 		  with arr = (make-array 128 :element-type 'bit :initial-element 0)
@@ -1013,10 +1023,11 @@ second and later characters must be alphanumeric or underscore."
                == += -= *= /= %=  ^= |= &= ** **= <<= >>= "
   (and c1 c2
        (or (and (char= c2 #\= )
-		(char-member c1 '( #\+ #\- #\* #\/ #\%  #\^ #\&
-				  #\| #\! #\= #\< #\> )))
+		(char-member c1 '( #\+ #\- #\* #\/ #\% #\^ 
+				   #\| #\! #\= #\< #\> #\& )))
 	   (and (char= c1 c2)
 		(char-member c1 '( #\* #\< #\> #\/ #\< #\> )))
+	   
 	   (and (char= c1 #\< )
 		(char= c2 #\> )))))
 

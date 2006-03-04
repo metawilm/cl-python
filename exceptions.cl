@@ -19,6 +19,10 @@
 	       (make-instance cls))
 
 (def-py-method Exception.__init__ (x &rest args)
+  ;; raise AttributeError("a %s b", 24)  =>  AttributeError: "a 24 b"
+  (when (and (>= (length args) 2)
+	     (stringp (car args)))
+    (setf args (py-string.__mod__ (car args) (cdr args))))
   (setf (slot-value x 'args) args))
     
 (defvar *exception-tree* ;; XXX CPython has explanation string for every exception
