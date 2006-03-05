@@ -23,6 +23,7 @@ def exception(exc, f, *args):
         print "Wrong: no exception %s for %s%r" % (exc.__name__, f.__name__, args)
 
 def check_functions(i=0, j=0):
+    return #WB
     check(abs(42*i), 42*j)
     check(abs(-42*i), 42*j)
     check(abs(-12345678910*i), 12345678910*j)

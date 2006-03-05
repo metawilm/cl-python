@@ -9,42 +9,79 @@
 
 ;;; Class frameword:  py-meta-type, py-type, py-dictless-object
 
+(eval-when (:compile-toplevel :load-toplevel :execute)
+(defun py-eq-dict-hash (x)
+  ;; X is string or symbol
+  (sxhash (etypecase x
+	    (symbol (symbol-name x))
+	    (string x))))
+
+(defun py-eq-dict-test (x y)
+  ;; X,Y can be strings or symbols
+  (etypecase x
+    (symbol (etypecase y
+	      (symbol (eq x y))
+	      (string (string= (symbol-name x) y))))
+    (string (etypecase y
+	      (symbol (string= x (symbol-name y)))
+	      (string (string= x y))))))
+
+(defun make-py-eq-dict ()
+  (make-hash-table :hash-function 'py-eq-dict-hash :test 'py-eq-dict-test))
+
+) ;; eval-when
+
+
 (defclass py-dict-mixin ()
-  ((dict :initarg :dict :initform (make-hash-table :test #'eq) :accessor dict)))
+  ;; By default, instances have a PY-EQ dict. Overrule by supplying :DICT arg.
+  ((dict :initarg :dict
+	 :initform (make-py-eq-dict)
+	 :accessor dict)))
 
 (defmethod dict ((x t))
   nil)
 
-(defun hash-table-is-dict-p (x)
+(defun hash-table-is-regular-dict-p (x)
   (eq (hash-table-test x) 'py-==->lisp-val))
 
 (defun dict-get (x key)
+  (check-type key (or string symbol))
   (let ((d (dict x)))
+    (sym-gethash key d)))
+#||
+    (sym-gethash 
     (assert d () "dict-get: object ~A has no dict (key ~A)" x key)
-    (if (and (symbolp key) (hash-table-is-dict-p d))
+    (if (and (symbolp key) (hash-table-is-regular-dict-p d))
 	(gethash (symbol-name key) d)
+      
       (gethash key d))))
+||#
 
 (defun dict-del (x key)
+  (check-type key (or string symbol))
   (let ((d (dict x)))
     (assert d () "dict-del: object ~A has no dict (key ~A)" x key)
-    (if (and (symbolp key) (hash-table-is-dict-p d))
+    (if (and (symbolp key) (hash-table-is-regular-dict-p d))
 	(remhash (symbol-name key) d)
       (remhash key d))))
 
 (defun (setf dict-get) (new-val x key)
+  (check-type key (or string symbol))
   (let ((d (dict x)))
-    (if (and (symbolp key) (hash-table-is-dict-p d))
+    (if (and (symbolp key) (hash-table-is-regular-dict-p d))
 	(setf (gethash (symbol-name key) d) new-val)
       (setf (gethash key d) new-val))))
 
-
-(defun sym-gethash (key ht &optional (is-dict (hash-table-is-dict-p ht)))
-  (assert (symbolp key))
-  (if is-dict
-      (gethash (symbol-name key) ht)
-    (gethash key ht)))
-
+(defun sym-gethash (key ht &optional (is-reg-dict (hash-table-is-regular-dict-p ht)))
+  ;; KEY is either a symbol or a regular string
+  (if is-reg-dict
+      
+      (gethash (if (symbolp key) (symbol-name key) key) ht)
+    
+    (let ((key.sym (if (symbolp key) key (find-symbol key #.*package*))))
+      ;; If symbol not found, it can not be present as key in the HT either
+      (when key.sym
+	(gethash key.sym ht)))))
 
 (defclass py-class-mixin (py-dict-mixin)
   ((mro :initarg :mro :accessor class-mro)))
@@ -191,8 +228,8 @@
 	(let ((cls (mop:ensure-class
 		    name
 		    :direct-superclasses supers
-		    :metaclass (load-time-value (find-class 'py-meta-type)))))
-	  (setf (slot-value cls 'dict) namespace)
+		    :metaclass (load-time-value (find-class 'py-meta-type))
+		    :dict namespace)))
 	  (return-from make-py-class cls)))
       
       
@@ -325,9 +362,14 @@
 ;; By default, when an object has a dict, attributes are looked up in
 ;; the dict.
 
-;; allowed for now...
 (defmethod (setf py-attr) (val (x py-dict-mixin) attr)
-  (setf (dict-get x attr) val))
+  ;; XXX convert string to real string?
+  ;l XXX special-case when ATTR==__dict__
+  (let ((attr.str (typecase attr
+		    (string attr)
+		    (symbol (symbol-name attr))
+		    (t      (py-val->string attr)))))
+    (setf (dict-get x attr.str) val)))
 
 (defmethod py-del-attr ((x py-dict-mixin) attr)
   (dict-del x attr))
@@ -384,14 +426,16 @@
   (with-output-to-string (s)
     (print-unreadable-object (x s :identity t :type t)
       (with-slots (instance func) x
-	(format s "~A ~A" instance func)))))
+	(format s "~A.~A" instance func)))))
 
 (def-py-method py-bound-method.__call__ (x &rest args)
-  (excl::fast
-   (with-slots (func instance) x
-     (if (functionp func)
-	 (apply (the function func) instance args)
-       (apply #'py-call func instance args)))))
+  (when (and (null (cdr args))
+	     (eq (car args) '__dict__))
+    (break "pym.c args: ~A ~A" x args))
+  (with-slots (func instance) x
+    (if (functionp func)
+	(apply (the function func) instance args)
+      (apply #'py-call func instance args))))
 
 (def-py-method py-bound-method.__get__ (x &rest args)
   
@@ -520,6 +564,10 @@
 (def-py-method py-function.__name__ :attribute (func)
 	       (py-function-name func))
 
+(defmethod py-function-name ((x function))
+  ;; OK?
+  (string (excl::func_name x)))
+   
 (def-py-method py-function.__call__ (func)
   func)
 
@@ -757,8 +805,11 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 
 (def-py-method py-super.__getattribute__ (x attr)
   (flet ((find-preceding-class-in-mro (mro cls)
-	   (loop until (eq (pop mro) cls)
-	       finally (return (pop mro)))))
+	   #+(or)(warn "find-preceding-class-in-mro ~A ~A..." mro cls)
+	   (let ((res (loop until (eq (pop mro) cls)
+			  finally (return (pop mro)))))
+	     #+(or)(warn "-> ~A" res)
+	     res)))
     
     ;; XXX check when attribute is static method and super is bound to class, etc
     (with-slots (object current-class) x
@@ -767,14 +818,14 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 					 object
 				       (py-class-of object)))
 		    current-class)))
-	
+	#+(or)(break "Class before ~A is ~A; looking up ~A in latter" current-class class attr)
 	(let ((val (recursive-class-dict-lookup class attr)))
 	  (if val
 	      (bind-val val
 			(if (eq object class) *the-none* object)
 			class)
 	    (py-raise 'AttributeError
-		      "No such attribute found for `super' object: ~S.~S ~
+		      "No such attribute found for `super' object: ~S.~S ~%
                        (looked up attr ~S in class ~S" x attr attr class)))))))
 
 
@@ -879,13 +930,28 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 	(py-call get-meth val (or x *the-none*) (or x.class *the-none*))
       val)))
 
+(defun py-get-dict-attr (x x.class)
+  (or (dict x)
+      (loop for c in (mop:class-precedence-list x.class)
+	  when (dict c) return it)
+      (error "XXX No dict found in object ~S or its class ~A?!" x x.class)))
+
+
 (def-py-method py-object.__getattribute__ (x attr)
-  (let ((class-attr-val   nil)
-	(__getattr__      nil)
-	(x.class          (py-class-of x)))
+  ;; ATTR may be a symbol, a string, or instance of user-defined subclass of string
+  (let* ((class-attr-val   nil)
+	 (__getattr__      nil)
+	 (x.class          (py-class-of x))
+	 (attr.as_string   (if (symbolp attr)
+			       (symbol-name attr)
+			     (py-val->string attr)))
+	 (attr.as_sym      (find-symbol attr.as_string #.*package*))) ;; may fail (= NIL)
     
     #+(or)(break "po.__getattr..__ ~A ~A    cpl=~A"
 		 x attr (mop:class-precedence-list x.class))
+
+    (when (eq attr.as_sym '__dict__)
+      (return-from py-object.__getattribute__ (py-get-dict-attr x x.class)))
     
     (loop for c in (mop:class-precedence-list x.class)
 	until (or (eq c (load-time-value (find-class 'standard-class)))
@@ -893,22 +959,30 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 		  (eq c (load-time-value (find-class 'py-class-mixin))))
 	      
 	for c.dict = (dict c) ;; may be NIL
-	for c.dict-is-dict = (and c.dict (hash-table-is-dict-p c.dict))
+	for c.dict-is-regular-dict = (and c.dict (hash-table-is-regular-dict-p c.dict))
 		     
 	when c.dict
-	do (let ((getattribute-meth (sym-gethash '__getattribute__ c.dict c.dict-is-dict)))
+	do #||
+	   
+	   ;; This leads to infinite recursion. Probably only PY-ATTR
+	   ;; must look for a __getattribute__ method.
+	   
+	   (let ((getattribute-meth (sym-gethash '__getattribute__ c.dict c.dict-is-regular-dict)))
 	     (when (and getattribute-meth
 			(not (eq getattribute-meth #'py-object.__getattribute__)))
 	       (return-from py-object.__getattribute__
-		 (py-call getattribute-meth x attr))))
+		 (py-call getattribute-meth x attr.as_string))))
+	   ||#
 	   
 	   (unless class-attr-val
-	     (let ((val (sym-gethash attr c.dict c.dict-is-dict)))
-	       (when val 
-		 (setf class-attr-val val))))
+	     ;; Try to find attribute in class dict
+	     (when (or c.dict-is-regular-dict attr.as_sym) ;; otherwise key can't exist
+	       (let ((val (sym-gethash attr.as_sym c.dict c.dict-is-regular-dict)))
+		 (when val
+		   (setf class-attr-val val)))))
 	   
 	   (unless (or class-attr-val __getattr__)
-	     (let ((getattr-meth (sym-gethash '__getattr__ c.dict c.dict-is-dict)))
+	     (let ((getattr-meth (sym-gethash '__getattr__ c.dict c.dict-is-regular-dict)))
 	       (when getattr-meth (setf __getattr__ getattr-meth)))))
 
     ;; Arriving here means: no __getattribute__, but perhaps
@@ -935,12 +1009,15 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 		      (eq c (load-time-value (find-class 'py-class-mixin))))
 		  
 	    for c.dict = (dict c) ;; may be NIL
-	    for val = (when c.dict
-			(sym-gethash attr c.dict))
+	    for c.dict-is-regular-dict = (and c.dict (hash-table-is-regular-dict-p c.dict))
+					 
+	    for val = (when (and c.dict
+				 (or attr.as_sym c.dict-is-regular-dict))
+			(sym-gethash attr c.dict c.dict-is-regular-dict))
 	    when val do (return-from py-object.__getattribute__ val))
       
       (when (dict x)
-	(let ((val (dict-get x attr)))
+	(let ((val (dict-get x attr.as_string)))
 	  (when val
 	    (cond ((subtypep (py-class-of x) 'py-type)
 		   
@@ -962,7 +1039,7 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
     ;; Fall back to the __getattr__ hook.
     (when __getattr__
       (return-from py-object.__getattribute__
-	(py-call (bind-val __getattr__ x x.class) (symbol-name attr))))
+	(py-call (bind-val __getattr__ x x.class) attr.as_string)))
     
     ;; Give up.
     (py-raise 'AttributeError "No such attribute: ~A `~A' (class: ~A)" x attr (py-class-of x))))
@@ -999,6 +1076,7 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 (defmethod recursive-class-dict-lookup ((cls class) attr)
   ;; Look for ATTR in class CLS and all its superclasses.
   ;; and finally (which is in this implementation not a superclass of a class).
+  (assert (or (stringp attr) (symbolp attr)))
   (loop for c in (mop:class-precedence-list cls)
       until (or (eq c (load-time-value (find-class 'standard-class)))
 		(eq c (load-time-value (find-class 'py-dict-mixin))))
@@ -1047,10 +1125,10 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 						    (list (find-class 'py-user-object))))
 			  :metaclass (ecase cls-type
 				       (:metaclass (load-time-value (find-class 'py-meta-type)))
-				       (:class     metacls)))))
+				       (:class     metacls))
+			  :dict dict)))
 		 
 		 (mop:finalize-inheritance c)
-		 (setf (slot-value c 'dict) dict)
 		 
 		 c))
 
@@ -1379,6 +1457,7 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
   *the-none*)
 
 (def-py-method py-file.fileno (f)
+  (declare (ignore f))
   "File descriptor"
   ;; ?? (ensure-open-file f)
   (py-raise 'IOError "file.fileno(): todo"))
@@ -1498,6 +1577,7 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
   ;; 'a+'). If the file is opened in text mode (mode 't'), only
   ;; offsets returned by tell() are legal. Use of other offsets causes
   ;; undefined behavior.
+  (declare (ignore offset whence))
   (ensure-open-file f)
   :todo)
 
@@ -1515,6 +1595,7 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
   ;; include that file may remain unchanged, increase to the specified
   ;; size as if zero-filled, or increase to the specified size with
   ;; undefined new content. Availability: Windows, many Unix variants.
+  (declare (ignore size))
   (ensure-open-file f)
   :todo)
 
@@ -1522,6 +1603,7 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
   ;; Write a string to the file. There is no return value. Due to
   ;; buffering, the string may not actually show up in the file until
   ;; the flush() or close() method is called.
+  (declare (ignore str))
   (ensure-open-file f)
   :todo)
 
@@ -1530,6 +1612,7 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
   ;; iterable object producing strings, typically a list of
   ;; strings. There is no return value. (The name is intended to match
   ;; readlines(); writelines() does not add line separators.)
+  (declare (ignore sequence))
   (ensure-open-file f)
   :todo)
 
@@ -1551,6 +1634,7 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
   ;; may not be present on all file-like objects. It may also be None,
   ;; in which case the file uses the system default encoding for
   ;; converting Unicode strings.
+  (declare (ignore f))
   :todo)
 
 (def-py-method py-file.mode :attribute (f)
@@ -1577,6 +1661,7 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
   ;; indicate that multiple newline conventions were encountered. For
   ;; files not opened in universal newline read mode the value of this
   ;; attribute will be None.
+  (declare (ignore f))
   :todo)
 
 (def-py-method py-file.softspace :attribute (f)
@@ -1590,6 +1675,7 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
   ;; provide a writable softspace attribute. Note: This attribute is
   ;; not used to control the print statement, but to allow the
   ;; implementation of print to keep track of its internal state.
+  (declare (ignore f))
   :todo)
     
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -1597,8 +1683,52 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 ;; Property (User object)
 
 (defclass py-property (py-user-object)
-  ()
+  (fget fset fdel fdoc)
   (:metaclass py-user-type))
+
+;; standard __new__ behaviour
+
+(def-py-method py-property.__init__ (x &rest args)
+  ;; XXX move this arguments parsing to general function
+  (loop while args
+      for a = (pop args)
+      do (cond ((symbolp a)
+		(let ((val (pop args)))
+		  (unless val
+		    (py-raise 'ValueError
+			      "Invalid argument list for property.__init__: ~S" args))
+		  (ecase a
+		    ((fget fset fdel doc) (setf (slot-value x a) val)))))
+	       
+	       ((not (slot-boundp x 'fget)) (setf (slot-value x 'fget) a))
+	       ((not (slot-boundp x 'fset)) (setf (slot-value x 'fset) a))
+	       ((not (slot-boundp x 'fdel)) (setf (slot-value x 'fdel) a))
+	       ((not (slot-boundp x 'doc))  (setf (slot-value x 'doc) a))
+	       (t (error "invalid args to property.__init__")))))
+
+(def-py-method py-property.__get__ (x obj class)
+  (declare (ignore obj class))
+  (py-call (slot-value x 'fget) x))
+
+(def-py-method py-property.__set__ (x obj class)
+  (declare (ignore obj class))
+  (py-call (slot-value x 'fset) x))
+
+(def-py-method py-property.__del__ (x obj class)
+  (declare (ignore obj class))
+  (py-call (slot-value x 'fdel) x))
+
+(def-py-method py-property.fget :attribute (x)
+  (slot-value x 'fget))
+
+(def-py-method py-property.fset :attribute (x)
+  (slot-value x 'fset))	       
+
+(def-py-method py-property.fdel :attribute (x)
+  (slot-value x 'fdel))
+
+(def-py-method py-property.__doc__ :attribute (x)
+  (slot-value x 'doc))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -1609,6 +1739,7 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
   (:method ((x t))               x))
 
 (defmethod (setf py-attr) (val (x py-lisp-object) attr)
+  ;; XXX ????????
   (setf (py-attr (proxy-lisp-val x) attr) val))
 
 (defmacro def-proxy-class (py-name &optional supers)
@@ -1805,38 +1936,39 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 
 
 (def-py-method py-dict.__new__ :static (cls &rest kwargs)
-	       (let ((ht (make-dict)))
-		 (case (length kwargs)
-		   (0 (make-dict))
-		   (1 (let* ((a (car kwargs))
-			     (items-meth (recursive-class-lookup-and-bind a 'items))
-			     (items (if items-meth
-					(py-call items-meth)
-				      (py-iterate->lisp-list a))))
-			(loop for i in items
-			    for kv = (py-iterate->lisp-list i)
-			    if (= (length kv) 2)
-			    do (setf (gethash (pop kv) ht) (pop kv))
-			    else do (py-raise 'ValueError
-					      "dict.__new__: the items should be key-val ~
+  ;; XXX logic of filling dict must be moved to __init__
+  (let ((ht (make-dict)))
+    (case (length kwargs)
+      (0 (make-dict))
+      (1 (let* ((a (car kwargs))
+		(items-meth (recursive-class-lookup-and-bind a 'items))
+		(items (if items-meth
+			   (py-call items-meth)
+			 (py-iterate->lisp-list a))))
+	   (loop for i in items
+	       for kv = (py-iterate->lisp-list i)
+	       if (= (length kv) 2)
+	       do (setf (gethash (pop kv) ht) (pop kv))
+	       else do (py-raise 'ValueError
+				 "dict.__new__: the items should be key-val ~
                                                pairs; got ~S (in ~S)" kv a))))
-		   (t (loop 
-			  for key = (let ((k (pop kwargs)))
-				      (unless (symbolp k)
-					(py-raise 'TypeError
-						  "dict.__new__: invalid key-val arg format: ~
+      (t (loop 
+	     for key = (let ((k (pop kwargs)))
+			 (unless (symbolp k)
+			   (py-raise 'TypeError
+				     "dict.__new__: invalid key-val arg format: ~
                                                    ~S in ~S" k kwargs))
-				      k)
-			  for val = (when key
-				      (or (pop kwargs)
-					  (error "dict.__new__: no val for key ~S in ~S"
-						 key kwargs)))
-			  while key
-			  do (setf (gethash (py-symbol->string key) ht) val))))
-		 
-		 (if (eq cls (load-time-value (find-class 'py-dict)))
-		     ht
-		   (make-instance cls :lisp-object ht))))
+			 k)
+	     for val = (when key
+			 (or (pop kwargs)
+			     (error "dict.__new__: no val for key ~S in ~S"
+				    key kwargs)))
+	     while key
+	     do (setf (gethash (py-symbol->string key) ht) val))))
+    
+    (if (eq cls (load-time-value (find-class 'py-dict)))
+	ht
+      (make-instance cls :lisp-object ht))))
 
 (def-py-method py-dict.__eq__ (dict1^ dict2^)
   (py-bool (and (typep dict2 (load-time-value (find-class 'hash-table)))
@@ -2292,6 +2424,8 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 (def-py-method py-string.decode (x^ &optional encoding^ errors)
   (py-decode-unicode x encoding errors))
 
+(def-py-method py-string.encode (x^ &optional encoding^ errors)
+  (py-encode-unicode x encoding errors))
 
 (def-py-method py-string.find (x^ item &rest args) (declare (ignore x item args)) -1) ;; TODO
 
@@ -2468,7 +2602,9 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
       "Object ~S (py-class: ~A) does not have a __getattribute__ method"
       x (py-class-of x))
     
-    (py-call ga-meth attr)))
+    ;; Here we convert ATTR to a regular string. Not sure what desired/required
+    ;; behaviour is, if ATTR is instance of user-defined subclass of STRING.
+    (py-call ga-meth (if (symbolp attr) (symbol-name attr) (py-val->string attr)))))
 
 
 (defgeneric py-del-attr (x attr)
@@ -2534,8 +2670,7 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
   (:method ((f function) &rest args) (apply f args))
   
   (:method ((f py-bound-method) &rest args)
-	   (excl::fast
-	    (apply #'py-bound-method.__call__ f args)))
+	   (apply #'py-bound-method.__call__ f args))
   
   (:method ((f py-unbound-method) &rest args)
 	   (apply #'py-unbound-method.__call__ f args)))
