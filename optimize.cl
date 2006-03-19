@@ -238,6 +238,7 @@
 
 ;;; Calling objects
 
+#|| ;; too risky for now
 (define-compiler-macro py-call (x &rest args)
   #+(or)(when (and (listp x) (eq (car x) 'py-attr))
 	  (warn "py-call-attr ~A" x))
@@ -246,6 +247,7 @@
 	 (excl::fast (funcall (the function .x) ,@args))
        (locally (declare (notinline py-call))
 	 (py-call .x ,@args)))))
+||#
 
 (defmethod py-hash ((x string)) (py-string.__hash__ x))
 (defmethod py-hash ((x number)) (py-number.__hash__ x))

@@ -330,10 +330,12 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
 (defun pybf:getattr (x attr &optional default)
   "Return the value of attribute NAME of X. ~@
    If attribute doesn't exist, returns supplied DEFAULT or raises AttributeError."
-  (handler-case (py-attr x attr) ;; object.__getattribute__ x (py-string->symbol attr))
-    (Exception ()
-      (or default
-	  (py-raise 'AttributeError "[getattr:] ~A has no attr `~A'" x attr)))))
+  (handler-case
+      (values (py-attr x attr))
+    (AttributeError () (or default
+			   (py-raise 'AttributeError
+				     "[getattr:] ~A has no attr `~A'" x attr)))
+    (:no-error (val) val)))
 
 (defun pybf:globals ()
   "Return a dictionary (namespace) representing the current global symbol table. ~@
@@ -641,8 +643,11 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
 (defconstant pybv:False          *the-false*          )
 (defconstant pybv:NotImplemented *the-notimplemented* )
 
+(defvar pybv:clpy (find-package 'pyb-clpy))
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 ;;; 4) CLPY extras
 
 (defun pyb-clpy:brek (&rest args) (break (format nil "~{~A~^; ~}" args)))
+

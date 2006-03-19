@@ -999,22 +999,29 @@
 	   (setf *last-raised-exception* e)
 	   (error e)))
     
-    (cond ((and exc var)
-	 (etypecase exc
-	   (class  (do-error (make-instance exc :args var)))
-	   (error  (progn (warn "RAISE: ignored arg, as exc was already an instance, not a class")
-			  (do-error exc)))))
-	(exc
-	 (etypecase exc
-	   (class    (do-error (make-instance exc)))
-	   (error    (do-error exc))))
-	
-	(t
-	 (if *last-raised-exception*
-	     (error *last-raised-exception*)
-	   (py-raise 'ValueError "There is not exception to re-raise (got bare `raise')."))))))
+    (cond ((stringp (deproxy exc))
+	   (break "String exceptions are not supported (got: ~S)" (deproxy exc))
+	   (py-raise 'TypeError
+		     "String exceptions are not supported (got: ~S)" (deproxy exc)))
+	    
+	  ((and exc var)
+	   (etypecase exc
+	     (class  (do-error (make-instance exc :args var)))
+	     (error  (progn (warn "RAISE: ignored arg, as exc was already an instance, not a class")
+			    (do-error exc)))))
+	  (exc
+	   (etypecase exc
+	     (class    (do-error (make-instance exc)))
+	     (error    (do-error exc))))
+	  
+	  (t
+	   (if *last-raised-exception*
+	       (error *last-raised-exception*)
+	     (py-raise 'ValueError "There is not exception to re-raise (got bare `raise')."))))))
     
 (defmacro raise-stmt (exc var tb)
+  (when (stringp exc)
+    (warn "Encountered unsupported string exception ('raise ~A')" exc))
   `(raise-stmt-1 ,exc ,var ,tb))
 
 

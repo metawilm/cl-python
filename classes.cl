@@ -352,8 +352,10 @@
 
 ;;; Attributes are a fundamental thing: getting, setting, deleting
 
+#||
 (defgeneric py-attr (x attr)
   (:documentation "Get attribute ATTR of X"))
+||#
 
 (defgeneric (setf py-attr) (val x attr)
   (:documentation "Set attribute ATTR of X to VAL"))
@@ -433,6 +435,11 @@
   ((instance :initarg :instance :accessor py-method-instance))
   (:metaclass py-core-type))
 
+(defmethod print-object ((x py-bound-method) stream)
+  (print-unreadable-object (x stream :identity t :type t)
+    (with-slots (instance func) x
+      (format stream "~A.~A" instance func))))
+	
 (def-py-method py-bound-method.__repr__ (x)
   (with-output-to-string (s)
     (print-unreadable-object (x s :identity t :type t)
@@ -839,6 +846,16 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 		      "No such attribute found for `super' object: ~S.~S ~%
                        (looked up attr ~S in class ~S" x attr attr class)))))))
 
+(def-py-method py-super.__repr__ (x^)
+  (with-output-to-string (s)
+    (print-unreadable-object (x s :type t :identity t)
+      (with-slots (object current-class) x
+	(format s ":object ~S  :current-class ~A" object current-class)))))
+  
+(defmethod print-object ((x py-super) stream)
+  (print-unreadable-object (x stream :type t :identity t)
+    (with-slots (object current-class) x
+      (format stream ":object ~S  :current-class ~A" object current-class))))
 
 (defclass py-xrange (py-core-object)
   (start stop step)
@@ -947,114 +964,18 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 	  when (dict c) return it)
       (error "XXX No dict found in object ~S or its class ~A?!" x x.class)))
 
+(defvar *py-object.__getattribute__-active* ())
 
 (def-py-method py-object.__getattribute__ (x attr)
   ;; ATTR may be a symbol, a string, or instance of user-defined subclass of string
-  (let* ((class-attr-val   nil)
-	 (__getattr__      nil)
-	 (x.class          (py-class-of x))
-	 (attr.as_string   (if (symbolp attr)
-			       (symbol-name attr)
-			     (py-val->string attr)))
-	 (attr.as_sym      (find-symbol attr.as_string #.*package*))) ;; may fail (= NIL)
-    
-    #+(or)(break "po.__getattr..__ ~A ~A    cpl=~A"
-		 x attr (mop:class-precedence-list x.class))
-
-    (when (eq attr.as_sym '__dict__)
-      (return-from py-object.__getattribute__ (py-get-dict-attr x x.class)))
-    
-    (loop for c in (mop:class-precedence-list x.class)
-	until (or (eq c (load-time-value (find-class 'standard-class)))
-		  (eq c (load-time-value (find-class 'py-dict-mixin)))
-		  (eq c (load-time-value (find-class 'py-class-mixin))))
-	      
-	for c.dict = (dict c) ;; may be NIL
-	for c.dict-is-regular-dict = (and c.dict (hash-table-is-regular-dict-p c.dict))
-		     
-	when c.dict
-	do #||
-	   
-	   ;; This leads to infinite recursion. Probably only PY-ATTR
-	   ;; must look for a __getattribute__ method.
-	   
-	   (let ((getattribute-meth (sym-gethash '__getattribute__ c.dict c.dict-is-regular-dict)))
-	     (when (and getattribute-meth
-			(not (eq getattribute-meth #'py-object.__getattribute__)))
-	       (return-from py-object.__getattribute__
-		 (py-call getattribute-meth x attr.as_string))))
-	   ||#
-	   
-	   (unless class-attr-val
-	     ;; Try to find attribute in class dict
-	     (when (or c.dict-is-regular-dict attr.as_sym) ;; otherwise key can't exist
-	       (let ((val (sym-gethash attr.as_sym c.dict c.dict-is-regular-dict)))
-		 (when val
-		   (setf class-attr-val val)))))
-	   
-	   (unless (or class-attr-val __getattr__)
-	     (let ((getattr-meth (sym-gethash '__getattr__ c.dict c.dict-is-regular-dict)))
-	       (when getattr-meth (setf __getattr__ getattr-meth)))))
-
-    ;; Arriving here means: no __getattribute__, but perhaps
-    ;; __getattr__ or class-attr-val.
-    
-    ;; A class attribute that is a data descriptor (i.e. has a
-    ;; `__set__' attribute) has higher priority than an instance
-    ;; attribute.
-    
-    #+(or)
-    (warn "po.__ga__: ~S" `(:class-attr-val ,class-attr-val :__getattr__ ,__getattr__))
-
-    (when (and class-attr-val (data-descriptor-p class-attr-val))
-      (return-from py-object.__getattribute__
-	(bind-val class-attr-val x x.class)))
-    
-    ;; Try instance dict
-    
-    (if (typep x 'class)
-	
-	(loop for c in (mop:class-precedence-list x)
-	    until (or (eq c (load-time-value (find-class 'standard-class)))
-		      (eq c (load-time-value (find-class 'py-dict-mixin)))
-		      (eq c (load-time-value (find-class 'py-class-mixin))))
-		  
-	    for c.dict = (dict c) ;; may be NIL
-	    for c.dict-is-regular-dict = (and c.dict (hash-table-is-regular-dict-p c.dict))
-					 
-	    for val = (when (and c.dict
-				 (or attr.as_sym c.dict-is-regular-dict))
-			(sym-gethash attr c.dict c.dict-is-regular-dict))
-	    when val do (return-from py-object.__getattribute__ val))
-      
-      (when (dict x)
-	(let ((val (dict-get x attr.as_string)))
-	  (when val
-	    (cond ((subtypep (py-class-of x) 'py-type)
-		   
-		   ;; XXX check the exact condition under which binding
-		   ;; of instance dict item occurs
-
-		   (let ((bound-val (bind-val val nil x)))
-		     (when bound-val ;; attribute-method bounded to class -> NIL
-		       (return-from py-object.__getattribute__ bound-val))))
-
-		  (t (return-from py-object.__getattribute__ 
-		       val)))))))
-    
-    ;; Fall back to a class attribute that is not a `data descriptor'.
-    (when class-attr-val
-      (return-from py-object.__getattribute__
-	(bind-val class-attr-val x x.class)))
-    
-    ;; Fall back to the __getattr__ hook.
-    (when __getattr__
-      (return-from py-object.__getattribute__
-	(py-call (bind-val __getattr__ x x.class) attr.as_string)))
-    
-    ;; Give up.
-    (py-raise 'AttributeError "No such attribute: ~A `~A' (class: ~A)" x attr (py-class-of x))))
-
+  (when (or (and (symbolp attr)
+		 (eq attr '__dict__))
+	    (string= (py-val->string attr) "__dict__"))
+    (return-from py-object.__getattribute__ (dict x)))
+  
+  (let ((*py-object.__getattribute__-active*
+	 (cons (cons x attr) *py-object.__getattribute__-active*)))
+    (py-attr x attr)))
 
 (def-py-method py-object.__setattr__ (x attr^ val)
   (check-type attr (or string symbol))
@@ -2605,22 +2526,142 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 			    (t (class-of x))))
     (:method ((x t))       (class-of x)))
 
-(defmethod py-attr (x attr)
-  
-  ;; x.a => x.__getattribute'__(x, attr).__get'__(x)
-  ;; 
-  ;; where the accent after xxx in __xxx'__ means that the method from
-  ;; the class is used, not an instance attribute (if it would exist)
-  
-  (let ((ga-meth (recursive-class-lookup-and-bind x '__getattribute__)))
+
+(defun py-attr (x attr)
+  ;; ATTR may be a symbol, a string, or instance of user-defined subclass of string
+  (let* ((class-attr-val   nil)
+	 (__getattr__      nil)
+	 (__getattribute__ nil)
+	 (x.class          (py-class-of x))
+	 (attr.as_string   (if (symbolp attr)
+			       (symbol-name attr)
+			     (py-val->string attr)))
+	 (attr.as_sym      (find-symbol attr.as_string #.*package*)) ;; may fail (= NIL)
+	 
+	 (inside-object-getattribute (loop for (obj . at) in *py-object.__getattribute__-active*
+					 when (and (eq obj x)
+						   (string= (py-val->string at) attr.as_string))
+					 return t
+					 finally (return nil))))
     
-    (assert ga-meth ()
-      "Object ~S (py-class: ~A) does not have a __getattribute__ method"
-      x (py-class-of x))
+    (loop for c in (mop:class-precedence-list x.class)
+	until (or (eq c (load-time-value (find-class 'standard-class)))
+		  (eq c (load-time-value (find-class 'py-dict-mixin)))
+		  (eq c (load-time-value (find-class 'py-class-mixin))))
+	      
+	for c.dict = (dict c) ;; may be NIL
+	for c.dict-is-regular-dict = (and c.dict (hash-table-is-regular-dict-p c.dict))
+				     
+	when c.dict
+	do 
+	  (unless (or inside-object-getattribute
+		      __getattribute__)
+	    ;; Try only the first __getattribute__ method found (but not py-object's).
+	    (let ((getattribute-meth (sym-gethash '__getattribute__ c.dict c.dict-is-regular-dict)))
+	      (when (and getattribute-meth
+			 (not (eq getattribute-meth #'py-object.__getattribute__)))
+		(setf __getattribute__ getattribute-meth)
+		(handler-case 
+		    (values (py-call (bind-val getattribute-meth x x.class) attr.as_string))
+		  (AttributeError () 
+		    (warn "__getattribute__ ~S ~S gave exception; also trying __getattr__ (if any)"
+			  x attr)
+		    nil)
+		  (:no-error (val)
+		    (return-from py-attr val))))))
+	  
+	  (unless class-attr-val
+	    ;; Try to find attribute in class dict.
+	    (when (or c.dict-is-regular-dict attr.as_sym) ;; otherwise key can't exist
+	      (let ((val (sym-gethash attr.as_sym c.dict c.dict-is-regular-dict)))
+		(when val
+		  (setf class-attr-val val)))))
+	  
+	  (unless (or inside-object-getattribute
+		      __getattr__)
+	    ;; Look for __getattr__ method (but don't call it yet:
+	    ;; only if instance/class dicts fail).
+	    (let ((getattr-meth (sym-gethash '__getattr__ c.dict c.dict-is-regular-dict)))
+	      (when getattr-meth (setf __getattr__ getattr-meth)))))
+
+    ;; Arriving here means: no __getattribute__ (or one that raised AttributeError),
+    ;; but perhaps __getattr__ or class-attr-val.
     
-    ;; Here we convert ATTR to a regular string. Not sure what desired/required
-    ;; behaviour is, if ATTR is instance of user-defined subclass of STRING.
-    (py-call ga-meth (if (symbolp attr) (symbol-name attr) (py-val->string attr)))))
+    ;; When __getattribute__ exists, but raised AttributeError, then call __getattr__
+    ;; irrespective (!) of presence of attribute in instance or class/superclasses:
+    
+    (when (and __getattribute__ __getattr__)
+      (warn "Both __getattribute__ and __getattr__: calling it  ~A ~A" x attr)
+      (return-from py-attr
+	(py-call (bind-val __getattr__ x x.class) attr.as_string)))
+
+    ;; A class attribute that is a data descriptor (i.e. has a
+    ;; `__set__' attribute) has higher priority than an instance
+    ;; attribute.
+
+    (when (and class-attr-val (data-descriptor-p class-attr-val))
+      (return-from py-attr
+	(bind-val class-attr-val x x.class)))
+    
+    ;; Try instance dict
+    
+    (if (typep x 'class)
+	
+	(loop for c in (mop:class-precedence-list x)
+	    until (or (eq c (load-time-value (find-class 'standard-class)))
+		      (eq c (load-time-value (find-class 'py-dict-mixin)))
+		      (eq c (load-time-value (find-class 'py-class-mixin))))
+		  
+	    for c.dict = (dict c) ;; may be NIL
+	    for c.dict-is-regular-dict = (and c.dict (hash-table-is-regular-dict-p c.dict))
+					 
+	    for val = (when (and c.dict
+				 (or attr.as_sym c.dict-is-regular-dict))
+			(sym-gethash attr c.dict c.dict-is-regular-dict))
+	    when val do (return-from py-attr val))
+      
+      (when (dict x)
+	(let ((val (dict-get x attr.as_string)))
+	  (when val
+	    (cond ((subtypep (py-class-of x) 'py-type)
+		   
+		   ;; XXX check the exact condition under which binding
+		   ;; of instance dict item occurs
+
+		   (let ((bound-val (bind-val val nil x)))
+		     (when bound-val ;; attribute-method bounded to class -> NIL
+		       (return-from py-attr bound-val))))
+
+		  (t (return-from py-attr 
+		       val)))))))
+    
+    ;; Fall back to a class attribute that is not a `data descriptor'.
+    (when class-attr-val
+      (return-from py-attr
+	(bind-val class-attr-val x x.class)))
+
+    ;; Right place??
+    #||
+    (when (eq attr.as_sym '__dict__)
+      (return-from py-attr (py-get-dict-attr x x.class)))
+    ||#
+    
+    ;; Fall back to the __getattr__ hook (not checked whether it raises AttributeError)
+    (when __getattr__
+      (return-from py-attr
+	(py-call (bind-val __getattr__ x x.class) attr.as_string)))
+     
+    (when (eq attr.as_sym '__dict__)
+      (return-from py-attr (py-get-dict-attr x x.class)))
+
+    #||
+    (unless __getattribute__
+      (return-from py-attr
+	(py-call (bind-val #'object.__getattribute__ x x.class) attr.as_string)))
+    ||#
+    
+    ;; Give up.
+    (py-raise 'AttributeError "No such attribute: ~A `~A' (class: ~A)" x attr (py-class-of x))))
 
 
 (defgeneric py-del-attr (x attr)
@@ -3007,10 +3048,12 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 (def-py-shortcut-func py-hash __hash__)
 
 (defun py-val->string (x)
+  (if (symbolp x) ;; Symbols don't represent Python values, but this is just handy for ourselves
+      (symbol-name x)
   (let ((s (deproxy x))) ;; deproxy, as it may be py-string subclass instance
     (if (stringp s)
 	s
-      (py-raise 'TypeError "Expected a string, but got: ~A" x))))
+      (py-raise 'TypeError "Expected a string, but got: ~A" x)))))
 
 (defun py-val->integer (x &key min)
   (let ((i (deproxy x)))
@@ -3193,7 +3236,7 @@ next value gotten by iterating over X. Returns NIL, NIL upon exhaustion.")
 (defun py-print (dest items comma?)
   (let ((*print-pretty* nil))
     (let* ((write-func (if dest 
-			   (py-object.__getattribute__ dest 'write)
+			   (py-attr dest 'write)
 			 (lambda (s) (write-string s) (finish-output))))
 	   
 	   (softspace-val (if dest
