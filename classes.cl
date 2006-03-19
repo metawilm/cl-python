@@ -362,14 +362,25 @@
 ;; By default, when an object has a dict, attributes are looked up in
 ;; the dict.
 
-(defmethod (setf py-attr) (val (x py-dict-mixin) attr)
+(defmethod (setf py-attr) (val x attr)
   ;; XXX convert string to real string?
   ;l XXX special-case when ATTR==__dict__
-  (let ((attr.str (typecase attr
+  (let* ((attr.str (typecase attr
 		    (string attr)
 		    (symbol (symbol-name attr))
-		    (t      (py-val->string attr)))))
-    (setf (dict-get x attr.str) val)))
+		    (t      (py-val->string attr))))
+	 (x.dict   (dict x))
+	 (x.attr   (when x.dict 
+		     (dict-get x attr.str)))
+	 (x.attr.__set__  (when x.attr
+			    (recursive-class-lookup-and-bind x.attr '__set__)))
+	 (x.__setattr__   (unless x.attr.__set__
+			    (recursive-class-lookup-and-bind x '__setattr__))))
+    
+    (cond (x.attr.__set__ (py-call x.attr.__set__ val))
+	  (x.__setattr__  (py-call x.__setattr__ attr.str val))
+	  (t              (py-raise 'AttributeError
+				    "(setf py-attr): no __setattr__ method for ~S" x)))))
 
 (defmethod py-del-attr ((x py-dict-mixin) attr)
   (dict-del x attr))
@@ -1045,7 +1056,12 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
     (py-raise 'AttributeError "No such attribute: ~A `~A' (class: ~A)" x attr (py-class-of x))))
 
 
-
+(def-py-method py-object.__setattr__ (x attr^ val)
+  (check-type attr (or string symbol))
+  (if (dict x)
+      (setf (dict-get x attr) val)
+    (py-raise 'AttributeError "No __setattr__ method for object ~S" x)))
+      
 (def-py-method py-object.__delattr__ (x attr)
   (check-type attr symbol)
   (let ((d (dict x)))
@@ -1707,8 +1723,8 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 	       (t (error "invalid args to property.__init__")))))
 
 (def-py-method py-property.__get__ (x obj class)
-  (declare (ignore obj class))
-  (py-call (slot-value x 'fget) x))
+  (declare (ignore class))
+  (py-call (slot-value x 'fget) obj))
 
 (def-py-method py-property.__set__ (x obj class)
   (declare (ignore obj class))

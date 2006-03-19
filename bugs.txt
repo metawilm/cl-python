@@ -44,5 +44,13 @@ x = d(a=3, b=5)
 Error: AttributeError: No such attribute: #<C> `__dict__' (class: #<py-type C>)
   [condition type: AttributeError]
 
---------
+------------------------------------------------------------------------------
+20060312
+
+- Name mangling of __xxx inside classes (both names and attributes)
+  is not implemented yet.
+
+- Ensure correct calling of __setattr__, __delattr__, __set__,
+  __get__, __del__.
+
 

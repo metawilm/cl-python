@@ -1191,7 +1191,7 @@
 	       (push (py-string-val->symbol k) res)
 	       (push v res)))
 	finally (return res))))
-	     
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;
 ;;; Detecting the globals and locals of modules, functions and classes
