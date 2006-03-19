@@ -286,9 +286,7 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
   (error "todo: py-compile"))
 
 (defun pybf:delattr (x name)
-  (check-type x python-object)
-  (check-type name attribute-name-designator)
-  (error "todo: delattr"))
+  (setf (py-attr x name) nil))
 
 (defun pybf:dir (&optional x)
   "Without args, returns names in current scope. ~@
@@ -643,7 +641,6 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
 (defconstant pybv:False          *the-false*          )
 (defconstant pybv:NotImplemented *the-notimplemented* )
 
-(defvar pybv:clpy (find-package 'pyb-clpy))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -651,3 +648,4 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
 
 (defun pyb-clpy:brek (&rest args) (break (format nil "~{~A~^; ~}" args)))
 
+(defvar pybv:brek #'pyb-clpy:brek)

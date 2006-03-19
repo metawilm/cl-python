@@ -66,11 +66,20 @@
       (remhash key d))))
 
 (defun (setf dict-get) (new-val x key)
+  ;; NEW-VAL == NIL -> delete key; return whether it existed
   (check-type key (or string symbol))
   (let ((d (dict x)))
-    (if (and (symbolp key) (hash-table-is-regular-dict-p d))
-	(setf (gethash (symbol-name key) d) new-val)
-      (setf (gethash key d) new-val))))
+
+    (unless d
+      (error "(setf dict-get) on dictless object: ~A ~A ~A" x key new-val))
+    
+    (let ((key (if (and (symbolp key) (hash-table-is-regular-dict-p d))
+		   (symbol-name key)
+		 key)))
+      
+      (if (null new-val)
+	  (remhash key d)
+	(setf (gethash key d) new-val)))))
 
 (defun sym-gethash (key ht &optional (is-reg-dict (hash-table-is-regular-dict-p ht)))
   ;; KEY is either a symbol or a regular string
@@ -133,7 +142,7 @@
 
 (defclass py-user-type   (py-type) ())
 (defclass py-user-object (py-object)
-  ()
+  ((dict :initform (make-dict)))  ;; not EQ-dict  XXX check if __slots__
   (:metaclass py-user-type))
 
 ;; Lisp type/object
@@ -337,6 +346,57 @@
 	      (:attribute          `(make-instance 'py-attribute-method
 				      :func (function ,cls.meth)))))))))
 
+;; (defun f (&rest args)
+;;   (with-parsed-py-arglist ("f" (a b) args)
+;;     (+ a b)))
+;;
+;; (f 1 2) (f 1 :b 2) (f :a 1 :b 2)
+
+(defmacro with-parsed-py-arglist ( (func-name formal-args actual-args) &body body)
+  (let ((alist '#:alist))
+    `(let* ((,alist (parse-poskey-arglist ,func-name ',formal-args ,actual-args))
+	    ,@(loop for f in formal-args
+		  collect `(,f (cdr (assoc ',f ,alist :test #'eq)))))
+       ,@body)))
+    
+(defun parse-poskey-arglist (func-name formal-pos-args actual-args)
+  (let ((pos-args (loop until (symbolp (car actual-args))
+		      collect (pop actual-args)))
+	(kw-args (loop while actual-args
+		     for key = (pop actual-args)
+		     for val = (pop actual-args)
+		     unless (and (symbolp key) val)
+		     do (error "Invalid arglist: ~S" actual-args)
+		     collect (cons key val))))
+    
+    (let ((res ())
+	  (formal-pos-args (copy-list formal-pos-args)))
+      
+      (loop while (and formal-pos-args pos-args)
+	  do (push (cons (pop formal-pos-args) (pop pos-args)) res))
+      
+      (when pos-args
+	(py-raise 'TypeError "Too many arguments for function ~A (got: ~A)" 
+		  func-name))
+      
+      (loop while kw-args
+	  for kwa = (pop kw-args)
+	  for key = (car kwa)
+	  for val = (cdr kwa)
+	  do (let ((fkw (find key formal-pos-args :test #'string=))) ;; (string= |:a| '|a|)
+	       (if fkw
+		   (progn (setf formal-pos-args (delete fkw formal-pos-args :test #'eq))
+			  (push (cons fkw val) res))
+		 (py-raise 'ValueError
+			   "Invalid argument list: unknown keyword arg (or duplicated arg): ~A"
+			   key))))
+      
+      (loop for f in formal-pos-args
+	  do (push (cons f nil) res))
+      
+      res)))
+
+
 (defconstant *the-true* 1)
 (defconstant *the-false* 0)
 
@@ -350,48 +410,10 @@
 (define-compiler-macro py-bool (lisp-val)
   `(if ,lisp-val *the-true* *the-false*))
 
-;;; Attributes are a fundamental thing: getting, setting, deleting
-
-#||
-(defgeneric py-attr (x attr)
-  (:documentation "Get attribute ATTR of X"))
-||#
-
-(defgeneric (setf py-attr) (val x attr)
-  (:documentation "Set attribute ATTR of X to VAL"))
-
-
-;; By default, when an object has a dict, attributes are looked up in
-;; the dict.
-
-(defmethod (setf py-attr) (val x attr)
-  ;; XXX convert string to real string?
-  ;l XXX special-case when ATTR==__dict__
-  (let* ((attr.str (typecase attr
-		    (string attr)
-		    (symbol (symbol-name attr))
-		    (t      (py-val->string attr))))
-	 (x.dict   (dict x))
-	 (x.attr   (when x.dict 
-		     (dict-get x attr.str)))
-	 (x.attr.__set__  (when x.attr
-			    (recursive-class-lookup-and-bind x.attr '__set__)))
-	 (x.__setattr__   (unless x.attr.__set__
-			    (recursive-class-lookup-and-bind x '__setattr__))))
-    
-    (cond (x.attr.__set__ (py-call x.attr.__set__ val))
-	  (x.__setattr__  (py-call x.__setattr__ attr.str val))
-	  (t              (py-raise 'AttributeError
-				    "(setf py-attr): no __setattr__ method for ~S" x)))))
-
-(defmethod py-del-attr ((x py-dict-mixin) attr)
-  (dict-del x attr))
-
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 ;;; Core objects (function, method, None...; not subclassable by the user)
-
 
 
 ;; Method (Core object)
@@ -964,6 +986,7 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 	  when (dict c) return it)
       (error "XXX No dict found in object ~S or its class ~A?!" x x.class)))
 
+
 (defvar *py-object.__getattribute__-active* ())
 
 (def-py-method py-object.__getattribute__ (x attr)
@@ -977,22 +1000,22 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 	 (cons (cons x attr) *py-object.__getattribute__-active*)))
     (py-attr x attr)))
 
+
+(defvar *py-object.__setattr__-active* ())
+
 (def-py-method py-object.__setattr__ (x attr^ val)
   (check-type attr (or string symbol))
-  (if (dict x)
-      (setf (dict-get x attr) val)
-    (py-raise 'AttributeError "No __setattr__ method for object ~S" x)))
-      
+  (let ((*py-object.__setattr__-active* (cons (cons x attr) *py-object.__setattr__-active*)))
+    (setf (py-attr x attr) val)))
+
+
+(defvar *py-object.__delattr__-active* ())
+
 (def-py-method py-object.__delattr__ (x attr)
-  (check-type attr symbol)
-  (let ((d (dict x)))
-    (cond ((null d) (py-raise 'TypeError
-			      "Object ~S has not attribute `~A' (not even a dict)." 
-			      x attr))
-	  ((remhash attr d))
-	  (t (py-raise 'ValueError "Object ~S has not attribute `~A' (but there is a dict)."
-		       x attr)))))
-	  
+  (check-type attr (or string symbol))
+  (let ((*py-object.__delattr__-active* (cons (cons x attr) *py-object.__delattr__-active*)))
+    (setf (py-attr x attr) nil)))
+
 
 (def-py-method py-object.__new__ :static (cls &rest attr)
   (declare (ignore attr))
@@ -1620,36 +1643,28 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 ;; Property (User object)
 
 (defclass py-property (py-user-object)
-  (fget fset fdel fdoc)
+  (fget fset fdel doc)
   (:metaclass py-user-type))
 
 ;; standard __new__ behaviour
 
 (def-py-method py-property.__init__ (x &rest args)
-  ;; XXX move this arguments parsing to general function
-  (loop while args
-      for a = (pop args)
-      do (cond ((symbolp a)
-		(let ((val (pop args)))
-		  (unless val
-		    (py-raise 'ValueError
-			      "Invalid argument list for property.__init__: ~S" args))
-		  (ecase a
-		    ((fget fset fdel doc) (setf (slot-value x a) val)))))
-	       
-	       ((not (slot-boundp x 'fget)) (setf (slot-value x 'fget) a))
-	       ((not (slot-boundp x 'fset)) (setf (slot-value x 'fset) a))
-	       ((not (slot-boundp x 'fdel)) (setf (slot-value x 'fdel) a))
-	       ((not (slot-boundp x 'doc))  (setf (slot-value x 'doc) a))
-	       (t (error "invalid args to property.__init__")))))
+  (with-parsed-py-arglist ("property.__init__" (fget fset fdel doc) args)
+    (setf (slot-value x 'fget) (or fget *the-none*)
+	  (slot-value x 'fset) (or fset *the-none*)
+	  (slot-value x 'fdel) (or fdel *the-none*)
+	  (slot-value x 'doc)  (or doc  ""))))
 
 (def-py-method py-property.__get__ (x obj class)
   (declare (ignore class))
   (py-call (slot-value x 'fget) obj))
 
-(def-py-method py-property.__set__ (x obj class)
-  (declare (ignore obj class))
-  (py-call (slot-value x 'fset) x))
+(def-py-method py-property.__set__ (x obj val)
+  (declare (ignore class))
+  (with-slots (fset) x
+    (if (eq fset *the-none*)
+	(py-raise 'AttributeError "Cannot set attribute")
+      (py-call (slot-value x 'fset) obj val)))) ;; bind?
 
 (def-py-method py-property.__del__ (x obj class)
   (declare (ignore obj class))
@@ -1674,10 +1689,6 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 (defgeneric deproxy (x)
   (:method ((x py-lisp-object))  (proxy-lisp-val x))
   (:method ((x t))               x))
-
-(defmethod (setf py-attr) (val (x py-lisp-object) attr)
-  ;; XXX ????????
-  (setf (py-attr (proxy-lisp-val x) attr) val))
 
 (defmacro def-proxy-class (py-name &optional supers)
   `(progn (defclass ,py-name ,(or supers '(py-lisp-object))
@@ -2527,6 +2538,8 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
     (:method ((x t))       (class-of x)))
 
 
+;;; Attributes are a fundamental thing: getting, setting, deleting
+
 (defun py-attr (x attr)
   ;; ATTR may be a symbol, a string, or instance of user-defined subclass of string
   (let* ((class-attr-val   nil)
@@ -2564,7 +2577,7 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 		(handler-case 
 		    (values (py-call (bind-val getattribute-meth x x.class) attr.as_string))
 		  (AttributeError () 
-		    (warn "__getattribute__ ~S ~S gave exception; also trying __getattr__ (if any)"
+		    #+(or)(warn "__getattribute__ ~S ~S gave exception; also trying __getattr__ (if any)"
 			  x attr)
 		    nil)
 		  (:no-error (val)
@@ -2591,7 +2604,7 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
     ;; irrespective (!) of presence of attribute in instance or class/superclasses:
     
     (when (and __getattribute__ __getattr__)
-      (warn "Both __getattribute__ and __getattr__: calling it  ~A ~A" x attr)
+      #+(or)(warn "Both __getattribute__ and __getattr__: calling it  ~A ~A" x attr)
       (return-from py-attr
 	(py-call (bind-val __getattr__ x x.class) attr.as_string)))
 
@@ -2664,17 +2677,75 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
     (py-raise 'AttributeError "No such attribute: ~A `~A' (class: ~A)" x attr (py-class-of x))))
 
 
-(defgeneric py-del-attr (x attr)
-  (:documentation "Remove attribute ATTR of X")
-  
-  (:method (x attr)
-	   (let ((da-meth (recursive-class-lookup-and-bind x '__delattr__)))
-	     (assert da-meth ()
-	       "Object ~S (py-class: ~A) does not have a __delattr__ method"
-	       x (py-class-of x))
-	     
-	     (py-call da-meth attr))))
+(defun (setf py-attr) (val x attr)
+  ;; When ATTR is NIL, it means attribute is deleted ("del x.attr")
 
+  ;; XXX convert string to real string?
+  ;; XXX special-case when ATTR==__dict__
+
+  (let* ((attr.str        (py-val->string attr))
+	 (x.class         (py-class-of x))
+	 (x.attr          (recursive-class-dict-lookup x.class attr)))
+    
+    (if (null attr)
+	
+	;; del x.attr
+	;; <cls>.__delattr__ takes precedence over <cls.attr>.__del__
+	(let* ((x.attr.__del__  (when x.attr
+				  (recursive-class-lookup-and-bind x.attr '__del__)))
+	       (delattr-active  (loop for (obj . at) in *py-object.__delattr__-active*
+				    if (and (eq obj x) (string= at attr))
+				    return t
+				    finally (return nil)))
+	       
+	       (x.__delattr__   (unless delattr-active
+				  (recursive-class-lookup-and-bind x '__delattr__))))
+	  
+	  (cond (x.__delattr__  (py-call x.__delattr__ attr.str))
+		
+		(x.attr.__del__ (if (eq x.attr.__del__ *the-none*)
+				    (py-raise 'AttributeError
+					      "Cannot delete attribute ~A of ~A (__del__ = None)"
+					      x attr)
+				  (py-call x.attr.__del__ x val)))
+		
+		((dict x)       (unless (setf (dict-get x attr) nil)
+				  (py-raise 'AttributeError
+					    "Cannot delete attribute ~A of object ~A: does not exist"
+					    attr x)))
+		
+		(t              (py-raise 'AttributeError
+					  "Cannot delete attribute ~A of ~A: no __delattr__ method"
+					  x attr))))
+      
+      ;; x.attr = val
+      ;; <cls>.__setattr__ takes precedence over <cls.attr>.__set__
+      (let* ((x.attr.__set__  (when x.attr
+				(recursive-class-lookup-and-bind x.attr '__set__)))
+	     (setattr-active  (loop for (obj . at) in *py-object.__setattr__-active*
+				  if (and (eq obj x) (string= at attr))
+				  return t
+				  finally (return nil)))
+	     
+	     (x.__setattr__   (unless setattr-active
+				(recursive-class-lookup-and-bind x '__setattr__))))
+	
+	#+(or)(warn "x: ~A attr: ~A x.attr: ~A x.attr.__set__: ~A x.__setattr__: ~A"
+		    x attr x.attr x.attr.__set__ x.__setattr__)
+	
+	(cond (x.__setattr__  (py-call x.__setattr__ attr.str val))
+	      
+	      (x.attr.__set__ (if (eq x.attr.__set__ *the-none*)
+				  (py-raise 'AttributeError
+					    "Cannot set attribute ~A of ~A (__set__ = None)"
+					    x attr)
+				(py-call x.attr.__set__ x val)))
+	      
+	      ((dict x)       (setf (dict-get x attr) val))
+
+	      
+	      (t              (py-raise 'AttributeError
+					"(setf py-attr): no __setattr__ method for ~S" x)))))))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
