@@ -489,7 +489,7 @@
     (attributeref-expr
      (destructuring-bind (object (id-ex attr-name)) (cdr item)
        (assert (eq id-ex 'identifier-expr))
-       `(py-del-attr ,object ',attr-name)))
+       `(setf (py-attr ,object ',attr-name) nil)))
     
     (identifier-expr
      (let* ((name (second item)))

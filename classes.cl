@@ -92,6 +92,7 @@
       (when key.sym
 	(gethash key.sym ht)))))
 
+
 (defclass py-class-mixin (py-dict-mixin)
   ((mro :initarg :mro :accessor class-mro)))
 
@@ -156,9 +157,100 @@
   (:metaclass py-lisp-type)
   (:documentation "Base class for proxy classes"))
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;
+;;; This is a bit ugly, but method classes must be evaluated prior to their
+;;; use; therefore here are method classes, and below their methods.
+;;;
+
+(defclass py-method (py-core-object)
+  ((func :initarg :func :accessor py-method-func))
+  (:metaclass py-core-type))
+
+(defclass py-class-method (py-method)
+  ((class :initarg :class))
+  (:metaclass py-core-type))
+
+(defclass py-attribute-method (py-method)
+  ()
+  (:metaclass py-core-type))
+
+(defclass py-writable-attribute-method (py-attribute-method)
+  (write-func)
+  (:metaclass py-core-type))
+
+(defclass py-static-method (py-method)
+  ()
+  (:metaclass py-core-type))
+
+(defparameter *writable-attribute-methods* (make-hash-table :test #'eq))
+
+(defmacro def-py-method (cls.meth &rest args)
+  (let* ((cm (symbol-name cls.meth))
+	 (dot-pos (or (position #\. cm)
+		      (error "Need dot in name: (def-py-method classname.methodname ..); got: ~A"
+			     cls.meth)))
+	 (cls  (intern (subseq cm 0 dot-pos) #.*package*))
+	 (meth (intern (subseq cm (1+ dot-pos)) #.*package*))
+	 (modifiers (loop while (keywordp (car args)) collect (pop args)))
+	 (func-name (if (eq (car modifiers) :attribute-write)
+			(intern (format nil "~A-writer" cls.meth) #.*package*)
+		      cls.meth)))
+    
+    (assert (<= (length modifiers) 1) ()
+      "Multiple modifiers for a py-method: ~A. Todo?" modifiers)
+
+    `(progn
+       ,(destructuring-bind (func-args &body func-body) args
+	  (loop with real-args
+	      with body = `(locally ,@func-body) ;; allows DECLARE forms at head
+	
+	      for sym in func-args
+	      for sym-name = (when (symbolp sym) (symbol-name sym))
+
+	      if (not (symbolp sym))
+	      do (push sym real-args)
+		 
+	      else if (char= #\^ (aref sym-name (1- (length sym-name))))
+	      do (let ((real-name (intern (subseq sym-name 0 (1- (length sym-name)))
+					  #.*package*)))
+		   (push real-name real-args)
+		   (setf body `(let ((,real-name (deproxy ,real-name)))
+				 ,body)))
+		 
+	      else do (push sym real-args)
+		   
+	      finally (return `(defun ,func-name ,(nreverse real-args)
+				 (block ,cls.meth
+				   ,body)))))
+       
+       (let* ((cls (or (find-class ',cls) (error "No such class: ~A" ',cls))))
+	 (unless (dict cls)
+	   (error "Class ~A has no dict" cls))
+	 (setf (dict-get cls ',meth)
+	   ,(ecase (car modifiers)
+	      ((nil)                `(function ,cls.meth))
+	      (:static              `(make-instance 'py-static-method
+				       :func (function ,cls.meth)))
+	      (:attribute           `(make-instance 'py-attribute-method
+				       :func (function ,cls.meth)))
+	      (:attribute-read      `(let ((x (make-instance 'py-writable-attribute-method
+						:func (function ,cls.meth))))
+				       (setf (gethash ',cls.meth *writable-attribute-methods*) x)
+				       x))
+	      (:attribute-write     `(let ((f (function ,func-name))
+					   (read-f (or (gethash ',cls.meth *writable-attribute-methods*)
+						       (error "Attribute read function ~A not found yet"
+							      ',cls.meth))))
+				       (setf (slot-value read-f 'write-func) f)
+				       read-f ;; stored in dict under attr name
+				       ))))))))
+
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;
 ;;; dynamic class creation
 
 (defun make-py-class (&key name context-name namespace supers cls-metaclass mod-metaclass)
@@ -235,7 +327,7 @@
       
       (when (eq metaclass (load-time-value (find-class 'py-meta-type)))
 	(let ((cls (mop:ensure-class
-		    name
+		    (make-symbol (symbol-name name))
 		    :direct-superclasses supers
 		    :metaclass (load-time-value (find-class 'py-meta-type))
 		    :dict namespace)))
@@ -287,8 +379,29 @@
 	    
 	    cls))))))
 
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+(defconstant *the-true* 1)
+(defconstant *the-false* 0)
+
+(defvar *the-none*)
+(defvar *the-ellipsis*)
+(defvar *the-notimplemented*)
+    
+(defun py-bool (lisp-val)
+  (if lisp-val *the-true* *the-false*))
+
+(define-compiler-macro py-bool (lisp-val)
+  `(if ,lisp-val *the-true* *the-false*))
+
+
+(def-py-method py-dictless-object.__class__ :attribute (x)
+  (py-class-of x))
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;; 
 ;;; Built-in Python object types:
 ;;; 
 ;;; -- type ----------- repr ----- subclassable -- examples -------------------
@@ -296,55 +409,7 @@
 ;;;  py-core-object:  py cls inst   no        function, method
 ;;;  py-user-object:  py cls inst   yes       file, module, property
 ;;;
-
-;;; Support methods on built-in Python classes
-
-(defmacro def-py-method (cls.meth &rest args)
-  (let* ((cm (symbol-name cls.meth))
-	 (dot-pos (or (position #\. cm)
-		      (error "Need dot in name: (def-py-method classname.methodname ..); got: ~A"
-			     cls.meth)))
-	 (cls  (intern (subseq cm 0 dot-pos) #.*package*))
-	 (meth (intern (subseq cm (1+ dot-pos)) #.*package*))
-	 (modifiers (loop while (keywordp (car args)) collect (pop args))))
-
-    (assert (<= (length modifiers) 1) ()
-      "Multiple modifiers for a py-method: ~A. Todo?" modifiers)
-
-    `(progn
-       ,(destructuring-bind (func-args &body func-body) args
-	  (loop with real-args
-	      with body = `(locally ,@func-body) ;; allows DECLARE forms at head
-
-	      for sym in func-args
-	      for sym-name = (when (symbolp sym) (symbol-name sym))
-
-	      if (not (symbolp sym))
-	      do (push sym real-args)
-		 
-	      else if (char= #\^ (aref sym-name (1- (length sym-name))))
-	      do (let ((real-name (intern (subseq sym-name 0 (1- (length sym-name)))
-					  #.*package*)))
-		   (push real-name real-args)
-		   (setf body `(let ((,real-name (deproxy ,real-name)))
-				 ,body)))
-		 
-	      else do (push sym real-args)
-		   
-	      finally (return `(defun ,cls.meth ,(nreverse real-args)
-				 (block ,cls.meth
-				   ,body)))))
-       
-       (let* ((cls (or (find-class ',cls) (error "No such class: ~A" ',cls))))
-	 (unless (dict cls)
-	   (error "Class ~A has no dict" cls))
-	 (setf (dict-get cls ',meth)
-	   ,(ecase (car modifiers)
-	      ((nil)               `(function ,cls.meth))
-	      (:static             `(make-instance 'py-static-method
-				      :func (function ,cls.meth)))
-	      (:attribute          `(make-instance 'py-attribute-method
-				      :func (function ,cls.meth)))))))))
+				       
 
 ;; (defun f (&rest args)
 ;;   (with-parsed-py-arglist ("f" (a b) args)
@@ -397,42 +462,31 @@
       res)))
 
 
-(defconstant *the-true* 1)
-(defconstant *the-false* 0)
-
-(defvar *the-none*)
-(defvar *the-ellipsis*)
-(defvar *the-notimplemented*)
-    
-(defun py-bool (lisp-val)
-  (if lisp-val *the-true* *the-false*))
-
-(define-compiler-macro py-bool (lisp-val)
-  `(if ,lisp-val *the-true* *the-false*))
-
-
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
+;;; 
 ;;; Core objects (function, method, None...; not subclassable by the user)
-
+;;;
 
 ;; Method (Core object)
 
-(defclass py-method (py-core-object)
-  ((func :initarg :func :accessor py-method-func))
-  (:metaclass py-core-type))
+;; py-method
 
-(def-py-method py-method.__get__ (func obj class)
-  (break "py-method.__get__ (func, .. ..) -> func?!  (~A and ~A)" obj class)
-  func)
+;; py-class-method
 
-(defclass py-class-method (py-method)
-  ((class :initarg :class))
-  (:metaclass py-core-type))
+(def-py-method py-class-method.__new__ :static (cls func)
+  (declare (ignore func))
+  (make-instance cls))
 
-(defclass py-attribute-method (py-method)
-  ()
-  (:metaclass py-core-type))
+(def-py-method py-class-method.__init__ (x^ func)
+  (setf (slot-value x 'func) func))
+
+(def-py-method py-class-method.__call__ (x^ obj &rest args)
+  (let ((arg (if (excl::classp obj) obj (py-class-of obj))))
+    (with-slots (func class) x
+      (apply #'py-call (py-method-func x) arg args))))
+
+
+;; py-attribute-method
 
 (def-py-method py-attribute-method.__get__ (x inst class)
   (declare (ignore class))
@@ -440,18 +494,28 @@
       (py-call (slot-value x 'func) inst)
     nil))
 
-(def-py-method py-attribute-method.__set__ (x inst class)
-  (if inst
-      (py-raise 'TypeError
-		"Attribute ~A of object ~A is read-only (value: ~A)"
-		x inst (py-call (slot-value x 'func) inst))
-    (py-raise 'TypeError
-	      "Class ~A has no attribute ~A" class x)))
+(def-py-method py-attribute-method.__set__ (x obj val)
+  (declare (ignore val))
+  (py-raise 'TypeError
+	    "Attribute ~A of object ~A is read-only (value: ~A)"
+	    x obj (py-call (slot-value x 'func) obj)))
 
 (def-py-method py-attribute-method.__repr__ (x)
   (with-output-to-string (s)
     (print-unreadable-object (x s :type t :identity t))))
 
+;; py-writable-attribute-method
+
+(def-py-method py-writable-attribute-method.__set__ (x obj val)
+  (if (slot-boundp x 'write-func)
+      (py-call (slot-value x 'write-func) obj val)
+    (error "No writer defined for writable attribute: ~A" x)))
+
+(def-py-method py-writable-attribute-method.__get__ (x inst class)
+  (declare (ignore class))
+  (if inst
+      (py-call (slot-value x 'func) inst)
+    nil))
 
 (defclass py-bound-method (py-method)
   ((instance :initarg :instance :accessor py-method-instance))
@@ -517,9 +581,8 @@
   (with-slots (class func) x
     (apply #'py-call func x args)))
 
-(defclass py-static-method (py-method)
-  ()
-  (:metaclass py-core-type))
+
+;; py-static-method
 
 (def-py-method py-static-method.__new__ :static (cls func)
   (assert (eq cls (load-time-value (find-class 'py-static-method))))
@@ -961,18 +1024,6 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 ;; Object (User object)
 
 (defun bind-val (val x x.class)
-  #+(or)
-  (when (eq val #'py-function.__get__)
-    (warn "bind-val of py-fuction.__get__")
-    ;; .__get__ is a "method-wrapper" in CPython. Special binding
-    ;; behaviour. For now, the following seems to fake it well enough.
-    (return-from bind-val
-      (excl:named-function (method-wrapper for __get__)
-	(lambda (&rest args)
-	  (assert (functionp (pop args)))  ;; it's the lambda itself
-	  (apply #'bind-val x args)))))
-  
-  #+(or)(break "bind-val of #'py-function.__get__: ~A ~A" x x.class)
   
   (let ((get-meth (recursive-class-dict-lookup
 		   (py-class-of val) '__get__)))
@@ -1079,7 +1130,7 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 				  :class))
 		      
 		      (c (mop:ensure-class
-			  name 
+			  (make-symbol (symbol-name name)) 
 			  :direct-superclasses (or supers
 						   (load-time-value
 						    (list (find-class 'py-user-object))))
@@ -1097,17 +1148,27 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
   nil)
 
 (def-py-method py-type.__name__ :attribute (cls)
-	       ;; XXX remove prefix `py-' etc
-	       (string (class-name cls)))
+  ;; XXX remove prefix `py-' etc
+  (string (class-name cls)))
 
 (def-py-method py-type.__dict__ :attribute (cls)
   (dict cls))
 
-(def-py-method py-dictless-object.__class__ :attribute (x)
-	       (py-class-of x))
+(def-py-method py-type.__bases__ :attribute-read (cls)
+  (make-tuple-from-list (mop:class-direct-superclasses cls)))
+
+(def-py-method py-type.__bases__ :attribute-write (cls bases^)
+  (assert (excl::classp cls))
+  (let ((bases (py-iterate->lisp-list bases)))
+    (unless (member (find-class 'py-user-object) bases :test #'eq)
+      (setf bases (append bases (list (find-class 'py-user-object)))))
+    (warn "bases: ~S" bases)
+    (mop:ensure-class-using-class cls (mop::class-name cls) 
+				  :direct-superclasses bases)))
 
 (def-py-method py-type.__mro__ :attribute (x)
-	       (mop:class-precedence-list x))
+  ;; We could filter out the Lisp implementation classes.
+  (mop:class-precedence-list x))
 
 (def-py-method py-type.__subclasses__ (x)
   (make-py-list-from-list (mop:class-direct-subclasses x)))
@@ -1657,18 +1718,22 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 
 (def-py-method py-property.__get__ (x obj class)
   (declare (ignore class))
-  (py-call (slot-value x 'fget) obj))
+  (with-slots (fget) x
+    (if (eq fget *the-none*)
+	(py-raise 'AttributeError "Cannot get attribute")
+      (py-call fget obj))))
 
 (def-py-method py-property.__set__ (x obj val)
-  (declare (ignore class))
   (with-slots (fset) x
     (if (eq fset *the-none*)
 	(py-raise 'AttributeError "Cannot set attribute")
       (py-call (slot-value x 'fset) obj val)))) ;; bind?
 
-(def-py-method py-property.__del__ (x obj class)
-  (declare (ignore obj class))
-  (py-call (slot-value x 'fdel) x))
+(def-py-method py-property.__del__ (x obj)
+  (with-slots (fdel) x
+    (if (eq fdel *the-none*)
+	(py-raise 'AttributeError "Cannot delete attribute")
+      (py-call (slot-value x 'fdel) obj))))
 
 (def-py-method py-property.fget :attribute (x)
   (slot-value x 'fget))
@@ -1882,41 +1947,36 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
       do (setf (gethash (py-symbol->string k) ht) v)
       finally (return ht)))
 
-
 (def-py-method py-dict.__new__ :static (cls &rest kwargs)
   ;; XXX logic of filling dict must be moved to __init__
-  (let ((ht (make-dict)))
-    (case (length kwargs)
-      (0 (make-dict))
-      (1 (let* ((a (car kwargs))
-		(items-meth (recursive-class-lookup-and-bind a 'items))
-		(items (if items-meth
-			   (py-call items-meth)
-			 (py-iterate->lisp-list a))))
-	   (loop for i in items
-	       for kv = (py-iterate->lisp-list i)
-	       if (= (length kv) 2)
-	       do (setf (gethash (pop kv) ht) (pop kv))
-	       else do (py-raise 'ValueError
-				 "dict.__new__: the items should be key-val ~
-                                               pairs; got ~S (in ~S)" kv a))))
-      (t (loop 
-	     for key = (let ((k (pop kwargs)))
-			 (unless (symbolp k)
-			   (py-raise 'TypeError
-				     "dict.__new__: invalid key-val arg format: ~
-                                                   ~S in ~S" k kwargs))
-			 k)
-	     for val = (when key
-			 (or (pop kwargs)
-			     (error "dict.__new__: no val for key ~S in ~S"
-				    key kwargs)))
-	     while key
-	     do (setf (gethash (py-symbol->string key) ht) val))))
-    
-    (if (eq cls (load-time-value (find-class 'py-dict)))
-	ht
-      (make-instance cls :lisp-object ht))))
+  (if (eq cls (load-time-value (find-class 'py-dict)))
+      (make-dict)
+    (make-instance cls :lisp-object (make-dict))))
+
+(def-py-method py-dict.__init__ (x^ &rest kwargs)
+  (case (length kwargs)
+    (0 )
+    (1 (let* ((iterable (car kwargs))
+	      (items-meth (recursive-class-lookup-and-bind iterable 'items))
+	      (items (if items-meth
+			 (py-call items-meth)
+		       (py-iterate->lisp-list iterable))))
+	 
+	 (map-over-py-object (lambda (obj)
+			       (let ((lst (py-iterate->lisp-list obj)))
+				 (if (= (length lst) 2)
+				     (setf (gethash (pop lst) x) (pop lst))
+				   (py-raise 'ValueError
+					     "Got more than 2 values for element in .items() of ~A"
+					     iterable))))
+			     items)))
+	 
+    (t (loop while kwargs
+	   do (let ((key (pop kwargs))
+		    (val (pop kwargs)))
+		(unless (symbolp key)
+		  (py-raise 'TypeError "dict.__new__: invalid key (not a symbol): ~S" key))
+		(setf (gethash (py-symbol->string key) x) val))))))
 
 (def-py-method py-dict.__eq__ (dict1^ dict2^)
   (py-bool (and (typep dict2 (load-time-value (find-class 'hash-table)))
@@ -1976,10 +2036,21 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 				     seq)
 		 d))
 
+(def-py-method py-dict.items (x^)
+  (make-py-list-from-list
+   (loop for k being the hash-key in x
+       using (hash-value v)
+       collect (make-tuple-from-list (list k v)))))
+
 (def-py-method py-dict.keys (x^)
   (make-py-list-from-list
    (loop for k being the hash-key in x
        collect k)))
+
+(def-py-method py-dict.values (x^)
+  (make-py-list-from-list
+   (loop for v being the hash-value in x
+       collect v)))
 
 ;; List (Lisp object: adjustable array)
 
@@ -2446,8 +2517,15 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 (defmacro make-tuple-unevaled-list (items)
   `(make-tuple-from-list (list ,@items)))
 
+;; Efficient tuple functions
 
-      
+(defun tuple-p-fast (x)
+  (listp x))
+
+(defun tuple-length-fast (x)
+  (assert (listp x))
+  (length x))
+
 (def-py-method py-tuple.__cmp__ (x^ y^)
   (let ((x.len (length x))
 	(y.len (length y)))
@@ -2472,12 +2550,15 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 			((py-==->lisp-val xi yi))
 			(t (return nil))))))
 
-(def-py-method py-tuple.__getitem__ (x^ item)
+(def-py-method py-tuple.__getitem__ (x^ item^)
   ;; XXX item may be a slice
-  (check-type item integer)
-  (cond ((<= 0 item (1- (length x)))
-	 (nth item x))
-	(t (error "unexpected"))))
+  (etypecase item
+    (integer (cond ((<= 0 item (1- (length x)))
+		    (nth item x))
+		   ((<= 0 (+ (length x) item) (1- (length x)))
+		    (nth (+ (length x) item) x))
+		   (t (error "unexpected"))))
+    (py-slice (error :todo-tuple-getitem-slice))))
 
 (def-py-method py-tuple.__iter__ (x^)
   (make-iterator-from-function
@@ -2534,7 +2615,12 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 			     ;; metatypes fake being of type `type'
 			     (load-time-value (find-class 'py-type)))
 			    
-			    (t (class-of x))))
+			    ((or (typep x (load-time-value 'standard-class))
+				 (typep x (load-time-value 'built-in-class)))
+			     (load-time-value (find-class 'py-type)))
+			    
+			    (t (warn "py-class-of ~A -> ~A" x (class-of x))
+			       (class-of x))))
     (:method ((x t))       (class-of x)))
 
 
@@ -2687,7 +2773,7 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 	 (x.class         (py-class-of x))
 	 (x.attr          (recursive-class-dict-lookup x.class attr)))
     
-    (if (null attr)
+    (if (null val)
 	
 	;; del x.attr
 	;; <cls>.__delattr__ takes precedence over <cls.attr>.__del__
@@ -2707,7 +2793,7 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 				    (py-raise 'AttributeError
 					      "Cannot delete attribute ~A of ~A (__del__ = None)"
 					      x attr)
-				  (py-call x.attr.__del__ x val)))
+				  (py-call x.attr.__del__ x)))
 		
 		((dict x)       (unless (setf (dict-get x attr) nil)
 				  (py-raise 'AttributeError
