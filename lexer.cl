@@ -910,7 +910,10 @@ second and later characters must be alphanumeric or underscore."
 		    (when minus
 		      (setf exp (* -1 exp)))
 		  
-		    (setf res (* res (expt 10 exp)))))
+		    (setf res (* res (expt 10 exp)))
+		    
+		    ;; CPython: 1e10 -> float, even though it's an int
+		    (setf res (coerce res 'double-float))))
 	      
 	      (when ch
 		(unread-chr ch)))))

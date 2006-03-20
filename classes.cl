@@ -477,6 +477,13 @@
   (declare (ignore func))
   (make-instance cls))
 
+(def-py-method py-class-method.__get__ (x inst class)
+  (declare (ignore class))
+  (let ((arg (if (excl::classp inst) inst (py-class-of inst))))
+    (make-instance 'py-bound-method
+      :func (slot-value x 'func)
+      :instance arg)))
+    
 (def-py-method py-class-method.__init__ (x^ func)
   (setf (slot-value x 'func) func))
 
@@ -660,9 +667,15 @@
 (def-py-method py-function.__repr__ (func)
   (with-output-to-string (s)
     (print-unreadable-object (func s :identity t)
-      (format s "python-function ~A (~A)" 
-	      (py-function-name func)
-	      (py-function-context-name func)))))
+      (if (typep func 'py-function)
+	  
+	  (progn 
+	    (format s "python-function ~A" (py-function-name func))
+	    (when (string/= (py-function-name func)
+			    (py-function-context-name func))
+	      (format s " (~A)" (py-function-context-name func))))
+	
+	(format s "function ~A" (py-function-name func))))))
 
 (def-py-method py-function.__name__ :attribute (func)
 	       (py-function-name func))
@@ -907,29 +920,30 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 
 
 (def-py-method py-super.__getattribute__ (x attr)
-  (flet ((find-preceding-class-in-mro (mro cls)
+  (flet ((find-remaining-mro (mro cls)
 	   #+(or)(warn "find-preceding-class-in-mro ~A ~A..." mro cls)
 	   (let ((res (loop until (eq (pop mro) cls)
-			  finally (return (pop mro)))))
+			  finally (return mro))))
 	     #+(or)(warn "-> ~A" res)
 	     res)))
     
     ;; XXX check when attribute is static method and super is bound to class, etc
     (with-slots (object current-class) x
-      (let ((class (find-preceding-class-in-mro
-		    (py-type.__mro__ (if (typep object 'class)
-					 object
-				       (py-class-of object)))
-		    current-class)))
-	#+(or)(break "Class before ~A is ~A; looking up ~A in latter" current-class class attr)
-	(let ((val (recursive-class-dict-lookup class attr)))
-	  (if val
-	      (bind-val val
-			(if (eq object class) *the-none* object)
-			class)
-	    (py-raise 'AttributeError
-		      "No such attribute found for `super' object: ~S.~S ~%
-                       (looked up attr ~S in class ~S" x attr attr class)))))))
+      
+      (let* ((remaining-mro (find-remaining-mro (py-type.__mro__ (if (typep object 'class)
+								     object
+								   (py-class-of object)))
+						current-class))
+	     (class (car remaining-mro))
+	     (val (recursive-class-dict-lookup class attr remaining-mro)))
+	
+	(if val
+	    (bind-val val
+		      (if (eq object class) *the-none* object)
+		      class)
+	  (py-raise 'AttributeError
+		    "No such attribute found for `super' object: ~S.~S; ~
+                     looked up attr ~S in class ~S" x attr attr class))))))
 
 (def-py-method py-super.__repr__ (x^)
   (with-output-to-string (s)
@@ -1077,29 +1091,33 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
   ;; nothing
   )
 
-(def-py-method py-object.__class__ :attribute (x)
-	       (py-class-of x))
+(def-py-method py-object.__class__ :attribute-read (x)
+  (py-class-of x))
+
+(def-py-method py-object.__class__ :attribute-write (x new-class)
+  (assert (excl::classp new-class))
+  (change-class x new-class))
 
 (def-py-method py-object.__repr__ (x)
   (with-output-to-string (s)
     (print-unreadable-object (x s :identity t :type t))))
 
-(defmethod recursive-class-dict-lookup ((cls class) attr)
+(defun recursive-class-dict-lookup (cls attr &optional cls-list)
   ;; Look for ATTR in class CLS and all its superclasses.
   ;; and finally (which is in this implementation not a superclass of a class).
   (assert (or (stringp attr) (symbolp attr)))
-  (loop for c in (mop:class-precedence-list cls)
+  (when cls-list
+    (assert (eq cls (car cls-list))))
+  (loop for c in (or cls-list (mop:class-precedence-list cls))
       until (or (eq c (load-time-value (find-class 'standard-class)))
-		(eq c (load-time-value (find-class 'py-dict-mixin))))
+  		(eq c (load-time-value (find-class 'py-dict-mixin))))
 	    ;; XXX standard-class is after py-dict-mixin etc
       when (and (dict c) (dict-get c attr)) return it
-      finally #+(or)(return nil)
-	      
-	      ;; this seems not needed, in the finally clause
-	      (let ((obj-attr (dict-get (load-time-value (find-class 'py-object)) attr)))
-		(when obj-attr
-		  #+(or)(warn "rec van py-object: ~A" attr)
-		  (return obj-attr)))))
+      finally ;; this seems not needed, in the finally clause
+ 	      (let ((obj-attr (dict-get (load-time-value (find-class 'py-object)) attr)))
+ 		(when obj-attr
+ 		  #+(or)(warn "rec van py-object: ~A (cpl: ~A)" attr (mop:class-precedence-list cls))
+ 		  (return obj-attr)))))
 
 (defun recursive-class-lookup-and-bind (x attr)
   #+(or)(warn "recursive-class-lookup-and-bind ~A ~A" x attr)
@@ -1159,12 +1177,16 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 
 (def-py-method py-type.__bases__ :attribute-write (cls bases^)
   (assert (excl::classp cls))
+  #+(or)(break "Old class: ~A" cls)
   (let ((bases (py-iterate->lisp-list bases)))
-    (unless (member (find-class 'py-user-object) bases :test #'eq)
-      (setf bases (append bases (list (find-class 'py-user-object)))))
-    (warn "bases: ~S" bases)
+    #||(unless (member (find-class 'py-user-object) bases :test #'eq)
+	 (setf bases (append bases (list (find-class 'py-user-object)))))
+    ||#
+    #+(or)(warn "bases: ~S" bases)
     (mop:ensure-class-using-class cls (mop::class-name cls) 
-				  :direct-superclasses bases)))
+				  :direct-superclasses bases)
+    #+(or)(break "New class: ~A" cls)
+    cls))
 
 (def-py-method py-type.__mro__ :attribute (x)
   ;; We could filter out the Lisp implementation classes.
@@ -1774,9 +1796,12 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 (def-py-method py-number.__add__ (x^ y^) (+ x y))
 
 (def-py-method py-number.__cmp__ (x^ y^) 
-  (cond ((< x y) -1)
-	((= x y) 0)
-	(t       1)))
+  (cond ((= x y) 0) ;; also for complex
+	((and (realp x) (realp y))
+	 (cond ((< x y) -1)
+	       (t       +1)))
+	((or (complexp x) (complexp y))
+	 (py-raise 'TypeError "Cannot compare complexes"))))
 
 (def-py-method py-number.__div__ (x^ y^) (/ x y))  ;; overruled for integers
 
@@ -1841,6 +1866,18 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 		     c
 		   (make-instance 'cls :lisp-object c))))
 
+(def-py-method py-complex.__repr__ (x^)
+  (let ((r (realpart x))
+	(i (imagpart x)))
+    (cond ((= i 0)
+	   (error :unexpected)) ;; due to CL simplification rules
+	  ((= r 0)
+	   (format nil "~Aj" (py-repr-string i)))
+	  ((> i 0)
+	   (format nil "(~A+~Aj)" (py-repr-string r) (py-repr-string i)))
+	  (t
+	   (format nil "(~A-~Aj)" (py-repr-string r) (py-repr-string (- i)))))))
+  
 ;; Real
 
 (def-proxy-class py-real (py-number))
@@ -1921,6 +1958,27 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 		     f
 		   (make-instance 'cls :lisp-object f))))
 
+(def-py-method py-float.__repr__ (x^)
+  (let* ((s (format nil "~F" x))
+	 (s.len (length s)))
+
+    ;;  '1.2d0'  -> '1.2'
+    ;;  '1.2d+9' -> '1.2e+9'
+    ;;  '1.2d-9' -> '1.2e-9'
+    
+    (loop for ix from (1- s.len) downto 0
+	do (when (char= (aref s ix) #\d)
+	     (ecase (aref s (1+ ix))
+	       
+	       (#\0 ;; 1.2d0
+		(setf s (delete #\d s :start ix :end (1+ ix))
+		      s (delete #\0 s :start ix :end (1+ ix))))
+	       
+	       ((#\+ #\-) ;; 1.2d+9  1.2d+9
+		(setf (aref s ix) #\e)))))
+    
+    s))
+  
 ;;; non-numberic classes
 
 ;; Dict
@@ -2021,12 +2079,6 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 (def-py-method py-dict.__setitem__ (dict^ key val)
   (let ((key2 (if (symbolp key) (symbol-name key) key)))
     (setf (gethash key2 dict) val)))
-
-(def-py-method py-dict.__str__ (x^)
-  (with-output-to-string (s)
-    (print-unreadable-object (x s :identity t)
-      (format s "dict with ~A items" (hash-table-count x)))))
-
 
 (def-py-method py-dict.fromkeys :static (seq &optional val)
 	       (unless val
@@ -2615,6 +2667,10 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 			     ;; metatypes fake being of type `type'
 			     (load-time-value (find-class 'py-type)))
 			    
+			    ((typep x (load-time-value (find-class 'py-class-mixin)))
+			     ;; maybe user-defined metaclass
+			     (class-of x))
+			    
 			    ((or (typep x (load-time-value 'standard-class))
 				 (typep x (load-time-value 'built-in-class)))
 			     (load-time-value (find-class 'py-type)))
@@ -2664,7 +2720,7 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 		    (values (py-call (bind-val getattribute-meth x x.class) attr.as_string))
 		  (AttributeError () 
 		    #+(or)(warn "__getattribute__ ~S ~S gave exception; also trying __getattr__ (if any)"
-			  x attr)
+				x attr)
 		    nil)
 		  (:no-error (val)
 		    (return-from py-attr val))))))
@@ -2887,7 +2943,11 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 	   (apply #'py-bound-method.__call__ f args))
   
   (:method ((f py-unbound-method) &rest args)
-	   (apply #'py-unbound-method.__call__ f args)))
+	   (apply #'py-unbound-method.__call__ f args))
+  
+  (:method ((f py-static-method) &rest args)
+	   (apply #'py-static-method.__call__ f args)))
+
 
 
 ;;; Subscription of items (sequences, mappings)

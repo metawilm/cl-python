@@ -59,3 +59,23 @@ Error: AttributeError: No such attribute: #<C> `__dict__' (class: #<py-type C>)
 
 - String exceptions (raise "foo") not supported (deprecated in CPython)
 
+
+
+failing b5:
+
+
+    check(isinstance(int, type), True)
+    check(isinstance(int, object), True)
+    check(isinstance(type, object), True)
+
+    check(issubclass(type, object), True)
+
+3.5d0
+#C(0.0d0 4.5d0) -> 4.5j
+'#C(3 4)' != '(3+4j)'
+#C(-3 4)' != '(-3+4j)'
+'#C(0 -4)' != '-4j'
+3.5d0' != '(3.5+0j)'
+'#<dict with 1 items @ #x7302f872>' != '{1: 42}'
+Wrong: no exception UnicodeError for py-string('abcÿ',)
+Wrong: '#<#:C @ #x730774b2>' != '<C object>'
