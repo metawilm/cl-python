@@ -397,10 +397,13 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
 
 (defun pybf::issubclass-1 (x cls)
   (if (typep cls 'py-tuple)
+      
       (dolist (c (py-iterate->lisp-list cls))
-	(when (subtypep x c)
+	(when (pybf::issubclass-1 x c)
 	  (return-from pybf::issubclass-1 t)))
-    (subtypep x cls)))
+    
+    (or (eq cls (load-time-value (find-class 'py-object)))
+	(subtypep x cls))))
 
 
 (defun pybf:iter (x &optional y)
