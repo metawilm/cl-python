@@ -548,6 +548,7 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
 	      (declare (special *scope*))
 	      (py-eval mod-ast))
 	    (setf namespace new-ns)))
+  (py-import (slot-value m 'name) :force-reload t)
   m)
 
 

@@ -124,7 +124,9 @@
 	  do (loop 
 	       (with-simple-restart (return-python-toplevel "Return to Python top level [:ptl]")
 		 (loop with acc = ()
-		     do (format t (if acc "... " ">>> "))
+		     do (locally (declare (special *stdout-softspace*))
+			  (setf *stdout-softspace* (py-bool nil)))
+			(format t (if acc "... " ">>> "))
 			(let ((x (read-line)))
 			  (cond
 			 

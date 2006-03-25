@@ -1297,7 +1297,7 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
       (py-raise 'AttributeError "Module ~A has no attribute ~A" x attr.sym))))
 
 
-(defun py-import (mod-name)
+(defun py-import (mod-name &key force-reload)
   
   (labels ((safe-file-mtime (fname)
 	     (let ((stat (handler-case (excl.osi:stat fname)
@@ -1354,7 +1354,8 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 	   
 	   (fasl-fname (format nil "~A.fasl" mod-name))
 	   (fasl-mtime (safe-file-mtime fasl-fname))
-	   (fasl-ok-p (and fasl-mtime
+	   (fasl-ok-p (and (not force-reload)
+			   fasl-mtime
 			   (<= py-mtime fasl-mtime))))
       
       (unless py-mtime
@@ -3483,6 +3484,15 @@ next value gotten by iterating over X. Returns NIL, NIL upon exhaustion.")
 	       (when (> (length s) 0)
 		 (setf last-char-written (aref s (1- (length s)))))))
       
+      (let* ((printed-newline-already (or (not comma?)
+					  (char= last-char-written #\Newline)))
+	     (must-print-newline-next-time (py-bool (not printed-newline-already))))
+	
+	(if dest
+	    (setf (py-attr dest 'softspace) must-print-newline-next-time)
+	  (setf *stdout-softspace* must-print-newline-next-time)))
+      
+      #||
       (cond ((and comma? (not (char= last-char-written #\Newline))) ;; right logic? 
 	     (if dest 
 		 (setf (py-attr dest 'softspace) *the-true*)
@@ -3497,7 +3507,9 @@ next value gotten by iterating over X. Returns NIL, NIL upon exhaustion.")
 	     (if dest
 		 (setf (py-attr dest 'softspace) *the-false*)
 	       (setf *stdout-softspace* *the-false*))
-	     (py-call write-func (py-string-from-char #\Newline)))))))
+	     (py-call write-func (py-string-from-char #\Newline))))
+      ||#
+      )))
 
 
 

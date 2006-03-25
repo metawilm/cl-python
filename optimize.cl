@@ -212,27 +212,64 @@
 (defmethod py-^ ((x integer) (y integer)) (logxor x y))
 (defmethod py-& ((x integer) (y integer)) (logand x y))
 
-#+(or) ;; XXX ignores softspace
+
+(defun py-print-cmhelper (x stream)
+  ;; Quickly prints obj to stdout
+  ;; If X is a string, returns last char of it; otherwise returns NIL
+  (excl::fast
+   (typecase x
+     
+     (fixnum (excl::print-fixnum stream 10 x)
+	     nil)
+     
+     (string (excl::write-string-nokey x stream)
+	     (let ((x.len (length x)))
+	       (and (> x.len 0)
+		    (aref x (1- (length x))))))
+     
+     (t      (excl::write-string-nokey (py-str-string x) stream)
+	     nil))))
+
 (define-compiler-macro py-print (&whole whole dest items comma?)
   (if (and (null dest)
 	   (listp items)
 	   (eq (car items) 'list))
       
-      `(excl::fast ,@(loop 
-			 with num-items = (length items)
-			 for x in (cdr items)
-			 for i from 0
-			 collect `(let ((x ,x))
-				    (if (excl:fixnump x)
-					(if (<= 0 (the fixnum x) 9)
-					    (write-char
-					     (char "0123456789" (the (integer 0 9) x)))
-					  (write (the fixnum x) :pretty nil :base 10))
-				      (write-string (py-str-string x)))
-				    ,(when (< i (- num-items 2))
-				       `(write-char #\Space t))))
-		   ,(unless comma?
-		      `(write-char #\Newline)))
+      `(let ((stdout (excl::fast *standard-output*))) ;; XXX use sys.stdout (add check?)
+	 (declare (ignorable stdout))
+	 ,@(loop 
+	       with num-items = (length (cdr items))
+	       for x in (cdr items)
+	       for i from 0
+	       collect `(progn 
+			  ;; Spaces before first item (perhaps), always between items
+			  ,(if (= i 0)
+			       `(when (py-val->lisp-bool (excl::fast *stdout-softspace*))
+				  (excl::fast-write-char #\Space stdout))
+			     `(excl::fast-write-char #\Space stdout))
+			  
+			  ;; Print item
+			  ,(if (< i (1- num-items))
+			       `(py-print-cmhelper ,x stdout)
+			     
+			     `(progn 
+				;; Set new softspace value
+				(let ((last-char-written (py-print-cmhelper ,x stdout)))
+				  (declare (ignorable last-char-written))
+				  (let ((printed-newline-already
+					 ,(cond ((not comma?) t)
+						(t `(and last-char-written
+							 (char= last-char-written
+								#\Newline))))))
+				    (setf *stdout-softspace*
+				      (py-bool (not printed-newline-already)))))))))
+	 ;; Newline after last item
+	 ,(unless comma?
+	    `(excl::fast-write-char #\Newline stdout))
+	 
+	 ;; Return value:
+	 nil)
+    
     whole))
 
 
