@@ -1,11 +1,9 @@
 (in-package :python)
 
-;;; Exceptions
+;;; Python Exceptions
 
-;; Because DEFINE-CONDITION has no :metaclass option, we use DEFCLASS.
-
-;; The exceptions are generated at compile time, so they can be set
-;; in a DEFCONSTANT form in file BUILTIN-TYPES.CL.
+;; Because DEFINE-CONDITION has no :metaclass option, we use DEFCLASS;
+;; this is non-portable.
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
 

@@ -10,21 +10,25 @@
 ;; parse-python-{file,string} corresponds to a macro defined below
 ;; that generates the corresponding Lisp code.
 ;; 
-;; Note that each such AST node has a name ending in "-expr" or
-;; "-stmt". There no is separate package for those symbols.
+;; Each such AST node has a name ending in "-expr" or "-stmt"; there
+;; no is separate package for those symbols.
 ;; 
 ;; In the macro expansions, lexical variables that keep context state
 ;; have a name like +NAME+.
  
 
-
-;; The Python compiler uses its own kind of declaration to keep state
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;
+;;; Declarations
+;;
+;; The Python compiler uses its own set of declaration to keep state
 ;; in generated code. This declaration is named "pydecl".
+;; The declarations are in the form of (:key ...val...) pairs.
 ;; 
 ;; Currently, the following "pydecl" declaration keys are used:
 ;;  
 ;;  :mod-globals-names          : vector of variable names at the module level
-;;  :mod-futures                : the features imported form the __future__ module
+;;  :mod-futures                : the features imported from the __future__ module
 ;;
 ;;  :context                    : innermost context, one of (:class :module :function)
 ;;  :context-stack              : list of class and function names, innermost first
@@ -35,7 +39,9 @@
 ;; 
 ;;  :inside-loop-p              : T iff inside WHILE of FOR  (to check BREAK, CONTINUE)
 ;;  :inside-function-p          : T iff inside FUNCDEF       (to check RETURN)
+;;  :inside-class-p             : T iff inside CLASSDEF      (for name mangling private variables)
 
+#+(or)
 (sys:define-declaration
     pydecl (&rest property-pairs) nil :declare
     (lambda (declaration env)
@@ -44,17 +50,28 @@
 		    (nconc (cdr declaration)
 			   (sys:declaration-information 'pydecl env))))))
 
+;#+(or) ;; For debugging
+(sys:define-declaration
+    pydecl (&rest property-pairs) nil :declare
+    (lambda (declaration env)
+      (let* ((declaration-copy (copy-tree declaration))
+	     (old-info (copy-tree (sys:declaration-information 'pydecl env)))
+	     (new-info (cons 'pydecl
+			     (nconc (cdr declaration)
+				    (sys:declaration-information 'pydecl env)))))
+	(warn "decl ~S + old ~S => ~S" declaration-copy old-info new-info)
+	(values :declare
+		new-info))))
+
 (defun get-pydecl (var env)
-  (let ((res (second (assoc var (sys:declaration-information 'pydecl env) :test #'eq))))
-    #+(or)(warn "get-pydecl ~A -> ~A" var res)
-    res))
+  (second (assoc var (sys:declaration-information 'pydecl env) :test #'eq)))
 
 (defmacro with-pydecl (pairs &body body)
-    `(locally (declare (pydecl ,@pairs))
-       ,@body))
+  `(locally (declare (pydecl ,@pairs))
+     ,@body))
 
 
-
+;; Utils
 
 (defmacro with-gensyms (list &body body)
   ;; Actually, the new symbols are uninterned fresh symbols with
@@ -63,47 +80,27 @@
 	     collect `(,x ',(make-symbol (symbol-name x))))
      ,@body))
 
-
-
-;; The ASSERT-STMT uses the value of *__debug__* to determine whether
-;; or not to include the assertion code.
-;; 
-;; XXX Currently there is not way to set *__debug__* to False.
-
-(defvar *__debug__* t)
-
-
-;; Modules are kept in a dictionary `sys.modules', mapping from string
-;; to module object. For now, we keep a symbol->module hash table.
-
-(defvar *py-modules* (make-hash-table :test #'eq))
-    
-
-;; The name of the module now being compiled.
-
-(defvar *current-module-name* "__main__")
-
-
-;; Compiler debugging and optimization options.
-;; XXX not used yet
-
-(defvar *comp-opt*
-    (copy-tree '((:include-line-numbers t) ;; XXX include line numbers in AST? not sure its useful
-		 (:inline-number-math t)
-		 (:inline-fixnum-math nil)))) 
-
-(defun comp-opt-p (x)
-  (assert (member x *comp-opt* :key #'car) () "Unknown Python compiler option: ~S" x)
-  (second (assoc x *comp-opt*)))
-
-(defun (setf comp-opt) (val x)
-  (assert (member x *comp-opt* :key #'car) () "Unknown Python compiler option: ~S" x)
-  (setf (second (assoc x *comp-opt*)) val))
-
-
 (defmacro fast (&body body)
   `(locally (declare (optimize (safety 3) (debug 3)))
      ,@body))
+
+
+;;; Compiler debugging and optimization options.
+(defvar *mangle-private-variables* t ;; XXX not used yet
+  "In class definitions, replace __foo by _C__foo, like CPython does")
+
+
+;; Various settings
+
+(defvar *__debug__* t
+  "The ASSERT-STMT uses the value of *__debug__* to determine whether
+or not to include the assertion code.
+ 
+XXX Currently there is not way to set *__debug__* to False.
+XXX Make +mod-debug+ instead?")
+
+(defvar *current-module-name* "__main__"
+  "The name of the module now being compiled; module.__name__ is set to it.")
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -205,6 +202,7 @@
 	   ,@(mapcar #'assign-one targets))))))
 
 (defmacro attributeref-expr (item attr)
+  (assert (eq (car attr) 'identifier-expr))
   `(py-attr ,item ',(second attr)))
 
 (defmacro augassign-stmt (op place val)
@@ -429,10 +427,10 @@
 					 suite
 					 (get-pydecl :lexically-declared-globals e))
     (declare (ignore locals))
-    (let* ((cname (second name))
+    (let* ((cname             (second name))
 	   (new-context-stack (cons cname (get-pydecl :context-stack e)))
-	   (context-cname (intern (format nil "~{~A~^.~}" (reverse new-context-stack))
-				  #.*package*)))
+	   (context-cname     (intern (format nil "~{~A~^.~}" (reverse new-context-stack))
+				      #.*package*)))
       
       (with-gensyms (cls)
 	`(let ((+cls-namespace+ (make-dict)))
@@ -597,7 +595,7 @@
       :break)))
 
 (defmacro funcdef-stmt (decorators
-			fname (&whole formal-args pos-args key-args *-arg **-arg)
+			fname (pos-args key-args *-arg **-arg)
 			suite
 			&environment e)
 
@@ -618,49 +616,70 @@
 	
 	(t (break :unexpected)))
   
-  (flet ((lambda-args-and-destruct-form (funcdef-pos-args)
-	   ;; Replace "def f( (x,y), z):  .." 
-	   ;; by "def f( _tmp , z):  (x,y) = _tmp; ..".
-	   (loop with lambda-pos-args = () and destructs = ()
-	       for pa in funcdef-pos-args
-	       do (ecase (car pa)
-		    (tuple-expr      (let ((tmp-var (make-symbol (format nil "~A" (cdr pa)))))
-				       (push tmp-var lambda-pos-args)
-				       (push `(assign-stmt ,tmp-var ((identifier-expr ,pa)))
-					     destructs)))
-		    (identifier-expr (push (second pa) lambda-pos-args)))
-	       finally (return (values (nreverse lambda-pos-args)
-				       (when destructs
-					 `(progn ,@(nreverse destructs))))))))
+  (labels
+      ((sym-tuple-name (tup)
+	 ;; Convert tuple with identifiers to symbol:  (a,(b,c)) -> |(a,(b,c))|
+	 ;; Returns the symbol and a list with the "included" symbols (here: a, b and c)
+	 (assert (and (listp tup) (eq (first tup) 'tuple-expr)))
+	 (let ((eaten-vars ()))
+	   (labels ((rec (x)
+		      (ecase (car x)
+			(tuple-expr (format nil "(~{~A~^, ~})"
+					    (loop for v in (second x) collect (rec v))))
+			(identifier-expr (push (second x) eaten-vars)
+					 (symbol-name (second x))))))
+	     (values (intern (rec tup) #.*package*)
+		     eaten-vars))))
+       
+       (lambda-args-and-destruct-form (funcdef-pos-args)
+	 ;; Replace "def f( (x,y), z):  .." 
+	 ;; by "def f( |(x,y)|, z):  x, y = |(x,y)|; ..".
+	 (loop with lambda-pos-args and destructs and tuple-dummy-vars and tuple-eaten-vars
+	     for pa in funcdef-pos-args
+	     do 
+	       (ecase (car pa)
+		 (tuple-expr      (multiple-value-bind (tuple-var eaten-vars)
+				      (sym-tuple-name pa)
+				    (push tuple-var lambda-pos-args)
+				    (push tuple-var tuple-dummy-vars)
+				    (setf tuple-eaten-vars (nconc tuple-eaten-vars eaten-vars))
+				    (push `(assign-stmt ,tuple-var (,pa))
+					  destructs)))
+		 (identifier-expr (push (second pa) lambda-pos-args)))
+	     finally
+	       (return (values (nreverse lambda-pos-args)
+			       (when destructs
+				 `(progn ,@(nreverse destructs)))
+			       tuple-dummy-vars
+			       tuple-eaten-vars)))))
     
-    (let ((all-arg-names (apply #'funcdef-list-all-arg-names formal-args)))
+    (multiple-value-bind (lambda-pos-args pos-arg-destruct-form tuple-vars tuple-eaten-vars)
+	(lambda-args-and-destruct-form pos-args)
       
-      (multiple-value-bind
-	  (lambda-pos-args pos-arg-destruct-form) (lambda-args-and-destruct-form pos-args)
-	
+      (let ((all-arg-names (funcdef-list-all-arg-names (loop for p in lambda-pos-args
+							   collect `(identifier-expr ,p))
+						       key-args *-arg **-arg)))
 	(multiple-value-bind
 	    (func-explicit-globals func-locals) (funcdef-stmt-suite-globals-locals
 						 suite
 						 all-arg-names
 						 (get-pydecl :lexically-declared-globals e))
 	  
+	  (setf func-locals (union func-locals tuple-eaten-vars :test #'eq))
+	  
 	  (let* ((all-locals-and-arg-names (append all-arg-names func-locals))
-		 (new-context-stack (cons fname (get-pydecl :context-stack e)))
-		 (context-fname (intern (format nil "~{~A~^.~}" (reverse new-context-stack))
-				  #.*package*))
-		 
+		 (new-context-stack        (cons fname (get-pydecl :context-stack e)))
+		 (context-fname            (intern (format nil "~{~A~^.~}" (reverse new-context-stack))
+						   #.*package*))
 		 (func-lambda
 		  `(py-arg-function
 		    ,context-fname
-		    (,lambda-pos-args 
+		    (,lambda-pos-args
 		     ,(loop for ((nil name) val) in key-args collect `(,name ,val))
 		     ,(when *-arg  (second *-arg))
 		     ,(when **-arg (second **-arg)))
 		    
 		    (let ,func-locals
-		      
-		      ,@(when pos-arg-destruct-form
-			  `(,pos-arg-destruct-form))
 		      
 		      (block :function-body
 			
@@ -678,9 +697,13 @@
 					(:context :function)
 					(:inside-function-p t)
 					(:lexically-visible-vars
-					 ,(append all-locals-and-arg-names
+					 ,(append (set-difference all-locals-and-arg-names
+								  tuple-vars)
 						  (get-pydecl :lexically-visible-vars e)))
 					(:context-stack ,new-context-stack))
+
+			    ,@(when pos-arg-destruct-form
+				`(,pos-arg-destruct-form))
 			    
 			    ,(if (generator-ast-p suite)
 				 
@@ -784,38 +807,48 @@
 	     `((t ,else-clause)))))
 
 (defmacro import-stmt (args)
-  `(progn ,@(loop for x in args
-		collect (if (eq (first x) 'not-as)
-			    
-			    (let ((mod-name (second (second x))))
-			      `(let ((module-obj (py-import ',mod-name)))
-				 (assign-stmt module-obj ((identifier-expr ,mod-name)))))
-			
-			  `(warn "XXX unsupported import: ~A" ',x)))))
+  `(progn ,@(loop for (as mod-path bind-name) in args
+		do (assert (eq as 'as))
+		collect (ecase (car mod-path)
+			  
+			  (attributeref-expr
+			   ;; import a.b
+			   (break "TODO: (import-stmt ~A" args))
+			  
+			  (identifier-expr   ;; import a [as b]
+			   (let ((mod-name (second mod-path)))
+			     `(let ((module-obj (py-import ',mod-name)))
+				(assign-stmt module-obj (,bind-name)))))))))
   
 (defmacro import-from-stmt (source-name items)
-  (if (eq (car source-name) 'identifier-expr)
-      
-      ;; import names from 1 module: "from x import ..."
-      `(let ((module ,source-name))
-	 ,@(loop for item in items
-	       collect (ecase (car item)
-			 (not-as  ;; "from mod import name"
-			  (let ((name (second item)))
-			    (assert (eq (car name) 'identifier-expr))
-			    ;; name = mod.name
-			    `(assign-stmt (attributeref-expr module ,name)
-					  (,name))))
-			 (as ;; "from mod import name-in-mod as name-here"
-			  (destructuring-bind 
-			      (name-in-mod name-here) (cdr item)
-			    (assert (eq (car name-in-mod) 'identifier-expr))
-			    (assert (eq (car name-here)   'identifier-expr))
-			    ;; name-here = mod.name-in-mod
-			    `(assign-stmt (attributeref-expr module ,name-in-mod)
-					  (,name-here)))))))
+  (ecase (car source-name)
     
-    `(error "TODO: dotted import, like:  from x.y import ...")))
+    (attributeref-expr
+     ;; "from a.b import ..."
+     (break "TODO: dotted import, like:  from x.y import ..."))
+    
+    (identifier-expr
+     ;; "from a import ..."
+     (let ((mod-name (second source-name)))
+       `(let ((mod-obj (or (gethash ',mod-name *py-modules*)
+			   (py-import ',mod-name))))
+	  
+	  ,(if (eq items '|*|)
+	       
+	       ;; Bind all objects in module's dict in this namespace,
+	       ;; but skip names starting with underscore.
+	       `(let ((src-items (py-module-get-items mod-obj :import-* t)))
+		  (loop for (k . v) in src-items
+		      unless (char= (aref (symbol-name k) 0) #\_)
+		      do (py-module-set-kv +mod+ k v)))
+		  
+	     `(progn ,@(loop for (as item bind-name) in items
+			   do (assert (eq as 'as))
+			      (assert (eq (car item) 'identifier-expr))
+			      (assert (eq (car bind-name) 'identifier-expr))
+			   collect
+			     `(assign-stmt (attributeref-expr mod-obj ,item)
+					   (,bind-name))))))))))
 
 (defmacro lambda-expr (args expr)
   ;; XXX Maybe treating lambda as a funcdef-stmt results in way more
@@ -846,23 +879,29 @@
   (check-type module py-module)
   (with-slots (globals-names globals-values dyn-globals) module
     
-    `(with-module-context (,globals-names ,globals-values ,dyn-globals)
+    `(with-module-context (,globals-names ,globals-values ,dyn-globals :existing-mod ,module)
        ,@body)))
 
 (defmacro with-module-context ((glob-names glob-values dyn-glob
-				&key set-builtins create-return-mod module-name)
-			       &body body)
+				&key set-builtins create-return-mod module-name existing-mod)
+			       &body body
+			       &environment e)
+  (warn "w-m-c: env: ~A" e)
   (check-type glob-names vector)
   (check-type dyn-glob hash-table)
+  (assert (not (and create-return-mod existing-mod)))
   
   `(let* ((+mod-globals-names+  ,glob-names)
 	  (+mod-globals-values+ ,glob-values)
 	  (+mod-dyn-globals+    ,dyn-glob)
-	  (+mod+ ,(when create-return-mod
-		    `(make-module :globals-names  +mod-globals-names+
-				  :globals-values +mod-globals-values+
-				  :dyn-globals    +mod-dyn-globals+
-				  :name ,module-name))))
+	  (+mod+ ,(if create-return-mod
+		      
+		      `(make-module :globals-names  +mod-globals-names+
+				    :globals-values +mod-globals-values+
+				    :dyn-globals    +mod-dyn-globals+
+				    :name ,module-name)
+		    existing-mod)))
+     
      (declare (ignorable +mod+))
 	      
      ,@(when set-builtins
@@ -941,9 +980,7 @@
 	 `(+mod+))))
 
 
-
 (defmacro module-stmt (suite) ;; &environment e)
-  
   ;; A module is translated into a lambda that creates and returns a
   ;; module object. Executing the lambda will create a module object
   ;; and register it, after which other modules can access it.
@@ -1021,7 +1058,7 @@
     
 (defmacro raise-stmt (exc var tb)
   (when (stringp exc)
-    (warn "Encountered unsupported string exception ('raise ~A')" exc))
+    (warn "Raising string exceptions not supported (got: 'raise ~S')" exc))
   `(raise-stmt-1 ,exc ,var ,tb))
 
 

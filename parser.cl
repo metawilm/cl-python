@@ -220,9 +220,9 @@
  (:comma--import-as-name*)
  (comma--import-as-name (|,| import-as-name) ($2))
  
- (import-as-name (identifier)                  (`(not-as (identifier-expr ,$1))))
+ (import-as-name (identifier)                  (`(as (identifier-expr ,$1) (identifier-expr ,$1))))
  (import-as-name (identifier |as| identifier)  (`(as (identifier-expr ,$1) (identifier-expr ,$3))))
- (dotted-as-name (dotted-name)                 (`(not-as ,$1)))
+ (dotted-as-name (dotted-name)                 (`(as ,$1 ,$1))) ;; XXX import a.b -> bind ??
  (dotted-as-name (dotted-name |as| identifier) (`(as ,$1 (identifier-expr ,$3))))
  
  (dotted-name (identifier dot--name*) ((if $2

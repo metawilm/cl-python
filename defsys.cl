@@ -14,7 +14,6 @@
   
   ("pyprint" (:uses-definitions-from "package"))
   ("walk"    (:uses-definitions-from "package"))
-  ("repl"    (:uses-definitions-from "package"))
   ("formatstring"    (:uses-definitions-from "package"))
   
   ("classes"     (:uses-definitions-from "package" "formatstring"))
@@ -27,6 +26,8 @@
   ("run"     (:uses-definitions-from "lexer" "parser"))
   
   ("compiler" (:uses-definitions-from "builtins" "walk" "run")) ;; fill asts, parse-python-string
+
+  ("repl"    (:uses-definitions-from "package" "compiler" "run" "classes"))
   
   ("classes" (:uses-definitions-from "pyprint" "formatstring")) ;; py-pprint
   )

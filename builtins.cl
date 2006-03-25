@@ -537,17 +537,6 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
 
 (defun pybf:reload (m)
   ;; m py-module
-  #+(or)(with-slots (module namespace) m
-	  (let ((mod-ast (parse-python-string (read-file module)))
-		(__name__ (namespace-lookup namespace '__name__))
-		(__file__(namespace-lookup namespace '__file__))
-		(new-ns (make-namespace :builtins t)))
-	    (namespace-bind new-ns '__name__ __name__)
-	    (namespace-bind new-ns '__file__ __file__)
-	    (let ((*scope* new-ns))
-	      (declare (special *scope*))
-	      (py-eval mod-ast))
-	    (setf namespace new-ns)))
   (py-import (slot-value m 'name) :force-reload t)
   m)
 

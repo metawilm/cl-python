@@ -39,6 +39,7 @@
 
 (defun repl ()
   (setf *repl-mod* (make-module))
+  (clrhash *py-modules*)
   (let* ((dyn-globals (slot-value *repl-mod* 'dyn-globals)))
     
     (declare (special *the-none*))
@@ -146,8 +147,8 @@
 				      :report "Parse string again into AST")
 				  (recompile-grammar ()
 				      :report "Recompile grammar"
-				    (compile-file "parsepython")
-				    (load "parsepython"))))))
+				    (compile-file "parser")
+				    (load "parser"))))))
 			 
 			   (t (push (concatenate 'string x (string #\Newline))
 				    acc)
@@ -161,7 +162,7 @@
 				(block :try-parse
 
 				  ;; try to parse as Python code first
-				  ;;  but when first char is a space, it is Lisp code
+				  ;;  but when first char is a space, always treat it as Lisp code
 				  (unless (and (> (length total) 0)
 					       (char= (char total 0) #\Space))
 				    (let ((ast (ignore-errors (parse-python-string total))))
@@ -188,11 +189,13 @@
 				  (let ((lisp-form (ignore-errors (read-from-string total nil nil))))
 				    (when (and lisp-form
 					       (not (member lisp-form '(def class for while if)))) 
-				      (let ((res (eval lisp-form)))
-					(remember-value res)
-					(write res)
-					(write-char #\Newline))
-				      (setf acc nil)))))))))))))))
+				      (multiple-value-bind (res err) 
+					  (ignore-errors (eval lisp-form))
+					(unless err
+					  (remember-value res)
+					  (write res)
+					  (write-char #\Newline)
+					  (setf acc nil)))))))))))))))))
 
 (defun prof (f kind)
   (ecase kind

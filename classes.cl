@@ -1247,6 +1247,8 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
    (name           :initarg :name           :type symbol :initform "__main__"))
   (:metaclass py-user-type))
 
+;; XXX module has dict attribute, but it is not updated correctly
+
 (defun make-module (&rest options)
   (apply #'make-instance 'py-module options))
 
@@ -1263,8 +1265,41 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
     (print-unreadable-object (x s :identity t)
       (format s "module ~A" (slot-value x 'name)))))
 
+(defmethod print-object ((x py-module) stream)
+  (write-string (py-module.__repr__ x) stream))
 
+(defun py-module-get-items (x &key import-*)
+  (check-type x py-module)
+  (with-slots (globals-names globals-values dyn-globals) x
+    (let ((full-list (nconc (loop for k across globals-names and v across globals-values
+				when v collect (cons k v))
+			    (loop for k being the hash-key in dyn-globals
+				using (hash-value v)
+				collect (cons k v)))))
+      (when import-*
+	;; Only those names listed in the module's __all__ attribute
+	;; XXX Error when name in __all__ not bound?
+	(let* ((__all__ (cdr (assoc '__all__ full-list))))
+	  (when __all__
+	    (let ((all-names-list (py-iterate->lisp-list __all__)))
+	      (setf full-list 
+		(delete-if-not (lambda (kv) (member (car kv) all-names-list :test #'string=))
+			       full-list))))))
 
+      full-list)))
+
+(defun py-module-set-kv (x k v)
+  (check-type x py-module)
+  (check-type k symbol)
+  (assert v)
+  
+  (with-slots (globals-names globals-values dyn-globals) x
+    (loop for kn across globals-names and i from 0
+	when (eq k kn) 
+	do (setf (aref globals-values i) v)
+	   (return)
+	finally
+	  (setf (gethash k dyn-globals) v))))
 
 (defun py-string-val->symbol (attr)
   (if (symbolp attr)
@@ -1297,7 +1332,14 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
       (py-raise 'AttributeError "Module ~A has no attribute ~A" x attr.sym))))
 
 
+;; Modules are kept in a dictionary `sys.modules', mapping from string
+;; to module object. For now, we keep a symbol->module hash table.
+
+(defparameter *py-modules* (make-hash-table :test #'eq))
+
 (defun py-import (mod-name &key force-reload)
+  ;; Registers module in *py-modules* and returns it.
+  (assert (symbolp mod-name))
   
   (labels ((safe-file-mtime (fname)
 	     (let ((stat (handler-case (excl.osi:stat fname)
@@ -1330,7 +1372,7 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 		 (format f "(locally (declare (special %py-import-hook%)) ~%")
 		 (format f "  (funcall %py-import-hook% ~%")
 		 (format f "    (funcall #.(locally (declare (special %mod-func%)) ~%")
-		 (format f "      %mod-func%))))"))
+		 (format f "                 %mod-func% ))))"))
 	     
 	       (warn "Compiling ~A ..." cl-fname)
 	       
@@ -1383,8 +1425,9 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 	    fasl-fname fasl-mtime py-fname py-mtime)))
       
       
-      (let* ((module-object nil)
-	     (%py-import-hook% (lambda (mod) (setf module-object mod))))
+      (let* ((old-module-object (gethash mod-name *py-modules*))
+	     (new-module-object nil)
+	     (%py-import-hook% (lambda (mod) (setf new-module-object mod))))
 	
 	(declare (special %py-import-hook%))
 
@@ -1392,10 +1435,19 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 	
 	(load fasl-fname :verbose nil)
 	
-	(unless module-object
+	(unless new-module-object
 	  (break "imported module ~A did not call %py-import-hook%" mod-name))
-	
-	module-object))))
+
+	(if old-module-object
+	    
+	    ;; The old module object is updated; the new module object is not used anymore
+	    (progn (dolist (f '(globals-names globals-values dyn-globals))
+		     (setf (slot-value old-module-object f) (slot-value new-module-object f)))
+		   (setf new-module-object old-module-object))
+	  
+	  (setf (gethash mod-name *py-modules*) new-module-object))
+	  
+	new-module-object))))
 
       
 ;; File (User object)
@@ -2535,13 +2587,43 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 (def-py-method py-string.lower (x^)
   (string-downcase x))
 
-(def-py-method py-string.upper (x^)
-  (string-upcase x))
-   
+(defun verify-string-strip-chars (char-list)
+  ;; Returns list of chars
+  (loop for c in (py-iterate->lisp-list char-list)
+      if (characterp c) collect c
+      else if (and (stringp c) (= (length c) 1)) collect (aref c 0)
+      else if (and (setf c (py-val->string c))
+		   (= (length c) 1)) collect (aref c 0)
+      else do (py-raise 'ValueError
+			"string.strip wants list of single-char string, got: ~S"
+			char-list)))
+
+(def-py-method py-string.lstrip (x^ &optional (chars '(#\Newline #\Space #\Tab)))
+  (let* ((veri-cs (verify-string-strip-chars chars))
+	 (new-start (loop for ch across x and i from 0
+			while (member ch veri-cs)
+			finally (return i))))
+    (subseq x new-start)))
+  
+(def-py-method py-string.rstrip (x^ &optional (chars '(#\Newline #\Space #\Tab)))
+  (let* ((veri-cs (verify-string-strip-chars chars))
+	 (new-end (1+ (loop for i from (1- (length x)) downto 0
+			  while (member (aref x i) veri-cs)
+			  finally (return i)))))
+    (subseq x 0 new-end)))
+
+(def-py-method py-string.strip (x &optional (chars '(#\Newline #\Space #\Tab)))
+  (py-string.rstrip (py-string.lstrip x chars) chars))
+
 (def-py-method py-string.replace (x^ old new &optional count^)
   (let ((olds (py-val->string old))
 	(news (py-val->string new)))
     (substitute news olds x :count count)))
+
+(def-py-method py-string.upper (x^)
+  (string-upcase x))
+   
+
 
 ;; Tuple (Lisp object: consed list)
 
