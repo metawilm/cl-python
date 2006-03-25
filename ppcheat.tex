@@ -1,0 +1,185 @@
+\documentclass{article}
+\topmargin -1.5cm
+\oddsidemargin -0.04cm
+\evensidemargin -0.04cm
+\textwidth 16.59cm
+\textheight 21.94cm 
+\begin{document}
+\title{Common Lisp Pretty Printer Cheatsheet}
+\author{Willem Broekema, February 2006}
+\date{}
+\maketitle
+
+\section{Control variables}
+\begin{tabular}{ll}
+ {\tt *print-array*}  & Print array as {\tt \#(}$\ldots${\tt )}, bit vector as {\tt \#*}? Otherwise {\tt \#<}$\ldots${\tt >} \\
+ {\tt *print-base*}   & Base of integers and ratios: in 2..36 (default: 10) \\
+ {\tt *print-case*}   & Case of symbols: {\tt :upcase} (default), {\tt :downcase} or {\tt :capitalize} \\
+ {\tt *print-circle*} & Detect circularity, printed as `{\tt \#{\em n}=...}' and `{\tt \#{\em n}\#}'? \\
+ {\tt *print-escape*} & Include escape characters + symbol package prefixes? \\
+ {\tt *print-gensym*} & Prefix uninterned symbols by `{\tt \#:}' (e.g. gensyms)? \\
+ {\tt *print-length*} & Max items to print at current *print-level*: more: `{\tt ...}'
+                        ($\ge 0$, {\tt nil}=$\infty$) \\
+ {\tt *print-level*}  & Max depth level in nested object, $\ge 0$, deeper: `{\tt \#}' \\
+ {\tt *print-lines*}  & Max number of lines, otherwise `{\tt ..}' ($\ge 0$, {\tt nil}=$\infty$) \\
+ {\tt *print-miser-width*} & Width of text, where {\em miser style} starts (in {\em em}, {\tt nil}=$\infty$) \\
+ {\tt *print-pprint-dispatch*} & Current pp dispatch table \\
+ {\tt *print-pretty*}     & Use pp dispatch table + nice whitespace? If not, {\tt print-object} used \\
+ {\tt *print-radix*}      & Indicate int base: 2, 8, 16: prefix `{\tt \#b}', `{\tt \#o}',
+                            `{\tt \#x}'; 10: suffix `{\tt .}'; {\em n}: `{\tt \#{\em n}r}') \\
+ {\tt *print-readably*}   & Output {\em read}-able $\Rightarrow$ {\tt *print-\{escape,array,gensym\}*},
+                          no depth max, \\ & `{\tt \#<}' $\Rightarrow$ {\em print-not-readable} error \\
+ {\tt *print-right-margin*} & Line length (in {\em em}, {\tt nil}=automatic) \\
+\end{tabular}
+
+\section{Format}
+{\tt (format {\em dest string} \&rest {\em args})} $\quad$
+with {\em dest} a stream, string, or {\tt nil} for a fresh string \\
+\\
+Commands in string: $\quad$
+{\em $\sim$} [{\em prefix-1, prefix-2, $\ldots$}] [{\em : $\!$@}] {\em directive} \\
+$~\quad$ - modifiers {\em :} and {\em @} optional (no prescribed order between them); \\
+$~\quad$ - each prefix params is a signed integer or {\em single-quote + character} (like {\tt 'x})
+           to use that character (`x') \\
+$~\quad$ - if prefix param is {\tt v}, then it is taken from the argument list
+           ({\em after} the regular argument \\
+$~\quad$ - omitted parameters (using default) can lead to multiple commas after each other \\
+$~\quad$ - literal tilde using ``$\sim\sim$'' (and ``$\sim${\em n}$\sim$'' for {\em n} tildes)
+
+
+\section{Directives}
+One character, case-insensitive.
+
+\subsection{Character ($\sim$C)}
+
+\begin{tabular}{lllll}
+ $\sim$C  & \#$\backslash$a     & $\Rightarrow $ & ``C'' \\
+ $\sim$C  & \#$\backslash$Space & $\Rightarrow $ & `` '' \\
+\\
+ $\sim$:C & \#$\backslash$a     & $\Rightarrow $ & ``a'' & {\em : $\Rightarrow$ spell out name} \\
+ $\sim$:C & \#$\backslash$Space & $\Rightarrow $ & ``Space''
+\end{tabular}
+
+\subsection{Newline ($\sim$\%), Fresh line ($\sim$\&)}
+\begin{tabular}{lll}
+  $\sim$\%        & : & {\em 1 newline} \\
+  $\sim${\em n}\% & : & {\em n newlines} \\
+\\
+  $\sim$\&        & : & {\em 1 freshline} \\
+  $\sim${\em n}\& & : & {\em 1 freshline + (n-1) newlines}
+\end{tabular}
+
+\subsection{Radix ($\sim$R, $\sim$D, $\sim$B, $\sim$O, $\sim$X)}
+Full form: {\em $\sim$ radix, mincol, padchar, commachar, comma-interval R} \\
+\\
+If width less than {\em mincol}, then fill with {\em padchar} [space] \\
+\\
+\begin{tabular}{llcll}
+  $\sim${\em n}R & & : &          & {\em in radix n} \\
+\\
+  $\sim$D  & 1234 & $\Rightarrow$ & ``1234''  & {\em in decimal} \\
+  $\sim$@D & 1234 & $\Rightarrow$ & ``+1234'' & {\em @ $\Rightarrow$ always sign} \\
+  $\sim$:D & 1234 & $\Rightarrow$ & ``1,234'' & {\em : $\Rightarrow$ {\em commachar} [or comma] as
+    thousands separator} \\
+  $\sim$,,,2:D & 1234 & $\Rightarrow$ & ``12,34'' & {\em a separator every
+    {\em comma-interval} [3] numbers} \\
+\\
+  $\sim$B      & 1234 & $\Rightarrow$ & ``10011010010''   & {\em in binary} \\
+  $\sim$,,,4:B & 1234 & $\Rightarrow$ & ``100,1101,0010'' & {\em in binary, with comma-interval} \\
+\\
+  $\sim$O & 1234 & $\Rightarrow$ & ``2322'' & {\em in octal} \\
+  $\sim$X & 1324 & $\Rightarrow$ & ``4d2''  & {\em in hexadecimal} \\
+\\
+  $\sim$R  & 4 & $\Rightarrow$ & ``four'' \\
+  $\sim$:R & 4 & $\Rightarrow$ & ``fourth'' \\
+  $\sim$@R & 4 & $\Rightarrow$ & ``IV'' & {\em as Roman numeral} \\
+  $\sim$R  & 4 & $\Rightarrow$ & ``IIII'' & {\em as Old Roman numeral} \\
+\end{tabular}
+
+\subsection{Floating Point ($\sim$F, $\sim$E, $\sim$G)}
+todo
+
+\subsection{Printer Operations ($\sim$A, $\sim$S, $\sim$W)}
+Full form: $\sim$ mincol, colinc, minpad, padchar A \\
+\\
+\begin{tabular}{llcll}
+  $\sim$A   &    & : &   {\em aesthetic} & {\em bind {\tt *print-\{readably,escape\}*} to {\tt nil}} \\
+  $\sim$S   &    & : &   {\em standard} & {\em bind {\tt *print-escape*} to {\tt t}} \\
+\\
+  $\sim$W   &    & : &   {\em write} & {\em bind {\tt *print-pretty*} to {\tt t}} \\
+  $\sim$@W  &    & : &   {\em write} & {\em @ $\Rightarrow$ bind {\tt *print-\{level,length\}*} to {\tt nil}} \\
+\\
+  $\sim$3A   & 1 & $\Rightarrow$   & ``~~1'' & {\em Add {\em padchar} [space] when width less than {\em mincol} [0]} \\
+  $\sim$3@A  & 1 & $\Rightarrow$   & ``1~~'' & {\em @ $\Rightarrow$ fill at the right} \\
+  $\sim$3,2,1,'xA & 1 & $\Rightarrow$ & ``1xxx'' & {\em When smaller than 3, add 1 and then multiple times 2 {\em x}-es} \\
+\\
+  $\sim$A   & nil & $\Rightarrow$   & ``nil'' \\
+  $\sim$:A  & nil & $\Rightarrow$   & ``()'' & {\em : $\Rightarrow$ nil as list} \\
+  $\sim$:A  & '(nil) & $\Rightarrow$ & ``(nil)'' & {\em but contained nils as `nil', not `()'} \\
+\end{tabular}
+
+
+\subsection{Pretty Printer Operations}
+
+\subsubsection{Conditional Newline ($\sim$\_)}
+\begin{tabular}{lllll}
+  $\sim$\_   & : & {\em linear} &
+    {\em in a logical block, either all {\em linear} newlines are insert, or none.} \\
+  $\sim$@\_  & : & {\em miser} & 
+    {\em like {\em linear}, but when {\em miser style} is in effect} \\
+  $\sim$:\_  & : & {\em fill} & {\em a newline is inserted if the
+     rest does not fit on the line} \\
+  $\sim$:@\_ & : & {\em mandatory} &
+    {\em a newline is always inserted (possibly triggering the other kinds of newline)}\\
+\end{tabular}
+
+\subsubsection{Logical Block ($\sim< \ \ldots \ \sim:>$)}
+Full form: $\quad \sim<\ $ {\em prefix} $\ \sim;\ $ {\em body} $\ \sim;\ $ {\em suffix} $\ \sim:>$ \\
+\\
+The {\em prefix} and {\em suffix} clauses may not contain format directives.\\
+\\
+The {\em body} is applied to the corresponding {\em arg}, which should
+be a list (but other objects are handled gracefully). Inside the {\em
+body}, use `{\em $\sim\!\wedge$}' to exit is the list if exhausted. \\
+\\
+\begin{tabular}{ccccccll}
+  $\sim<$ & {\em prefix} & $\sim;$ & {\em body} & $\sim;$ & {\em suffix} & $\sim:>$ \\
+  $\sim<$ & {\em prefix} & $\sim;$ & {\em body} &         &              & $\sim:>$ &
+   {\em if 2 clauses: suffix defaults to the null string} \\
+  $\sim<$ &              &         & {\em body} &         &              & $\sim:>$ &
+   {\em if 3 clauses: both prefix and suffix null} \\
+\\
+  $\sim@<$ &             &         &            &         &              &          &
+   {\em consume all remaining arguments} \\
+           &             & $\sim@;$ &           &         &              &          &
+   {\em the {\em prefix} is per-line, not a once-only prefix} \\
+           &             &          &           &         &              & $\sim\!@\!>$ &
+   {\em the {\em prefix} is per-line, not a once-only prefix} \\
+  $\sim:<$ &                      \multicolumn{5}{c}{$\ldots$}            & $\sim:>$  &
+   {\em use `(' and `)' as prefix and suffix, respectively}
+\\
+XXX more
+\end{tabular}
+
+\subsubsection{Indent ($\sim$I)}
+\subsubsection{Function Call ($\sim$/)}
+
+\subsubsection{Conditional Expression ($\sim[ \ldots \sim]$)}
+Full form: $\quad \sim\![ \, s_0 \, \sim; \, s_1 \, \sim; \ldots \sim; \, s_n \, \sim]$ \\
+\\
+The corresponding argument $i$ must be a positive integer; the $i$-th clause is chosen. \\
+If the argument is out of range, nothing is done. \\
+\\
+\begin{tabular}{llll}
+  $\sim$n[$ & : & {\em the $n$-th clause is taken} \\
+  $\ldots \sim:; \, s_{def} \, \sim]$ & : & {\em $s_{def}$ denotes a default clause, 
+                                     used if none of the other clauses are used} \\
+  $\sim:\![ \, s_{false} \, \sim; \, s_{true} \, \sim]$ &:& {\em selects clause corresponding to truth value of {\em arg}} \\
+  $\sim\!@[ \, s_{true} \, \sim]$ &:& {\em if {\em arg} is true, keep {\em arg} for use by $s_{true}$.} \\
+\end{tabular}
+
+\end{document}
+
+%%% Local Variables: 
+%%% TeX-master: "/x/dev/franz/python/ppcheat.tex"
+%%% End: 
