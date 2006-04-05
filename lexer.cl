@@ -801,8 +801,9 @@ second and later characters must be alphanumeric or underscore."
 		    
 		 finally (when ch 
 			   (unread-chr ch))
-			 (let ((*read-base* base))
-			   (return (read-from-string vec))))
+			 (with-standard-io-syntax 
+			   (let ((*read-base* base))
+			     (return (read-from-string vec)))))
 	     
 	     #+(or)
 	     ;; Equivalent code, but not calling the lisp reader,
@@ -865,10 +866,11 @@ second and later characters must be alphanumeric or underscore."
 				    (push #\. lst)
 				    (push #\0 lst)
 				    (unread-chr ch)
-				    (return (read-from-string 
-					     (make-array (length lst)
-							 :initial-contents lst
-							 :element-type 'character))))))
+				    (return (with-standard-io-syntax
+					      (read-from-string 
+					       (make-array (length lst)
+							   :initial-contents lst
+							   :element-type 'character)))))))
 		      
 	      (when dot? (unread-chr dot?)))))
 	

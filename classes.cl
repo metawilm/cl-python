@@ -483,7 +483,7 @@
     (make-instance 'py-bound-method
       :func (slot-value x 'func)
       :instance arg)))
-    
+
 (def-py-method py-class-method.__init__ (x^ func)
   (setf (slot-value x 'func) func))
 
@@ -1301,42 +1301,75 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 	finally
 	  (setf (gethash k dyn-globals) v))))
 
-(defun py-string-val->symbol (attr)
-  (if (symbolp attr)
-      attr
-    
-    (let ((attr.string (if (stringp attr)
-			   attr
-			 (py-val->string attr))))
-      
-      (or (find-symbol attr.string #.*package*)
-	  (intern attr.string #.*package*)))))
-      
-(def-py-method py-module.__getattribute__ (x^ attr)
-  (let ((attr.sym (py-string-val->symbol attr)))
-    
-    (with-slots (name globals-names globals-values dyn-globals) x
-      
-      (loop for i from 0
-	  for n across globals-names
-	  when (eq n attr.sym) 
-	  do (let ((val (svref globals-values i)))
-	       (if (null val)
-		   (py-raise 'AttributeError "Module ~A has no attribute ~A" x attr.sym)
-		 (return-from py-module.__getattribute__ val))))
-      
-      (let ((val (gethash attr.sym dyn-globals)))
-	(when val
-	  (return-from py-module.__getattribute__ val)))
-      
-      (py-raise 'AttributeError "Module ~A has no attribute ~A" x attr.sym))))
 
+;; Utils
+
+(defun py-string-val->symbol (attr &key (intern t))
+  (let (attr.string)
+    (typecase attr
+      (symbol (return-from py-string-val->symbol attr))
+      (string (setf attr.string attr))
+      (t      (setf attr.string (py-val->string attr))))
+    
+    (or (find-symbol attr.string #.*package*)
+	(when intern
+	  (intern attr.string #.*package*)))))
+
+(def-py-method py-module.__getattribute__ (x^ attr)
+  (flet ((raise-attr-error (attr)
+	   (py-raise 'AttributeError "Module ~A has no attribute ~A" x attr)))
+    
+    (let ((attr.sym (py-string-val->symbol attr :intern nil)))
+      (with-slots (name globals-names globals-values dyn-globals) x
+	
+	(when attr.sym 
+	  ;; If symbol not interned, then it cannot be in the globals-names vector
+	  (let ((i (position attr.sym globals-names :test #'eq)))
+	    (if i
+		(let ((val (svref globals-values i)))
+		  (if (null val)
+		      (raise-attr-error attr)
+		    (return-from py-module.__getattribute__ val))))))
+	
+	(let ((val (gethash (or attr.sym attr) dyn-globals)))
+	  (when val
+	    (return-from py-module.__getattribute__ val))))
+      
+      (raise-attr-error (or attr.sym attr)))))
+
+(def-py-method py-module.__setattr__ (x^ attr val)
+  (let ((attr.sym (py-string-val->symbol attr :intern nil)))
+    (with-slots (name globals-names globals-values dyn-globals) x
+
+      ;; XXX Does x.attr.__set__ play a role? (Think not)
+      (when attr.sym 
+	;; If symbol not interned, then it cannot be in the globals-names vector
+	(let ((i (position attr.sym globals-names :test #'eq)))
+	  (when i
+	    (setf (svref globals-values i) val)
+	    (return-from py-module.__setattr__))))
+      
+      (setf (gethash (or attr.sym attr) dyn-globals) val))))
 
 ;; Modules are kept in a dictionary `sys.modules', mapping from string
 ;; to module object. For now, we keep a symbol->module hash table.
 
 (defparameter *py-modules* (make-hash-table :test #'eq))
 
+#+(or)
+(defun compile-module (path)
+  (ignore-errors 
+   (let ((*readtable* (copy-readtable nil))
+	 (f (lambda (stream char)
+	      (unread-char char stream)
+	      (parse-python-file stream))))
+     (loop for i from 0 below 256
+	 unless (or (char= (code-char i) #\:)
+		    (char= (code-char i) #\())
+	 do (set-macro-character (code-char i) f))
+     (compile-file "b2.py"))))
+						
+    
 (defun py-import (mod-name &key force-reload)
   ;; Registers module in *py-modules* and returns it.
   (assert (symbolp mod-name))
@@ -3008,7 +3041,7 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 ;;; Calling objects (functions, classes, instances)
 
 (defgeneric py-call (f &rest args)
-  
+
   (:method ((f null) &rest args)
 	   (error "PY-CALL of NIL"))
   
@@ -3018,10 +3051,6 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 		 (apply #'py-call __call__ args)
 	       (error "Don't know how to call: ~S (args: ~A)" f args))))
   
-  ;; Avoid infinite recursion:
-  
-  (:method ((f function) &rest args) (apply f args))
-  
   (:method ((f py-bound-method) &rest args)
 	   (apply #'py-bound-method.__call__ f args))
   
@@ -3029,9 +3058,41 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 	   (apply #'py-unbound-method.__call__ f args))
   
   (:method ((f py-static-method) &rest args)
-	   (apply #'py-static-method.__call__ f args)))
+	   (apply #'py-static-method.__call__ f args))
+  
+  ;; Avoid infinite recursion:
+  (:method ((f function) &rest args) (apply f args)))
+  
 
 
+;; Compiler macros are defined in optimize.cl; PY-CALL is exceptional
+;; in that this function is used many times in this module already,
+;; and we benefit from inlining it.
+
+#+(or) ;; issue
+(define-compiler-macro py-call (x &rest args)
+  (warn "x: ~A" x)
+  `(let ((.x ,x))
+     (if (functionp .x)
+	 :foo
+       (locally (declare (notinline py-call))
+	 (py-call .x ,@args)))))
+
+#||
+  `(let ((.x ,x))
+     (if (functionp .x)
+	 (excl::fast (funcall (the function x) ,@args))
+       (let ((x.cls (class-of .x)))
+	 (locally (declare (notinline py-call))
+	   (if (eq x.cls (load-time-value (find-class 'py-bound-method)))
+	       
+	       (with-slots ((func .func) (instance .instance)) .x
+		 (if (functionp .func)
+		     (excl::fast (funcall (the function .func)) ,@args)
+		   (sdf .func .x ,@args)))
+	     
+	     (sdf .x ,@args))))))
+||#
 
 ;;; Subscription of items (sequences, mappings)
 
@@ -3045,17 +3106,30 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 (defgeneric (setf py-subs) (new-val x item)
   (:method (new-val x item)
 	   #+(or)(warn "(setf py-subs) T T: ~S ~S" x item)
-	   (let ((si (recursive-class-dict-lookup (py-class-of x) '__setitem__)))
-	     (if si
-		 (py-call si x item new-val)
-	       (py-raise 'TypeError "Object ~S does not support item assignment" x)))))
+	   
+	   (if (null new-val)
+	       
+	       ;; delete item
+	       (let* ((x.cls (py-class-of x))
+			   (__delitem__ (recursive-class-dict-lookup x.cls '__delitem__)))
+		      (if __delitem__
+			    (py-call __delitem__ x item)
+			(py-raise 'TypeError
+				  "Object ~A (a ~A) has no `__delitem__' method"
+				  x (class-name (py-class-of x)))))
+	     
+	     (let ((si (recursive-class-dict-lookup (py-class-of x) '__setitem__)))
+	       (if si
+		   (py-call si x item new-val)
+		 (py-raise 'TypeError "Object ~S does not support item assignment" x))))))
 
-(defun setf-py-subs (x item new-val)
-  (setf (py-subs x item) new-val))
-
-(defun setf-py-attr (x attr val)
-  (declare (notinline (setf py-attr)))
-  (setf (py-attr x attr) val))
+#+(or)
+((defun setf-py-subs (x item new-val)
+   (setf (py-subs x item) new-val))
+ 
+ (defun setf-py-attr (x attr val)
+   (declare (notinline (setf py-attr)))
+   (setf (py-attr x attr) val)))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -3399,7 +3473,7 @@ the ~/.../ directive: ~/python:repr-fmt/"
   (let ((s (py-repr-string argument)))
     (write-string s stream)))
 
-
+#||
 (defgeneric py-del-subs (x item)
   (:method (x item) (let* ((x.cls (py-class-of x))
 			   (__delitem__ (recursive-class-dict-lookup x.cls '__delitem__)))
@@ -3408,6 +3482,7 @@ the ~/.../ directive: ~/python:repr-fmt/"
 			(py-raise 'TypeError
 				  "Object ~A (a ~A) has no `__delitem__' method"
 				  x (class-name (py-class-of x)))))))
+||#
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 

@@ -110,7 +110,11 @@
   (let* ((x.len (length x))
 	 (i2 (if (< item 0) (+ item x.len) item)))
     (if (<= 0 i2 (1- x.len))
-	(setf (aref x i2) val)
+	(if (null val)
+	    (progn (loop for i from (1+ i2) below x.len
+		       do (setf (aref x (1- i)) (aref x i)))
+		   (decf (fill-pointer x)))
+	  (setf (aref x i2) val))
       (call-next-method))))
 
 (defmethod py-subs ((x hash-table) item)
@@ -118,7 +122,10 @@
       (call-next-method)))
 
 (defmethod (setf py-subs) (val (x hash-table) item)
-  (setf (gethash item x) val))
+  (if (null val)
+      (or (remhash item x)
+	  (call-next-method))
+    (setf (gethash item x) val)))
 
 ;;; Comparison: ==
 #+(or)

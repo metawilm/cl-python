@@ -9,7 +9,8 @@ def check(a, b):
             print `a`, "==", `b`
     if not a == b:
         # raise AssertionError("%.30r != %.30r" % (a, b))
-        print "Wrong: %r != %r" % (a,b)
+        if show:
+          print "Wrong: %r != %r" % (a,b)
 
 def exception(exc, f, *args):
     try:
@@ -21,7 +22,8 @@ def exception(exc, f, *args):
     else:
         # raise AssertionError("%s not raised by %s%r",
         #                       exc.__name__, f.__name__, args)
-        print "Wrong: no exception %s for %s%r" % (exc.__name__, f.__name__, args)
+        if show:
+          print "Wrong: no exception %s for %s%r" % (exc.__name__, f.__name__, args)
 
 def check_functions(i=0, j=0):
     check(abs(42*i), 42*j)
@@ -374,7 +376,7 @@ def check_descriptors(i, j):
 def main():
     global show
     show = True
-    for i in range(10):
+    for i in range(100):
         check_functions(j=long(i*1000000), i=i*1000000)
         check_descriptors(j=long(i*1000000), i=i*1000000)
         show = False

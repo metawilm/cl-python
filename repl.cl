@@ -82,6 +82,7 @@
 				     "Retry the compilation of the REPL command. [:rc]")
 				  (let ((helper-func
 					 (compile nil `(lambda ()
+							 (declare (optimize (debug 3)))
 							 (with-this-module-context (,*repl-mod*)
 							   ,suite)))))
 				    (loop

@@ -41,29 +41,31 @@
 ;;  :inside-function-p          : T iff inside FUNCDEF       (to check RETURN)
 ;;  :inside-class-p             : T iff inside CLASSDEF      (for name mangling private variables)
 
-#+(or)
+;#+(or)
 (sys:define-declaration
     pydecl (&rest property-pairs) nil :declare
     (lambda (declaration env)
       (values :declare
 	      (cons 'pydecl
-		    (nconc (cdr declaration)
+		    (nconc (copy-list (cdr declaration))
 			   (sys:declaration-information 'pydecl env))))))
 
-;#+(or) ;; For debugging
+#+(or) ;; For debugging
 (sys:define-declaration
     pydecl (&rest property-pairs) nil :declare
     (lambda (declaration env)
       (let* ((declaration-copy (copy-tree declaration))
 	     (old-info (copy-tree (sys:declaration-information 'pydecl env)))
 	     (new-info (cons 'pydecl
-			     (nconc (cdr declaration)
+			     (nconc (cdr (copy-tree declaration))
 				    (sys:declaration-information 'pydecl env)))))
 	(warn "decl ~S + old ~S => ~S" declaration-copy old-info new-info)
 	(values :declare
 		new-info))))
 
 (defun get-pydecl (var env)
+  #+(or)(break "get-pydecl ~A ~A" var env)
+  #+(or)(warn "decl info: ~S" (sys:declaration-information 'pydecl env))
   (second (assoc var (sys:declaration-information 'pydecl env) :test #'eq)))
 
 (defmacro with-pydecl (pairs &body body)
@@ -81,7 +83,11 @@
      ,@body))
 
 (defmacro fast (&body body)
-  `(locally (declare (optimize (safety 3) (debug 3)))
+  `(progn
+     ,@body)
+  
+  #+(or)
+  `(locally (declare (optimize (speed 3) (safety 0) (debug 0)))
      ,@body))
 
 
@@ -107,14 +113,17 @@ XXX Make +mod-debug+ instead?")
 ;;; 
 ;;;  The macros corresponding to AST nodes
 
+(defun assert-stmt-1 (test test-ast raise-arg)
+  (with-simple-restart (:continue "Ignore the assertion failure")
+    (unless (py-val->lisp-bool test)
+      (py-raise 'AssertionError (or raise-arg 
+				    (format nil "Failing test: ~A"
+					    (with-output-to-string (s)
+					      (py-pprint s test-ast))))))))
+  
 (defmacro assert-stmt (test raise-arg)
   (when *__debug__*
-    `(with-simple-restart (:continue "Ignore the assertion failure")
-       (unless (py-val->lisp-bool ,test)
-	 (py-raise 'AssertionError ,(or raise-arg 
-					`(format nil "Failing test: ~A"
-						 (with-output-to-string (s)
-						   (py-pprint s ',test)))))))))
+    `(assert-stmt-1 ,test ',test ,raise-arg)))
 
 (defun assign-stmt-list-vals (iterable num-targets)
   (let ((val-list (py-iterate->lisp-list iterable)))
@@ -154,11 +163,11 @@ XXX Make +mod-debug+ instead?")
 		 
 		 (attributeref-expr 
 		  (destructuring-bind (item attr) (cdr tg)
-		    `(setf-py-attr ,item ',(second attr) ,val)))
+		    `(setf (py-attr ,item ',(second attr)) ,val)))
 		 
 		 (subscription-expr
 		  (destructuring-bind (item subs) (cdr tg)
-		    `(setf-py-subs ,item ,subs ,val)))
+		    `(setf (py-subs ,item ,subs) ,val)))
 		 		  
 		 ((list-expr tuple-expr)
 		  (let* ((targets (second tg))
@@ -175,7 +184,7 @@ XXX Make +mod-debug+ instead?")
 		    (flet ((module-set ()
 			     (let ((ix (position name (get-pydecl :mod-globals-names e))))
 			       (if ix
-				   `(setf (svref +mod-globals-values+ ,ix) ,val)
+				   `(setf (svref +mod-static-globals-values+ ,ix) ,val)
 				 `(setf (gethash ',name +mod-dyn-globals+) ,val))))
 			   
 			   (local-set () `(setf ,name ,val))
@@ -262,18 +271,18 @@ XXX Make +mod-debug+ instead?")
 
 (defmacro binary-lazy-expr (op left right)
   (ecase op
-    (or `(let ((left ,left))
-	   (if (py-val->lisp-bool left)
-	       left
-	     (let ((right ,right))
-	       (if (py-val->lisp-bool right)
-		   right
+    (or `(let ((.left ,left))
+	   (if (py-val->lisp-bool .left)
+	       .left
+	     (let ((.right ,right))
+	       (if (py-val->lisp-bool .right)
+		   .right
 		 *the-false*)))))
     
-    (and `(let ((left ,left))
-	    (if (py-val->lisp-bool left)
+    (and `(let ((.left ,left))
+	    (if (py-val->lisp-bool .left)
 		,right
-	      left)))))
+	      .left)))))
 
 (defmacro break-stmt (&environment e)
   (if (get-pydecl :inside-loop-p e)
@@ -307,9 +316,10 @@ XXX Make +mod-debug+ instead?")
 	
       `(let* ((prim ,primary))
 	 
-	 
+	 #||
 	 (when (call-expr-special-p prim)
 	   (setf prim (call-expr-special prim (.locals.) (.globals.))))
+	 ||#
 	 
 	 ,(cond ((or kw-args **-arg)
 		 `(call-expr-pos+*+kw+** prim (list ,@pos-args) ,*-arg (list ,@kw-args) ,**-arg))
@@ -363,10 +373,12 @@ XXX Make +mod-debug+ instead?")
 			(or (second args) globals-dict)
 			(or (third args)  locals-dict)))))))
 
+#||
 (defun call-expr-special-p (prim)
   (or (eq prim (load-time-value #'pybf:locals))
       (eq prim (load-time-value #'pybf:globals))
       (eq prim (load-time-value #'pybf:eval))))
+||#
 
 (defmacro py-attr-call (prim attr &rest pos-args)
   ;; A method call with only positional args: <prim>.<attr>(p1, p2, .., pi)
@@ -411,8 +423,10 @@ XXX Make +mod-debug+ instead?")
 	   
 	   (let ((prim-attr (py-attr prim ',attr)))
 	     
+	     #||
 	     (when (call-expr-special-p prim-attr)
 	       (setf prim-attr (call-expr-special prim-attr (.locals.) (.globals.))))
+	     ||#
 	     
 	     (py-call prim-attr ,@pos-args)))))))
   
@@ -462,7 +476,7 @@ XXX Make +mod-debug+ instead?")
 				      ,(let ((ix (position '__metaclass__
 							   (get-pydecl :mod-globals-names e))))
 					 (if ix
-					     `(svref +mod-globals-values+ ,ix)
+					     `(svref +mod-static-globals-values+ ,ix)
 					   `(gethash '__metaclass__ +mod-dyn-globals+))))))
 	     (assign-stmt ,cls (,name))))))))
 
@@ -482,7 +496,7 @@ XXX Make +mod-debug+ instead?")
      `(progn ,@(loop for x in (second item) collect `(del-stmt ,x))))
     
     (subscription-expr
-     `(py-del-subs ,@(cdr item))) ;; XXX maybe inline dict case
+     `(setf (py-subs ,@(cdr item)) nil)) ;; XXX maybe inline dict case
     
     (attributeref-expr
      (destructuring-bind (object (id-ex attr-name)) (cdr item)
@@ -490,21 +504,24 @@ XXX Make +mod-debug+ instead?")
        `(setf (py-attr ,object ',attr-name) nil)))
     
     (identifier-expr
-     (let* ((name (second item)))
+     (let* ((name (second item))
+	    (ix (position name (get-pydecl :mod-globals-names e))))
        
        (flet ((module-del ()
 		;; reset module-level vars with built-in names to their built-in value
-		(let ((ix (position name (get-pydecl :mod-globals-names e))))
-		  `(delete-identifier-at-module-level
-		    ',name ,ix ,(when (builtin-name-p name)
-				  `(builtin-name-value ',name)))))
+		`(delete-identifier-at-module-level ',name ,ix +mod+))
 	      
 	      (local-del ()
-		`(progn (check-del-bound ',name ,name)
-			(setf ,name nil)))
+		(let ((biv (builtin-value name)))
+		  `(progn (unless ,name
+			    (unbound-variable-error ',name))
+			  (setf ,name ,(if biv
+					   `(builtin-value ',name)
+					 nil)))))
 	      
 	      (class-del ()
-		`(class-del ,(symbol-name name) +cls-namespace+)))
+		`(unless (py-del-subs +cls-namespace+ ,name)
+		   (unbound-variable-error ',name))))
 	 
 	 (ecase (get-pydecl :context e)
 	 
@@ -522,7 +539,7 @@ XXX Make +mod-debug+ instead?")
 (defmacro dict-expr (alist)
   `(make-dict-unevaled-list ,alist))
 
-
+;; TODO review
 (defmacro exec-stmt (code globals locals &environment e)
   ;; TODO:
   ;;   - allow code object etc as CODE
@@ -754,8 +771,6 @@ XXX Make +mod-debug+ instead?")
 		     (identifier-expr ,fname)))))))))))
 
 
-
-
 (defmacro generator-expr (&whole whole item for-in/if-clauses)
   (declare (ignore item for-in/if-clauses))
   (rewrite-generator-expr-ast whole))
@@ -777,14 +792,14 @@ XXX Make +mod-debug+ instead?")
   
   (flet ((module-lookup ()
 	   (let ((ix (position name (get-pydecl :mod-globals-names e))))
-	     `(identifier-expr-module-lookup ',name
-					     ,ix
-					     ,(when (builtin-name-p name)
-						`(builtin-name-value ',name)))))
+	     (if ix
+		 `(or (fast (svref +mod-static-globals-values+ ,ix))
+		      (unbound-variable-error ',name))
+	       `(identifier-expr-module-lookup-dyn ',name +mod-dyn-globals+))))
 	 
 	 (local-lookup ()
 	   `(or ,name
-		(check-local-bound ',name ,name))))
+		(unbound-variable-error ',name))))
     
     (ecase (get-pydecl :context e)
 
@@ -873,112 +888,133 @@ XXX Make +mod-debug+ instead?")
 (defmacro list-expr (items)
   `(make-py-list-unevaled-list ,items))
 
-;; Used by expansions of `module-stmt', `exec-stmt', and by function `eval'.
+
 
 (defmacro with-this-module-context ((module) &body body)
+  ;; Used by expansions of `module-stmt' and by function `eval'.
   (check-type module py-module)
   (with-slots (globals-names globals-values dyn-globals) module
     
     `(with-module-context (,globals-names ,globals-values ,dyn-globals :existing-mod ,module)
        ,@body)))
 
+(defparameter *module-hook* nil)
+
 (defmacro with-module-context ((glob-names glob-values dyn-glob
 				&key set-builtins create-return-mod module-name existing-mod)
-			       &body body
-			       &environment e)
-  (warn "w-m-c: env: ~A" e)
+			       &body body)
   (check-type glob-names vector)
-  (check-type dyn-glob hash-table)
+  ;;(check-type dyn-glob hash-table)
   (assert (not (and create-return-mod existing-mod)))
   
-  `(let* ((+mod-globals-names+  ,glob-names)
-	  (+mod-globals-values+ ,glob-values)
-	  (+mod-dyn-globals+    ,dyn-glob)
-	  (+mod+ ,(if create-return-mod
-		      
-		      `(make-module :globals-names  +mod-globals-names+
-				    :globals-values +mod-globals-values+
-				    :dyn-globals    +mod-dyn-globals+
-				    :name ,module-name)
-		    existing-mod)))
-     
-     (declare (ignorable +mod+))
+  `(progn (in-package :python)
+	  
+	  (let* ((+mod-static-globals-names+  ,glob-names)
+		 (+mod-static-globals-values+ ,glob-values)
+		 (+mod-static-globals-builtin-values+
+		  (coerce (loop for n across +mod-static-globals-names+
+			      collect (builtin-value n))
+			  'vector))
+		 (+mod-dyn-globals+ ,dyn-glob)
+		 (+mod+ ,(if create-return-mod
+			     
+			     `(make-module :globals-names  +mod-static-globals-names+
+					   :globals-values +mod-static-globals-values+
+					   :dyn-globals    +mod-dyn-globals+
+					   :name ,module-name)
+			   existing-mod)))
+
+	    
+	    ,@(when set-builtins
+		`((map-into +mod-static-globals-values+ #'identity +mod-static-globals-builtin-values+)))
+
+	    (loop for (k v) in '((__name__  ,(or module-name "__main__"))
+				 (__debug__  1))
+		do (let ((ix (position k +mod-static-globals-names+)))
+		     (when (and ix
+				(null (svref +mod-static-globals-values+ ix)))
+		       (setf (svref +mod-static-globals-values+ ix) v))))
+	    
+	    (loop for n across +mod-static-globals-names+
+		for v across +mod-static-globals-values+
+		do (format t "~A: ~A~%" n v))
+	    
+	    (with-pydecl
+		((:mod-globals-names  ,glob-names)
+		 (:context            :module)
+		 (:mod-futures        :todo-parse-module-ast-future-imports))
 	      
-     ,@(when set-builtins
-	 (loop for name across glob-names and i from 0
-	     if (builtin-name-p name)
-	     collect `(setf (svref +mod-globals-values+ ,i)
-			(builtin-name-value ',name)) into setfs
-							 
-	     else if (eq name '__name__)
-	     collect `(setf (svref +mod-globals-values+ ,i) ,(or module-name "__main__"))
-	     into setfs
-		     
-	     else if (eq name '__debug__)
-	     collect `(setf (svref +mod-globals-values+ ,i) 1)
-	     into setfs
-	       
-	     finally (when setfs
-		       (return `((progn ,@setfs))))))
+	      ,@body)
 
-     (flet ((.globals. () (module-make-globals-dict
-			   ;; Updating this dict really modifies the globals.
-			   +mod-globals-names+ +mod-globals-values+ +mod-dyn-globals+))
+	    #+(or)
+	    (loop for form in body collect
+		  `(with-pydecl
+		       ((:mod-globals-names  ,glob-names)
+			(:context            :module)
+			(:mod-futures        :todo-parse-module-ast-future-imports))
+		       
+		     (let ()
+		       ;; The LET prevents these forms from being walked into.
+		       ;; Without the LET, soms tests for PYDECL declarations fail because
+		       ;; environment is NIL during walking of top-level forms.
+		       ;; (Test case: module with "d=3" as contents.)
+		       ,form)))
 	    
-	    (identifier-expr-module-lookup (name ix builtin-value)
-	      (excl::fast
-	       (if ix
-		   (or (svref +mod-globals-values+ ix)
-		       (py-raise 'NameError "Variable '~A' is unbound [glob]" name))
-		 
-		 (or (gethash name +mod-dyn-globals+)
-		     builtin-value
-		     (py-raise 'NameError
-			       "Variable '~A' is unbound [dyn-glob]" name)))))
-	    
-	    (delete-identifier-at-module-level (name ix builtin-value)
-	      (excl::fast
-	       (or (if ix
-		       (prog1 (svref +mod-globals-values+ ix)
-			 (setf (svref +mod-globals-values+ ix) builtin-value))
-		     (prog1 (remhash name +mod-dyn-globals+)
-		       (when builtin-value
-			 (setf (gethash name +mod-dyn-globals+) builtin-value))))
-		   (py-raise 'NameError "Cannot delete variable '~A': it is unbound [global]" name))))
-	    
-	    (check-del-bound (name val)
-	      (excl::fast
-	       (unless val 
-		 (py-raise 'NameError "Cannot delete variable '~A': it is unbound [local]" name))))
-	    
-	    (check-local-bound (name val)
-	      (excl::fast
-	       (or val (py-raise 'NameError "Local variable ~A is unbound" name))))
-	    
-	    (class-del (name cls-namespace)
-	      (excl::fast
-	       (unless (py-del-subs cls-namespace name)
-		 (py-raise 'NameError "Cannot delete variable '~A': it is unbound [class]" name)))))
+	    (when *module-hook*
+	      (funcall *module-hook* +mod+)))))
+
+
+(defmacro create-module-globals-dict ()
+  `(module-make-globals-dict
+    ;; Updating this dict really modifies the globals.
+    +mod-static-globals-names+ +mod-static-globals-values+ +mod-dyn-globals+))
+
+(defun unbound-variable-error (name)
+  (py-raise 'NameError "Variable '~A' is unbound" name))
+
+(defun identifier-expr-module-lookup-dyn (name +mod-dyn-globals+)
+  (or (gethash name +mod-dyn-globals+)
+      (builtin-value name)
+      (unbound-variable-error name)))
+
+(defun delete-identifier-at-module-level (name ix +mod+)
+  (with-slots (globals-names globals-values dyn-globals) +mod+
+    (let ((biv (builtin-value name)))
+      
+      (unless
+	  (if ix
+	      (prog1 (svref globals-values ix)
+		(setf (svref globals-values ix) biv))
+	    (prog1 (remhash name dyn-globals)
+	      (when biv
+		(setf (gethash name dyn-globals) biv))))
+	(unbound-variable-error name)))))
+
+#||
+(class-del (name cls-namespace)
+	   (excl::fast
+	    (unless (py-del-subs cls-namespace name)
+	      (py-raise 'NameError "Cannot delete variable '~A': it is unbound [class]" name)))
 
        
-       ;; remove 'unused' warnings
-       #'.globals.
-       #'identifier-expr-module-lookup
+	   ;; remove 'unused' warnings
+	   #'.globals.
+	   #'identifier-expr-module-lookup
 
-       ;; "locals()" at the module level is equivalent to "globals()"
+	   ;; "locals()" at the module level is equivalent to "globals()"
        
-       (macrolet ((.locals. () `(.globals.)))
+	   (macrolet ((.locals. () `(.globals.)))
 	 
-	 (with-pydecl
-	     ((:mod-globals-names  ,glob-names)
-	      (:context            :module)
-	      (:mod-futures        :todo-parse-module-ast-future-imports))
+	     (with-pydecl
+		 ((:mod-globals-names  ,glob-names)
+		  (:context            :module)
+		  (:mod-futures        :todo-parse-module-ast-future-imports))
 	   
-	   ,@body)))
+	       ,@body))
      
-     ,@(when create-return-mod
-	 `(+mod+))))
-
+	   ,@(when create-return-mod
+	       `(+mod+)))
+||#
 
 (defmacro module-stmt (suite) ;; &environment e)
   ;; A module is translated into a lambda that creates and returns a
@@ -996,7 +1032,7 @@ XXX Make +mod-debug+ instead?")
     
     `(with-module-context (,(make-array (length ast-globals) :initial-contents ast-globals)
 			   (make-array ,(length ast-globals) :initial-element nil) ;; not eval now
-			   ,(make-hash-table :test #'eq)
+			   (make-hash-table :test #'eq)
 			   :set-builtins t
 			   :create-return-mod t
 			   :module-name ,*current-module-name*)
@@ -1011,7 +1047,7 @@ XXX Make +mod-debug+ instead?")
 
 (defmacro return-stmt (val &environment e)
   (if (get-pydecl :inside-function-p e)
-      `(return-from :function-body ,(or val *the-none*))
+      `(return-from :function-body ,(or val `(load-time-value *the-none*)))
     (py-raise 'SyntaxError "RETURN found outside function")))
 
 (defmacro slice-expr (start stop step)
@@ -1164,18 +1200,18 @@ XXX Make +mod-debug+ instead?")
       (find-symbol (string x) (load-time-value (find-package :python-builtin-values)))
       (find-symbol (string x) (load-time-value (find-package :python-builtin-clpy)))))
 
-(defun builtin-name-value (x)
+(defun builtin-value (x)
   (let ((sym (builtin-name-p x)))
-    (assert sym)
-    (let ((pkg (symbol-package sym)))
-      (cond ((eq pkg (load-time-value (find-package :python-builtin-functions)))
-	     (symbol-function sym))
-	    ((eq pkg (load-time-value (find-package :python-builtin-types)))
-	     (symbol-value sym))
-	    ((eq pkg (load-time-value (find-package :python-builtin-values)))
-	     (symbol-value sym))
-	    ((eq pkg (load-time-value (find-package :python-builtin-clpy)))
-	     (symbol-function sym))))))
+    (when sym
+      (let ((pkg (symbol-package sym)))
+	(cond ((eq pkg (load-time-value (find-package :python-builtin-functions)))
+	       (symbol-function sym))
+	      ((eq pkg (load-time-value (find-package :python-builtin-types)))
+	       (symbol-value sym))
+	      ((eq pkg (load-time-value (find-package :python-builtin-values)))
+	       (symbol-value sym))
+	      ((eq pkg (load-time-value (find-package :python-builtin-clpy)))
+	       (symbol-function sym)))))))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -2101,3 +2137,13 @@ Non-negative integer denoting the number of args otherwise."
 ;; ---
 ;; f()()() -> prints 'global', not 'af'
 
+
+#||
+(let ((*readtable* (copy-readtable nil))
+		   (f (lambda (stream char)
+			(unread-char char stream)
+			(parse-python-file stream))))
+	       (loop for i from 0 below 256
+		   do (set-macro-character (code-char i) f))
+	       (compile-file "b2.py"))
+||#
