@@ -535,11 +535,12 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
     (or res
 	(py-raise 'TypeError "reduce() of empty sequence with no initial value"))))
 
-(defun pybf:reload (m)
-  ;; m py-module
-  (py-import (slot-value m 'name) :force-reload t)
+(defun pybf:reload (m &optional verbose)
+  ;; VERBOSE is not a CPython argument
+  (py-import (py-string-val->symbol (slot-value m 'name))
+	     :force-reload t
+	     :verbose (when verbose (py-val->lisp-bool verbose)))
   m)
-
 
 (defun pybf:repr (x)
   (py-repr x))
@@ -568,7 +569,7 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
 
 (defun pybf:setattr (x attr val)
   ;; XXX attr symbol/string
-  (setf-py-attr x attr val))
+  (setf (py-attr x attr) val))
 
 (defun pybf:sorted (x)
   ;;; over sequences, or over all iterable things?

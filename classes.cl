@@ -3,6 +3,11 @@
 ;;;; Python classes and metaclasses; the built-in classes including
 ;;;; their methods.
 
+;;; To have Emacs properly indent the DEF-PY-METHOD form, add to .emacs:
+;;; 
+;;;  (put 'def-py-method 'fi:common-lisp-indent-hook
+;;;     (get 'defmethod 'fi:common-lisp-indent-hook))
+
 (defvar *py-print-safe* nil)
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -647,18 +652,19 @@
 (defclass py-function (standard-generic-function py-core-object py-dict-mixin)
   ;; mop:funcallable-standard-class defines :name initarg, but I don't know how to access it...
   ((name         :initarg :name         :accessor py-function-name)
-   (context-name :initarg :context-name :accessor py-function-context-name))
+   (context-name :initarg :context-name :accessor py-function-context-name)
+   (lambda       :initarg :lambda       :accessor py-function-lambda))
   (:metaclass funcallable-python-class))
 
 (defun make-py-function (&key name context-name lambda)
-  (let ((x (make-instance 'py-function :name (string name)  :context-name context-name)))
+  (let ((x (make-instance 'py-function :name (string name) :lambda lambda :context-name context-name)))
     (mop:set-funcallable-instance-function x lambda)
     ;; fill dict?
     x))
 
 (def-py-method py-function.__get__ (func obj class)
-  (cond ((eq func #'py-function.__get__)
-	 (break "eq py-f.__get__"))
+  (cond #+(or)((eq func #'py-function.__get__)
+	       (break "eq py-f.__get__"))
 	((or (null obj) (none-p obj))
 	 (make-instance 'py-unbound-method :func func :class class))
 	(t
@@ -1244,7 +1250,8 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
    (globals-values :initarg :globals-values :type vector :initform #())
    (dyn-globals    :initarg :dyn-globals    :type hash-table
 		   :initform (make-hash-table :test #'eq))
-   (name           :initarg :name           :type symbol :initform "__main__"))
+   (name           :initarg :name           :type symbol :initform "__main__")
+   (filepath       :initarg :path                        :initform nil))
   (:metaclass py-user-type))
 
 ;; XXX module has dict attribute, but it is not updated correctly
@@ -1263,7 +1270,8 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 (def-py-method py-module.__repr__ (x^)
   (with-output-to-string (s)
     (print-unreadable-object (x s :identity t)
-      (format s "module ~A" (slot-value x 'name)))))
+      (with-slots (name filepath) x
+	(format s "module `~A' from file ~S" name filepath)))))
 
 (defmethod print-object ((x py-module) stream)
   (write-string (py-module.__repr__ x) stream))
@@ -1304,16 +1312,16 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 
 ;; Utils
 
-(defun py-string-val->symbol (attr &key (intern t))
-  (let (attr.string)
-    (typecase attr
-      (symbol (return-from py-string-val->symbol attr))
-      (string (setf attr.string attr))
-      (t      (setf attr.string (py-val->string attr))))
+(defun py-string-val->symbol (x &key (intern t))
+  (let (x.string)
+    (typecase x
+      (symbol (return-from py-string-val->symbol x))
+      (string (setf x.string x))
+      (t      (setf x.string (py-val->string x))))
     
-    (or (find-symbol attr.string #.*package*)
+    (or (find-symbol x.string #.*package*)
 	(when intern
-	  (intern attr.string #.*package*)))))
+	  (intern x.string #.*package*)))))
 
 (def-py-method py-module.__getattribute__ (x^ attr)
   (flet ((raise-attr-error (attr)
@@ -1369,120 +1377,74 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 	 do (set-macro-character (code-char i) f))
      (compile-file "b2.py"))))
 						
-    
-(defun py-import (mod-name &key force-reload)
+
+(defun py-import (mod-name &key force-reload (verbose t))
   ;; Registers module in *py-modules* and returns it.
   (assert (symbolp mod-name))
   
-  (labels ((safe-file-mtime (fname)
-	     (let ((stat (handler-case (excl.osi:stat fname)
-			   (excl:syscall-error () nil))))
-	       (when stat
-		 (excl.osi:stat-mtime stat))))
+  (flet ((safe-file-mtime (fname)
+	   (let ((stat (handler-case (excl.osi:stat fname)
+			 (excl:syscall-error () nil))))
+	     (when stat
+	       (excl.osi:stat-mtime stat))))
 	 
-	   (recompile-py-and-write (mod-name py-fname cl-fname fasl-fname)
-	     (let* ((*current-module-name* (string mod-name))
-		    (file-ast (progn (warn "Parsing ~A ..." py-fname)
-				     (parse-python-file py-fname)))
-		    (mod-func (progn (warn "Compiling ~A ..." py-fname)
-				     (let ((*compile-print* t))
-				       (compile nil `(lambda () ,file-ast))))))
-	       (declare (special *current-module-name*))
+	 (recompile-py-if-needed (mod-name py-fname fasl-fname)
+	   (let* ((*current-module-name* (string mod-name)) ;; used by compiler
+		  (*current-module-path* py-fname) ;; XXX must become path
+		
+		  ;; Operate under read table that dispatches
+		  ;; every character to Python parser
+		  (*readtable* (load-time-value
+				(let ((rt (copy-readtable nil))
+				      (f (lambda (stream char)
+					   (unread-char char stream)
+					   (parse-python-file stream))))
+				  (loop for i from 0 below 256
+				      do (set-macro-character (code-char i) f t rt))
+				  rt))))
 	     
-	       ;; MOD-FUNC is a lambda that returns a module object.
-	       ;; This function will be written as literal object in the
-	       ;; FASL file. To that end, we need (?) to create a
-	       ;; temporary Lisp file, which will be compiled to FASL.
-	     
-	       (warn "Writing ~A ..." cl-fname)
-	     
-	       (with-open-file (f cl-fname
-				:direction :output
-				:if-exists :supersede
-				:if-does-not-exist :create)
-	       
-		 (format f "(in-package :python)~%")
-		 (format f "(locally (declare (special %py-import-hook%)) ~%")
-		 (format f "  (funcall %py-import-hook% ~%")
-		 (format f "    (funcall #.(locally (declare (special %mod-func%)) ~%")
-		 (format f "                 %mod-func% ))))"))
-	     
-	       (warn "Compiling ~A ..." cl-fname)
-	       
-	       (let ((%mod-func% mod-func))
-		 (declare (special %mod-func%))
-		 (compile-file cl-fname :output-file fasl-fname :verbose nil))
-	     
-	       (let ((fasl-mtime (safe-file-mtime fasl-fname)))
-		 (assert (and fasl-mtime
-			      (safe-file-mtime py-fname)
-			      (>= fasl-mtime (safe-file-mtime py-fname)))))
-	     
-	       t)))
-    
+	     (declare (special *current-module-name*))
+	     (compile-file py-fname
+			   :output-file fasl-fname
+			   :if-newer t
+			   :verbose verbose))))
+	   
     ;; XXX need to look for file in all directories of sys.path
     
+    (unless force-reload
+      (let ((existing-mod (gethash mod-name *py-modules*)))
+	(when existing-mod
+	  (return-from py-import existing-mod))))
+    
     (let* ((py-fname (format nil "~A.py" mod-name))
-	   (py-mtime (safe-file-mtime py-fname))
-	   
-	   (cl-fname (format nil "~A.cl" mod-name))
-	   
 	   (fasl-fname (format nil "~A.fasl" mod-name))
-	   (fasl-mtime (safe-file-mtime fasl-fname))
-	   (fasl-ok-p (and (not force-reload)
-			   fasl-mtime
-			   (<= py-mtime fasl-mtime))))
+	   (old-module (gethash mod-name *py-modules*))
+	   (new-module nil)
+	  
+	   (*module-hook* (lambda (mod) (setf new-module mod))))
+      (declare (special *module-hook*))
       
-      (unless py-mtime
+      (recompile-py-if-needed mod-name py-fname fasl-fname)
+      (load fasl-fname :verbose verbose)
+       
+      (unless new-module
 	(py-raise 'ImportError
-		  "Python source file '~A' not found (in current directory)."
-		  py-fname))
-      
-      
-      (if fasl-ok-p
+		  "Module did not call *module-hook* upon loading"))
+       
+      (when old-module
+	;; Update old module object with info from new one
+	;; (slot `name' is assumed to be set correctly)
+	(dolist (f '(globals-names globals-values dyn-globals))
+	  (setf (slot-value old-module f) (slot-value new-module f)))
 	  
-	  (warn "Cache file ~A is still up to date" fasl-fname)
+	(setf new-module old-module))
 	
-	(progn 
-	  (unless (recompile-py-and-write mod-name py-fname cl-fname fasl-fname)
-	    (py-raise 'ImportError
-		      "Compiling, or writing compiled code, failed."))
-	  
-	  (setf fasl-mtime (safe-file-mtime fasl-fname)
-		fasl-ok-p (and fasl-mtime
-			       (<= py-mtime fasl-mtime)))
-	  
-	  (assert fasl-ok-p ()
-	    "Something strange with file timestamps going on: just modified file ~
-             ~A mtime ~A, while existing file ~A has mtime ~A." 
-	    fasl-fname fasl-mtime py-fname py-mtime)))
-      
-      
-      (let* ((old-module-object (gethash mod-name *py-modules*))
-	     (new-module-object nil)
-	     (%py-import-hook% (lambda (mod) (setf new-module-object mod))))
-	
-	(declare (special %py-import-hook%))
+      (setf (gethash mod-name *py-modules*) new-module)
 
-	(warn "Loading ~A ..." fasl-fname)
-	
-	(load fasl-fname :verbose nil)
-	
-	(unless new-module-object
-	  (break "imported module ~A did not call %py-import-hook%" mod-name))
+      ;; Return new or update module
+      new-module)))
 
-	(if old-module-object
-	    
-	    ;; The old module object is updated; the new module object is not used anymore
-	    (progn (dolist (f '(globals-names globals-values dyn-globals))
-		     (setf (slot-value old-module-object f) (slot-value new-module-object f)))
-		   (setf new-module-object old-module-object))
-	  
-	  (setf (gethash mod-name *py-modules*) new-module-object))
-	  
-	new-module-object))))
 
-      
 ;; File (User object)
 
 (defclass py-file (py-user-object py-dict-mixin)
@@ -1974,34 +1936,48 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 (def-proxy-class py-int (py-real))
 
 (def-py-method py-int.__new__ :static (cls &optional (arg 0) (base 0))
-	       (if (eq cls (find-class (load-time-value 'py-int)))
-		   
-		   (typecase arg
-		     (integer arg)
-		     (float  (truncate arg))
-		     (t      (setf arg (py-val->string arg)
-				   base (py-val->integer base :min 0))
-			     (let ((*read-base* (cond ((and (>= (length arg) 2)
-							    (char= (aref arg 0) #\0)
-							    (member (aref arg 1) '(#\x #\X) :test #'char=))
-						       (setf arg (subseq arg 2))
-						       16)
-						      ((and (>= (length arg) 1)
-							    (char= (aref arg 0) #\0))
-						       (setf arg (subseq arg 1))
-						       8)
-						      ((= base 0) 
-						       10)
-						      (t (check-type base (integer 2 36))
-							 base))))
-			       (truncate (read-from-string arg)))))
-		 
-		 (make-instance cls :lisp-object arg)
-		 
-		 #+(or)
-		 (let ((i (make-instance cls :lisp-object arg)))
-		   (setf (proxy-lisp-val i) arg)
-		   i)))
+  ;; If base = 0, then derive base from literal ARG, or use base = 10.
+  
+  (flet ((invalid-arg-error (a)
+	   (py-raise 'TypeError "Invalid arg for int.__new__: ~S" a)))
+    
+    (let ((val (typecase arg
+		 (integer arg)
+		 (float  (truncate arg))
+		 (t      (setf arg (py-val->string arg)
+			       base (py-val->integer base :min 0))
+			 
+			 (flet ((read-arg (arg &optional (base 10))
+				  (let ((v (with-standard-io-syntax
+					     (let ((*read-base* base))
+					       (read-from-string arg)))))
+				    (if (numberp v)
+					(truncate v)
+				      (invalid-arg-error arg)))))
+			   
+			   (cond ((and (>= (length arg) 2)
+				       (char= (aref arg 0) #\0)
+				       (member (aref arg 1) '(#\x #\X) :test #'char=))
+				  (read-arg (subseq arg 2) 16))
+			  
+				 ((and (= (length arg) 1))
+				  (or (digit-char-p (aref arg 0))
+				      (invalid-arg-error arg)))
+			  
+				 ((and (>= (length arg) 1)
+				       (char= (aref arg 0) #\0))
+				  (read-arg (subseq arg 1) 8))
+				 
+				 ((= base 0)
+				  (read-arg arg))
+				 
+				 ((/= base 0)
+				  (check-type base (integer 2 36))
+				  (read-arg arg base))))))))
+		  
+      (if (eq cls (find-class (load-time-value 'py-int)))
+	  val
+	(make-instance cls :lisp-object val)))))
 
 (def-py-method py-int.__init__ (&rest args) nil)
 
@@ -2025,24 +2001,24 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 (def-proxy-class py-bool (py-int))
 
 (def-py-method py-bool.__new__ :static (cls &optional (val 0))
-	       (let ((bool-val (if (py-val->lisp-bool val) *the-true* *the-false*)))
-		 (if (eq cls (load-time-value (find-class 'py-bool)))
-		     bool-val
-		   (make-instance 'cls :lisp-object bool-val))))
+  (let ((bool-val (if (py-val->lisp-bool val) *the-true* *the-false*)))
+    (if (eq cls (load-time-value (find-class 'py-bool)))
+	bool-val
+      (make-instance 'cls :lisp-object bool-val))))
 
 ;; Float
 
 (def-proxy-class py-float (py-real))
 
 (def-py-method py-float.__new__ :static (cls &optional (val 0))
-	       (setf val (deproxy val))
-	       (when  (stringp val)
-		 (setf val (read-from-string val)))
-	       (let* ((num (py-val->number val))
-		      (f   (coerce num 'double-float)))
-		 (if (eq cls (load-time-value (find-class 'py-float)))
-		     f
-		   (make-instance 'cls :lisp-object f))))
+  (setf val (deproxy val))
+  (when  (stringp val)
+    (setf val (read-from-string val)))
+  (let* ((num (py-val->number val))
+	 (f   (coerce num 'double-float)))
+    (if (eq cls (load-time-value (find-class 'py-float)))
+	f
+      (make-instance 'cls :lisp-object f))))
 
 (def-py-method py-float.__repr__ (x^)
   (let* ((s (format nil "~F" x))
@@ -2894,7 +2870,7 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
       (when (dict x)
 	(let ((val (dict-get x attr.as_string)))
 	  (when val
-	    (cond ((subtypep (py-class-of x) 'py-type)
+	    (cond ((subtypep (py-class-of x) (load-time-value (find-class 'py-type)))
 		   
 		   ;; XXX check the exact condition under which binding
 		   ;; of instance dict item occurs

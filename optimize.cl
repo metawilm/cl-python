@@ -272,7 +272,8 @@
 				      (py-bool (not printed-newline-already)))))))))
 	 ;; Newline after last item
 	 ,(unless comma?
-	    `(excl::fast-write-char #\Newline stdout))
+	    `(progn (excl::fast-write-char #\Newline stdout)
+		    (force-output stdout)))
 	 
 	 ;; Return value:
 	 nil)

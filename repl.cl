@@ -126,7 +126,8 @@
 	  do (loop 
 	       (with-simple-restart (return-python-toplevel "Return to Python top level [:ptl]")
 		 (loop with acc = ()
-		     do (locally (declare (special *stdout-softspace*))
+		     do #+(or)(format t "acc: ~S~%" acc)
+			(locally (declare (special *stdout-softspace*))
 			  (setf *stdout-softspace* (py-bool nil)))
 			(format t (if acc "... " ">>> "))
 			(let ((x (read-line)))
@@ -187,7 +188,11 @@
 					(return-from :try-parse))))
 				
 				  ;; try to parse as Lisp code second
-				  (let ((lisp-form (ignore-errors (read-from-string total nil nil))))
+				  (let ((lisp-form (ignore-errors (with-standard-io-syntax
+								    ;; Bind package, so symbols _, __, ___
+								    ;; are present.
+								    (let ((*package* #.*package*))
+								      (read-from-string total nil nil))))))
 				    (when (and lisp-form
 					       (not (member lisp-form '(def class for while if)))) 
 				      (multiple-value-bind (res err) 

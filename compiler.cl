@@ -108,6 +108,8 @@ XXX Make +mod-debug+ instead?")
 (defvar *current-module-name* "__main__"
   "The name of the module now being compiled; module.__name__ is set to it.")
 
+(defvar *current-module-path* ""
+  "The path of the Python file being compiled; saved in module's `filepath' slot.")
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; 
@@ -901,12 +903,13 @@ XXX Make +mod-debug+ instead?")
 (defparameter *module-hook* nil)
 
 (defmacro with-module-context ((glob-names glob-values dyn-glob
-				&key set-builtins create-return-mod module-name existing-mod)
+				&key set-builtins call-hook create-mod existing-mod
+				     module-name module-path)
 			       &body body)
   (check-type glob-names vector)
   ;;(check-type dyn-glob hash-table)
-  (assert (not (and create-return-mod existing-mod)))
-  
+  (assert (and (or create-mod existing-mod)
+	       (not (and create-mod existing-mod))))
   `(progn (in-package :python)
 	  
 	  (let* ((+mod-static-globals-names+  ,glob-names)
@@ -916,15 +919,20 @@ XXX Make +mod-debug+ instead?")
 			      collect (builtin-value n))
 			  'vector))
 		 (+mod-dyn-globals+ ,dyn-glob)
-		 (+mod+ ,(if create-return-mod
+		 (+mod+ ,(if create-mod
 			     
 			     `(make-module :globals-names  +mod-static-globals-names+
 					   :globals-values +mod-static-globals-values+
 					   :dyn-globals    +mod-dyn-globals+
-					   :name ,module-name)
+					   :name ,module-name
+					   :path ,module-path)
 			   existing-mod)))
 
-	    
+	    (declare (ignorable +mod-static-globals-names+
+				+mod-static-globals-values+
+				+mod-static-globals-builtin-values+
+				+mod-dyn-globals+
+				+mod+))
 	    ,@(when set-builtins
 		`((map-into +mod-static-globals-values+ #'identity +mod-static-globals-builtin-values+)))
 
@@ -946,22 +954,9 @@ XXX Make +mod-debug+ instead?")
 	      
 	      ,@body)
 
-	    #+(or)
-	    (loop for form in body collect
-		  `(with-pydecl
-		       ((:mod-globals-names  ,glob-names)
-			(:context            :module)
-			(:mod-futures        :todo-parse-module-ast-future-imports))
-		       
-		     (let ()
-		       ;; The LET prevents these forms from being walked into.
-		       ;; Without the LET, soms tests for PYDECL declarations fail because
-		       ;; environment is NIL during walking of top-level forms.
-		       ;; (Test case: module with "d=3" as contents.)
-		       ,form)))
-	    
-	    (when *module-hook*
-	      (funcall *module-hook* +mod+)))))
+	    ,@(when call-hook
+		`((when *module-hook*
+		    (funcall *module-hook* +mod+)))))))
 
 
 (defmacro create-module-globals-dict ()
@@ -990,32 +985,6 @@ XXX Make +mod-debug+ instead?")
 		(setf (gethash name dyn-globals) biv))))
 	(unbound-variable-error name)))))
 
-#||
-(class-del (name cls-namespace)
-	   (excl::fast
-	    (unless (py-del-subs cls-namespace name)
-	      (py-raise 'NameError "Cannot delete variable '~A': it is unbound [class]" name)))
-
-       
-	   ;; remove 'unused' warnings
-	   #'.globals.
-	   #'identifier-expr-module-lookup
-
-	   ;; "locals()" at the module level is equivalent to "globals()"
-       
-	   (macrolet ((.locals. () `(.globals.)))
-	 
-	     (with-pydecl
-		 ((:mod-globals-names  ,glob-names)
-		  (:context            :module)
-		  (:mod-futures        :todo-parse-module-ast-future-imports))
-	   
-	       ,@body))
-     
-	   ,@(when create-return-mod
-	       `(+mod+)))
-||#
-
 (defmacro module-stmt (suite) ;; &environment e)
   ;; A module is translated into a lambda that creates and returns a
   ;; module object. Executing the lambda will create a module object
@@ -1034,8 +1003,10 @@ XXX Make +mod-debug+ instead?")
 			   (make-array ,(length ast-globals) :initial-element nil) ;; not eval now
 			   (make-hash-table :test #'eq)
 			   :set-builtins t
-			   :create-return-mod t
-			   :module-name ,*current-module-name*)
+			   :create-mod t
+			   :call-hook t
+			   :module-name ,*current-module-name*
+			   :module-path ,*current-module-path*)
        ,suite)))
 
 (defmacro pass-stmt ()
@@ -1465,8 +1436,23 @@ Non-negative integer denoting the number of args otherwise."
       finally (return num)))
 
 
+(defun raise-invalid-key-arg-error (key allowed-keys)
+  (py-raise 'TypeError "Invalid key argument supplied to function: ~A (allowed keys: ~A)"
+	    key allowed-keys))
+
+(defun raise-double-arg-supplied-error (key)
+  (py-raise 'TypeError "Duplicate value for function argument named ~A" key))
+
+(defun raise-too-many-args-error ()
+  (py-raise 'TypeError "Too many arguments supplied to function"))
+
+(defun raise-too-few-args-error ()
+  (py-raise 'TypeError "Too few arguments supplied to function"))
+
+(defun raise-invalid-func-args-error ()
+  (py-raise 'TypeError "Number or type of arguments to function incorrect"))
+
 (defmacro py-arg-function (name (pos-args key-args *-arg **-arg) &body body)
-  
   ;; Non-consing argument parsing! (except when *-arg or **-arg
   ;; present)
   ;; 
@@ -1559,6 +1545,74 @@ Non-negative integer denoting the number of args otherwise."
 	     
 	     (locally #+(or)(declare (optimize (safety 3) (debug 3)))
 	       ,@body)))))))
+
+
+(define-compiler-macro py-arg-function (&whole whole name (pos-args key-args *-arg **-arg) &body body)
+  ;; Special code for "simple" cases, where function only has a few positional args
+  
+  (when (not (or key-args *-arg **-arg))
+    (case (length pos-args)
+      
+      (0 ;; No args
+       (return-from py-arg-function 
+	 `(excl:named-function ,name
+	    (lambda () ,@body))))
+      
+      (1 ;; One pos arg
+       (let ((pa (car pos-args))
+	     (e (gensym "e")))
+	 (return-from py-arg-function 
+	   
+	   `(excl:named-function ,name
+	      (lambda (,pa &optional ,e)
+		
+		(cond ((eq ,pa ,(intern (symbol-name pa) :keyword))
+		       (setf ,pa ,e))
+		      ((symbolp ,pa)
+		       (raise-invalid-key-arg-error nil nil))
+		      (,e
+		       (raise-too-many-args-error)))
+		,@body)))))
+      
+      (2 ;; Two pos args
+       (destructuring-bind (pa pb)
+	   pos-args
+	 (let ((ka (intern (symbol-name pa) :keyword))
+	       (kb (intern (symbol-name pb) :keyword))
+	       (e1 (gensym "e1"))
+	       (e2 (gensym "e2")))
+	   
+	   (return-from py-arg-function 
+	     
+	     `(excl:named-function ,name
+		(lambda (,pa ,pb &optional ,e1 ,e2)
+		
+		  (cond ((symbolp ,pa)
+			 ;; pa = x, pb = y
+			 (cond ((and (eq ,pa ,ka)
+				     (eq ,e1 ,kb))
+				(setf ,pa ,pb)
+				(setf ,pb ,e2))
+			       
+			       ((and (eq ,pa ,kb)
+				     (eq ,e1 ,ka))
+				(setf ,pa ,e2))
+			       
+			       (t (raise-invalid-func-args-error))))
+			
+			;; PA is not a symbol, so not NIL
+			;; x, pb=y
+			((eq ,pb ,kb)
+			 (setf ,pb ,e1))
+			
+			;; x, foo=y
+			(,e1
+			 (raise-invalid-func-args-error)))
+		  
+		  ,@body))))))))
+  
+  ;; Not only pos args, or more than two pos args
+  (return-from py-arg-function whole))
 
 
 
@@ -2146,4 +2200,33 @@ Non-negative integer denoting the number of args otherwise."
 	       (loop for i from 0 below 256
 		   do (set-macro-character (code-char i) f))
 	       (compile-file "b2.py"))
+||#
+
+#||
+(defun foo (x y &optional e1 e2)
+  (declare (optimize (speed 3) (safety 0) (debug 0)))
+  (tagbody
+    
+   0 (if (symbolp x)
+	 (progn (setf x y)
+		(go 2))
+       (go 1))
+    
+   1 (if (symbolp y)
+	 (progn (setf y e1)
+		(go ok))
+       (when e1
+	 (go error)))
+
+   2 (if (symbolp e1)
+	 (progn (setf y e2)
+		(go ok))
+       (setf y e1)
+       (when e2
+	 (go error)))
+   ok
+    (return-from foo (py-+ x y))
+    
+   error
+    (py-raise 'TypeError "Whatever")))
 ||#
