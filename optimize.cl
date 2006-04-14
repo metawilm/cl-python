@@ -17,6 +17,7 @@
 (defmethod py-iterate->lisp-list ((x list))
   x)
 
+#+(or) ;; already in classes.cl
 (defmethod map-over-py-object ((func function) (object t))
   (warn "map over ~A" object)
   (loop with it-fun = (get-py-iterate-fun object)

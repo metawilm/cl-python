@@ -13,7 +13,7 @@
 
 (def-py-method Exception.__new__ :static (cls &rest args)
 	       (declare (ignore args))
-	       (assert (subtypep cls (load-time-value (find-class 'Exception))))
+	       #+(or)(assert (subtypep cls (load-time-value (find-class 'Exception))))
 	       (make-instance cls))
 
 (def-py-method Exception.__init__ (x &rest args)
@@ -87,7 +87,7 @@
 
 (defun py-raise (exc-type string &rest format-args)
   "Raise a Python exception with given format string"
-  (error exc-type :args (apply #'format nil string format-args)))
+  (error exc-type :args (cons string format-args)))
 
 (defun py-raise-runtime-error ()
   ;; RuntimeError object is allocated at load-time, to prevent causing
@@ -97,7 +97,10 @@
 (defmethod print-object ((x Exception) stream)
   (format stream "~A~@[: ~@{~A~^, ~}~]"
 	  (class-name (class-of x))
-	  (slot-value x 'args)))
+	  
+	  (destructuring-bind (string . format-args)
+	      (slot-value x 'args)
+	    (apply #'format nil string format-args))))
 
 (def-py-method Exception.__repr__ (x)
   (with-output-to-string (s)

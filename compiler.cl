@@ -73,6 +73,22 @@
      ,@body))
 
 
+;; Sometimes Python code is macroexpanded without a real environment
+;; object (it's NIL). For example, the (ACL) compiler invokes CONSTANTP
+;; (which invokes MACROEXPAND) without environment.
+;; 
+;; Macros that really need a real environment (because they use certain
+;; PYDECL values) macroexpand into a form refering *the-great-unknown*,
+;; (which is an always-unbound dynamic variable). This way, the compiler
+;; can run CONSTANTP without problems, and our answer *the-great-unknown*
+;; gives the compiler the hint that the code is not constant.
+;; 
+;; XXX Why is in this case CONSTANTP not called with same ENV as the macro
+;; that called CONSTANTP uses?
+
+(defvar *the-great-unknown*)
+
+
 ;; Utils
 
 (defmacro with-gensyms (list &body body)
@@ -207,7 +223,9 @@ XXX Make +mod-debug+ instead?")
 			;; Inside a classdef, do not look at lexically visible vars
 			(:class     (if (member name (get-pydecl :lexically-declared-globals e))
 					(module-set)      
-				      (class-set))))))))))
+				      (class-set)))
+			
+			((nil) `*the-great-unknown*))))))))
 	
 	`(let ((,val ,value))
 	   ,@(mapcar #'assign-one targets))))))
@@ -423,6 +441,9 @@ XXX Make +mod-debug+ instead?")
 	   
 	   ,(when test `(when ,test (return-from :call-expr-block ,outcome)))
 	   
+	   (py-call (py-attr prim ',attr) ,@pos-args)
+	    
+	   #+(or)
 	   (let ((prim-attr (py-attr prim ',attr)))
 	     
 	     #||
@@ -536,7 +557,9 @@ XXX Make +mod-debug+ instead?")
 	   
 	   (:class    (if (member name (get-pydecl :class-globals e))
 			  (module-del)
-			(class-del)))))))))
+			(class-del)))
+	   
+	   ((nil)     `*the-great-unknown*)))))))
 
 (defmacro dict-expr (alist)
   `(make-dict-unevaled-list ,alist))
@@ -815,7 +838,9 @@ XXX Make +mod-debug+ instead?")
       (:class    `(or (gethash ',(symbol-name name) +cls-namespace+)
 		      ,(if (member name (get-pydecl :lexically-visible-vars e))
 			   (local-lookup)
-			 (module-lookup)))))))
+			 (module-lookup))))
+      
+      ((nil)     `*the-great-unknown*))))
 
 (defmacro if-stmt (if-clauses else-clause)
   `(cond ,@(loop for (cond body) in if-clauses
@@ -943,6 +968,7 @@ XXX Make +mod-debug+ instead?")
 				(null (svref +mod-static-globals-values+ ix)))
 		       (setf (svref +mod-static-globals-values+ ix) v))))
 	    
+	    #+(or) ;; debug
 	    (loop for n across +mod-static-globals-names+
 		for v across +mod-static-globals-values+
 		do (format t "~A: ~A~%" n v))

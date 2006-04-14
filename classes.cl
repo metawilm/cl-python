@@ -165,8 +165,9 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;
 ;;; This is a bit ugly, but method classes must be evaluated prior to their
-;;; use; therefore here are method classes, and below their methods.
+;;; use. Therefore here are method classes, and below their methods.
 ;;;
+;;; Note that PY-METHOD is not a Lisp FUNCTION.
 
 (defclass py-method (py-core-object)
   ((func :initarg :func :accessor py-method-func))
@@ -273,8 +274,8 @@
   ;;  2) all supers are subtype of 'py-dictless-object (to create new "regular user-level" class)
   
   (flet ((of-type-class (s) (typep s 'class))
-	 (subclass-of-py-dl-object-p (s) (subtypep s 'py-dictless-object))
-	 (subclass-of-py-type-p   (s) (subtypep s 'py-type)))
+	 (subclass-of-py-dl-object-p (s) (subtypep s (load-time-value (find-class 'py-dictless-object))))
+	 (subclass-of-py-type-p (s)      (subtypep s (load-time-value (find-class 'py-type)))))
     
     (unless (every #'of-type-class supers)
       (py-raise 'TypeError "Not all superclasses are classes (got: ~A)." supers))
@@ -313,7 +314,7 @@
 	(py-raise 'TypeError "Metaclass must be a class (got: ~A)" metaclass))
       
       (unless (or (eq metaclass (load-time-value (find-class 'py-meta-type)))
-		  (subtypep metaclass 'py-type))
+		  (subtypep metaclass (load-time-value (find-class 'py-type))))
 	(py-raise 'TypeError 
 		  "Metaclass must be subclass of `type' (got class: ~A)" metaclass))
       
@@ -324,7 +325,7 @@
       
       (when (member metaclass
 		    (load-time-value (list (find-class 'py-lisp-type))
-					   (find-class 'py-core-type)))
+				     (find-class 'py-core-type)))
 	(setf metaclass (load-time-value (find-class 'py-user-type))))
       
       
@@ -347,42 +348,49 @@
 	  "recur: no __new__ found for class ~A, yet it is a subclass of PY-TYPE ?!"
 	  metaclass)
 
-	(let ((bound-_new_ (and __new__ 
-				(bind-val __new__ metaclass (py-class-of metaclass)))))
+	#+(or)(warn "binding __new__: ~A ~A" __new__ metaclass)
 
-	  (assert bound-_new_ () "bound __new__ failed")
-	  #+(or)(warn "Calling this __new__ method: ~S" bound-_new_)
+	(let ((cls (if (eq __new__  
+			   ;; Optimize common case:  py-type.__new__
+			   ;; (As PY-ATTR is unavailable at load time, use DICT-GET)
+			   (load-time-value (dict-get (find-class 'py-type) '__new__)))
+		       
+		       (progn 
+			 #+(or)(warn "Inlining make-py-class")
+			 (py-type.__new__ metaclass
+					  (string name)
+					  supers ;; MAKE-TUPLE-FROM-LIST not needed
+					  namespace))
+		     
+		     (let ((bound-_new_ (bind-val __new__ metaclass (py-class-of metaclass))))
+		       ;; If __new__ is a static method, then bound-_new_ will
+		       ;; be the underlying function.
+		       
+		       (or 
+			(py-call bound-_new_
+				 metaclass
+				 (string name) 
+				 (make-tuple-from-list supers) ;; ensure not NIL
+				 namespace)
+			(break "Class' bound __new__ returned NIL: ~A" bound-_new_))))))
+
 	  
-	  ;; If __new__ is a static method, then bound-_new_ will
-	  ;; be the underlying function.
+	  ;; Call __init__ when the "thing" returned by
+	  ;; <metaclass>.__new__ is of type <metaclass>.
 	  
-	  ;; Note that all params must be Python vals, therefore
-	  ;; (string ..), make-tuple-...
-	  (let ((cls (py-call bound-_new_
-			      metaclass
-			      (string name) 
-			      (make-tuple-from-list supers)
-			      namespace)))
-	    
-	    #+(or)(warn "The __new__ method returned class: ~S" cls)
-	    (assert cls () "__new__ returned NIL: ~A" bound-_new_)
-	    
-	    ;; Call __init__ when the "thing" returned by
-	    ;; <metaclass>.__new__ is of type <metaclass>.
-	    
-	    (if (typep cls metaclass)
+	  (if (typep cls metaclass)
 		
-		(let ((__init__ (recursive-class-dict-lookup metaclass '__init__)))
-		  (if __init__
-		      (progn #+(or)(warn "  __init__ method is: ~A" __init__)
-			     (py-call __init__ cls))
-		    #+(or)(warn "No __init__ found, for class ~A returned by metaclass ~A"
-			  cls metaclass)))
-	      
-	      #+(or)(warn "Not calling __init__ method, as class ~A is not instance of metaclass ~A"
-		    cls metaclass))
+	      (let ((__init__ (recursive-class-dict-lookup metaclass '__init__)))
+		(if __init__
+		    (progn #+(or)(warn "  __init__ method is: ~A" __init__)
+			   (py-call __init__ cls))
+		  #+(or)(warn "No __init__ found, for class ~A returned by metaclass ~A"
+			      cls metaclass)))
 	    
-	    cls))))))
+	    #+(or)(warn "Not calling __init__ method, as class ~A is not instance of metaclass ~A"
+			cls metaclass))
+	  
+	  cls)))))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -704,18 +712,18 @@
 
 
 (def-py-method py-enumerate.__new__ :static (cls iterable)
-	       (assert (subtypep cls 'py-enumerate))
-	       (let ((gener (make-iterator-from-function
-			     :name :enumerater
-			     :func (let ((iter (get-py-iterate-fun iterable))
-					 (i 0))
-				     (lambda ()
-				       (let ((val (funcall iter)))
-					 (when val
-					   (prog1 
-					       (make-tuple-from-list (list i val))
-					     (incf i)))))))))
-		 (make-instance cls) :gener gener))
+  #+(or)(assert (subtypep cls 'py-enumerate))
+  (let ((gener (make-iterator-from-function
+		:name :enumerater
+		:func (let ((iter (get-py-iterate-fun iterable))
+			    (i 0))
+			(lambda ()
+			  (let ((val (funcall iter)))
+			    (when val
+			      (prog1 
+				  (make-tuple-from-list (list i val))
+				(incf i)))))))))
+    (make-instance cls) :gener gener))
 
 (def-py-method py-enumerate.__repr__ (x)
   (with-output-to-string (s)
@@ -896,33 +904,34 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 
 
 (def-py-method py-super.__new__ :static (cls class-arg &optional second-arg)
-	       (cond ((not (typep class-arg 'class))
-		      (py-raise 'TypeError
-				"First arg to super.__new__() must be class (got: ~A)"
-				class-arg))
-		     
-		     ((null second-arg)
-		      (warn "super() with one arg is TODO (faking for now)")
-		      (lambda (sec-arg) (py-super.__new__ cls class-arg sec-arg)))
-		     
-		     ((typep second-arg class-arg)
-		      ;; like:  super( <B class>, <C instance> )
-		      ;; in the CPL of class C, find the class preceding class B
-		      ;; 
-		      ;; CPython returns a `super' instance and not directly the
-		      ;; class to allow subclassing class `super' and overriding
-		      ;; the __getattribute__ method.
-		      
-		      (make-instance cls :object second-arg :current-class class-arg))
-		     
-		     ((typep second-arg 'class)
-		      (unless (subtypep second-arg class-arg)
-			(py-raise 'TypeError
-				  "When calling `super' with two classes: second must be ~
+  (cond ((not (typep class-arg 'class))
+	 (py-raise 'TypeError
+		   "First arg to super.__new__() must be class (got: ~A)"
+		   class-arg))
+	
+	((null second-arg)
+	 (warn "super() with one arg is TODO (faking for now)")
+	 (lambda (sec-arg) (py-super.__new__ cls class-arg sec-arg)))
+	
+	((typep second-arg class-arg)
+	 ;; like:  super( <B class>, <C instance> )
+	 ;; in the CPL of class C, find the class preceding class B
+	 ;; 
+	 ;; CPython returns a `super' instance and not directly the
+	 ;; class to allow subclassing class `super' and overriding
+	 ;; the __getattribute__ method.
+	 
+	 (make-instance cls :object second-arg :current-class class-arg))
+	
+	((typep second-arg 'class)
+	 (unless (or (eq second-arg class-arg) ;; <- efficiency optimization
+		     (subtypep second-arg class-arg))
+	   (py-raise 'TypeError
+		     "When calling `super' with two classes: second must be ~
                                    subclass of first (got: ~A, ~A)" class-arg second-arg))
-		      (make-instance cls :object second-arg :current-class class-arg))
-		     
-		     (t (error "TODO super clause?"))))
+	 (make-instance cls :object second-arg :current-class class-arg))
+	
+	(t (error "TODO super clause?"))))
 
 
 (def-py-method py-super.__getattribute__ (x attr)
@@ -1001,8 +1010,7 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 ;; None
 
 (defclass py-none (py-core-object) () (:metaclass py-core-type))
-
-(setf *the-none* (make-instance 'py-none))
+(defvar *the-none* (make-instance 'py-none))
 
 (defmethod make-load-form ((x (eql *the-none*)) &optional e)
   (declare (ignore e))
@@ -1019,7 +1027,7 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 ;; Ellipsis
 
 (defclass py-ellipsis (py-core-type) () (:metaclass py-core-type))
-(setf *the-ellipsis* (make-instance 'py-ellipsis))
+(defvar *the-ellipsis* (make-instance 'py-ellipsis))
 
 (defmethod make-load-form ((x (eql *the-ellipsis*)) &optional e)
   (declare (ignore e))
@@ -1028,7 +1036,7 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 
 ;; NotImlemented
 (defclass py-notimplemented (py-core-type) () (:metaclass py-core-type))
-(setf *the-notimplemented* (make-instance 'py-notimplemented))
+(defvar *the-notimplemented* (make-instance 'py-notimplemented))
 
 (defmethod make-load-form ((x (eql *the-notimplemented*)) &optional e)
   (declare (ignore e))
@@ -1044,12 +1052,19 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 ;; Object (User object)
 
 (defun bind-val (val x x.class)
-  
+  #+(or)(break "bind-val ~A ~A" val x)
   (let ((get-meth (recursive-class-dict-lookup
 		   (py-class-of val) '__get__)))
     (if get-meth
 	(py-call get-meth val (or x *the-none*) (or x.class *the-none*))
       val)))
+
+(define-compiler-macro bind-val (val x x.class)
+  `(locally (declare (notinline bind-val))
+     (let ((val ,val))
+       (if (functionp val)
+	   (make-instance 'py-bound-method :instance ,x :func val)
+	 (bind-val val ,x ,x.class)))))
 
 (defun py-get-dict-attr (x x.class)
   (or (dict x)
@@ -1132,6 +1147,13 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
     (when val
       (bind-val val x x.cls))))
     
+#+(or)
+(defun recursive-class-lookup-and-bind (x attr)
+  #+(or)(warn "recursive-class-lookup-and-bind ~A ~A" x attr)
+  (let* ((x.cls (py-class-of x))
+	 (val   (recursive-class-dict-lookup x.cls attr)))
+    (when val
+      (bind-val val x x.cls))))
 
 (def-py-method py-object.__get__ (value instance class)
   (declare (ignore instance class))
@@ -1140,32 +1162,35 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 ;; Type (User object)
 
 (def-py-method py-type.__new__ :static (metacls name supers^ dict)
-	       
-	       ;; deproxy supers, as it may be *the-empty-tuple* instance
-	       (unless (symbolp name)
-		 (let ((str (deproxy name)))
-		   (if (stringp str)
-		       (setf name (intern str #.*package*))
-		     (py-raise 'TypeError "Invalid class name: ~A" name))))
-	       
-	       (let* ((cls-type (if (and (some (lambda (s) (subtypep s 'py-type)) supers)
-					 (eq metacls 'py-type)) ;; XXX (subtypep meta pytype)?
-				    :metaclass
-				  :class))
-		      
-		      (c (mop:ensure-class
-			  (make-symbol (symbol-name name)) 
-			  :direct-superclasses (or supers
-						   (load-time-value
-						    (list (find-class 'py-user-object))))
-			  :metaclass (ecase cls-type
-				       (:metaclass (load-time-value (find-class 'py-meta-type)))
-				       (:class     metacls))
-			  :dict dict)))
-		 
-		 (mop:finalize-inheritance c)
-		 
-		 c))
+  
+  ;; deproxy supers, as it may be *the-empty-tuple* instance
+  (unless (symbolp name)
+    (let ((str (deproxy name)))
+      (if (stringp str)
+	  (setf name (intern str #.*package*))
+	(py-raise 'TypeError "Invalid class name: ~A" name))))
+  
+  (let* ((cls-type (if (and (some (lambda (s) (let ((pt (load-time-value (find-class 'py-type))))
+						(or (eq s pt)
+						    (subtypep s 'py-type))))
+				  supers)
+			    (eq metacls 'py-type)) ;; XXX (subtypep meta pytype)?
+		       :metaclass
+		     :class))
+	 
+	 (c (mop:ensure-class
+	     (make-symbol (symbol-name name)) 
+	     :direct-superclasses (or supers
+				      (load-time-value
+				       (list (find-class 'py-user-object))))
+	     :metaclass (ecase cls-type
+			  (:metaclass (load-time-value (find-class 'py-meta-type)))
+			  (:class     metacls))
+	     :dict dict)))
+    
+    (mop:finalize-inheritance c)
+    
+    c))
 
 (def-py-method py-type.__init__ (cls &rest args)
   (declare (ignore cls args))
@@ -1216,32 +1241,26 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 	 (return-from py-type.__call__
 	   (py-class-of (car args))))
 	
-	#+(or)
-	((subtypep cls 'py-type)
-	 ;; make a new class
-	 (error "__call__ on subclass of 'type': ?  shouldn't it use type.__new__?"))
-	
 	((eq cls (load-time-value (find-class 'py-object)))
 	 ;; object() -> an instance without __dict__
 	 (return-from py-type.__call__
 	   (make-instance 'py-dictless-object)))
 	
-	(t (let* ((__new__ (recursive-class-dict-lookup cls '__new__))
-		  #+(or)(dummy (progn
-			   (warn "~A" `(recursive-class-dict-lookup ,cls '__new__))
-			   (warn "~S.__new__ => ~S" cls __new__)))
-		  (inst (apply #'py-call __new__ cls args))) ;; including CLS as arg!
-	     (declare (ignore dummy))
-	     (when
-		 (subtypep (py-class-of inst) cls)
-		 #+(or)(typep inst cls)
-	       ;; don't do this when inst is not of type cls
-	       (let ((__init__ (recursive-class-lookup-and-bind inst '__init__)))
-		 (apply #'py-call __init__ args)))
+	(t (if (eq cls (load-time-value (find-class 'py-type)))
+	       
+	       ;; Inline common case: creating new classes with TYPE as requested metaclass
+	       (apply #'py-type.__new__ cls args)
 	     
-	     (return-from py-type.__call__
+	     (let* ((__new__ (recursive-class-dict-lookup cls '__new__)) ;; XXX bind __new__?
+		    (inst    (apply #'py-call __new__ cls args))) ;; including CLS as arg!
+	       
+	       (when (or (eq (class-of inst) cls) ;; <- Efficiency optimization
+			 (subtypep (py-class-of inst) cls)) ;; <- real test
+		 ;; Don't do this when inst is not of type cls
+		 (let ((__init__ (recursive-class-lookup-and-bind inst '__init__)))
+		   (apply #'py-call __init__ args)))
+	       
 	       inst)))))
-
 
 ;; Module (User object)
 
@@ -1403,7 +1422,7 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 				      do (set-macro-character (code-char i) f t rt))
 				  rt))))
 	     
-	     (declare (special *current-module-name*))
+	     (declare (special *current-module-name* *current-module-path*))
 	     (compile-file py-fname
 			   :output-file fasl-fname
 			   :if-newer t
@@ -2774,7 +2793,7 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 
 ;;; Attributes are a fundamental thing: getting, setting, deleting
 
-(defun py-attr (x attr)
+(defun py-attr (x attr &key (bind-class-attr t) via-getattr)
   ;; ATTR may be a symbol, a string, or instance of user-defined subclass of string
   (let* ((class-attr-val   nil)
 	 (__getattr__      nil)
@@ -2808,7 +2827,7 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 	      (when (and getattribute-meth
 			 (not (eq getattribute-meth #'py-object.__getattribute__)))
 		(setf __getattribute__ getattribute-meth)
-		(handler-case 
+		(handler-case
 		    (values (py-call (bind-val getattribute-meth x x.class) attr.as_string))
 		  (AttributeError () 
 		    #+(or)(warn "__getattribute__ ~S ~S gave exception; also trying __getattr__ (if any)"
@@ -2870,7 +2889,8 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
       (when (dict x)
 	(let ((val (dict-get x attr.as_string)))
 	  (when val
-	    (cond ((subtypep (py-class-of x) (load-time-value (find-class 'py-type)))
+	    (cond ((or (eq (class-of x) (load-time-value (find-class 'py-type))) ;; <- eff. opt.
+		       (subtypep (py-class-of x) (load-time-value (find-class 'py-type))))
 		   
 		   ;; XXX check the exact condition under which binding
 		   ;; of instance dict item occurs
@@ -2883,9 +2903,18 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 		       val)))))))
     
     ;; Fall back to a class attribute that is not a `data descriptor'.
+    #+(or)
     (when class-attr-val
       (return-from py-attr
 	(bind-val class-attr-val x x.class)))
+    
+    (when class-attr-val
+      (return-from py-attr
+	(if (and (not bind-class-attr)
+		 (functionp class-attr-val))
+	    (values :class-attr class-attr-val x)
+	  (bind-val class-attr-val x x.class))))
+
 
     ;; Right place??
     #||
@@ -2908,7 +2937,9 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
     ||#
     
     ;; Give up.
-    (py-raise 'AttributeError "No such attribute: ~A `~A' (class: ~A)" x attr (py-class-of x))))
+    (if via-getattr
+	(throw :getattr-block :py-attr-not-found)
+      (py-raise 'AttributeError "No such attribute: ~A `~A' (class: ~A)" x attr (py-class-of x)))))
 
 
 (defun (setf py-attr) (val x attr)
@@ -3026,6 +3057,9 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 	     (if __call__
 		 (apply #'py-call __call__ args)
 	       (error "Don't know how to call: ~S (args: ~A)" f args))))
+
+  ;; XXX For bound/unbound/static method: need to check if object is
+  ;; not instance of (user-defined) subclass?
   
   (:method ((f py-bound-method) &rest args)
 	   (apply #'py-bound-method.__call__ f args))
@@ -3045,14 +3079,59 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 ;; in that this function is used many times in this module already,
 ;; and we benefit from inlining it.
 
-#+(or) ;; issue
-(define-compiler-macro py-call (x &rest args)
-  (warn "x: ~A" x)
-  `(let ((.x ,x))
-     (if (functionp .x)
-	 :foo
-       (locally (declare (notinline py-call))
-	 (py-call .x ,@args)))))
+(define-compiler-macro py-call (&whole whole prim &rest args)
+  (declare (ignorable whole))
+  #+(or)(warn "py-call ~A" whole)
+  `(locally (declare (notinline py-call))
+     
+     ,(cond ((and (listp prim)
+		  (eq (first prim) 'py-attr)
+		  (= (length prim) 3))
+	     
+	     ;; Optimize  (py-call (bind-val val x x.class) ..args..)
+	     ;; where val is a function and x an instance, so it doesn't allocate
+	     ;; bound method.
+	     
+	     (warn "inlining (py-call (py-attr ..) ..):  ~A.~A(..)" (second prim) (second (third prim)))
+	     (destructuring-bind (x attr) (cdr prim)
+	       (assert (and (listp attr)
+			    (eq (first attr) 'quote)
+			    (symbolp (second attr))))
+	       `(multiple-value-bind (a b c)
+		    (py-attr ,x ,attr :bind-class-attr nil)
+		  (if (eq a :class-attr)
+		      (progn #+(or)(assert (functionp b))
+			     #+(or)(warn "saving bound method ~A ~A" b c)
+			     (funcall b c ,@args))
+		    (py-call a ,@args)))))
+	    
+	    
+	    ((and (listp prim)
+		  (eq (first prim) 'bind-val)
+		  (= (length prim) 4))
+	     
+	     ;; Optimize  (py-call (bind-val val x x.class) ..args..)
+	     ;; where val is a function and x an instance, so it doesn't allocate
+	     ;; bound method.
+
+	     (warn "inlining (py-call (bind-val ..) ..) ~A" whole)
+	     (destructuring-bind (val x x.class) (cdr prim)
+	       `(let ((val ,val)
+		      (x ,x)
+		      (x.class ,x.class))
+		  (if (functionp val) ;; XXX Maybe check for user-defined subclasses of function?
+		      (progn #+(or)(warn "saving binding ~A" ',whole)
+			     (funcall val x ,@args))
+		    (py-call (bind-val val x x.class) ,@args)))))
+	    
+	    (t 
+	     ;; Optimize case where PRIM is a function.
+	     `(let ((.prim ,prim))
+		(if (functionp .prim)
+		    (progn #+(or)(warn "inlining py-call <function> ~A" .prim)
+			   (funcall (the function .prim) ,@args))
+		  (py-call .prim ,@args)))))))
+
 
 #||
   `(let ((.x ,x))
@@ -3643,6 +3722,4 @@ next value gotten by iterating over X. Returns NIL, NIL upon exhaustion.")
 	     (py-call write-func (py-string-from-char #\Newline))))
       ||#
       )))
-
-
 

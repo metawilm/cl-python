@@ -328,12 +328,19 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
 (defun pybf:getattr (x attr &optional default)
   "Return the value of attribute NAME of X. ~@
    If attribute doesn't exist, returns supplied DEFAULT or raises AttributeError."
-  (handler-case
-      (values (py-attr x attr))
-    (AttributeError () (or default
-			   (py-raise 'AttributeError
-				     "[getattr:] ~A has no attr `~A'" x attr)))
-    (:no-error (val) val)))
+  
+  (let ((val (catch :getattr-block
+	       (handler-case
+		   (values (py-attr x attr :via-getattr t))
+		 (AttributeError () :py-attr-not-found)
+		 (:no-error (val) val)))))
+    
+    (if (eq val :py-attr-not-found)
+	
+	(or default
+	    (py-raise 'AttributeError "[getattr:] ~A has no attr `~A'" x attr))
+      
+      val)))
 
 (defun pybf:globals ()
   "Return a dictionary (namespace) representing the current global symbol table. ~@
@@ -629,11 +636,11 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
 
 ;;; 3) Built-in values
 
-(defconstant pybv:None           *the-none*           )
-(defconstant pybv:Ellipsis       *the-ellipsis*       )
-(defconstant pybv:True           *the-true*           )
-(defconstant pybv:False          *the-false*          )
-(defconstant pybv:NotImplemented *the-notimplemented* )
+(defvar pybv:None           *the-none*           )
+(defvar pybv:Ellipsis       *the-ellipsis*       )
+(defvar pybv:True           *the-true*           )
+(defvar pybv:False          *the-false*          )
+(defvar pybv:NotImplemented *the-notimplemented* )
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;

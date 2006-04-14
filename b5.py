@@ -2,6 +2,7 @@
 # Test existence and performance of builtins that aren't used elsewhere
 
 show = True
+__debug__ = False
 
 def check(a, b):
     if __debug__:
@@ -301,7 +302,6 @@ def check_descriptors(i, j):
             return s
 
     def checks():
-        print "checks..."
         check(C(1), None)
         c1 = C()
         exception(AttributeError, getattr, c1, 'booh')
@@ -311,11 +311,8 @@ def check_descriptors(i, j):
         setattr(c1, "x", 42)
         check(c1.x, 42)
         ## check(c1._C__x, 42) ## TODO -WB
-        print 'a'
         check(c1.xx, 42)
-        print 'b'
         exception(AttributeError, delattr, c1, "xx")
-        print 'c'
         del c1.x
         exception(AttributeError, getattr, c1, "x")
         exception(AttributeError, getattr, c1, "xx")
@@ -333,9 +330,7 @@ def check_descriptors(i, j):
         exception(RuntimeError, setattr, c1, "foo", 42)
         c1.bar = "hello"
         check(c1.bar, "hello")
-        print "aap"
         exception(IndexError, getattr, c1, "spam")
-        print "noot"
         check(getattr(c1, "hello"), "booh")
         B = C.__bases__[-1]
         save = B.__getattribute__
@@ -347,10 +342,8 @@ def check_descriptors(i, j):
         check(c1.hello, 42)
         C.__getattribute__ = save2
         B.__getattribute__ = save
-        print "aap2"
         exception(IndexError, getattr, c1, "spam")
         exception(IndexError, getattr, c1, "spam", None)
-        print "noot2"
         check(getattr(c1, "hello"), "booh")
 
     checks()
