@@ -325,6 +325,36 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
 			   when (py-val->lisp-bool (py-call func x))
 			   collect x)))
 
+
+(defun pybf:getattr (x attr &optional default)
+  ;; Exceptions raised during py-attr are not catched.
+  (let ((val (catch :getattr-block
+	       (handler-case
+		   (py-attr x attr :via-getattr t)
+		 (AttributeError () :py-attr-not-found)))))
+    
+    (if (eq val :py-attr-not-found)
+	(or default
+	    (py-raise 'AttributeError "[getattr:] ~A has no attr `~A'" x attr))
+      val)))
+
+(defun pybf::getattr-nobind (x attr &optional default)
+  ;; Exceptions raised during py-attr are not catched.
+  ;; Returns :class-attr <meth> <inst>
+  ;;      or <value>
+  (multiple-value-bind (a b c)
+      (catch :getattr-block
+	       (handler-case
+		   (py-attr x attr :via-getattr t :bind-class-attr nil)
+		 (AttributeError () nil)))
+    (case a
+      (:class-attr (values a b c))
+      ((nil)       (or default
+		       (py-raise 'AttributeError
+				 "[getattr:] ~A has no attr `~A'" x attr)))
+      (t           a))))
+
+#+(or) ;; groks AttributeError, which is wrong (i think)
 (defun pybf:getattr (x attr &optional default)
   "Return the value of attribute NAME of X. ~@
    If attribute doesn't exist, returns supplied DEFAULT or raises AttributeError."
@@ -341,6 +371,9 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
 	    (py-raise 'AttributeError "[getattr:] ~A has no attr `~A'" x attr))
       
       val)))
+
+
+
 
 (defun pybf:globals ()
   "Return a dictionary (namespace) representing the current global symbol table. ~@

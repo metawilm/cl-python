@@ -6,6 +6,7 @@ def depth0(n):
     return n
 
 def depth1(n, pea):
+    print "depth1: ", n
     p = (pea, pea)
     for i in xrange(n):
         p = (p, pea)
@@ -29,6 +30,7 @@ def main():
         if n != base+1:
             raise RuntimeError, (n, base)
         base -= 1
+        print "base", base
     print base == 0
     del pea[:]
 

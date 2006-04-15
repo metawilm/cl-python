@@ -107,6 +107,13 @@
 	(string (schar x i2))
       (call-next-method))))
 
+(defmethod py-subs ((x list) (item fixnum)) ;; tuple
+  (when (< item 0)
+    (setf x    (nthcdr (- item) x)
+	  item 0))
+  (or (nth item x)
+      (call-next-method)))
+
 (defmethod (setf py-subs) (val (x vector) (item fixnum))
   (let* ((x.len (length x))
 	 (i2 (if (< item 0) (+ item x.len) item)))
@@ -129,17 +136,22 @@
     (setf (gethash item x) val)))
 
 ;;; Comparison: ==
-#+(or)
-(define-compiler-macro py-== (&whole whole x y)
-  #+(or)(warn "comp mac for == ~A ~A" x y)
-  (cond ((comp-opt-p :inline-number-math)
-	 `(let ((left ,x) (right ,y))
-	    (if (and (excl:fixnump left) (excl:fixnump right))
-		(fast (py-bool (= (the fixnum left) (the fixnum right))))
-	      (locally (declare (notinline py-==))
-		(py-== left right)))))
-	
-	(t whole)))
+
+(define-compiler-macro py-== (x y)
+  `(let ((.x ,x)
+	 (.y ,y))
+     (if (and (integerp .x) (integerp .y))
+	 (py-bool (= .x .y))
+       (locally (declare (notinline py-==))
+	 (py-== .x .y)))))
+
+(define-compiler-macro py-!= (x y)
+  `(let ((.x ,x)
+	 (.y ,y))
+     (if (and (integerp .x) (integerp .y))
+	 (py-bool (/= .x .y))
+       (locally (declare (notinline py-!=))
+	 (py-!= .x .y)))))
 
 (defmethod py-== ((x fixnum) (y fixnum)) (py-bool (= x y)))
 (defmethod py-== ((x string) (y string)) (py-bool (string= x y)))
@@ -157,61 +169,49 @@
 
 ;;; Arithmetic: + * // etc
 
-#+(or)
-(define-compiler-macro py-+ (&whole whole x y)
-  #+(or)(warn "comp mac for + ~A ~A" x y)
-  (cond ((comp-opt-p :inline-number-math)
-	 `(let ((left ,x) (right ,y))
-	    (if (and (excl:fixnump left) (excl:fixnump right))
-		(+ (the fixnum left) (the fixnum right))
-	      (locally (declare (notinline py-+))
-		(py-+ left right)))))
-	
-	(t whole)))
+(define-compiler-macro py-+ (x y)
+  `(let ((.x ,x)
+	 (.y ,y))
+     (if (and (integerp .x) (integerp .y))
+	 (+ .x .y)
+       (locally (declare (notinline py-+))
+	 (py-+ .x .y)))))
 
-#+(or)
-(define-compiler-macro py-* (&whole whole x y)
-  #+(or)(warn "comp mac for * ~A ~A" x y)
-  (cond ((comp-opt-p :inline-number-math)
-	 `(let ((left ,x) (right ,y))
-	    (if (and (integerp left) (integerp right))
-		(fast (* (the integer left) (the integer right)))
-	      (locally (declare (notinline py-*))
-		(py-* left right)))))
-	
-	(t whole)))
+(define-compiler-macro py-* (x y)
+  `(let ((.x ,x)
+	 (.y ,y))
+     (if (and (integerp .x) (integerp .y))
+	 (* .x .y)
+       (locally (declare (notinline py-*))
+	 (py-* .x .y)))))
 
-#+(or)
-(define-compiler-macro py-// (&whole whole x y)
-  #+(or)(warn "comp mac for // ~A ~A" x y)
-  (cond ((comp-opt-p :inline-number-math)
-	 `(let ((left ,x) (right ,y))
-	    (if (and (integerp left) (integerp right))
-		(fast (floor (the integer left) (the integer right)))
-	      (locally (declare (notinline py-//))
-		(py-// left right)))))
-	
-	(t whole)))
+(define-compiler-macro py-- (x y)
+  `(let ((.x ,x)
+	 (.y ,y))
+     (if (and (integerp .x) (integerp .y))
+	 (- .x .y)
+       (locally (declare (notinline py--))
+	 (py-- .x .y)))))
 
+(define-compiler-macro py-// (x y)
+  `(let ((.x ,x)
+	 (.y ,y))
+     (if (and (integerp .x) (integerp .y))
+	 (floor .x .y)
+       (locally (declare (notinline py-//))
+	 (py-// .x .y)))))
 
-#+(or)
-(define-compiler-macro py-% (&whole whole x y)
-  #+(or)(warn "comp mac for % ~A ~A" x y)
-  (cond ((comp-opt-p :inline-number-math)
-	 `(let ((left ,x) (right ,y))
-	    
-	    (cond ((and (integerp left) (integerp right))
-		   (fast (mod (the integer left) (the integer right))))
-		  
-		  ((stringp left)
-		   (py-string.__mod__ left right))
-		  
-		  (t 
-		   (locally (declare (notinline py-%))
-		     (py-% left right))))))
-	
-	(t whole)))
-
+(define-compiler-macro py-% (x y)
+  (if (stringp x)
+    
+      `(py-string.__mod__ ,x ,y)
+    
+    `(let ((.x ,x)
+	   (.y ,y))
+       (if (and (integerp .x) (integerp .y))
+	   (mod .x .y)
+	 (locally (declare (notinline py-%))
+	   (py-% .x .y))))))
 
 (defmethod py-% ((x fixnum) (y fixnum)) (mod x y))
 (defmethod py-% ((x string) y) (py-string.__mod__ x y))
@@ -220,6 +220,35 @@
 (defmethod py-^ ((x integer) (y integer)) (logxor x y))
 (defmethod py-& ((x integer) (y integer)) (logand x y))
 
+(defmethod py-+  ((x number) (y number))   (+ x y))
+(defmethod py--  ((x integer) (y integer)) (- x y))
+(defmethod py-// ((x integer) (y integer)) (floor x y))
+
+;; Augmented assignment
+
+(defmethod py-+= ((x string) y) 
+  (declare (ignore y))
+  nil)
+
+(defmethod py-+= ((x number) y) 
+  (declare (ignore y))
+  nil)
+
+(defmethod py--= ((x number) y) 
+  (declare (ignore y))
+  nil)
+
+(defmethod py-*= ((x number) y) 
+  (declare (ignore y))
+  nil)
+
+(defmethod py-/= ((x number) y)
+  (declare (ignore y))
+  nil)
+
+(defmethod py-//= ((x number) y)
+  (declare (ignore y))
+  nil)
 
 (defun py-print-cmhelper (x stream)
   ;; Quickly prints obj to stdout
@@ -274,7 +303,7 @@
 	 ;; Newline after last item
 	 ,(unless comma?
 	    `(progn (excl::fast-write-char #\Newline stdout)
-		    (force-output stdout)))
+		    #+(or)(force-output stdout)))
 	 
 	 ;; Return value:
 	 nil)

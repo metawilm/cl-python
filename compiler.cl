@@ -256,9 +256,8 @@ XXX Make +mod-debug+ instead?")
 				   (ev-val  ,val)
 				   (place-val-now (attributeref-expr ev-prim ,attr)))
 			      
-			      (or (funcall (function ,py-@=) place-val-now ev-val)
-				  (let ((new-val (funcall (function ,py-@)
-							  place-val-now ev-val)))
+			      (or (,py-@= place-val-now ev-val)
+				  (let ((new-val (,py-@ place-val-now ev-val)))
 				    (assign-stmt new-val
 						 ((attributeref-expr ev-prim ,attr))))))))
 			 
@@ -268,26 +267,27 @@ XXX Make +mod-debug+ instead?")
 				   (ev-val  ,val)
 				   (place-val-now (subscription-expr ev-prim ev-sub)))
 			  
-			      (or (funcall (function ,py-@=) place-val-now ev-val)
-				  (let ((new-val (funcall (function ,py-@)
-							  place-val-now ev-val)))
+			      (or (,py-@= place-val-now ev-val)
+				  (let ((new-val (,py-@ place-val-now ev-val)))
 				    (assign-stmt new-val
 						 ((subscription-expr ev-prim ev-sub))))))))
       
       (identifier-expr `(let* ((ev-val        ,val)
-			       (place-val-now ,place))
-			  
-			  (or (funcall (function ,py-@=) place-val-now ev-val)
-			      (let ((new-val (funcall (function ,py-@)
-						      place-val-now ev-val)))
+			       (place-val-now ,place)			       
+			       
+			       ;; The @= functions are not defined on numbers and strings.
+			       ;; Check for fixnum inline.
+			       (@=-result (unless (excl::fixnump place-val-now)
+					    (,py-@= place-val-now ev-val))))
+			  (or @=-result
+			      (let ((new-val (,py-@ place-val-now ev-val)))
 				(assign-stmt new-val (,place)))))))))
 
 (defmacro backticks-expr (item)
   `(py-repr ,item))
 
 (defmacro binary-expr (op left right)
-  (let ((py-@ (get-binary-op-func-name op)))
-    `(funcall (function ,py-@) ,left ,right)))
+  `(,(get-binary-op-func-name op) ,left ,right))
 
 (defmacro binary-lazy-expr (op left right)
   (ecase op
@@ -326,32 +326,59 @@ XXX Make +mod-debug+ instead?")
 		     collect (intern (symbol-name key) :keyword)
 		     collect val)))
     
-    (if (and (listp primary)
-	     (eq (car primary) 'attributeref-expr)
-	     (null (or kwd-args *-arg **-arg)))
-	
-	(destructuring-bind (obj (identifier-expr attr)) (cdr primary)
-	  (assert (eq identifier-expr 'identifier-expr))
-	  `(py-attr-call ,obj ,attr ,@pos-args))
-	
-      `(let* ((prim ,primary))
-	 
-	 #||
-	 (when (call-expr-special-p prim)
-	   (setf prim (call-expr-special prim (.locals.) (.globals.))))
-	 ||#
-	 
-	 ,(cond ((or kw-args **-arg)
-		 `(call-expr-pos+*+kw+** prim (list ,@pos-args) ,*-arg (list ,@kw-args) ,**-arg))
-		
-		((and pos-args *-arg)
-		 `(call-expr-pos+* prim (list ,@pos-args) ,*-arg))
-		
-		(*-arg
-		 `(call-expr-* prim ,*-arg))
-		
-		(t
-		 `(py-call prim ,@pos-args)))))))
+    (cond (;; Optimize x.y( ...), saving allocation of bound methdo
+	   
+	   (and (listp primary) 
+		(eq (car primary) 'attributeref-expr)
+		(null (or kwd-args *-arg **-arg)))
+	   
+	   (destructuring-bind (obj (identifier-expr attr)) (cdr primary)
+	     (assert (eq identifier-expr 'identifier-expr))
+	     `(py-attr-call ,obj ,attr ,@pos-args)))
+	  
+	  
+	  (;; Optimize "getattr(x,y)(...)" where getattr(x,y) is a function.
+	   ;; This saves allocation of bound method
+	   
+	   (and (listp primary)
+		(eq (first primary) 'call-expr)
+		(equal (second primary) '(identifier-expr getattr))
+		(not (or kwd-args *-arg **-arg))
+		(destructuring-bind (p k s ss)
+		    (third primary)
+		  (and (= 2 (length p))
+		       (not (or k s ss)))))
+	   
+	   ;; As primary is IDENTIFIER-EXPR, accessing it is side effect-free.
+	   #+(or)(warn "Inlining:  getattr(x,y)(...)")
+	   `(if (eq ,(second primary) (symbol-function 'pybf:getattr))
+	       
+		,(destructuring-bind ((obj attr) k s ss)
+		     (third primary)
+		   (declare (ignore k s ss))
+		   `(multiple-value-bind (.a .b .c)
+			(pybf::getattr-nobind ,obj ,attr #.*package*)
+		      (if (eq .a :class-attr)
+			  (progn (warn "getattr: saved bound method")
+				 (funcall .b .c ,@pos-args))
+			(py-call .a ,@pos-args))))
+
+	      (py-call ,primary ,@pos-args)))
+	  
+	  
+	  ;; XXX todo: Optimize obj.__get__(...) in b0.py
+	  
+	  (t (cond ((or kw-args **-arg)
+		    `(call-expr-pos+*+kw+** ,primary (list ,@pos-args) ,*-arg (list ,@kw-args) ,**-arg))
+		   
+		   ((and pos-args *-arg)
+		    `(call-expr-pos+* ,primary (list ,@pos-args) ,*-arg))
+		   
+		   (*-arg
+		    `(call-expr-* ,primary ,*-arg))
+		   
+		   (t
+		    `(py-call ,primary ,@pos-args)))))))
 
 (defun call-expr-pos+*+kw+** (prim pos-args *-arg kw-args **-arg)
   (apply #'py-call prim
@@ -400,60 +427,21 @@ XXX Make +mod-debug+ instead?")
       (eq prim (load-time-value #'pybf:eval))))
 ||#
 
-(defmacro py-attr-call (prim attr &rest pos-args)
+(defmacro py-attr-call (prim attr &rest args)
   ;; A method call with only positional args: <prim>.<attr>(p1, p2, .., pi)
-  (let ((len (length pos-args)))
-
-    ;; Inline calls to commonly called methods.
-    ;; 
-    ;; XXX This optimization should be considered for all methods on
-    ;; built-in types, by looking for bi-classes that have a method
-    ;; (or attribute) <ATTR>.
-    
-    (multiple-value-bind (test outcome)
-	(cond ((and (eq attr 'isspace) (= len 0))
-	       (values `(stringp prim) `(py-string.isspace prim)))
-	      
-	      ((and (eq attr 'append) (= len 1))
-	       (values `(vectorp prim) `(py-list.append prim ,@pos-args)))
-	      
-	      ((and (eq attr 'isalpha) (= len 0))
-	       (values `(stringp prim) `(py-string.isalpha prim)))
-	      
-	      ((and (eq attr 'isalnum) (= len 0))
-	       (values `(stringp prim) `(py-string.isalnum prim)))
-	      
-	      ((and (eq attr 'isdigit) (= len 0))
-	       (values `(stringp prim) `(py-string.isdigit prim)))
-	      
-	      ((and (eq attr 'keys) (= len 0))
-	       (values `(hash-table-p prim) `(py-dict.keys prim)))
-	      
-	      ((and (eq attr 'sort) (= len 0))
-	       (values `(vectorp prim) `(py-list.sort prim)))
-	      
-	      ((and (eq attr 'next) (= len 0))
-	       (values `(typep prim ,(find-class 'py-func-iterator))
-		       `(py-func-iterator.next prim))))
-      
-      `(block :call-expr-block
-	 (let* ((prim ,prim))
-	   
-	   ,(when test `(when ,test (return-from :call-expr-block ,outcome)))
-	   
-	   (py-call (py-attr prim ',attr) ,@pos-args)
-	    
-	   #+(or)
-	   (let ((prim-attr (py-attr prim ',attr)))
-	     
-	     #||
-	     (when (call-expr-special-p prim-attr)
-	       (setf prim-attr (call-expr-special prim-attr (.locals.) (.globals.))))
-	     ||#
-	     
-	     (py-call prim-attr ,@pos-args)))))))
   
+  #||
+  (if (inlineable-method-p attr args)
 
+      `(with-eval-once-form (x prim)
+	 ,(multiple-value-bind (test outcome)
+	      (inlineable-method-code x attr args)
+	    `(if ,test
+		 ,outcome
+	       (py-call (py-attr ,x ',attr) ,@args)))))
+    ||#  
+    `(py-call (py-attr ,prim ',attr) ,@args))
+	    
 
 (defmacro classdef-stmt (name inheritance suite &environment e)
   ;; todo: define .locals. containing class vars
@@ -1186,6 +1174,32 @@ XXX Make +mod-debug+ instead?")
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;
+;;; Detecting whether we need to use gensyms in order to evaluate a form just
+;;; once.
+
+(defmacro with-eval-once-form ((evaled-var form) &body body)
+  (let ((var-needed (cond ((and (listp form)
+				(= (length form) 2)
+				(eq (car form) 'identifier-expr))
+			   t)
+			  
+			  ((listp form)
+			   ;; self-evaluating
+			   nil)
+			  
+			  (t nil))))
+    (if var-needed
+	
+	`(with-gensyms (evaled)
+	   `(let ((,evaled ,form))
+	      ,(let ((evaled-var evaled))
+		 ,@body)))
+      
+      `(let ((,evaled-var ,form))
+	 ,@body))))
+	   
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;
@@ -1209,6 +1223,79 @@ XXX Make +mod-debug+ instead?")
 	       (symbol-value sym))
 	      ((eq pkg (load-time-value (find-package :python-builtin-clpy)))
 	       (symbol-function sym)))))))
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;
+;;; Inlining of method calls on built-in objects
+
+(defparameter *inlineable-methods* (make-hash-table :test #'eq))
+
+(defun register-inlineable-methods ()
+  (clrhash *inlineable-methods*)
+  (loop for item in
+	'((isalpha 0 stringp      py-string.isalpha)
+	  (isalnum 0 stringp      py-string.isalnum)
+	  (isdigit 0 stringp      py-string.isdigit)
+	  (islower 0 stringp      py-string.islower)
+	  (isspace 0 stringp      py-string.isspace)
+	  (join    0 stringp      py-string.join   )
+	  (lower   0 stringp      py-string.lower  )
+	  (strip   0 stringp      py-string.strip  )
+	  (upper   0 stringp      py-string.upper  )
+	  	  
+	  (keys    0 hash-table-p py-dict.keys     )
+	  (items   0 hash-table-p py-dict.items    )
+	  (values  0 hash-table-p py-dict.values   )
+	  	  
+	  (next    0 py-func-iterator-p py-func-iterator.next)
+	  
+	  (read      (0 . 1) filep  py-file.read     )   
+	  (readline  (0 . 1) filep  py-file.readline )   
+	  (readlines (0 . 1) filep  py-file.readlines)   
+	  (xreadlines 0      filep  py-file.xreadlines)
+	  (write      1      filep  py-file.write  )
+	  
+	  (append  1       vectorp  py-list.append )
+	  (sort    0       vectorp  py-list.sort   )
+	  (pop     (0 . 1) vectorp  py-list.pop    ))
+	
+      do (when (gethash (car item) *inlineable-methods*)
+	   (warn "Replacing existing entry in *inlineable-methods* for attr ~A:~% ~A => ~A"
+		 (car item) (gethash (car item) *inlineable-methods*) (cdr item)))
+	 (setf (gethash (car item) *inlineable-methods*) (cdr item))))
+
+(register-inlineable-methods)
+
+(defun inlineable-method-p (attr args)
+  (let ((item (gethash attr *inlineable-methods*)))
+    (when item
+      (destructuring-bind (req-args check func) 
+	  item
+	(declare (ignore check func))
+	(etypecase req-args
+	  (integer (= (length args) req-args))
+	  (cons    (= (car req-args) (length args) (cdr req-args))))))))
+
+(defun inlineable-method-code (prim attr args)
+  (let ((item (gethash attr *inlineable-methods*)))
+    (assert item)
+    
+    (destructuring-bind (req-args check func) 
+	item
+      (assert (etypecase req-args
+		(integer (= (length args) req-args))
+		(cons    (<= (car req-args) (length args) (cdr req-args)))))
+      
+      (let ((check-code (ecase check
+			  ((stringp vectorp hash-table-p) `(,check ,prim))
+			  (filep   `(eq (class-of ,prim)
+					(load-time-value (find-class 'py-func-iterator))))
+			  
+			  (py-func-iterator-p `(eq (class-of ,prim) 
+						   (load-time-value (find-class 'py-func-iterator))))))
+	    (run-code `(,func ,prim ,@args)))
+	(values check-code run-code)))))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -1763,7 +1850,7 @@ Non-negative integer denoting the number of args otherwise."
 ;;;
 ;;; Exceptions: convert Lisp conditions to Python exceptions
 
-(defparameter *max-py-error-level* 100000) ;; should be >= 1000 later on (for b1.py)
+(defparameter *max-py-error-level* 1000) ;; max number of nested try/except; for b1.py
 (defvar *with-py-error-level* 0)
 
 (defun check-max-with-py-error-level ()

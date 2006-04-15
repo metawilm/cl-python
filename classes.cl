@@ -233,27 +233,36 @@
        (let* ((cls (or (find-class ',cls) (error "No such class: ~A" ',cls))))
 	 (unless (dict cls)
 	   (error "Class ~A has no dict" cls))
-	 (setf (dict-get cls ',meth)
-	   ,(ecase (car modifiers)
-	      ((nil)                `(function ,cls.meth))
-	      (:static              `(make-instance 'py-static-method
-				       :func (function ,cls.meth)))
-	      (:attribute           `(make-instance 'py-attribute-method
-				       :func (function ,cls.meth)))
-	      (:attribute-read      `(let ((x (make-instance 'py-writable-attribute-method
-						:func (function ,cls.meth))))
-				       (setf (gethash ',cls.meth *writable-attribute-methods*) x)
-				       x))
-	      (:attribute-write     `(let ((f (function ,func-name))
-					   (read-f (or (gethash ',cls.meth *writable-attribute-methods*)
-						       (error "Attribute read function ~A not found yet"
-							      ',cls.meth))))
-				       (setf (slot-value read-f 'write-func) f)
-				       read-f ;; stored in dict under attr name
-				       ))))))))
+	 
+	 (let ((obj
+		,(ecase (car modifiers)
+		   ((nil)             `(let ((f (function ,cls.meth)))
+					 f))
+		   
+		   (:static           `(make-instance 'py-static-method
+					 :func (function ,cls.meth)))
+		   
+		   (:attribute        `(make-instance 'py-attribute-method
+					 :func (function ,cls.meth)))
+		   
+		   (:attribute-read   `(let ((x (make-instance 'py-writable-attribute-method
+						  :func (function ,cls.meth))))
+					 (setf (gethash ',cls.meth *writable-attribute-methods*) x)
+					 x))
+		   
+		   (:attribute-write  `(let ((f (function ,func-name))
+					     (read-f (or (gethash ',cls.meth
+								  *writable-attribute-methods*)
+							 (error
+							  "Attribute read function ~A not defined yet"
+							  ',cls.meth))))
+					 (setf (slot-value read-f 'write-func) f)
+					 nil ;; read function is already stored in dict
+					 )))))
+	   (when obj
+	     (setf (dict-get cls ',meth) obj)))))))
 
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;
@@ -350,10 +359,10 @@
 
 	#+(or)(warn "binding __new__: ~A ~A" __new__ metaclass)
 
-	(let ((cls (if (eq __new__  
-			   ;; Optimize common case:  py-type.__new__
-			   ;; (As PY-ATTR is unavailable at load time, use DICT-GET)
-			   (load-time-value (dict-get (find-class 'py-type) '__new__)))
+	(let ((cls (if (and (eq (class-of __new__) (load-time-value (find-class 'py-static-method)))
+			    (eq (py-method-func __new__) (symbol-function 'py-type.__new__)))
+		       
+		       ;; Optimize common case:  py-type.__new__
 		       
 		       (progn 
 			 #+(or)(warn "Inlining make-py-class")
@@ -509,7 +518,7 @@
 ;; py-attribute-method
 
 (def-py-method py-attribute-method.__get__ (x inst class)
-  (declare (ignore class))
+  #+(or)(break "pam.get ~A ~A ~A" x inst class)
   (if inst
       (py-call (slot-value x 'func) inst)
     nil))
@@ -555,7 +564,7 @@
 (def-py-method py-bound-method.__call__ (x &rest args)
   (when (and (null (cdr args))
 	     (eq (car args) '__dict__))
-    (break "pym.c args: ~A ~A" x args))
+    #+(or)(break "pym.c args: ~A ~A" x args))
   (with-slots (func instance) x
     (if (functionp func)
 	(apply (the function func) instance args)
@@ -609,7 +618,8 @@
   (make-instance 'py-static-method :func func))
 
 (def-py-method py-static-method.__get__ (x inst class)
-  (declare (ignore inst class))
+  #+(or)(declare (ignore inst class))
+  #+(or)(break "psm get ~A ~A ~A" x inst class)
   (slot-value x 'func))
 
 (def-py-method py-static-method.__repr__ (x)
@@ -671,10 +681,11 @@
     x))
 
 (def-py-method py-function.__get__ (func obj class)
-  (cond #+(or)((eq func #'py-function.__get__)
-	       (break "eq py-f.__get__"))
-	((or (null obj) (none-p obj))
+  #+(or)(break "py-f.__get__ ~A ~A" func obj)
+  
+  (cond ((or (null obj) (none-p obj))
 	 (make-instance 'py-unbound-method :func func :class class))
+	
 	(t
 	 (make-instance 'py-bound-method :func func :instance obj))))
 
@@ -1198,7 +1209,7 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 
 (def-py-method py-type.__name__ :attribute (cls)
   ;; XXX remove prefix `py-' etc
-  (string (class-name cls)))
+  (symbol-name (class-name cls)))
 
 (def-py-method py-type.__dict__ :attribute (cls)
   (dict cls))
@@ -1425,7 +1436,9 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 	     (declare (special *current-module-name* *current-module-path*))
 	     (compile-file py-fname
 			   :output-file fasl-fname
-			   :if-newer t
+			   :if-newer (if force-reload
+					 nil
+				       t)
 			   :verbose verbose))))
 	   
     ;; XXX need to look for file in all directories of sys.path
@@ -2579,7 +2592,10 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 (def-py-method py-string.encode (x^ &optional encoding^ errors)
   (py-encode-unicode x encoding errors))
 
-(def-py-method py-string.find (x^ item &rest args) (declare (ignore x item args)) -1) ;; TODO
+(def-py-method py-string.find (x^ item &rest args)
+  (declare (ignore x item args))
+  (warn "todo :string.find")
+  -1)
 
 (def-py-method py-string.isalpha (x^) (py-bool (every #'alpha-char-p x)))
 (def-py-method py-string.isalnum (x^) (py-bool (every #'alphanumericp x)))
@@ -2795,6 +2811,11 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 
 (defun py-attr (x attr &key (bind-class-attr t) via-getattr)
   ;; ATTR may be a symbol, a string, or instance of user-defined subclass of string
+  ;; 
+  ;; When BIND-CLASS-ATTR = NIL, then only if attr is a function, 
+  ;; found in a class dict, as values:  :class-attr class-attr-val x
+  ;; will be returned
+  
   (let* ((class-attr-val   nil)
 	 (__getattr__      nil)
 	 (__getattribute__ nil)
@@ -2825,7 +2846,7 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 	    ;; Try only the first __getattribute__ method found (but not py-object's).
 	    (let ((getattribute-meth (sym-gethash '__getattribute__ c.dict c.dict-is-regular-dict)))
 	      (when (and getattribute-meth
-			 (not (eq getattribute-meth #'py-object.__getattribute__)))
+			 (not (eq getattribute-meth (symbol-function 'py-object.__getattribute__))))
 		(setf __getattribute__ getattribute-meth)
 		(handler-case
 		    (values (py-call (bind-val getattribute-meth x x.class) attr.as_string))
@@ -2865,9 +2886,13 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
     ;; `__set__' attribute) has higher priority than an instance
     ;; attribute.
 
+    
     (when (and class-attr-val (data-descriptor-p class-attr-val))
       (return-from py-attr
-	(bind-val class-attr-val x x.class)))
+	(if (and (not bind-class-attr)
+		 (functionp class-attr-val))
+	    (values :class-attr class-attr-val x)
+	  (bind-val class-attr-val x x.class))))
     
     ;; Try instance dict
     
@@ -2940,6 +2965,32 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
     (if via-getattr
 	(throw :getattr-block :py-attr-not-found)
       (py-raise 'AttributeError "No such attribute: ~A `~A' (class: ~A)" x attr (py-class-of x)))))
+
+
+(define-compiler-macro py-attr (&whole whole x attr &key (bind-class-attr t) via-getattr)
+  (declare (ignore bind-class-attr via-getattr))
+  (if (and (listp attr)
+	   (eq (car attr) 'quote))
+      
+      (case (second attr)
+	
+	;; "x.__class__ = y" is intercepted so __class__ is always valid class
+	(__class__ `(py-class-of ,x))
+	
+	(__name__  `(let ((.x ,x))
+		      (if (excl::classp .x)
+			  
+			  (symbol-name (class-name .x))
+			
+			(locally 
+			    (declare (notinline py-attr))
+			  (py-attr .x ',attr)))))
+	
+	(__dict__ `(dict ,x))
+	
+	(t         whole))
+    
+    whole))
 
 
 (defun (setf py-attr) (val x attr)
@@ -3088,22 +3139,22 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 		  (eq (first prim) 'py-attr)
 		  (= (length prim) 3))
 	     
-	     ;; Optimize  (py-call (bind-val val x x.class) ..args..)
-	     ;; where val is a function and x an instance, so it doesn't allocate
-	     ;; bound method.
+	     ;; Optimize "obj.attr(..args..)" = (py-call (py-attr obj attr) ..args..)
+	     ;; so the allocation of a bound method object is skipped.
 	     
-	     (warn "inlining (py-call (py-attr ..) ..):  ~A.~A(..)" (second prim) (second (third prim)))
+	     #+(or)(warn "inlining (py-call (py-attr ..) ..):  ~A.~A(..)"
+			 (second prim) (second (third prim)))
 	     (destructuring-bind (x attr) (cdr prim)
 	       (assert (and (listp attr)
 			    (eq (first attr) 'quote)
 			    (symbolp (second attr))))
-	       `(multiple-value-bind (a b c)
+	       `(multiple-value-bind (.a .b .c)
 		    (py-attr ,x ,attr :bind-class-attr nil)
-		  (if (eq a :class-attr)
-		      (progn #+(or)(assert (functionp b))
-			     #+(or)(warn "saving bound method ~A ~A" b c)
-			     (funcall b c ,@args))
-		    (py-call a ,@args)))))
+		  (if (eq .a :class-attr)
+		      (progn #+(or)(assert (functionp .b))
+			     #+(or)(warn "saving bound method ~A ~A" .b .c)
+			     (funcall .b .c ,@args))
+		    (py-call .a ,@args)))))
 	    
 	    
 	    ((and (listp prim)
@@ -3114,15 +3165,15 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 	     ;; where val is a function and x an instance, so it doesn't allocate
 	     ;; bound method.
 
-	     (warn "inlining (py-call (bind-val ..) ..) ~A" whole)
+	     #+(or)(warn "inlining (py-call (bind-val ..) ..) ~A" whole)
 	     (destructuring-bind (val x x.class) (cdr prim)
-	       `(let ((val ,val)
-		      (x ,x)
-		      (x.class ,x.class))
-		  (if (functionp val) ;; XXX Maybe check for user-defined subclasses of function?
+	       `(let ((.val ,val)
+		      (.x ,x)
+		      (.x.class ,x.class))
+		  (if (functionp .val) ;; XXX Maybe check for user-defined subclasses of function?
 		      (progn #+(or)(warn "saving binding ~A" ',whole)
-			     (funcall val x ,@args))
-		    (py-call (bind-val val x x.class) ,@args)))))
+			     (funcall .val .x ,@args))
+		    (py-call (bind-val .val .x .x.class) ,@args)))))
 	    
 	    (t 
 	     ;; Optimize case where PRIM is a function.
@@ -3131,7 +3182,6 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 		    (progn #+(or)(warn "inlining py-call <function> ~A" .prim)
 			   (funcall (the function .prim) ,@args))
 		  (py-call .prim ,@args)))))))
-
 
 #||
   `(let ((.x ,x))

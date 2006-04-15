@@ -803,7 +803,8 @@ def checkoutput(n=0):
     #except NameError:
     #  pass
     outputtext = output.getvalue()
-    #print "outputtext: %r" % outputtext
+    #print "outputtext: "
+    #print outputtext
     h = strhash(outputtext)
     print "checkoutput: strhash=", h, "n=", n
     check(h, n)
