@@ -194,7 +194,7 @@
 								    (let ((*package* #.*package*))
 								      (read-from-string total nil nil))))))
 				    (when (and lisp-form
-					       (not (member lisp-form '(def class for while if)))) 
+					       (not (member lisp-form '(def class for while if try)))) 
 				      (multiple-value-bind (res err) 
 					  (ignore-errors (eval lisp-form))
 					(unless err
@@ -248,8 +248,3 @@
     
 (defun dummy (&rest args)
   (warn "dummy: ~A" args))
-
-
-
-
-

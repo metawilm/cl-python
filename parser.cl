@@ -47,7 +47,9 @@
 	    def class lambda return yield
 	    and or not for in is
 	    print from import as assert break continue global del exec pass
-	    if elif else while try except finally raise))
+	    if elif else while try except finally raise
+	    lispy-lisp-form 
+	    ))
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (defun generate-python-rules (name)
@@ -335,7 +337,8 @@
        ((|`| testlist1 |`|)     . ((list 'backticks-expr $2)))
        ((identifier)            . ((list 'identifier-expr $1)))
        ((number)                . ($1))
-       ((string+)               . ($1)))
+       ((string+)               . ($1))
+       ((lispy-lisp-form)       . ($1)))
 
  (string+ (string) ($1))  ;; consecutive string literals are joined: "s" "b" => "sb"
  (string+ (string+ string) ((concatenate 'string $1 $2))) 

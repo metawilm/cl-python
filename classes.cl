@@ -519,6 +519,7 @@
 
 (def-py-method py-attribute-method.__get__ (x inst class)
   #+(or)(break "pam.get ~A ~A ~A" x inst class)
+  (declare (ignore class))
   (if inst
       (py-call (slot-value x 'func) inst)
     nil))
@@ -618,7 +619,7 @@
   (make-instance 'py-static-method :func func))
 
 (def-py-method py-static-method.__get__ (x inst class)
-  #+(or)(declare (ignore inst class))
+  (declare (ignore inst class))
   #+(or)(break "psm get ~A ~A ~A" x inst class)
   (slot-value x 'func))
 
@@ -1407,6 +1408,17 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 	 do (set-macro-character (code-char i) f))
      (compile-file "b2.py"))))
 						
+(defmacro with-py-readtable (&body body)
+  ;; In this context every character is dispatched to the Python parser.
+  `(let ((*readtable* (load-time-value
+		       (let ((rt (copy-readtable nil))
+			     (f (lambda (stream char)
+				  (unread-char char stream)
+				  (parse-python-file stream))))
+			 (loop for i from 0 below 256
+			     do (set-macro-character (code-char i) f t rt))
+			 rt))))
+     ,@body))
 
 (defun py-import (mod-name &key force-reload (verbose t))
   ;; Registers module in *py-modules* and returns it.
@@ -1420,26 +1432,16 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 	 
 	 (recompile-py-if-needed (mod-name py-fname fasl-fname)
 	   (let* ((*current-module-name* (string mod-name)) ;; used by compiler
-		  (*current-module-path* py-fname) ;; XXX must become path
-		
-		  ;; Operate under read table that dispatches
-		  ;; every character to Python parser
-		  (*readtable* (load-time-value
-				(let ((rt (copy-readtable nil))
-				      (f (lambda (stream char)
-					   (unread-char char stream)
-					   (parse-python-file stream))))
-				  (loop for i from 0 below 256
-				      do (set-macro-character (code-char i) f t rt))
-				  rt))))
+		  (*current-module-path* py-fname)) ;; XXX must become path
 	     
-	     (declare (special *current-module-name* *current-module-path*))
-	     (compile-file py-fname
-			   :output-file fasl-fname
-			   :if-newer (if force-reload
-					 nil
-				       t)
-			   :verbose verbose))))
+	     (with-py-readtable
+		 (declare (special *current-module-name* *current-module-path*))
+	       (compile-file py-fname
+			     :output-file fasl-fname
+			     :if-newer (if force-reload
+					   nil
+					 t)
+			     :verbose verbose)))))
 	   
     ;; XXX need to look for file in all directories of sys.path
     

@@ -35,7 +35,7 @@
 		     (RuntimeError NotImplementedError)
 		     (NameError    UnboundLocalError)
 		     AttributeError
-		     (SyntaxError (IndentationError (TabError)))
+		     (SyntaxError (IndentationError TabError))
 		     TypeError
 		     AssertionError
 		     (LookupError IndexError
@@ -115,3 +115,9 @@
   (assert *cached-StopIteration*)
   (error *cached-StopIteration*))
 
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;; Special conditions
+
+(define-condition py-syntax-eof-condition ()
+  ())

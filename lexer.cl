@@ -213,6 +213,13 @@ READ-CHAR."
                                    but got: '~A' (~S) (line ~A)."
 				  c2 c2 *curr-src-line*))))
 		   
+		   ((char= c #\$)
+		    ;; Lisp-Python syntax
+		    (let ((str (coerce (loop for ch = (read-chr-error)
+					   while (char/= ch #\$) collect ch)
+				       'string)))
+		      (lex-return lispy-lisp-form (read-from-string str))))
+		    
 		   (t (with-simple-restart 
 			  (:continue "Discard the character and continue parsing.")
 			(py-raise 'SyntaxError
@@ -234,7 +241,10 @@ READ-CHAR."
   "Return a character, or raise a SyntaxError"
   (or (read-chr-nil) (unexpected-eof)))
 
+;; Used internally to /signal/ EOF of Python syntax.
+
 (defun unexpected-eof ()
+  (signal 'py-syntax-eof-condition)
   (py-raise 'SyntaxError "Unexpected end of file (line ~A)." *curr-src-line*))
 
 (define-compiler-macro read-chr-error ()
