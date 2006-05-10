@@ -695,7 +695,7 @@
     (print-unreadable-object (func s :identity t)
       (if (typep func 'py-function)
 	  
-	  (progn 
+	  (progn
 	    (format s "python-function ~A" (py-function-name func))
 	    (when (string/= (py-function-name func)
 			    (py-function-context-name func))
@@ -1433,7 +1433,7 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 	 (recompile-py-if-needed (mod-name py-fname fasl-fname)
 	   (let* ((*current-module-name* (string mod-name)) ;; used by compiler
 		  (*current-module-path* py-fname)) ;; XXX must become path
-	     
+	     (declare (special *current-module-name* *current-module-path*))
 	     (with-py-readtable
 		 (declare (special *current-module-name* *current-module-path*))
 	       (compile-file py-fname
@@ -2204,9 +2204,12 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 
 (def-proxy-class py-list)
 
+(defun make-py-list ()
+  (make-array 0 :adjustable t :fill-pointer 0))
+
 (def-py-method py-list.__new__ :static (cls &optional iterable)
 	       (declare (ignore iterable))
-	       (let ((vec (make-array 0 :adjustable t :fill-pointer 0)))
+	       (let ((vec (make-py-list)))
 		 (if (eq cls (load-time-value (find-class 'py-list)))
 		     vec
 		   (make-instance cls :lisp-object vec))))
@@ -2220,6 +2223,21 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 	  do (setf (aref x i) (pop items)))
       (setf (fill-pointer x) len)
       x)))
+
+(def-py-method py-list.__add__ (x^ y^)
+  (unless (and (vectorp x) (vectorp y))
+    (py-raise 'TypeError "list.__add__: only lists as second arg (got: ~A)" y))
+  (let ((vec (make-py-list)))
+    (adjust-array vec (+ (length x) (length y)))
+    (let ((i 0))
+      (loop for xi across x
+	  do (setf (aref vec i) xi)
+	     (incf i))
+      (loop for yi across y
+	  do (setf (aref vec i) yi)
+	     (incf i))
+      (setf (fill-pointer vec) i))
+    vec))
 
 (def-py-method py-list.__cmp__ (x^ y^)
   (let ((x.len (length x))

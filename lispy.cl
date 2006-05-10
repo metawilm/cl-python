@@ -2,8 +2,11 @@
 
 (in-package :python)
 
-(defvar *the-lispy-module* nil "Python module")
+(defparameter *the-lispy-module* (make-module) "Python module")
+
+#||
 (defvar *the-lispy-package* nil "Lisp package")
+||#
 
 (defmacro in-lisp-py-syntax (&key module)
   (declare (ignore module))
@@ -21,7 +24,7 @@
 				      
 			     do (cond ((null ch)      (lispy-eof-error))
 				      
-				      ((char= ch #\}) (unread-char ch stream)
+				      ((char= ch #\}) ;; don't unread #\}
 						      (return (nreverse chars)))
 				      
 				      (t (push ch chars))))
@@ -37,9 +40,9 @@
 (defun lispy-eof-error ()
   (py-raise 'EOFError "Got unexpected end-of-file"))
 
-(defvar *lispy-lisp-readtable* 
+(defparameter *lispy-lisp-readtable* 
     (let ((r (copy-readtable nil)))
-      (set-macro-character #\{ #'lispy-accolade-reader t r)
+      (set-macro-character #\{ #'lispy-accolade-reader nil r)
       r))
 				
 (defun lispy-parser (stream ch)
@@ -117,23 +120,90 @@
 			   (push `(in-lispy-lisp ,lisp-form) res))
 		  
 		  (if (or (= (length p) 0)
-			   (char/= (aref p 0) #\;))
+			  (char/= (aref p 0) #\;))
 		      (warn "Oops: ~A" p)
 		    #+(or)(warn #| 'SyntaxError|# "Cannot parse (neither Lisp nor Python):~%~S" p)))))
 	    
-	      (:no-error (python-ast)
-		(destructuring-bind (module-stmt (suite-stmt items)) python-ast
-		  (assert (eq module-stmt 'module-stmt))
-		  (assert (eq suite-stmt 'suite-stmt))
-		  #+(or)(warn "ok, Python: ~A" python-ast)
-		  (push `(in-lispy-python ,@items) res))))
+	    (:no-error (python-ast)
+	      (destructuring-bind (module-stmt (suite-stmt items)) python-ast
+		(assert (eq module-stmt 'module-stmt))
+		(assert (eq suite-stmt 'suite-stmt))
+		#+(or)(warn "ok, Python: ~A" python-ast)
+		(push `(in-lispy-python ,@items) res))))
 	  
 	  (go :start))))
     
     (setf res (nreverse res))
     
-    `(warn "~A" ',res)))
-    
+    `(progn ,@res)))
+
+(defmacro with-bridges (&body body)
+  `(handler-bind ((py-unbound-variable
+		   (lambda (c)
+		     (let* ((r (find-restart 'use-value))
+			    (varname (py-unbound-variable-varname c))
+			    (lispfunc (symbol-function varname)))
+		       (if (and r lispfunc)
+			   (use-value lispfunc)
+			 (warn "in-lispy-python: py-unbound-variable ~A unresolved" varname)))))
+		  
+		  (cell-error (lambda (c)
+				(let* ((varname (cell-error-name c))
+				       (pyval   (py-attr *the-lispy-module* varname)))
+				  (if pyval
+				      (use-value pyval)
+				    (warn "in-lispy-lisp: cell-error ~A unresolved" varname)))))
+		  
+		  ;; Muffly warnings about undefined functions, that might in fact be Python functions
+		  ;; defined at runtime.
+		  (style-warning (lambda (c) (muffle-warning c))))
+     
+     ,@body))
+
+#+(or)
+(defmacro in-lispy-python (&body body)
+  `(let ((*py-signal-conditions* t)
+	 (*in-lispy-python* t)
+	 (*level* (1+ *level*)))
+     
+     (declare (special *py-signal-conditions*))
+     
+     (warn "entering in-lispy-python [~A]" *level*)
+     
+     (prog1 (handler-bind ((py-unbound-variable
+			    (lambda (c)
+			      (let* ((r (find-restart 'use-value))
+				     (varname (py-unbound-variable-varname c))
+				     (lispfunc (symbol-function varname)))
+				(if (and r lispfunc)
+				    (use-value lispfunc)
+				  (warn "in-lispy-python: py-unbound-variable ~A unresolved" varname))))))
+       
+	      (let ((f (compile nil `(lambda () (with-this-module-context (,*the-lispy-module*)
+						  ,@',body)))))
+		(funcall f)))
+	     
+       (warn "exiting in-lispy-python [~A]" *level*))))
+
+(defmacro in-lispy-python (&body body)
+  `(let ((*py-signal-conditions* t)
+	 (*level* (1+ *level*)))
+     
+     (with-bridges 
+	 (let ((f (compile nil `(lambda () (with-this-module-context (,*the-lispy-module*)
+					     ,@',body)))))
+	   (funcall f)))))
+
+(defvar *level* 0)
+
+
+(defmacro in-lispy-lisp (&body body)
+  `(let ((*level* (1+ *level*)))
+     
+     (with-bridges 
+	 (let ((f (compile nil `(lambda () (with-this-module-context (,*the-lispy-module*)
+					     ,@',body)))))
+	   (funcall f)))))
 
 
 #||

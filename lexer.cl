@@ -244,7 +244,9 @@ READ-CHAR."
 ;; Used internally to /signal/ EOF of Python syntax.
 
 (defun unexpected-eof ()
-  (signal 'py-syntax-eof-condition)
+  (declare (special *py-signal-conditions*))
+  (when *py-signal-conditions*
+    (signal 'py-syntax-eof-condition))
   (py-raise 'SyntaxError "Unexpected end of file (line ~A)." *curr-src-line*))
 
 (define-compiler-macro read-chr-error ()

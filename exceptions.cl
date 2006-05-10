@@ -117,7 +117,12 @@
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;;; Special conditions
+;;; Special conditions, used for internal communication in REPL/Lispy
+
+(defvar *py-signal-conditions* t) ;; should be NIL by default, later
 
 (define-condition py-syntax-eof-condition ()
   ())
+
+(define-condition py-unbound-variable ()
+  ((varname :initarg :varname :accessor py-unbound-variable-varname)))

@@ -1,24 +1,56 @@
-(in-lisp-py-syntax :module "foo")
+(in-lisp-py-syntax)
 
-;; Simple Python function
+(format t "Lisp says: hello!~%")
+
+print "Python says: hello!"
+
+;; Calling a Lisp function from Python or Lisp
+(defun lispa ()
+  42)
+
+(format t "(lispa) = ~A~%" (lispa))
+
+print "lispa() = %s" % lispa()
+
+
+;; Calling a Python function (taking optional second argument)
+;; from Python or Lisp.
+
 def f(x, y=1):
   return x+y
 
-;; Lisp function accessing Python function
+print "f(3) = %d" % f(3)
+
+(format t "(f 3) = ~D~%" (f 3))
+
+# Note that Python-style "#..." comments are supported, too.
+
+;; Lisp function calling the Python function f
 (defun lispwow ()
-  (list (f 3)    ;; regular Lisp syntax
-	{f(3)}   ;; In Lisp code, put {...} around Python expressions
-	(f :x 1 :y 4)    ;; Supplying keyword arguments the Lisp way
-	{f(x=1, y=4)} )) ;; Supplying keyword arguments the Python way
+  (coerce (list (f 3)         ;; regular Lisp function call syntax
+		{f(3)}        ;; In Lisp code, put {...} around Python expressions
+		{f(x=1, y=4)} ;; Supplying keyword arguments the Python way
+		(f :x 1 :y 4) ;; Supplying keyword arguments the Lisp way
+		)
+	  'vector))
+
+(format t "Lispwow = ~A~%" (lispwow))
+
+print "Lispwow() = %s" % lispwow()
 
 ;; Equivalent Python function
 def pywow():
-  [ $(f 3)$, f(3), $(f :x 1 :y 4)$, f(x=1, y=4) ]
+  return [ $(f 3)$, f(3), $(f :x 1 :y 4)$, f(x=1, y=4) ]
+
+print "pywow = %s" % pywow()
+
+(format t "(pywow) = ~A~%" (pywow))
 
 
-print pywow() + lispwow()
+(format t "Concatenation (L) = ~A~%" (concatenate 'vector (pywow) (lispwow)))
 
-(format t (concatenate 'vector (pywow) (lispwow)))
+print "Concatenation (P) = %s" % (pywow() + lispwow())
+
 
 ;; Python and Lisp like to work together:
 
@@ -33,4 +65,5 @@ def pyfact(x):
       1
     (* x (pyfact (1- x))))) ;; In Lisp code, undefined functions are looked up in the Python world
 
-print pyfact(6), $(lispfact 6)$, $(= {pyfact(25)} (lispfact 25))$
+
+print pyfact(6), $(lispfact 6)$, pyfact(25) == lispfact(25), $(if (= {pyfact(25)} (lispfact 25)) 1 0)$

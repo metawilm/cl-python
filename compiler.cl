@@ -979,6 +979,14 @@ XXX Make +mod-debug+ instead?")
     +mod-static-globals-names+ +mod-static-globals-values+ +mod-dyn-globals+))
 
 (defun unbound-variable-error (name)
+  (declare (special *py-signal-conditions*))
+  
+  (when *py-signal-conditions*
+    (restart-case
+	(signal 'py-unbound-variable :varname name)
+      (use-value (val)
+	(return-from unbound-variable-error val))))
+  
   (py-raise 'NameError "Variable '~A' is unbound" name))
 
 (defun identifier-expr-module-lookup-dyn (name +mod-dyn-globals+)

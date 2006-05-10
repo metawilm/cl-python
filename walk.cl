@@ -457,7 +457,7 @@ VALUE and TARGET context."
        (funcall f (second form) :value t)))
     
     (t
-     (warn "WALK: assuming ~S is a Lisp form: not walked into." form)
+     #+(or)(warn "WALK: assuming ~S is a Lisp form: not walked into." form)
      form)))
 
 
