@@ -3284,13 +3284,15 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 (defvar *binary-op-funcs-ht* (make-hash-table :test #'eq))
 (defvar *binary-iop-funcs-ht* (make-hash-table :test #'eq))
 (defvar *binary-iop->op-ht* (make-hash-table :test #'eq))
-
-
   
-(defun get-binary-op-func-name (op) (or (gethash op *binary-op-funcs-ht*)
-				   (error "missing binary op func: ~A" op)))
-(defun get-binary-iop-func-name (iop) (or (gethash iop *binary-iop-funcs-ht*)
-				     (error "missing binary iop func: ~A" iop)))
+(defun get-binary-op-func-name (op)
+  (or (gethash op *binary-op-funcs-ht*)
+      (error "missing binary op func: ~A" op)))
+
+(defun get-binary-iop-func-name (iop)
+  (or (gethash iop *binary-iop-funcs-ht*)
+      (error "missing binary iop func: ~A" iop)))
+
 (defun get-binary-op-func-name-from-iop (iop)
   (let ((op (or (gethash iop *binary-iop->op-ht*)
 		(error "IOP ~S has no OP counterpart" iop))))
