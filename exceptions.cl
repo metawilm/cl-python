@@ -95,12 +95,14 @@
   (error (load-time-value (make-instance 'RuntimeError))))
 
 (defmethod print-object ((x Exception) stream)
-  (format stream "~A~@[: ~@{~A~^, ~}~]"
-	  (class-name (class-of x))
-	  
-	  (destructuring-bind (string . format-args)
-	      (slot-value x 'args)
-	    (apply #'format nil string format-args))))
+  (format stream "~A" (class-name (class-of x)))
+  (when (and (slot-boundp x 'args)
+	     (slot-value x 'args))
+    (format stream "~@[: ~@{~A~^, ~}~]"
+	    (destructuring-bind (string . format-args)
+		(slot-value x 'args)
+	      (apply #'format nil string format-args)))))
+||#
 
 (def-py-method Exception.__repr__ (x)
   (with-output-to-string (s)

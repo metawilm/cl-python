@@ -1075,7 +1075,9 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
   `(locally (declare (notinline bind-val))
      (let ((val ,val))
        (if (functionp val)
-	   (make-instance 'py-bound-method :instance ,x :func val)
+	   (progn 
+	     #+(or)(warn "bind-val ~S ~S -> bound method" val x)
+	     (make-instance 'py-bound-method :instance ,x :func val))
 	 (bind-val val ,x ,x.class)))))
 
 (defun py-get-dict-attr (x x.class)
@@ -3004,7 +3006,7 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 			
 			(locally 
 			    (declare (notinline py-attr))
-			  (py-attr .x ',attr)))))
+			  (py-attr .x ,attr)))))
 	
 	(__dict__ `(dict ,x))
 	
@@ -3012,6 +3014,9 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
     
     whole))
 
+(defun (setf py-class-of) (new-cls x)
+  (change-class x new-cls))
+	   
 
 (defun (setf py-attr) (val x attr)
   ;; When ATTR is NIL, it means attribute is deleted ("del x.attr")
@@ -3247,15 +3252,6 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 	       (if si
 		   (py-call si x item new-val)
 		 (py-raise 'TypeError "Object ~S does not support item assignment" x))))))
-
-#+(or)
-((defun setf-py-subs (x item new-val)
-   (setf (py-subs x item) new-val))
- 
- (defun setf-py-attr (x attr val)
-   (declare (notinline (setf py-attr)))
-   (setf (py-attr x attr) val)))
-
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -3554,7 +3550,7 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
   (let ((s (deproxy x))) ;; deproxy, as it may be py-string subclass instance
     (if (stringp s)
 	s
-      (py-raise 'TypeError "Expected a string, but got: ~A" x)))))
+      (py-raise 'TypeError "Expected a string, but got: ~S (a ~A)" x (class-of x))))))
 
 (defun py-val->integer (x &key min)
   (let ((i (deproxy x)))

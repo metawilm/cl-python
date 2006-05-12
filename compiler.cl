@@ -152,28 +152,26 @@ XXX Make +mod-debug+ instead?")
 		"Assignment to several vars: wanted ~A values, but got ~A"
 		num-targets (length val-list)))
     val-list))
-    
-(defmacro assign-stmt (value targets &environment e)
 
-  (when (and (listp value) (member (car value) '(tuple-expr list-expr))
-	     (= (length targets) 1) (member (caar targets) '(tuple-expr list-expr))
-	     (= (length (second value)) (length (second (car targets)))))
-
-    ;; Shortcut the case "a,b,.. = 1,2,.." where left and right same
-    ;; number of items. Note that all RHS values are evaluated before
-    ;; assignment to LHS places takes place.
-    
-    (let* ((value-items (second value))
-	   (tg-items    (second (car targets)))
-	   (temp-items  (loop for i from 0 below (length value-items)
-			    collect (gensym "assign-val"))))
+(defun assign-stmt-get-bound-vars (ass-stmt)
+  (destructuring-bind (assign-statement value targets) ass-stmt
+    (declare (ignore value))
+    (assert (eq assign-statement 'assign-stmt))
+    (let* ((todo targets)
+	   (res  ()))
       
-      (return-from assign-stmt
-	`(let ,(loop for te in temp-items for va in value-items
-		   collect `(,te ,va))
-	   ,@(loop for te in temp-items for tg in tg-items
-		 collect `(assign-stmt ,te (,tg)))))))
+      (loop for x = (pop todo)
+	  while x do
+	    (ecase (first x)
+	      (attributeref-expr )
+	      (subscription-expr )
+	      (identifier-expr        (push (second x) res))
+	      ((list-expr tuple-expr) (setf todo (nconc todo (second x))))))
+      res)))
+
   
+  
+(defmacro assign-stmt (value targets &environment e)
   
   (let ((context (get-pydecl :context e)))
     (with-gensyms (val)
@@ -231,6 +229,31 @@ XXX Make +mod-debug+ instead?")
 	
 	`(let ((,val ,value))
 	   ,@(mapcar #'assign-one targets))))))
+
+
+(define-compiler-macro assign-stmt (&whole whole value targets &environment e)
+  (declare (ignore e))
+  
+  (if (and (listp value) (member (car value) '(tuple-expr list-expr))
+	   (= (length targets) 1) (member (caar targets) '(tuple-expr list-expr))
+	   (= (length (second value)) (length (second (car targets)))))
+    
+      ;; Shortcut the case "a,b,.. = 1,2,.." where left and right same
+      ;; number of items. Note that all RHS values are evaluated before
+      ;; assignment to LHS places takes place.
+    
+      (let* ((value-items (second value))
+	     (tg-items    (second (car targets)))
+	     (temp-items  (loop for i from 0 below (length value-items)
+			      collect (gensym "assign-val"))))
+      
+	(return-from assign-stmt
+	  `(let ,(loop for te in temp-items for va in value-items
+		     collect `(,te ,va))
+	     ,@(loop for te in temp-items for tg in tg-items
+		   collect `(assign-stmt ,te (,tg))))))
+    
+    whole))
 
 (defmacro attributeref-expr (item attr)
   (assert (eq (car attr) 'identifier-expr))
@@ -327,60 +350,22 @@ XXX Make +mod-debug+ instead?")
 		     do (assert (eq i-e 'identifier-expr))
 		     collect (intern (symbol-name key) :keyword)
 		     collect val)))
-    
-    (cond (;; Optimize x.y( ...), saving allocation of bound methdo
-	   
-	   (and (listp primary) 
-		(eq (car primary) 'attributeref-expr)
-		(null (or kwd-args *-arg **-arg)))
-	   
-	   (destructuring-bind (obj (identifier-expr attr)) (cdr primary)
-	     (assert (eq identifier-expr 'identifier-expr))
-	     `(py-attr-call ,obj ,attr ,@pos-args)))
-	  
-	  
-	  (;; Optimize "getattr(x,y)(...)" where getattr(x,y) is a function.
-	   ;; This saves allocation of bound method
-	   
-	   (and (listp primary)
-		(eq (first primary) 'call-expr)
-		(equal (second primary) '(identifier-expr getattr))
-		(not (or kwd-args *-arg **-arg))
-		(destructuring-bind (p k s ss)
-		    (third primary)
-		  (and (= 2 (length p))
-		       (not (or k s ss)))))
-	   
-	   ;; As primary is IDENTIFIER-EXPR, accessing it is side effect-free.
-	   #+(or)(warn "Inlining:  getattr(x,y)(...)")
-	   `(if (eq ,(second primary) (symbol-function 'pybf:getattr))
-	       
-		,(destructuring-bind ((obj attr) k s ss)
-		     (third primary)
-		   (declare (ignore k s ss))
-		   `(multiple-value-bind (.a .b .c)
-			(pybf::getattr-nobind ,obj ,attr nil)
-		      (if (eq .a :class-attr)
-			  (progn #+(or)(warn "getattr: saved bound method")
-				 (funcall .b .c ,@pos-args))
-			(py-call .a ,@pos-args))))
 
-	      (py-call ,primary ,@pos-args)))
+    ;; XXX Need to special-case "locals()", "globals()"
+    
+    (cond ((or kw-args **-arg)
+	   `(call-expr-pos+*+kw+** ,primary (list ,@pos-args) ,*-arg (list ,@kw-args) ,**-arg))
 	  
+	  ((and pos-args *-arg)
+	   `(call-expr-pos+* ,primary (list ,@pos-args) ,*-arg))
 	  
-	  ;; XXX todo: Optimize obj.__get__(...) in b0.py
+	  (*-arg
+	   `(call-expr-* ,primary ,*-arg))
 	  
-	  (t (cond ((or kw-args **-arg)
-		    `(call-expr-pos+*+kw+** ,primary (list ,@pos-args) ,*-arg (list ,@kw-args) ,**-arg))
-		   
-		   ((and pos-args *-arg)
-		    `(call-expr-pos+* ,primary (list ,@pos-args) ,*-arg))
-		   
-		   (*-arg
-		    `(call-expr-* ,primary ,*-arg))
-		   
-		   (t
-		    `(py-call ,primary ,@pos-args)))))))
+	  (t
+	   `(py-call ,primary ,@pos-args)))))
+
+
 
 (defun call-expr-pos+*+kw+** (prim pos-args *-arg kw-args **-arg)
   (apply #'py-call prim
@@ -428,6 +413,52 @@ XXX Make +mod-debug+ instead?")
       (eq prim (load-time-value #'pybf:globals))
       (eq prim (load-time-value #'pybf:eval))))
 ||#
+
+(define-compiler-macro call-expr (&whole whole primary (pos-args kwd-args *-arg **-arg))
+  ;; XXX locals(), globals()
+  (cond ((and (listp primary) 
+	      (eq (car primary) 'attributeref-expr)
+	      (null (or kwd-args *-arg **-arg)))
+
+	 ;; Optimize x.y( ...), saving allocation of bound method
+	 
+	 (destructuring-bind (obj (identifier-expr attr)) (cdr primary)
+	   (assert (eq identifier-expr 'identifier-expr))
+	   `(py-attr-call ,obj ,attr ,@pos-args)))
+	
+
+	((and (listp primary)
+	      (eq (first primary) 'call-expr)
+	      (equal (second primary) '(identifier-expr getattr))
+	      (not (or kwd-args *-arg **-arg))
+	      (destructuring-bind (p k s ss)
+		  (third primary)
+		(and (= 2 (length p))
+		     (not (or k s ss)))))
+
+	 ;; Optimize "getattr(x,y)(...)" where getattr(x,y) is a function.
+	 ;; This saves allocation of bound method
+	 
+	 ;; As primary is IDENTIFIER-EXPR, accessing it is side effect-free.
+	 #+(or)(warn "Inlining:  getattr(x,y)(...)")
+	 `(if (eq ,(second primary) (symbol-function 'pybf:getattr))
+	      
+	      ,(destructuring-bind ((obj attr) k s ss)
+		   (third primary)
+		 (declare (ignore k s ss))
+		 `(multiple-value-bind (.a .b .c)
+		      (pybf::getattr-nobind ,obj ,attr nil)
+		    (if (eq .a :class-attr)
+			(progn #+(or)(warn "getattr: saved bound method")
+			       (funcall .b .c ,@pos-args))
+		      (py-call .a ,@pos-args))))
+
+	    (py-call ,primary ,@pos-args)))
+	
+	
+	;; XXX todo: Optimize obj.__get__(...) in b0.py
+	
+	(t whole)))
 
 (defmacro py-attr-call (prim attr &rest args)
   ;; A method call with only positional args: <prim>.<attr>(p1, p2, .., pi)
@@ -823,7 +854,7 @@ XXX Make +mod-debug+ instead?")
 	 
 	 (local-lookup ()
 	   (if (member name (get-pydecl :safe-lex-visible-vars e))
-	       (progn (warn "safe: ~A" name)
+	       (progn #+(or)(warn "safe: ~A" name)
 		      name)
 	     `(or ,name
 		  (unbound-variable-error ',name)))))
@@ -1067,6 +1098,38 @@ XXX Make +mod-debug+ instead?")
   (if (null (cdr stmts))
       (car stmts)
     `(progn ,@stmts)))
+
+(define-compiler-macro suite-stmt (&whole whole stmts &environment e)
+  ;; Derive safe variables resulting from assign-stmts.
+  
+  (cond ((and (some (lambda (s)
+		      (and (listp s) (eq (car s) 'assign-stmt)))
+		    (butlast stmts))
+	      (not (ast-contains-DEL-p whole)))
+	 
+	 ;; Collect the stmts before the assignment, and those after
+	 
+	 (multiple-value-bind (before-stmts ass-stmt after-stmts)
+	     (loop for sublist on stmts
+		 for s = (car sublist)
+		 until (and (listp s) (eq (car s) 'assign-stmt))
+		 collect s into before
+		 finally (return (values before s (cdr sublist))))
+	 
+	   (assert ass-stmt)
+	   `(progn ,@(when before-stmts
+		       `((suite-stmt ,before-stmts))) ;; recursive, but doesn't contain assign-stmt
+		   ,ass-stmt
+		   ,@(when after-stmts
+		       (let ((bound-vars (assign-stmt-get-bound-vars ass-stmt)))
+			 `((with-pydecl ((:safe-lex-visible-vars
+					  ,(union (set-difference 
+						   bound-vars
+						   (get-pydecl :lexically-declared-globals e))
+						  (get-pydecl :safe-lex-visible-vars e))))
+			     (suite-stmt ,after-stmts)))))))) ;; recursive, but 1 assign-stmt less
+	
+	(t whole)))
 
 (defvar *last-raised-exception* nil)
 
@@ -1964,11 +2027,11 @@ statements, as then variables can be guaranteed to be bound."
   
   (with-py-ast (form ast)
     (case (car form)
-      (del-stmt                     (return-from ast-contains-DEL-p t))
-      (t                            form)))
+      (del-stmt  (return-from ast-contains-DEL-p t))
+      (t         form)))
   
   nil)
-
+  
 
 (defun contains-call-p (ast)
   (with-py-ast (form ast)
@@ -1992,7 +2055,25 @@ statements, as then variables can be guaranteed to be bound."
     
     (flet ((new-tag (kind) (if (eq kind :yield)
 			       (incf yield-counter)
-			     (make-symbol (format nil "~A~A" kind (incf other-counter))))))
+			     (make-symbol (format nil "~A~A" kind (incf other-counter)))))
+	   (add-suites (list)
+	     ;; group multiple non-symbols s as (suite-stmt s1 s2 ...)
+	     (let ((res      ())
+		   (non-tags ()))
+	       
+	       (dolist (x list)
+		 (if (listp x)
+		     (push x non-tags)
+		   (progn
+		     (when non-tags
+		       (push `(suite-stmt ,(nreverse non-tags)) res)
+		       (setf non-tags nil))
+		     (push x res))))
+	       
+	       (when non-tags
+		 (push `(suite-stmt ,(nreverse non-tags)) res))
+	       
+	       (nreverse res))))
       
       (labels
 	  ((walk (form stack)
@@ -2222,8 +2303,12 @@ statements, as then variables can be guaranteed to be bound."
 			     t))))
 	      :build-result t)))
 
-	(let ((walked-as-list (multiple-value-list (apply-splits (walk suite ()))))
-	      (final-tag -1))
+	(let* ((walked-as-list (multiple-value-list (apply-splits (walk suite ()))))
+	       
+	       ;; Add SUITE-STMT, to trigger :safe-lex-visible-vars optimization
+	       (walked-list-with-suites (add-suites walked-as-list))
+	       
+	       (final-tag -1))
 	  
 	  `(let ((.state. 0)
 		 ,@(nreverse vars))
@@ -2246,7 +2331,7 @@ statements, as then variables can be guaranteed to be bound."
 			  ,@(loop for i from -1 to yield-counter
 				collect `(,i (go ,i))))
 		       0
-			,@walked-as-list
+			,@walked-list-with-suites
 
 			(generator-finished)
 			
