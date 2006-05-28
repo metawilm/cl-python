@@ -197,11 +197,13 @@
 					       (not (member lisp-form '(def class for while if try)))) 
 				      (multiple-value-bind (res err) 
 					  (ignore-errors (eval lisp-form))
-					(unless err
-					  (remember-value res)
-					  (write res)
-					  (write-char #\Newline)
-					  (setf acc nil)))))))))))))))))
+					(if err
+					    (warn "Evaluation as Lisp failed: ~A" err)
+					  (progn
+					    (remember-value res)
+					    (write res)
+					    (write-char #\Newline)
+					    (setf acc nil))))))))))))))))))
 
 (defun prof (f kind)
   (ecase kind

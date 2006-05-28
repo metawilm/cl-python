@@ -137,7 +137,7 @@
     
     `(progn ,@res)))
 
-(defmacro with-bridges (&body body)
+(defmacro with-bridges ((py-module) &body body)
   `(handler-bind ((py-unbound-variable
 		   (lambda (c)
 		     (let* ((r (find-restart 'use-value))
@@ -149,7 +149,7 @@
 		  
 		  (cell-error (lambda (c)
 				(let* ((varname (cell-error-name c))
-				       (pyval   (py-attr *the-lispy-module* varname)))
+				       (pyval   (py-attr ,py-module varname)))
 				  (if pyval
 				      (use-value pyval)
 				    (warn "in-lispy-lisp: cell-error ~A unresolved" varname)))))
@@ -159,6 +159,10 @@
 		  (style-warning (lambda (c) (muffle-warning c))))
      
      ,@body))
+
+(defun replb ()
+  (with-bridges (*repl-mod*)
+    (repl)))
 
 #+(or)
 (defmacro in-lispy-python (&body body)
@@ -189,7 +193,7 @@
   `(let ((*py-signal-conditions* t)
 	 (*level* (1+ *level*)))
      
-     (with-bridges 
+     (with-bridges (*the-lispy-module*)
 	 (let ((f (compile nil `(lambda () (with-this-module-context (,*the-lispy-module*)
 					     ,@',body)))))
 	   (funcall f)))))
@@ -200,7 +204,7 @@
 (defmacro in-lispy-lisp (&body body)
   `(let ((*level* (1+ *level*)))
      
-     (with-bridges 
+     (with-bridges (*the-lispy-module*) 
 	 (let ((f (compile nil `(lambda () (with-this-module-context (,*the-lispy-module*)
 					     ,@',body)))))
 	   (funcall f)))))

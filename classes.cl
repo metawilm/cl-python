@@ -50,7 +50,7 @@
   (eq (hash-table-test x) 'py-==->lisp-val))
 
 (defun dict-get (x key)
-  (check-type key (or string symbol))
+  #+(or)(check-type key (or string symbol))
   (let ((d (dict x)))
     (sym-gethash key d)))
 #||
@@ -88,14 +88,16 @@
 
 (defun sym-gethash (key ht &optional (is-reg-dict (hash-table-is-regular-dict-p ht)))
   ;; KEY is either a symbol or a regular string
+  (declare (optimize (speed 3) (safety 0) (debug 0)))
+  
   (if is-reg-dict
       
-      (gethash (if (symbolp key) (symbol-name key) key) ht)
+      (values (gethash (if (symbolp key) (symbol-name key) key) ht))
     
     (let ((key.sym (if (symbolp key) key (find-symbol key #.*package*))))
       ;; If symbol not found, it can not be present as key in the HT either
       (when key.sym
-	(gethash key.sym ht)))))
+	(values (gethash key.sym ht))))))
 
 
 (defclass py-class-mixin (py-dict-mixin)
@@ -1857,9 +1859,25 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 
 ;;; Lisp objects (proxies around Lisp values: number, string, list, tuple, dict)
 
+(defvar *proxy-classes* ())
+
+(defun deproxy (x)
+  (declare (optimize (speed 3) (safety 0) (debug 0)))
+  (typecase x
+    ((or number string list function vector hash-table)
+     x)
+    
+    (py-lisp-object
+     (proxy-lisp-val x))
+    
+    (t
+     x)))
+
+#+(or) ;; original version; probably a bit slower
 (defgeneric deproxy (x)
   (:method ((x py-lisp-object))  (proxy-lisp-val x))
   (:method ((x t))               x))
+
 
 (defmacro def-proxy-class (py-name &optional supers)
   `(progn (defclass ,py-name ,(or supers '(py-lisp-object))
@@ -2582,7 +2600,8 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 			       (py-string-from-char char/charlist)
 			     (coerce char/charlist 'string)))))
 
-(def-py-method py-string.__hash__ (x^) (sxhash x))
+(def-py-method py-string.__hash__ (x^)
+  (sxhash x))
 
 (def-py-method py-string.__len__  (x^)  (length x))
 
@@ -2931,13 +2950,36 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 	    for val = (when (and c.dict
 				 (or attr.as_sym c.dict-is-regular-dict))
 			(sym-gethash attr c.dict c.dict-is-regular-dict))
-	    when val do (return-from py-attr val))
-      
-      (when (dict x)
-	(let ((val (dict-get x attr.as_string)))
-	  (when val
-	    (cond ((or (eq (class-of x) (load-time-value (find-class 'py-type))) ;; <- eff. opt.
-		       (subtypep (py-class-of x) (load-time-value (find-class 'py-type))))
+	    when val do 
+	      
+	      #+(or)(return-from py-attr val)
+	      
+	      (let ((bound-val (bind-val val x x.class)))
+		(when bound-val ;; attribute-method bounded to class -> NIL
+		  (return-from py-attr bound-val))))
+
+      (let ((x.dict (dict x)))
+	(when x.dict
+	  (let ((val (sym-gethash attr.as_string x.dict)))
+	    (when val
+	      (return-from py-attr val))
+	    
+	    #+(or)
+	    (cond ((member (load-time-value (find-class 'py-type))
+			   (mop:class-precedence-list (py-class-of x)) :test 'eq)
+		   (warn "yes, ~A subtype of type" (py-class-of x))
+		       
+		        ;; <- eff. opt.
+		       #||
+		       (member (load-time-value (find-class 'py-type))
+			       (mop:class-precedence-list (class-of x)) :test 'eq)
+			
+		       #+(or)
+		       (or (eq (class-of x) (load-time-value (find-class 'py-type)))
+			   (subtypep (py-class-of x) (load-time-value (find-class 'py-type))))
+		       
+		       ||#
+		       
 		   
 		   ;; XXX check the exact condition under which binding
 		   ;; of instance dict item occurs
@@ -2946,7 +2988,8 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 		     (when bound-val ;; attribute-method bounded to class -> NIL
 		       (return-from py-attr bound-val))))
 
-		  (t (return-from py-attr 
+		  (t #+(or)(break "attr: ~A ~A ~A" x attr val)
+		     (return-from py-attr 
 		       val)))))))
     
     ;; Fall back to a class attribute that is not a `data descriptor'.
@@ -3646,7 +3689,12 @@ finished; F will then not be called again."
   f)
 
 ;; general useful iteration constructs
+(defparameter *py-iterate-func-types* (make-hash-table :test 'eq))
 
+(defmethod get-py-iterate-fun :around (x)
+  (incf (gethash (class-of x) *py-iterate-func-types* 0))
+  (call-next-method))
+   
 (defgeneric get-py-iterate-fun (x)
   (:documentation
    "Return a function that when called repeatedly returns VAL, T, where VAL is the
@@ -3709,7 +3757,8 @@ next value gotten by iterating over X. Returns NIL, NIL upon exhaustion.")
 
 (defgeneric py-iterate->lisp-list (object)
   (:documentation
-   "Returns a Lisp list, that may not be modified destructively.")
+   "Returns a Lisp list, that may not be modified destructively (as for e.g. tuples,
+the lisp list will be returned).")
   (:method ((x t))
 	   (loop with it-fun = (get-py-iterate-fun x)
 	       for val = (funcall it-fun)

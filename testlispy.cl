@@ -1,3 +1,4 @@
+(in-package :python)
 (in-lisp-py-syntax)
 
 (format t "Lisp says: hello!~%")

@@ -61,7 +61,26 @@
 	  ((and (>= start stop) (< step 0))
 	   (loop for i from stop downto start by (- step) do (funcall f i)))
 	  (t (call-next-method)))))
-      
+
+
+(defmethod get-py-iterate-fun ((x py-func-iterator))
+  (slot-value x 'func))
+
+(defmethod get-py-iterate-fun ((x string))
+  (let ((i 0))
+    (lambda ()
+      (when (< i (length x))
+	(prog1 (string (aref x i))
+	  (incf i))))))
+
+(defmethod get-py-iterate-fun ((x vector))
+  (let ((i 0))
+    (lambda ()
+      (when (< i (length x))
+	(prog1 (aref x i)
+	  (incf i))))))
+	  
+
 ;; Membership test
 
 (defmethod py-in (x (ht hash-table))
@@ -215,6 +234,7 @@
 
 (defmethod py-% ((x fixnum) (y fixnum)) (mod x y))
 (defmethod py-% ((x string) y) (py-string.__mod__ x y))
+(defmethod py-% ((x integer) (y integer)) (mod x y))
 
 (defmethod py-* ((x number) (y number)) (* x y))
 (defmethod py-^ ((x integer) (y integer)) (logxor x y))
@@ -303,7 +323,7 @@
 	 ;; Newline after last item
 	 ,(unless comma?
 	    `(progn (excl::fast-write-char #\Newline stdout)
-		    #+(or)(force-output stdout)))
+		    (force-output stdout)))
 	 
 	 ;; Return value:
 	 nil)
@@ -351,3 +371,9 @@
 (defmethod py-len ((x list))   (length x))
 
 
+;;; Tests
+
+(define-compiler-macro py-val->lisp-bool (&whole whole x)
+  (typecase x
+    ((or string number) (py-val->lisp-bool x))
+    (t                  whole)))

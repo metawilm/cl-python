@@ -225,7 +225,8 @@ XXX Make +mod-debug+ instead?")
 					(module-set)      
 				      (class-set)))
 			
-			((nil) `*the-great-unknown*))))))))
+			((nil) #+(or)(break)
+			       `*the-great-unknown*))))))))
 	
 	`(let ((,val ,value))
 	   ,@(mapcar #'assign-one targets))))))
@@ -582,7 +583,8 @@ XXX Make +mod-debug+ instead?")
 			  (module-del)
 			(class-del)))
 	   
-	   ((nil)     `*the-great-unknown*)))))))
+	   ((nil)     #+(or)(break)
+		      `*the-great-unknown*)))))))
 
 (defmacro dict-expr (alist)
   `(make-dict-unevaled-list ,alist))
@@ -873,7 +875,8 @@ XXX Make +mod-debug+ instead?")
 			   (local-lookup)
 			 (module-lookup))))
       
-      ((nil)     `*the-great-unknown*))))
+      ((nil)     #+(or)(break)
+		 `*the-great-unknown*))))
 
 (defmacro if-stmt (if-clauses else-clause)
   `(cond ,@(loop for (cond body) in if-clauses
@@ -2107,7 +2110,8 @@ statements, as then variables can be guaranteed to be bound."
 		       (push generator vars)
 		       
 		       (values
-			`(:split 
+			`(:split
+			  #+(or)(warn "type of for-in in gen: ~A" (class-of ,source))
 			  (setf ,generator (get-py-iterate-fun ,source)
 				,loop-var  (funcall ,generator))
 			  (unless ,loop-var (go ,else-tag))
@@ -2142,7 +2146,7 @@ statements, as then variables can be guaranteed to be bound."
 		   ;;  def f():
 		   ;;    while test:
 		   ;;      yield 1
-		   ;;        if foo:
+		   ;;      if foo:
 		   ;;        continue
 		   ;; 
 		   ;; where the 'continue' must be rewritten
@@ -2336,8 +2340,8 @@ statements, as then variables can be guaranteed to be bound."
 			(generator-finished)
 			
 			,final-tag
-			(raise-StopIteration)
-			#+(or)(py-raise 'StopIteration "The generator has finished.")))))))))))))
+			(return-from :function-body nil)
+			#+(or)(raise-StopIteration)))))))))))))
 
 
 (defun suite->generator (fname suite)

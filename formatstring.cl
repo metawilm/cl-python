@@ -2,7 +2,7 @@
 
 (defstruct (format-string (:conc-name fs-) (:constructor make-fs))
   (string        :type string)
-  (type-of-arg   :type (or (eql :mapping) (eql :list)) :read-only t)
+  (type-of-arg   :type (member :mapping :list) :read-only t)
   (recipes       :type list)
   (list-num-args :type (or fixnum null)))
 
@@ -15,8 +15,6 @@
 			 (:mapping t)
 			 (:list    nil))))
     (loop
-	with string = (make-array 20 :element-type 'character :adjustable t :fill-pointer 0)
-	
 	with list-args = (unless is-mapping-fs
 			   (let ((args (deproxy arg)))
 			     
@@ -33,9 +31,11 @@
 	with mapping-getitem = (when is-mapping-fs
 				 (recursive-class-lookup-and-bind arg '__getitem__))
 			       
+	with collected-strings = ()
+			       
 	for rec across (fs-recipes fs)
 	do (ecase (pop rec)
-	     (:literal (fs-extend-vec (car rec) string))
+	     (:literal (push (car rec) collected-strings))
 	     (:format  (destructuring-bind
 			   (map-key conv-flags min-field-width precision conv-type) rec
 			 
@@ -57,10 +57,14 @@
 							   conv-flags min-field-width)
 					  obj.f)))
 			   
-			   (fs-extend-vec obj.f2 string)))))
+			   (push obj.f2 collected-strings)))))
 	   
-	finally (return string))))
-
+	finally (setf collected-strings (nreverse collected-strings))
+		#+(or)(warn "collected: ~S" collected-strings)
+		(loop for s in collected-strings
+		    sum (length s) into s.len
+		    finally (return-from make-formatted-string
+			      (apply #'concatenate 'string collected-strings))))))
 
 (defun format-object (conv-type obj)
   (ecase conv-type
