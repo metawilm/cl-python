@@ -78,9 +78,11 @@ VALUE and TARGET context."
       
     (assert-stmt
      (if build-result
-	 `(assert-stmt ,(funcall f (second form) :value t) ,(funcall f (third form)))
+	 `(assert-stmt ,(funcall f (second form) :value t) ,(when (third form)
+							      (funcall f (third form))))
        (progn (funcall f (second form) :value t)
-	      (funcall f (third form)))))
+	      (when (third form)
+		(funcall f (third form))))))
       
     (assign-stmt
      (if build-result

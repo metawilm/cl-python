@@ -59,7 +59,7 @@
     (if (and (symbolp key) (hash-table-is-regular-dict-p d))
 	(gethash (symbol-name key) d)
       
-      (gethash key d))))
+      (gethash key d)))
 ||#
 
 (defun dict-del (x key)
@@ -86,9 +86,27 @@
 	  (remhash key d)
 	(setf (gethash key d) new-val)))))
 
+(defparameter *sym-gethash-stats* (make-hash-table :test #'equal))
+
 (defun sym-gethash (key ht &optional (is-reg-dict (hash-table-is-regular-dict-p ht)))
   ;; KEY is either a symbol or a regular string
   (declare (optimize (speed 3) (safety 0) (debug 0)))
+  #+(or)(incf (gethash (cons key ht) *sym-gethash-stats* 0))
+  #+(or)(warn "sym-gethash ~A ~A ~S" key (hash-table-count ht) (loop for k being the hash-key of ht
+							     using (hash-value v)
+							     do (return (list k v))
+								   finally (return "")))
+  #+(or) ;; optimization
+  (when (eq ht (load-time-value (dict (find-class 'py-user-object))))
+    (return-from sym-gethash nil))
+ 
+  #+(or) ;; optimization
+  (let ((key0 (schar (if (symbolp key) (symbol-name key) key) 0)))
+    (when (and (char/= key0 #\_)
+	       (or (eq ht (load-time-value (dict (find-class 'py-object))))
+		   (eq ht (load-time-value (dict (find-class 'py-function)))) ;; works because 'next' is generator; and that is inlined (XXX?)
+		   ))
+      (return-from sym-gethash nil)))
   
   (if is-reg-dict
       
@@ -270,6 +288,9 @@
 ;;;
 ;;; dynamic class creation
 
+(defmacro ltv-find-class (clsname)
+  `(load-time-value (find-class ,clsname)))
+
 (defun make-py-class (&key name context-name namespace supers cls-metaclass mod-metaclass)
   (declare (ignore context-name)) ;; XXX for now
 
@@ -285,8 +306,8 @@
   ;;  2) all supers are subtype of 'py-dictless-object (to create new "regular user-level" class)
   
   (flet ((of-type-class (s) (typep s 'class))
-	 (subclass-of-py-dl-object-p (s) (subtypep s (load-time-value (find-class 'py-dictless-object))))
-	 (subclass-of-py-type-p (s)      (subtypep s (load-time-value (find-class 'py-type)))))
+	 (subclass-of-py-dl-object-p (s) (subtypep s (ltv-find-class 'py-dictless-object)))
+	 (subclass-of-py-type-p (s)      (subtypep s (ltv-find-class 'py-type))))
     
     (unless (every #'of-type-class supers)
       (py-raise 'TypeError "Not all superclasses are classes (got: ~A)." supers))
@@ -309,23 +330,23 @@
     ;; Python class `object' corresponds to Lisp class 'py-dictless-object
     ;; but the new class should have a dict:
     ;; [XXX perhaps not needed anymore, as py-object has a dict?]
-    (substitute (load-time-value (find-class 'py-object))
-		(load-time-value (find-class 'py-dictless-object))
+    (substitute (ltv-find-class 'py-object)
+		(ltv-find-class 'py-dictless-object)
 		supers)
     
     
     (let ((metaclass (or cls-metaclass
 			 (when supers (class-of (car supers)))
 			 mod-metaclass
-			 (load-time-value (find-class 'py-type)))))
+			 (ltv-find-class 'py-type))))
       
       #+(or)(warn "metaclass: ~A" metaclass)
       
       (unless (typep metaclass 'class)
 	(py-raise 'TypeError "Metaclass must be a class (got: ~A)" metaclass))
       
-      (unless (or (eq metaclass (load-time-value (find-class 'py-meta-type)))
-		  (subtypep metaclass (load-time-value (find-class 'py-type))))
+      (unless (or (eq metaclass (ltv-find-class 'py-meta-type))
+		  (subtypep metaclass (ltv-find-class 'py-type)))
 	(py-raise 'TypeError 
 		  "Metaclass must be subclass of `type' (got class: ~A)" metaclass))
       
@@ -334,19 +355,18 @@
       ;; py-user-type as metaclass.
       ;; XXX subclassing `function' ?
       
-      (when (member metaclass
-		    (load-time-value (list (find-class 'py-lisp-type))
-				     (find-class 'py-core-type)))
-	(setf metaclass (load-time-value (find-class 'py-user-type))))
+      (when (or (eq metaclass (ltv-find-class 'py-lisp-type))
+		(eq metaclass (ltv-find-class 'py-core-type)))
+	(setf metaclass (ltv-find-class 'py-user-type)))
       
       
       ;; Subclass of `type' has metaclass 'py-meta-type
       
-      (when (eq metaclass (load-time-value (find-class 'py-meta-type)))
+      (when (eq metaclass (ltv-find-class 'py-meta-type))
 	(let ((cls (mop:ensure-class
 		    (make-symbol (symbol-name name))
 		    :direct-superclasses supers
-		    :metaclass (load-time-value (find-class 'py-meta-type))
+		    :metaclass (ltv-find-class 'py-meta-type)
 		    :dict namespace)))
 	  (return-from make-py-class cls)))
       
@@ -361,7 +381,7 @@
 
 	#+(or)(warn "binding __new__: ~A ~A" __new__ metaclass)
 
-	(let ((cls (if (and (eq (class-of __new__) (load-time-value (find-class 'py-static-method)))
+	(let ((cls (if (and (eq (class-of __new__) (ltv-find-class 'py-static-method))
 			    (eq (py-method-func __new__) (symbol-function 'py-type.__new__)))
 		       
 		       ;; Optimize common case:  py-type.__new__
@@ -617,7 +637,7 @@
 ;; py-static-method
 
 (def-py-method py-static-method.__new__ :static (cls func)
-  (assert (eq cls (load-time-value (find-class 'py-static-method))))
+  (assert (eq cls (ltv-find-class 'py-static-method)))
   (make-instance 'py-static-method :func func))
 
 (def-py-method py-static-method.__get__ (x inst class)
@@ -1142,19 +1162,30 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 (defun recursive-class-dict-lookup (cls attr &optional cls-list)
   ;; Look for ATTR in class CLS and all its superclasses.
   ;; and finally (which is in this implementation not a superclass of a class).
-  (assert (or (stringp attr) (symbolp attr)))
-  (when cls-list
-    (assert (eq cls (car cls-list))))
+  #+(or)(assert (or (stringp attr) (symbolp attr)))
+  #+(or)(when cls-list
+	  (assert (eq cls (car cls-list))))
   (loop for c in (or cls-list (mop:class-precedence-list cls))
-      until (or (eq c (load-time-value (find-class 'standard-class)))
-  		(eq c (load-time-value (find-class 'py-dict-mixin))))
-	    ;; XXX standard-class is after py-dict-mixin etc
-      when (and (dict c) (dict-get c attr)) return it
+      until (or (eq c (ltv-find-class 'standard-class))
+  		(eq c (ltv-find-class 'py-dict-mixin))
+		(eq c (ltv-find-class 'py-class-mixin))
+		(eq c (ltv-find-class 'standard-generic-function))) ;; condition copied from py-attr 
+	    
+      do (let ((val (cond ((and (eq attr '__set__)
+				(eq cls (ltv-find-class 'py-object)))
+			   #'py-object.__set__)
+			  (t (let* ((c.dict (dict c))
+				    (val (when c.dict
+					   (sym-gethash attr c.dict))))
+			       val)))))
+	   (when val 
+	     (return-from recursive-class-dict-lookup val)))
+		 
       finally ;; this seems not needed, in the finally clause
- 	      (let ((obj-attr (dict-get (load-time-value (find-class 'py-object)) attr)))
- 		(when obj-attr
- 		  #+(or)(warn "rec van py-object: ~A (cpl: ~A)" attr (mop:class-precedence-list cls))
- 		  (return obj-attr)))))
+	(let ((obj-attr (dict-get (ltv-find-class 'py-object) attr)))
+	  (when obj-attr
+	    #+(or)(warn "rec van py-object: ~A (cpl: ~A)" attr (mop:class-precedence-list cls))
+	    (return obj-attr)))))
 
 (defun recursive-class-lookup-and-bind (x attr)
   #+(or)(warn "recursive-class-lookup-and-bind ~A ~A" x attr)
@@ -1186,7 +1217,7 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 	  (setf name (intern str #.*package*))
 	(py-raise 'TypeError "Invalid class name: ~A" name))))
   
-  (let* ((cls-type (if (and (some (lambda (s) (let ((pt (load-time-value (find-class 'py-type))))
+  (let* ((cls-type (if (and (some (lambda (s) (let ((pt (ltv-find-class 'py-type)))
 						(or (eq s pt)
 						    (subtypep s 'py-type))))
 				  supers)
@@ -1200,7 +1231,7 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 				      (load-time-value
 				       (list (find-class 'py-user-object))))
 	     :metaclass (ecase cls-type
-			  (:metaclass (load-time-value (find-class 'py-meta-type)))
+			  (:metaclass (ltv-find-class 'py-meta-type))
 			  (:class     metacls))
 	     :dict dict)))
     
@@ -1246,23 +1277,23 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
   (with-output-to-string (s)
     (print-unreadable-object (x s :identity t)
       (format s "~@[meta~*~]class ~A"
-	      (typep x (load-time-value (find-class 'py-meta-type)))
+	      (typep x (ltv-find-class 'py-meta-type))
 	      (class-name x)))))
 
 (def-py-method py-type.__call__ (cls &rest args)
   
-  (cond ((and (eq cls (load-time-value (find-class 'py-type)))
+  (cond ((and (eq cls (ltv-find-class 'py-type))
 	      args
 	      (not (cdr args)))
 	 (return-from py-type.__call__
 	   (py-class-of (car args))))
 	
-	((eq cls (load-time-value (find-class 'py-object)))
+	((eq cls (ltv-find-class 'py-object))
 	 ;; object() -> an instance without __dict__
 	 (return-from py-type.__call__
 	   (make-instance 'py-dictless-object)))
 	
-	(t (if (eq cls (load-time-value (find-class 'py-type)))
+	(t (if (eq cls (ltv-find-class 'py-type))
 	       
 	       ;; Inline common case: creating new classes with TYPE as requested metaclass
 	       (apply #'py-type.__new__ cls args)
@@ -1964,7 +1995,7 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 
 (def-py-method py-complex.__new__ :static (cls &optional (real 0) (complex 0))
 	       (let ((c (complex real complex)))
-		 (if (eq cls (load-time-value (find-class 'py-complex)))
+		 (if (eq cls (ltv-find-class 'py-complex))
 		     c
 		   (make-instance 'cls :lisp-object c))))
 
@@ -2029,7 +2060,7 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 				  (check-type base (integer 2 36))
 				  (read-arg arg base))))))))
 		  
-      (if (eq cls (find-class (load-time-value 'py-int)))
+      (if (eq cls (ltv-find-class 'py-int))
 	  val
 	(make-instance cls :lisp-object val)))))
 
@@ -2056,7 +2087,7 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 
 (def-py-method py-bool.__new__ :static (cls &optional (val 0))
   (let ((bool-val (if (py-val->lisp-bool val) *the-true* *the-false*)))
-    (if (eq cls (load-time-value (find-class 'py-bool)))
+    (if (eq cls (ltv-find-class 'py-bool))
 	bool-val
       (make-instance 'cls :lisp-object bool-val))))
 
@@ -2070,7 +2101,7 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
     (setf val (read-from-string val)))
   (let* ((num (py-val->number val))
 	 (f   (coerce num 'double-float)))
-    (if (eq cls (load-time-value (find-class 'py-float)))
+    (if (eq cls (ltv-find-class 'py-float))
 	f
       (make-instance 'cls :lisp-object f))))
 
@@ -2123,7 +2154,7 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 
 (def-py-method py-dict.__new__ :static (cls &rest kwargs)
   ;; XXX logic of filling dict must be moved to __init__
-  (if (eq cls (load-time-value (find-class 'py-dict)))
+  (if (eq cls (ltv-find-class 'py-dict))
       (make-dict)
     (make-instance cls :lisp-object (make-dict))))
 
@@ -2153,7 +2184,7 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 		(setf (gethash (py-symbol->string key) x) val))))))
 
 (def-py-method py-dict.__eq__ (dict1^ dict2^)
-  (py-bool (and (typep dict2 (load-time-value (find-class 'hash-table)))
+  (py-bool (and (typep dict2 (ltv-find-class 'hash-table))
 		(= (hash-table-count dict1) (hash-table-count dict2))
 		(loop for d1.k being the hash-key in dict1 using (hash-value d1.v)
 		    for d2.v = (gethash d1.k dict2)
@@ -2230,7 +2261,7 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 (def-py-method py-list.__new__ :static (cls &optional iterable)
 	       (declare (ignore iterable))
 	       (let ((vec (make-py-list)))
-		 (if (eq cls (load-time-value (find-class 'py-list)))
+		 (if (eq cls (ltv-find-class 'py-list))
 		     vec
 		   (make-instance cls :lisp-object vec))))
 		    
@@ -2719,9 +2750,9 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 	       (let ((tup (make-tuple-from-list (when iterable 
 						  (py-iterate->lisp-list iterable)))))
 		 
-		 (cond ((eq cls (load-time-value (find-class 'py-tuple))) tup)
+		 (cond ((eq cls (ltv-find-class 'py-tuple)) tup)
 		       
-		       ((subtypep cls (load-time-value (find-class 'py-tuple)))
+		       ((subtypep cls (ltv-find-class 'py-tuple))
 			(let ((x (make-instance cls)))
 			  (setf (proxy-lisp-val x) tup)
 			  x))
@@ -2808,44 +2839,45 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;  
 
 (defgeneric py-class-of (x)
-    (:method ((x integer)) (load-time-value (find-class 'py-int    )))
-    (:method ((x real))    (load-time-value (find-class 'py-float  )))
-    (:method ((x complex)) (load-time-value (find-class 'py-complex)))
-    (:method ((x string))  (load-time-value (find-class 'py-string )))
-    (:method ((x vector))  (load-time-value (find-class 'py-list   )))
-    (:method ((x list))    (load-time-value (find-class 'py-tuple  )))
-    (:method ((x hash-table)) (load-time-value (find-class 'py-dict)))
+  (:method ((x integer)) (ltv-find-class 'py-int    ))
+  (:method ((x real))    (ltv-find-class 'py-float  ))
+  (:method ((x complex)) (ltv-find-class 'py-complex))
+  (:method ((x string))  (ltv-find-class 'py-string ))
+  (:method ((x vector))  (ltv-find-class 'py-list   ))
+  (:method ((x list))    (ltv-find-class 'py-tuple  ))
+  (:method ((x hash-table)) (ltv-find-class 'py-dict))
     
-    (:method ((x function))    (load-time-value (find-class 'py-function)))
-    (:method ((x py-function)) (load-time-value (find-class 'py-function)))
+  (:method ((x function))    (ltv-find-class 'py-function))
+  (:method ((x py-function)) (ltv-find-class 'py-function))
     
-    (:method ((x py-lisp-type)) (load-time-value (find-class 'py-type)))
-    (:method ((x py-core-type)) (load-time-value (find-class 'py-type)))
-    (:method ((x py-user-type)) (load-time-value (find-class 'py-type)))
+  (:method ((x py-lisp-type)) (ltv-find-class 'py-type))
+  (:method ((x py-core-type)) (ltv-find-class 'py-type))
+  (:method ((x py-user-type)) (ltv-find-class 'py-type))
     
-    (:method ((x class))   (cond
-			    ((eq x (load-time-value (find-class 'py-type)))
-			     x)  ;; py-type is its own class
+  (:method ((x class))   (cond
+			  ((eq x (ltv-find-class 'py-type))
+			   x)  ;; py-type is its own class
 			    
-			    ((eq x (load-time-value (find-class 'py-meta-type)))
-			     ;; the metatypes is posing as `type'
-			     (load-time-value (find-class 'py-type)))
+			  ((eq x (ltv-find-class 'py-meta-type))
+			   ;; the metatypes is posing as `type'
+			   (ltv-find-class 'py-type))
 			    
-			    ((typep x (load-time-value (find-class 'py-meta-type)))
-			     ;; metatypes fake being of type `type'
-			     (load-time-value (find-class 'py-type)))
+			  ((typep x (ltv-find-class 'py-meta-type))
+			   ;; metatypes fake being of type `type'
+			   (ltv-find-class 'py-type))
 			    
-			    ((typep x (load-time-value (find-class 'py-class-mixin)))
-			     ;; maybe user-defined metaclass
-			     (class-of x))
+			  ((typep x (ltv-find-class 'py-class-mixin))
+			   ;; maybe user-defined metaclass
+			   (class-of x))
 			    
-			    ((or (typep x (load-time-value 'standard-class))
-				 (typep x (load-time-value 'built-in-class)))
-			     (load-time-value (find-class 'py-type)))
-			    
-			    (t (warn "py-class-of ~A -> ~A" x (class-of x))
-			       (class-of x))))
-    (:method ((x t))       (class-of x)))
+			  ((or (typep x (ltv-find-class 'standard-class))
+			       (typep x (ltv-find-class 'built-in-class)))
+			   (ltv-find-class 'py-type))
+			  
+			  (t (warn "py-class-of ~A -> ~A" x (class-of x))
+			     (class-of x))))
+  
+  (:method ((x t))       (class-of x)))
 
 
 ;;; Attributes are a fundamental thing: getting, setting, deleting
@@ -2864,7 +2896,9 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 	 (attr.as_string   (if (symbolp attr)
 			       (symbol-name attr)
 			     (py-val->string attr)))
-	 (attr.as_sym      (find-symbol attr.as_string #.*package*)) ;; may fail (= NIL)
+	 (attr.as_sym      (if (symbolp attr)
+			       attr
+			     (find-symbol attr.as_string #.*package*))) ;; may fail (= NIL)
 	 
 	 (inside-object-getattribute (loop for (obj . at) in *py-object.__getattribute__-active*
 					 when (and (eq obj x)
@@ -2873,11 +2907,29 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 					 finally (return nil))))
     
     (loop for c in (mop:class-precedence-list x.class)
-	until (or (eq c (load-time-value (find-class 'standard-class)))
-		  (eq c (load-time-value (find-class 'py-dict-mixin)))
-		  (eq c (load-time-value (find-class 'py-class-mixin))))
+	until (or (progn #+(or)(warn "c: ~A" c) nil)
+		  (eq c (ltv-find-class 'standard-class))
+		  (eq c (ltv-find-class 'py-dict-mixin))
+		  (eq c (ltv-find-class 'py-class-mixin))
+		  (eq c (ltv-find-class 'standard-generic-function))
+		  )
 	      
-	for c.dict = (dict c) ;; may be NIL
+	for c.dict = (cond ((eq c (ltv-find-class 'py-user-object))
+			    nil) ;; has no methods
+			   
+			   ((eq c (ltv-find-class 'py-object))
+			    (when (member attr.as_sym '(__getattribute__ __setattr__ __delattr__
+						      __new__ __init__ __class__ __repr__ __get__)
+					:test #'eq)
+				(load-time-value (dict (find-class 'py-object)))))
+			   
+			   ((eq c (ltv-find-class 'py-function))
+			    (when (member attr.as_sym '(__get__ __repr__ __name__ __call__)
+					  :test #'eq)
+			      (load-time-value (dict (find-class 'py-function)))))
+			   
+			   (t (dict c))) ;; may be NIL
+		     
 	for c.dict-is-regular-dict = (and c.dict (hash-table-is-regular-dict-p c.dict))
 				     
 	when c.dict
@@ -2885,7 +2937,9 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 	  (unless (or inside-object-getattribute
 		      __getattribute__)
 	    ;; Try only the first __getattribute__ method found (but not py-object's).
-	    (let ((getattribute-meth (sym-gethash '__getattribute__ c.dict c.dict-is-regular-dict)))
+	    (let ((getattribute-meth 
+		   (cond ((eq c (ltv-find-class 'py-object)) #'py-object.__getattribute__)
+			 (t (sym-gethash '__getattribute__ c.dict c.dict-is-regular-dict)))))
 	      (when (and getattribute-meth
 			 (not (eq getattribute-meth (symbol-function 'py-object.__getattribute__))))
 		(setf __getattribute__ getattribute-meth)
@@ -2909,7 +2963,9 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 		      __getattr__)
 	    ;; Look for __getattr__ method (but don't call it yet:
 	    ;; only if instance/class dicts fail).
-	    (let ((getattr-meth (sym-gethash '__getattr__ c.dict c.dict-is-regular-dict)))
+	    (let ((getattr-meth 
+		   (cond ((eq c (ltv-find-class 'py-object)) nil)
+			 (t (sym-gethash '__getattr__ c.dict c.dict-is-regular-dict)))))
 	      (when getattr-meth (setf __getattr__ getattr-meth)))))
 
     ;; Arriving here means: no __getattribute__ (or one that raised AttributeError),
@@ -2940,9 +2996,9 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
     (if (typep x 'class)
 	
 	(loop for c in (mop:class-precedence-list x)
-	    until (or (eq c (load-time-value (find-class 'standard-class)))
-		      (eq c (load-time-value (find-class 'py-dict-mixin)))
-		      (eq c (load-time-value (find-class 'py-class-mixin))))
+	    until (or (eq c (ltv-find-class 'standard-class))
+		      (eq c (ltv-find-class 'py-dict-mixin))
+		      (eq c (ltv-find-class 'py-class-mixin)))
 		  
 	    for c.dict = (dict c) ;; may be NIL
 	    for c.dict-is-regular-dict = (and c.dict (hash-table-is-regular-dict-p c.dict))
@@ -2965,18 +3021,18 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 	      (return-from py-attr val))
 	    
 	    #+(or)
-	    (cond ((member (load-time-value (find-class 'py-type))
+	    (cond ((member (ltv-find-class 'py-type)
 			   (mop:class-precedence-list (py-class-of x)) :test 'eq)
 		   (warn "yes, ~A subtype of type" (py-class-of x))
 		       
 		        ;; <- eff. opt.
 		       #||
-		       (member (load-time-value (find-class 'py-type))
+		       (member (ltv-find-class 'py-type)
 			       (mop:class-precedence-list (class-of x)) :test 'eq)
 			
 		       #+(or)
-		       (or (eq (class-of x) (load-time-value (find-class 'py-type)))
-			   (subtypep (py-class-of x) (load-time-value (find-class 'py-type))))
+		       (or (eq (class-of x) (ltv-find-class 'py-type))
+			   (subtypep (py-class-of x) (ltv-find-class 'py-type)))
 		       
 		       ||#
 		       
@@ -3257,7 +3313,7 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 	 (excl::fast (funcall (the function x) ,@args))
        (let ((x.cls (class-of .x)))
 	 (locally (declare (notinline py-call))
-	   (if (eq x.cls (load-time-value (find-class 'py-bound-method)))
+	   (if (eq x.cls (ltv-find-class 'py-bound-method))
 	       
 	       (with-slots ((func .func) (instance .instance)) .x
 		 (if (functionp .func)

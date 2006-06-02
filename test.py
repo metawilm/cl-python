@@ -1,7 +1,8 @@
-def f(x):
-  print "f %s" % x
-  return [x,x]
+print "running tests..."
 
-@f
-def g():
-  return 3
+# IronPython 20060602
+class x(dict): pass
+c = x(a=3)
+assert type(c) is x
+assert c['a'] == 3
+

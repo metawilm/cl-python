@@ -109,8 +109,8 @@
     (print-object x s)))
 
 
-(defvar *cached-StopIteration*
-    (make-instance 'StopIteration :args "Iterator has finished")
+(defparameter *cached-StopIteration*
+    (make-instance 'StopIteration :args (list "Iterator has finished"))
   "Shared instance of this commonly used exception")
 
 (defun raise-StopIteration ()
