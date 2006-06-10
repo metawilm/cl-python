@@ -104,15 +104,9 @@
 	     collect `(,x ',(make-symbol (symbol-name x))))
      ,@body))
 
-(defmacro fast (&body body)
-  `(locally (declare (optimize (speed 3) (safety 0) (debug 0)))
-     ,@body))
-
-
 ;;; Compiler debugging and optimization options.
 (defvar *mangle-private-variables* t ;; XXX not used yet
   "In class definitions, replace __foo by _C__foo, like CPython does")
-
 
 ;; Various settings
 
@@ -208,7 +202,7 @@ XXX Make +mod-debug+ instead?")
 			   (local-set () `(setf ,name ,val))
 			
 			   (class-set () `(setf 
-					      (gethash ,(symbol-name name) +cls-namespace+)
+					      (this-dict-get +cls-namespace+ ,(symbol-name name))
 					    ,val)))
 		    
 		      (ecase context
@@ -516,7 +510,7 @@ XXX Make +mod-debug+ instead?")
 				      :context-name ',context-cname
 				      :namespace +cls-namespace+
 				      :supers (list ,@(second inheritance))
-				      :cls-metaclass (gethash "__metaclass__" +cls-namespace+)
+				      :cls-metaclass (py-dict-getitem +cls-namespace+ "__metaclass__")
 				      :mod-metaclass
 				      ,(let ((ix (position '__metaclass__
 							   (get-pydecl :mod-globals-names e))))
@@ -870,7 +864,7 @@ XXX Make +mod-debug+ instead?")
 		 
       (:module   (module-lookup))
       
-      (:class    `(or (gethash ',(symbol-name name) +cls-namespace+)
+      (:class    `(or (this-dict-get +cls-namespace+ ',(symbol-name name))
 		      ,(if (member name (get-pydecl :lexically-visible-vars e))
 			   (local-lookup)
 			 (module-lookup))))
@@ -1403,7 +1397,11 @@ XXX Make +mod-debug+ instead?")
 	      collect (cons k v)))))
 
 (defgeneric convert-to-namespace-ht (x)
-
+  
+  (:method :around (x)
+	   (declare (ignore x))
+	   (break "convert-to-namespace-ht needs to be updated to new DICT style"))
+  
   ;; Convert a Python dict to a namespace, by replacing all string
   ;; keys by corresponding symbols.
   

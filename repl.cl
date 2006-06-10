@@ -198,7 +198,7 @@
 				      (multiple-value-bind (res err) 
 					  (ignore-errors (eval lisp-form))
 					(if err
-					    (warn "Evaluation as Lisp failed: ~A" err)
+					    (format t ";; Evaluation as Lisp failed: ~A~%" err)
 					  (progn
 					    (remember-value res)
 					    (write res)

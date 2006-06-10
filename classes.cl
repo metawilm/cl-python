@@ -8,116 +8,119 @@
 ;;;  (put 'def-py-method 'fi:common-lisp-indent-hook
 ;;;     (get 'defmethod 'fi:common-lisp-indent-hook))
 
-(defvar *py-print-safe* nil)
+(defmacro fast (&body body)
+  `(locally (declare (optimize (speed 3) (safety 0) (debug 0)))
+     ,@body))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 ;;; Class frameword:  py-meta-type, py-type, py-dictless-object
 
-(eval-when (:compile-toplevel :load-toplevel :execute)
-(defun py-eq-dict-hash (x)
-  ;; X is string or symbol
-  (sxhash (etypecase x
-	    (symbol (symbol-name x))
-	    (string x))))
+(eval-when (compile load eval)
+  
+  (defparameter *dict-id-counter* 1)
 
-(defun py-eq-dict-test (x y)
-  ;; X,Y can be strings or symbols
-  (etypecase x
-    (symbol (etypecase y
-	      (symbol (eq x y))
-	      (string (string= (symbol-name x) y))))
-    (string (etypecase y
-	      (symbol (string= x (symbol-name y)))
-	      (string (string= x y))))))
+  (defclass py-dict () ;; Class redefinition  below, to set PY-CORE-OBJECT as superclass.
+    ((id              :accessor py-dict-id               :initform (new-dict-id) )
+     (symdict-func    :accessor py-dict-symdict-func     :initform nil )
+     (lookup-counter  :accessor py-dict-lookup-counter   :initform 0   )
+     (non-string-keys :accessor py-dict-non-string-keysp :initform nil )
+     (hash-table      :accessor py-dict-hash-table      
+		      :initform (make-hash-table :test 'py-==->lisp-val :hash-function 'py-hash))))
+  
+  (defun py-==->lisp-val (x y)
+    (/= (py-== x y) 0))
+  
+  (defun py-hash (x)
+    ;; Dummy
+    (sxhash x))
+  
+  (defgeneric py-== (x y)
+    ;; Dummy
+    (:method (x y)
+	     (if (equalp x y) 1 0)))
+  
+  (defun new-dict-id ()
+    (1- (incf *dict-id-counter*)))
 
-(defun make-py-eq-dict ()
-  (make-hash-table :hash-function 'py-eq-dict-hash :test 'py-eq-dict-test))
-
-) ;; eval-when
-
+  (defmethod touch-py-dict ((x py-dict))
+    ;; Update ID; remove symdict func; reset counters.
+    (setf (py-dict-id x) (new-dict-id))
+    (when (py-dict-symdict-func x)
+      (setf (py-dict-symdict-func x) nil))
+    (setf (py-dict-lookup-counter x) 0))
+  
+  (defgeneric py-dict-setitem (dict key val)
+    (:documentation "Returns ITEM, or NIL")
+    
+    (:method ((d py-dict) k v)
+	     (touch-py-dict d)
+	     (typecase k
+	       (symbol)
+	       (string)
+	       (t (setf (py-dict-non-string-keysp d) t)))
+	     (setf (gethash k (py-dict-hash-table d)) v)))
+  )
 
 (defclass py-dict-mixin ()
-  ;; By default, instances have a PY-EQ dict. Overrule by supplying :DICT arg.
   ((dict :initarg :dict
-	 :initform (make-py-eq-dict)
+	 :initform (make-dict)
 	 :accessor dict)))
+
+(eval-when (compile load eval)
+  (defun make-dict ()
+    (make-instance 'py-dict))
+)
 
 (defmethod dict ((x t))
   nil)
 
-(defun hash-table-is-regular-dict-p (x)
-  (eq (hash-table-test x) 'py-==->lisp-val))
+(defun ensure-dict (x)
+  (let ((d (dict x)))
+    (unless d
+      (error "dict-get on ~A, which does not have dict" x))
+    d))
 
 (defun dict-get (x key)
-  #+(or)(check-type key (or string symbol))
-  (let ((d (dict x)))
-    (sym-gethash key d)))
-#||
-    (sym-gethash 
-    (assert d () "dict-get: object ~A has no dict (key ~A)" x key)
-    (if (and (symbolp key) (hash-table-is-regular-dict-p d))
-	(gethash (symbol-name key) d)
-      
-      (gethash key d)))
-||#
+  (assert (stringp key))
+  (let ((d (ensure-dict x)))
+    (this-dict-get d key)))
+
+(defmacro ltv-find-class (clsname)
+  `(load-time-value (find-class ,clsname)))
+
+(defun this-dict-get (d key)
+  (assert (stringp key))
+  (assert d)
+  (if (eq (class-of d) (ltv-find-class 'py-dict))
+      (py-dict.__getitem__ d key)
+    (py-classlookup-bind-call d '__getitem__ key)))
 
 (defun dict-del (x key)
-  (check-type key (or string symbol))
-  (let ((d (dict x)))
-    (assert d () "dict-del: object ~A has no dict (key ~A)" x key)
-    (if (and (symbolp key) (hash-table-is-regular-dict-p d))
-	(remhash (symbol-name key) d)
-      (remhash key d))))
+  (check-type key string)
+  (let ((d (ensure-dict x)))
+    (if (eq (class-of d) (ltv-find-class 'py-dict))
+	(py-dict.__delitem__ d key)
+      (py-classlookup-bind-call d '__delitem__ key))))
 
-(defun (setf dict-get) (new-val x key)
+(defun (setf dict-get) (val x key)
   ;; NEW-VAL == NIL -> delete key; return whether it existed
   (check-type key (or string symbol))
-  (let ((d (dict x)))
+  (let ((d (ensure-dict x)))
+    (setf (this-dict-get d key) val)))
 
-    (unless d
-      (error "(setf dict-get) on dictless object: ~A ~A ~A" x key new-val))
-    
-    (let ((key (if (and (symbolp key) (hash-table-is-regular-dict-p d))
-		   (symbol-name key)
-		 key)))
+(defun (setf this-dict-get) (val d key)
+  (if (null val)
       
-      (if (null new-val)
-	  (remhash key d)
-	(setf (gethash key d) new-val)))))
+      (if (eq (class-of d) (ltv-find-class 'py-dict))
+	  (py-dict-delitem d key)
+	(py-classlookup-bind-call d '__setitem__ key val))
+      
+    (if (eq (class-of d) (ltv-find-class 'py-dict))
+	(py-dict-setitem d key val)
+      (py-classlookup-bind-call d '__setitem__ key val))))
 
-(defparameter *sym-gethash-stats* (make-hash-table :test #'equal))
-
-(defun sym-gethash (key ht &optional (is-reg-dict (hash-table-is-regular-dict-p ht)))
-  ;; KEY is either a symbol or a regular string
-  (declare (optimize (speed 3) (safety 0) (debug 0)))
-  #+(or)(incf (gethash (cons key ht) *sym-gethash-stats* 0))
-  #+(or)(warn "sym-gethash ~A ~A ~S" key (hash-table-count ht) (loop for k being the hash-key of ht
-							     using (hash-value v)
-							     do (return (list k v))
-								   finally (return "")))
-  #+(or) ;; optimization
-  (when (eq ht (load-time-value (dict (find-class 'py-user-object))))
-    (return-from sym-gethash nil))
- 
-  #+(or) ;; optimization
-  (let ((key0 (schar (if (symbolp key) (symbol-name key) key) 0)))
-    (when (and (char/= key0 #\_)
-	       (or (eq ht (load-time-value (dict (find-class 'py-object))))
-		   (eq ht (load-time-value (dict (find-class 'py-function)))) ;; works because 'next' is generator; and that is inlined (XXX?)
-		   ))
-      (return-from sym-gethash nil)))
   
-  (if is-reg-dict
-      
-      (values (gethash (if (symbolp key) (symbol-name key) key) ht))
-    
-    (let ((key.sym (if (symbolp key) key (find-symbol key #.*package*))))
-      ;; If symbol not found, it can not be present as key in the HT either
-      (when key.sym
-	(values (gethash key.sym ht))))))
-
-
 (defclass py-class-mixin (py-dict-mixin)
   ((mro :initarg :mro :accessor class-mro)))
 
@@ -168,7 +171,7 @@
 
 (defclass py-user-type   (py-type) ())
 (defclass py-user-object (py-object)
-  ((dict :initform (make-dict)))  ;; not EQ-dict  XXX check if __slots__
+  ((dict :initform (make-dict)))  ;; XXX __slots__ ignored
   (:metaclass py-user-type))
 
 ;; Lisp type/object
@@ -181,6 +184,13 @@
   ((lisp-object :initarg :lisp-object :accessor proxy-lisp-val))
   (:metaclass py-lisp-type)
   (:documentation "Base class for proxy classes"))
+
+
+;; Fix py-dict, to have py-core-object as superclass
+
+(mop:ensure-class 'py-dict
+		  :direct-superclasses (list 'py-core-object)
+		  :metaclass 'py-core-type)
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;
@@ -282,21 +292,17 @@
 	   (when obj
 	     (setf (dict-get cls ',meth) obj)))))))
 
-
-
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;
 ;;; dynamic class creation
 
-(defmacro ltv-find-class (clsname)
-  `(load-time-value (find-class ,clsname)))
 
 (defun make-py-class (&key name context-name namespace supers cls-metaclass mod-metaclass)
   (declare (ignore context-name)) ;; XXX for now
 
   (assert (symbolp name))
   (assert (listp supers))
-  (assert (hash-table-p namespace))
+  (assert (typep namespace 'py-dict))
   
   ;; XXX is this a true restriction?  Custom metaclasses may allow
   ;; more kinds of `bases' in their __new__(...) ?
@@ -423,7 +429,6 @@
 	  
 	  cls)))))
 
-
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defconstant *the-true* 1)
@@ -438,10 +443,6 @@
 
 (define-compiler-macro py-bool (lisp-val)
   `(if ,lisp-val *the-true* *the-false*))
-
-
-(def-py-method py-dictless-object.__class__ :attribute (x)
-  (py-class-of x))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -511,9 +512,9 @@
 ;;; Core objects (function, method, None...; not subclassable by the user)
 ;;;
 
-;; Method (Core object)
+(def-py-method py-dictless-object.__class__ :attribute (x)
+  (py-class-of x))
 
-;; py-method
 
 ;; py-class-method
 
@@ -1127,8 +1128,12 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 
 (def-py-method py-object.__setattr__ (x attr^ val)
   (check-type attr (or string symbol))
+  (let ((attr.sym (if (stringp attr)
+		      (or (find-symbol attr #.*package*)
+			  (intern attr #.*package*))
+		    attr)))
   (let ((*py-object.__setattr__-active* (cons (cons x attr) *py-object.__setattr__-active*)))
-    (setf (py-attr x attr) val)))
+    (setf (py-attr x attr.sym) val))))
 
 
 (defvar *py-object.__delattr__-active* ())
@@ -1137,7 +1142,6 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
   (check-type attr (or string symbol))
   (let ((*py-object.__delattr__-active* (cons (cons x attr) *py-object.__delattr__-active*)))
     (setf (py-attr x attr) nil)))
-
 
 (def-py-method py-object.__new__ :static (cls &rest attr)
   (declare (ignore attr))
@@ -1162,30 +1166,29 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 (defun recursive-class-dict-lookup (cls attr &optional cls-list)
   ;; Look for ATTR in class CLS and all its superclasses.
   ;; and finally (which is in this implementation not a superclass of a class).
-  #+(or)(assert (or (stringp attr) (symbolp attr)))
-  #+(or)(when cls-list
-	  (assert (eq cls (car cls-list))))
+  (assert (symbolp attr))
   (loop for c in (or cls-list (mop:class-precedence-list cls))
       until (or (eq c (ltv-find-class 'standard-class))
   		(eq c (ltv-find-class 'py-dict-mixin))
 		(eq c (ltv-find-class 'py-class-mixin))
 		(eq c (ltv-find-class 'standard-generic-function))) ;; condition copied from py-attr 
 	    
-      do (let ((val (cond ((and (eq attr '__set__)
-				(eq cls (ltv-find-class 'py-object)))
-			   #'py-object.__set__)
-			  (t (let* ((c.dict (dict c))
-				    (val (when c.dict
-					   (sym-gethash attr c.dict))))
-			       val)))))
-	   (when val 
+      do (let* ((d (dict c))
+		(val (when d
+		       (if (eq (class-of d) (ltv-find-class 'py-dict))
+			   (py-dict-getitem d attr)
+			 (let ((*py-attr-sym* attr))
+			   (declare (special *py-attr-sym*))
+			   (this-dict-get d (symbol-name attr)))))))
+	   (when val
 	     (return-from recursive-class-dict-lookup val)))
-		 
+
       finally ;; this seems not needed, in the finally clause
-	(let ((obj-attr (dict-get (ltv-find-class 'py-object) attr)))
+	(let ((obj-attr (py-dict-getitem (load-time-value (dict (find-class 'py-object))) attr)))
 	  (when obj-attr
 	    #+(or)(warn "rec van py-object: ~A (cpl: ~A)" attr (mop:class-precedence-list cls))
 	    (return obj-attr)))))
+	
 
 (defun recursive-class-lookup-and-bind (x attr)
   #+(or)(warn "recursive-class-lookup-and-bind ~A ~A" x attr)
@@ -1299,7 +1302,8 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 	       (apply #'py-type.__new__ cls args)
 	     
 	     (let* ((__new__ (recursive-class-dict-lookup cls '__new__)) ;; XXX bind __new__?
-		    (inst    (apply #'py-call __new__ cls args))) ;; including CLS as arg!
+		    (bound-new (bind-val __new__ cls (py-class-of cls)))
+		    (inst    (apply #'py-call bound-new cls args))) ;; including CLS as arg!
 	       
 	       (when (or (eq (class-of inst) cls) ;; <- Efficiency optimization
 			 (subtypep (py-class-of inst) cls)) ;; <- real test
@@ -1329,6 +1333,7 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 	       (let ((x (make-instance cls)))
 		 (setf (dict-get x '__name__) name)
 		 x))
+
 (def-py-method py-module.__init__ (&rest args)
 	       (declare (ignore args))
 	       nil)
@@ -1910,9 +1915,9 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
   (:method ((x t))               x))
 
 
-(defmacro def-proxy-class (py-name &optional supers)
+(defmacro def-proxy-class (py-name &optional supers slots)
   `(progn (defclass ,py-name ,(or supers '(py-lisp-object))
-	    ()
+	    ,slots
 	    (:metaclass py-lisp-type))
 	  (mop:finalize-inheritance (find-class ',py-name))))
 
@@ -2126,31 +2131,99 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
     
     s))
   
-;;; non-numberic classes
+;;; non-numeric classes
 
 ;; Dict
 
-(def-proxy-class py-dict)
+;; Class py-dict is already defined above, as it's needed for
+;; bootstrapping Python class hierarchy.
 
-(defun py-==->lisp-val (x y)
-  (/= (py-== x y) 0))
-       
-(defun make-dict ()
-  ;; todo: (make-hash-table :test #'py-==  :hash #'py-hash)
-  (make-hash-table :test 'py-==->lisp-val :hash-function 'py-hash))
+
+(defconstant +dict-symhash-trigger+ 10)
+
+(defmethod incf-dict-lookup-count ((x py-dict))
+  (let ((new-count (the fixnum (incf (py-dict-lookup-counter x)))))
+    (when (and (= (the fixnum new-count) +dict-symhash-trigger+)
+	       (not (py-dict-non-string-keysp x))
+	       (not (py-dict-symdict-func x)))
+      (py-dict-make-symdict-func x))
+    new-count))
+
+(defparameter *symbol-dict-suffix-bits* 4)
+
+(defmethod py-dict-make-symdict-func ((x py-dict))
+  (assert (not (py-dict-non-string-keysp x)) (x)
+    "Cannot create symdict-func for dict, as it has non-string keys")
+  (loop for k being the hash-key in (py-dict-hash-table x)
+      using (hash-value v)
+      for k.sym = (if (symbolp k)
+		      k 
+		    (or (find-symbol k #.*package*)
+			(intern k #.*package*)))
+      collect (cons k.sym v) into alist
+      finally (let ((f (make-symbol-hash-func alist)))
+		(warn "compiling symdict!")
+		(setf (py-dict-symdict-func x) f)
+		(return t))))
+
+(defun make-symbol-hash-func (alist)
+  "ALIST is ((key . val)); each KEY is a symbol.
+Creates a function for doing fast lookup, using jump table"
+  (let* ((suffix-max (1- (expt 2 *symbol-dict-suffix-bits*)))
+	 (f `(lambda (x)
+	       "Foo bar"
+	       (declare (optimize (speed 3) (safety 0) (debug 0)))
+	       
+	       ;; For symbols, calling excl::symbol-hash-fcn is
+	       ;; approximately 4 times faster than calling sxhash.
+	       
+	       (let* ((hash (the fixnum (excl::symbol-hash-fcn x)))
+		      (suffix (logand hash ,suffix-max)))
+		
+		 (case (the (integer 0 15) suffix)
+		   
+		   ,@(loop for (s . val) in alist
+			 for hash = (excl::symbol-hash-fcn s)
+			 for suffix = (logand hash suffix-max)
+			 collect (list s val suffix) into hashes
+			 finally 
+			   (return
+			     (loop for ix from 0 to suffix-max
+				 collect
+			
+				   `(,ix ,(loop for (s val suffix) in hashes
+					      when (= suffix ix)
+					      collect (list s val) into candidates
+					      finally 
+						(return
+						  (if candidates
+						      `(cond ,@(loop for (c val) in candidates
+								   collect `((eq x ',c)
+									     ,val)))
+						    nil))))))))))))
+    (compile nil f)))
+
+(defun convert-if-symbol (x)
+  (if (symbolp x)
+      (symbol-name x)
+    x))
 
 (defmacro make-dict-unevaled-list (items)
-  (let ((dict '#:dict))
-    `(let ((,dict (make-dict)))
+  (let ((dict '#:dict)
+	(ht '#:ht))
+    `(let* ((,dict (make-dict))
+	    (,ht (py-dict-hash-table ,dict)))
+       (declare (ignorable ,ht))
        ,@(loop for (k . v) in items
-	     collect `(setf (gethash ,k ,dict) ,v))
+	     collect `(setf (gethash ,k ,ht) ,v))
        ,dict)))
 
 (defun make-dict-from-symbol-alist (alist)
-  (loop with ht = (make-dict)
+  (loop with d = (make-dict)
+      with ht = (py-dict-hash-table d)
       for (k . v) in alist 
       do (setf (gethash (py-symbol->string k) ht) v)
-      finally (return ht)))
+      finally (return d)))
 
 (def-py-method py-dict.__new__ :static (cls &rest kwargs)
   ;; XXX logic of filling dict must be moved to __init__
@@ -2158,43 +2231,107 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
       (make-dict)
     (make-instance cls :lisp-object (make-dict))))
 
-(def-py-method py-dict.__init__ (x^ &rest kwargs)
+(def-py-method py-dict.__init__ (x &rest kwargs)
   (case (length kwargs)
+    
     (0 )
+    
     (1 (let* ((iterable (car kwargs))
 	      (items-meth (recursive-class-lookup-and-bind iterable 'items))
 	      (items (if items-meth
 			 (py-call items-meth)
-		       (py-iterate->lisp-list iterable))))
-	 
+		       (py-iterate->lisp-list iterable)))
+	      (setitem-meth (or (recursive-class-lookup-and-bind x '__setitem__)
+				(py-raise 'TypeError
+					  "py-dict.__init__ called on object without __setitem__ (~A)"
+					  x))))
 	 (map-over-py-object (lambda (obj)
 			       (let ((lst (py-iterate->lisp-list obj)))
 				 (if (= (length lst) 2)
-				     (setf (gethash (pop lst) x) (pop lst))
+				     (py-call setitem-meth (pop lst) (pop lst))
 				   (py-raise 'ValueError
 					     "Got more than 2 values for element in .items() of ~A"
 					     iterable))))
 			     items)))
-	 
-    (t (loop while kwargs
+    
+    (t (loop with setitem-meth = (or (recursive-class-lookup-and-bind x '__setitem__)
+				     (py-raise 'TypeError
+					       "py-dict.__init__ called on object without __setitem__ (~A)"
+					       x))
+	   while kwargs
 	   do (let ((key (pop kwargs))
 		    (val (pop kwargs)))
 		(unless (symbolp key)
 		  (py-raise 'TypeError "dict.__new__: invalid key (not a symbol): ~S" key))
-		(setf (gethash (py-symbol->string key) x) val))))))
+		(py-call setitem-meth (symbol-name key) val))))))
 
-(def-py-method py-dict.__eq__ (dict1^ dict2^)
-  (py-bool (and (typep dict2 (ltv-find-class 'hash-table))
-		(= (hash-table-count dict1) (hash-table-count dict2))
-		(loop for d1.k being the hash-key in dict1 using (hash-value d1.v)
-		    for d2.v = (gethash d1.k dict2)
-		    when (py-val->lisp-bool (py-!= d1.v d2.v)) return nil
-		    finally (return t)))))
+(def-py-method py-dict.__delitem__ (dict k)
+  (or (py-dict-delitem dict k)
+      (py-raise 'KeyError "Dict has no such key: ~A" k)))
 
-(def-py-method py-dict.__getitem__ (dict^ key)
-  (let ((key2 (if (symbolp key) (symbol-name key) key)))
-    (or (gethash key2 dict)
-	(py-raise 'KeyError "Dict has no such key: ~A" key2))))
+(defgeneric py-dict-delitem (dict key)
+  (:documentation "Returns boolean indicating SUCCESS")
+  (:method :around ((d py-dict) k)
+	   (declare (ignore k))
+	   (if (call-next-method)
+	       (touch-py-dict d)
+	     nil))
+  
+  (:method ((d py-dict) (k symbol))
+	   (let ((f (py-dict-symdict-func d)))
+	     (if f
+		 (funcall f k)
+	       (call-next-method))))
+
+  #||
+  (:method ((d py-dict) (k string))
+	   (if (or (eq k (symbol-name (fast *py-attr-sym*)))
+		   ...
+		   )))
+  ||#
+  
+  (:method ((d py-dict) k)
+	   (when (remhash k (py-dict-hash-table d))
+	     (touch-py-dict d))))
+
+(def-py-method py-dict.__eq__ (dict1 dict2)
+  (let ((ht1 (py-dict-hash-table dict1))
+	(ht2 (py-dict-hash-table dict2)))
+    (py-bool (and (= (hash-table-count ht1) (hash-table-count ht2))
+		  (loop for d1.k being the hash-key in ht1 using (hash-value d1.v)
+		      for d2.v = (gethash d1.k ht2)
+		      when (py-val->lisp-bool (py-!= d1.v d2.v)) return nil
+		      finally (return t))))))
+
+(def-py-method py-dict.__getitem__ (dict k)
+  "KEY may be symbol (converted to string)"
+  (or (py-dict-getitem dict k)
+      (py-raise 'KeyError "Dict has no such key: ~A" k)))
+
+(defgeneric py-dict-getitem (dict key)
+  (:documentation "Returns ITEM, or NIL")
+  (:method :around ((d py-dict) k)
+	   (declare (ignore k))
+	   (incf-dict-lookup-count d)
+	   (call-next-method))
+  
+  (:method ((d py-dict) (k symbol))
+	   (let ((f (py-dict-symdict-func d)))
+	     (if f
+		 (funcall f k)
+	       (call-next-method))))
+
+  (:method ((d py-dict) (k string))
+	   (declare (special *py-attr-sym*))
+	   (let* ((s (fast *py-attr-sym*))
+		  (sn (fast (symbol-name s))))
+	     (if (or (eq k sn)
+		     (fast (string= (the string k) (the string sn))))
+		 (py-dict-getitem d s)
+	       (call-next-method))))
+
+  (:method ((d py-dict) k)
+	   (gethash k (py-dict-hash-table d))))
 
 (def-py-method py-dict.__iter__ (dict^)
   (with-hash-table-iterator (next-func dict)
@@ -2205,33 +2342,43 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 			(declare (ignore val))
 			(when ret key))))))
 
-(def-py-method py-dict.__nonzero__ (dict^)
-  (py-bool (> (hash-table-count dict) 0)))
+(def-py-method py-dict.__nonzero__ (dict)
+  (py-bool (> (hash-table-count (py-dict-hash-table dict)) 0)))
 
+#+(or)
 (def-py-method py-dict.__repr__ (x^)
   (with-output-to-string (s)
-    (write-char #\{ s)
-    (loop with c = (hash-table-count x)
-	for key being the hash-key in x
-	using (hash-value val)
-	for i from 1
-	do (write-string (py-repr-string key) s)
-	   (write-char #\: s)
-	   (write-char #\Space s)
-	   (write-string (py-repr-string val) s)
-	   (unless (= i c)
-	     (write-string ", " s)))
-    (write-char #\} s)))
+	   (write-char #\{ s)
+	   (loop with c = (hash-table-count x)
+	       for key being the hash-key in x
+	       using (hash-value val)
+	       for i from 1
+	       do (write-string (py-repr-string key) s)
+		  (write-char #\: s)
+		  (write-char #\Space s)
+		  (write-string (py-repr-string val) s)
+		  (unless (= i c)
+		    (write-string ", " s)))
+	   (write-char #\} s)))
 
-(def-py-method py-dict.__setitem__ (dict^ key val)
-  (let ((key2 (if (symbolp key) (symbol-name key) key)))
-    (setf (gethash key2 dict) val)))
+(def-py-method py-dict.__repr__ (x)
+  (with-output-to-string (s)
+    (print-unreadable-object (x s)
+      (with-slots (id lookup-counter non-string-keys) x
+	(format s "items: ~A  id: ~A  lookups: ~A  non-strings: ~A" 
+		(hash-table-count (py-dict-hash-table x)) id lookup-counter non-string-keys)))))
 
+(def-py-method py-dict.__setitem__ (x key val)
+  (py-dict-setitem x key val))
+
+
+  
 (def-py-method py-dict.fromkeys :static (seq &optional val)
 	       (unless val
 		 (setf val *the-none*))
-	       (let* ((d (make-dict)))
-		 (map-over-py-object (lambda (key) (setf (gethash key d) val))
+	       (let* ((d (make-dict))
+		      (ht (py-dict-hash-table d)))
+		 (map-over-py-object (lambda (key) (setf (gethash key ht) val))
 				     seq)
 		 d))
 
@@ -2239,12 +2386,12 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
   (make-py-list-from-list
    (loop for k being the hash-key in x
        using (hash-value v)
-       collect (make-tuple-from-list (list k v)))))
+       collect (make-tuple-from-list (list (convert-if-symbol k) v)))))
 
 (def-py-method py-dict.keys (x^)
   (make-py-list-from-list
    (loop for k being the hash-key in x
-       collect k)))
+       collect (if (convert-if-symbol k) k))))
 
 (def-py-method py-dict.values (x^)
   (make-py-list-from-list
@@ -2417,6 +2564,8 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 	      "<list>[i] = x : i outside range (got ~A, length list = ~A)"
 	      item (length x)))
   (setf (aref x item) val))
+
+(defvar *py-print-safe* nil)
 
 (def-py-method py-list.__str__ (x^)
   (if *py-print-safe*
@@ -2882,24 +3031,18 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 
 ;;; Attributes are a fundamental thing: getting, setting, deleting
 
-(defun py-attr (x attr &key (bind-class-attr t) via-getattr)
-  ;; ATTR may be a symbol, a string, or instance of user-defined subclass of string
-  ;; 
+(defvar *py-attr-sym* nil)
+
+(defun py-attr (x attr.as_sym &key (bind-class-attr t) via-getattr)
   ;; When BIND-CLASS-ATTR = NIL, then only if attr is a function, 
   ;; found in a class dict, as values:  :class-attr class-attr-val x
   ;; will be returned
-  
-  (let* ((class-attr-val   nil)
+  (assert (symbolp attr.as_sym))
+  (let* ((attr.as_string  (symbol-name attr.as_sym))
+	 (class-attr-val   nil)
 	 (__getattr__      nil)
 	 (__getattribute__ nil)
 	 (x.class          (py-class-of x))
-	 (attr.as_string   (if (symbolp attr)
-			       (symbol-name attr)
-			     (py-val->string attr)))
-	 (attr.as_sym      (if (symbolp attr)
-			       attr
-			     (find-symbol attr.as_string #.*package*))) ;; may fail (= NIL)
-	 
 	 (inside-object-getattribute (loop for (obj . at) in *py-object.__getattribute__-active*
 					 when (and (eq obj x)
 						   (string= (py-val->string at) attr.as_string))
@@ -2918,34 +3061,36 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 			    nil) ;; has no methods
 			   
 			   ((eq c (ltv-find-class 'py-object))
-			    (when (member attr.as_sym '(__getattribute__ __setattr__ __delattr__
-						      __new__ __init__ __class__ __repr__ __get__)
-					:test #'eq)
-				(load-time-value (dict (find-class 'py-object)))))
+			    (load-time-value (dict (find-class 'py-object))))
 			   
 			   ((eq c (ltv-find-class 'py-function))
-			    (when (member attr.as_sym '(__get__ __repr__ __name__ __call__)
-					  :test #'eq)
-			      (load-time-value (dict (find-class 'py-function)))))
+			    (load-time-value (dict (find-class 'py-function))))
 			   
 			   (t (dict c))) ;; may be NIL
 		     
-	for c.dict-is-regular-dict = (and c.dict (hash-table-is-regular-dict-p c.dict))
-				     
+	for c.dict.class = (when c.dict
+			     (class-of c.dict))
+	    
 	when c.dict
 	do 
 	  (unless (or inside-object-getattribute
 		      __getattribute__)
 	    ;; Try only the first __getattribute__ method found (but not py-object's).
-	    (let ((getattribute-meth 
-		   (cond ((eq c (ltv-find-class 'py-object)) #'py-object.__getattribute__)
-			 (t (sym-gethash '__getattribute__ c.dict c.dict-is-regular-dict)))))
+	    (let ((getattribute-meth (cond ((eq c (ltv-find-class 'py-object))
+					    #'py-object.__getattribute__)
+					   ((eq c.dict.class (ltv-find-class 'py-dict))
+					    (py-dict-getitem c.dict '__getattribute__))
+					   (t (let ((*py-attr-sym* '__getattribute__))
+						(this-dict-get c.dict "__getattribute__"))))))
 	      (when (and getattribute-meth
 			 (not (eq getattribute-meth (symbol-function 'py-object.__getattribute__))))
 		(setf __getattribute__ getattribute-meth)
+		
 		(handler-case
-		    (values (py-call (bind-val getattribute-meth x x.class) attr.as_string))
-		  (AttributeError () 
+		    (let ((*py-attr-sym* attr.as_sym)) ;; may be NIL
+		      (values (py-call (bind-val getattribute-meth x x.class) attr.as_string)))
+		  
+		  (AttributeError ()
 		    #+(or)(warn "__getattribute__ ~S ~S gave exception; also trying __getattr__ (if any)"
 				x attr)
 		    nil)
@@ -2954,19 +3099,27 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 	  
 	  (unless class-attr-val
 	    ;; Try to find attribute in class dict.
-	    (when (or c.dict-is-regular-dict attr.as_sym) ;; otherwise key can't exist
-	      (let ((val (sym-gethash attr.as_sym c.dict c.dict-is-regular-dict)))
-		(when val
-		  (setf class-attr-val val)))))
+	    (let ((val (cond ((eq c.dict.class (ltv-find-class 'py-dict))
+			      (py-dict-getitem c.dict attr.as_sym))
+			     (t
+			      (let ((*py-attr-sym* attr.as_sym))
+				(this-dict-get c.dict attr.as_string))))))
+	      (when val
+		(setf class-attr-val val))))
 	  
 	  (unless (or inside-object-getattribute
 		      __getattr__)
 	    ;; Look for __getattr__ method (but don't call it yet:
 	    ;; only if instance/class dicts fail).
 	    (let ((getattr-meth 
-		   (cond ((eq c (ltv-find-class 'py-object)) nil)
-			 (t (sym-gethash '__getattr__ c.dict c.dict-is-regular-dict)))))
-	      (when getattr-meth (setf __getattr__ getattr-meth)))))
+		   (cond ((eq c (ltv-find-class 'py-object))
+			  nil)
+			 ((eq c.dict.class (ltv-find-class 'py-dict))
+			  (py-dict-getitem c.dict '__getattr__))
+			 (t (let ((*py-attr-sym* '__getattr__))
+			      (this-dict-get c.dict "__getattr__"))))))
+	      (when getattr-meth
+		(setf __getattr__ getattr-meth)))))
 
     ;; Arriving here means: no __getattribute__ (or one that raised AttributeError),
     ;; but perhaps __getattr__ or class-attr-val.
@@ -2982,7 +3135,6 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
     ;; A class attribute that is a data descriptor (i.e. has a
     ;; `__set__' attribute) has higher priority than an instance
     ;; attribute.
-
     
     (when (and class-attr-val (data-descriptor-p class-attr-val))
       (return-from py-attr
@@ -3001,91 +3153,53 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 		      (eq c (ltv-find-class 'py-class-mixin)))
 		  
 	    for c.dict = (dict c) ;; may be NIL
-	    for c.dict-is-regular-dict = (and c.dict (hash-table-is-regular-dict-p c.dict))
 					 
-	    for val = (when (and c.dict
-				 (or attr.as_sym c.dict-is-regular-dict))
-			(sym-gethash attr c.dict c.dict-is-regular-dict))
-	    when val do 
-	      
-	      #+(or)(return-from py-attr val)
-	      
+	    for val = (when c.dict
+			(if (eq (class-of c.dict) (ltv-find-class 'py-dict))
+			    (py-dict-getitem c.dict attr.as_sym)
+			  (let ((*py-attr-sym* attr.as_sym))
+			    (this-dict-get c.dict attr.as_string))))
+	    when val do
 	      (let ((bound-val (bind-val val x x.class)))
-		(when bound-val ;; attribute-method bounded to class -> NIL
+		;; Binding can result in NIL: attribute-method bounded to
+		;; class (e.g. "complex.real").
+		;; Otherwise probably unbound method, or classmeth -> func.
+		(when bound-val 
 		  (return-from py-attr bound-val))))
 
       (let ((x.dict (dict x)))
 	(when x.dict
-	  (let ((val (sym-gethash attr.as_string x.dict)))
+	  (let ((val (if (eq (class-of x.dict) (ltv-find-class 'py-dict))
+			 (py-dict-getitem x.dict attr.as_sym)
+		       (let ((*py-attr-sym* attr.as_sym))
+			 (this-dict-get x.dict attr.as_string)))))
 	    (when val
-	      (return-from py-attr val))
-	    
-	    #+(or)
-	    (cond ((member (ltv-find-class 'py-type)
-			   (mop:class-precedence-list (py-class-of x)) :test 'eq)
-		   (warn "yes, ~A subtype of type" (py-class-of x))
-		       
-		        ;; <- eff. opt.
-		       #||
-		       (member (ltv-find-class 'py-type)
-			       (mop:class-precedence-list (class-of x)) :test 'eq)
-			
-		       #+(or)
-		       (or (eq (class-of x) (ltv-find-class 'py-type))
-			   (subtypep (py-class-of x) (ltv-find-class 'py-type)))
-		       
-		       ||#
-		       
-		   
-		   ;; XXX check the exact condition under which binding
-		   ;; of instance dict item occurs
-
-		   (let ((bound-val (bind-val val nil x)))
-		     (when bound-val ;; attribute-method bounded to class -> NIL
-		       (return-from py-attr bound-val))))
-
-		  (t #+(or)(break "attr: ~A ~A ~A" x attr val)
-		     (return-from py-attr 
-		       val)))))))
+	      ;; don't bind: coming from instance dict
+	      (return-from py-attr val))))))
     
     ;; Fall back to a class attribute that is not a `data descriptor'.
-    #+(or)
-    (when class-attr-val
-      (return-from py-attr
-	(bind-val class-attr-val x x.class)))
-    
     (when class-attr-val
       (return-from py-attr
 	(if (and (not bind-class-attr)
 		 (functionp class-attr-val))
 	    (values :class-attr class-attr-val x)
 	  (bind-val class-attr-val x x.class))))
-
-
-    ;; Right place??
-    #||
-    (when (eq attr.as_sym '__dict__)
-      (return-from py-attr (py-get-dict-attr x x.class)))
-    ||#
     
     ;; Fall back to the __getattr__ hook (not checked whether it raises AttributeError)
     (when __getattr__
       (return-from py-attr
-	(py-call (bind-val __getattr__ x x.class) attr.as_string)))
+	(let ((*py-attr-sym* attr.as_sym))
+	  (py-call (bind-val __getattr__ x x.class) attr.as_string))))
      
     (when (eq attr.as_sym '__dict__)
       (return-from py-attr (py-get-dict-attr x x.class)))
-
-    #||
-    (unless __getattribute__
-      (return-from py-attr
-	(py-call (bind-val #'object.__getattribute__ x x.class) attr.as_string)))
-    ||#
     
     ;; Give up.
     (if via-getattr
 	(throw :getattr-block :py-attr-not-found)
-      (py-raise 'AttributeError "No such attribute: ~A `~A' (class: ~A)" x attr (py-class-of x)))))
+      (py-raise 'AttributeError 
+		"No such attribute: ~A `~A' (class: ~A)"
+		x attr.as_string x.class))))
 
 
 (define-compiler-macro py-attr (&whole whole x attr &key (bind-class-attr t) via-getattr)
@@ -3095,7 +3209,7 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
       
       (case (second attr)
 	
-	;; "x.__class__ = y" is intercepted so __class__ is always valid class
+	;; "x.__class__ = y" is intercepted, ensuring __class__ is always a valid class
 	(__class__ `(py-class-of ,x))
 	
 	(__name__  `(let ((.x ,x))
@@ -3107,7 +3221,9 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 			    (declare (notinline py-attr))
 			  (py-attr .x ,attr)))))
 	
-	(__dict__ `(dict ,x))
+	(__dict__ `(let ((x ,x))
+		     (or (dict x)
+			 (py-raise 'TypeError "No __dict__ attribute: ~A" x))))
 	
 	(t         whole))
     
@@ -3116,76 +3232,97 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 (defun (setf py-class-of) (new-cls x)
   (change-class x new-cls))
 	   
-
-(defun (setf py-attr) (val x attr)
-  ;; When ATTR is NIL, it means attribute is deleted ("del x.attr")
-
-  ;; XXX convert string to real string?
-  ;; XXX special-case when ATTR==__dict__
-
-  (let* ((attr.str        (py-val->string attr))
-	 (x.class         (py-class-of x))
-	 (x.attr          (recursive-class-dict-lookup x.class attr)))
+(defun (setf py-attr) (val x attr.sym)
+  ;; When ATTR.SYM is NIL, it means attribute is deleted ("del x.attr")
+  
+  (assert (symbolp attr.sym))
+  (let* ((x.class (py-class-of x))
+	 (x.attr  (recursive-class-dict-lookup x.class attr.sym)))
     
     (if (null val)
-	
+
 	;; del x.attr
 	;; <cls>.__delattr__ takes precedence over <cls.attr>.__del__
 	(let* ((x.attr.__del__  (when x.attr
 				  (recursive-class-lookup-and-bind x.attr '__del__)))
 	       (delattr-active  (loop for (obj . at) in *py-object.__delattr__-active*
-				    if (and (eq obj x) (string= at attr))
+				    if (and (eq obj x) (string= at attr.sym))
 				    return t
 				    finally (return nil)))
 	       
 	       (x.__delattr__   (unless delattr-active
-				  (recursive-class-lookup-and-bind x '__delattr__))))
+				  (let ((da (recursive-class-dict-lookup x.class '__delattr__)))
+				    (unless (eq da #'py-object.__delattr__)
+				      da)))))
 	  
-	  (cond (x.__delattr__  (py-call x.__delattr__ attr.str))
+	  (or (when x.__delattr__
+		(let ((*py-attr-sym* attr.sym))
+		  (py-call (bind-val x.__delattr__ x x.class) (symbol-name attr.sym))))
+	      
+	      (when x.attr.__del__
+		(if (eq x.attr.__del__ *the-none*)
+		    (py-raise 'AttributeError
+			      "Cannot delete attribute ~A of ~A (__del__ = None)"
+			      x attr.sym)
+		  (py-call x.attr.__del__ x)))
 		
-		(x.attr.__del__ (if (eq x.attr.__del__ *the-none*)
-				    (py-raise 'AttributeError
-					      "Cannot delete attribute ~A of ~A (__del__ = None)"
-					      x attr)
-				  (py-call x.attr.__del__ x)))
-		
-		((dict x)       (unless (setf (dict-get x attr) nil)
-				  (py-raise 'AttributeError
-					    "Cannot delete attribute ~A of object ~A: does not exist"
-					    attr x)))
-		
-		(t              (py-raise 'AttributeError
-					  "Cannot delete attribute ~A of ~A: no __delattr__ method"
-					  x attr))))
+	      (let ((d (dict x)))
+		(when d
+		  (or (if (eq (class-of d) (ltv-find-class 'py-dict))
+			  (py-dict-delitem d attr.sym)
+			(let ((*py-attr-sym* attr.sym))
+			  (setf (this-dict-get d (symbol-name attr.sym)) nil)))
+		    
+		      (py-raise 'AttributeError
+				"Cannot delete attribute ~A of object ~A: does not exist"
+				attr.sym x))))
+	      
+	      (py-raise 'AttributeError
+			"Cannot delete attribute ~A of ~A"
+			attr.sym x)))
       
       ;; x.attr = val
       ;; <cls>.__setattr__ takes precedence over <cls.attr>.__set__
       (let* ((x.attr.__set__  (when x.attr
 				(recursive-class-lookup-and-bind x.attr '__set__)))
 	     (setattr-active  (loop for (obj . at) in *py-object.__setattr__-active*
-				  if (and (eq obj x) (string= at attr))
+				  if (and (eq obj x) (string= at attr.sym))
 				  return t
 				  finally (return nil)))
 	     
 	     (x.__setattr__   (unless setattr-active
-				(recursive-class-lookup-and-bind x '__setattr__))))
+				(let ((sa (recursive-class-dict-lookup x.class '__setattr__)))
+				  (unless (eq sa #'py-object.__setattr__)
+				    sa)))))
 	
 	#+(or)(warn "x: ~A attr: ~A x.attr: ~A x.attr.__set__: ~A x.__setattr__: ~A"
 		    x attr x.attr x.attr.__set__ x.__setattr__)
 	
-	(cond (x.__setattr__  (py-call x.__setattr__ attr.str val))
+	(or (when x.__setattr__
+	      (let ((*py-attr-sym* attr.sym))
+		(py-call (bind-val x.__setattr__ x x.class) (symbol-name attr.sym) val)))
 	      
-	      (x.attr.__set__ (if (eq x.attr.__set__ *the-none*)
-				  (py-raise 'AttributeError
-					    "Cannot set attribute ~A of ~A (__set__ = None)"
-					    x attr)
-				(py-call x.attr.__set__ x val)))
-	      
-	      ((dict x)       (setf (dict-get x attr) val))
+	    (when x.attr.__set__
+	      (if (eq x.attr.__set__ *the-none*)
+		  (py-raise 'AttributeError
+			    "Cannot set attribute ~A of ~A (__set__ = None)"
+			    x attr.sym)
+		(py-call x.attr.__set__ x val)))
+	    
+	    (let ((d (dict x)))
+	      (when d
+		(warn "dict: ~A" d)
+		(or (if (eq (class-of d) (ltv-find-class 'py-dict))
+			(py-dict-setitem d attr.sym val)
+		      (let ((*py-attr-sym* attr.sym))
+			(setf (this-dict-get d (symbol-name attr.sym)) val)))
+			
+		    (py-raise 'AttributeError
+			      "Cannot set attribute ~A of object ~A"
+			      attr.sym x))))
 
-	      
-	      (t              (py-raise 'AttributeError
-					"(setf py-attr): no __setattr__ method for ~S" x)))))))
+	    (py-raise 'AttributeError
+		      "(setf py-attr): no __setattr__ method for ~S" x))))))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -3218,6 +3355,41 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
   (recursive-class-dict-lookup (py-class-of x) '__set__))
 
 
+;; iterator from lambda
+
+(defclass py-func-iterator (py-core-object)
+  ((name        :initarg :name)
+   (func        :initarg :func :type function)
+   (stopped-yet :initform nil))
+  (:metaclass py-core-type))
+
+(defun make-iterator-from-function (&key func name)
+  "Create an iterator that calls f again and again. F somehow has
+to keep its own state. As soon as F returns NIL, it is considered
+finished; F will then not be called again."
+  (check-type func function)
+  (make-instance 'py-func-iterator :func func :name name))
+
+(def-py-method py-func-iterator.next (fi)
+  (with-slots (stopped-yet func) fi
+    (let ((res (cond (stopped-yet nil)
+		     ((funcall func))
+		     (t (setf stopped-yet t)
+			nil))))
+      (if res
+	  (return-from py-func-iterator.next res)
+	(raise-StopIteration)))))
+
+(def-py-method py-func-iterator.__repr__ (fi)
+  (with-output-to-string (s)
+    (print-unreadable-object (fi s :identity t)
+      (with-slots (name) fi
+	(format s "generator ~@[~A~]" name)))))
+
+(def-py-method py-func-iterator.__iter__ (f)
+  f)
+
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 ;;; Calling objects (functions, classes, instances)
@@ -3247,7 +3419,14 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
   
   ;; Avoid infinite recursion:
   (:method ((f function) &rest args) (apply f args)))
-  
+
+
+(defun py-classlookup-bind-call (x attr &rest args)
+  "Returns RESULT, METH-FOND-P"
+  (let ((m (recursive-class-lookup-and-bind x attr)))
+    (if m
+	(values (apply #'py-call m args) t)
+      (values nil nil))))
 
 
 ;; Compiler macros are defined in optimize.cl; PY-CALL is exceptional
@@ -3605,6 +3784,10 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 (def-comparison <=  py-<=  (<= (the (integer -1 1) (pybf:cmp x y))  0))
 (def-comparison >=  py->=  (>= (the (integer -1 1) (pybf:cmp x y))  0))
 
+;; Necessary for bootstrapping (py-dict + def-py-method)
+(defmethod py-== ((x symbol) (y symbol))
+  (if (eq x y) 1 0))
+
 (defgeneric py-val->lisp-bool (x)
   (:method ((x number)) (/= x 0))
   (:method ((x string)) (> (length x) 0))
@@ -3635,13 +3818,11 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 (def-py-shortcut-func py-len  __len__ )
 (def-py-shortcut-func py-nonzero __nonzero__ )
 
-#+(or)
-(defun py-hash (x)
-  (py-hash-1 (if (symbolp x)
-		 (symbol-name x)
-	       x)))
-
+(fmakunbound 'py-hash)
 (def-py-shortcut-func py-hash __hash__)
+
+(defmethod py-hash ((x symbol))
+  (py-hash (symbol-name x)))
 
 (defun py-val->string (x)
   (if (symbolp x) ;; Symbols don't represent Python values, but this is just handy for ourselves
@@ -3708,41 +3889,7 @@ the ~/.../ directive: ~/python:repr-fmt/"
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-;;; Iteration
 
-;; iterator from lambda
-
-(defclass py-func-iterator (py-core-object)
-  ((name        :initarg :name)
-   (func        :initarg :func :type function)
-   (stopped-yet :initform nil))
-  (:metaclass py-core-type))
-
-(defun make-iterator-from-function (&key func name)
-  "Create an iterator that calls f again and again. F somehow has
-to keep its own state. As soon as F returns NIL, it is considered
-finished; F will then not be called again."
-  (check-type func function)
-  (make-instance 'py-func-iterator :func func :name name))
-
-(def-py-method py-func-iterator.next (fi)
-  (with-slots (stopped-yet func) fi
-    (let ((res (cond (stopped-yet nil)
-		     ((funcall func))
-		     (t (setf stopped-yet t)
-			nil))))
-      (if res
-	  (return-from py-func-iterator.next res)
-	(raise-StopIteration)))))
-
-(def-py-method py-func-iterator.__repr__ (fi)
-  (with-output-to-string (s)
-    (print-unreadable-object (fi s :identity t)
-      (with-slots (name) fi
-	(format s "generator ~@[~A~]" name)))))
-
-(def-py-method py-func-iterator.__iter__ (f)
-  f)
 
 ;; general useful iteration constructs
 (defparameter *py-iterate-func-types* (make-hash-table :test 'eq))
@@ -3895,4 +4042,3 @@ the lisp list will be returned).")
 	     (py-call write-func (py-string-from-char #\Newline))))
       ||#
       )))
-

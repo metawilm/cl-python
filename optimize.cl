@@ -83,12 +83,11 @@
 
 ;; Membership test
 
-(defmethod py-in (x (ht hash-table))
-  (multiple-value-bind (val found)
-      (gethash x ht)
-    (declare (ignore val))
-    (py-bool found)))
-
+(defmethod py-in (x (d py-dict))
+  (if (eq (class-of d) (ltv-find-class 'py-dict))
+      (py-bool (py-dict-getitem d x))
+    (call-next-method)))
+    
 (defmethod py-in ((item string) (seq string))
   ;; XXX 'ab' in 'abc' -> ??
   (if (= (length item) 1)
@@ -144,15 +143,20 @@
 	  (setf (aref x i2) val))
       (call-next-method))))
 
-(defmethod py-subs ((x hash-table) item)
-  (or (gethash item x)
-      (call-next-method)))
+(defmethod py-subs ((x py-dict) item)
+  (if (eq (class-of x) (ltv-find-class 'py-dict))
+      (py-dict.__getitem__ x item)
+    (call-next-method)))
 
-(defmethod (setf py-subs) (val (x hash-table) item)
-  (if (null val)
-      (or (remhash item x)
-	  (call-next-method))
-    (setf (gethash item x) val)))
+(defmethod (setf py-subs) (val (x py-dict) item)
+  (if (eq (class-of x) (ltv-find-class 'py-dict))
+      
+      (if (null val)
+	  (or (remhash item (py-dict-hash-table x))
+	      (call-next-method))
+	(setf (gethash item (py-dict-hash-table x)) val))
+    
+    (call-next-method)))
 
 ;;; Comparison: ==
 

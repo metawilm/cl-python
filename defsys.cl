@@ -40,11 +40,11 @@
   (excl:load-system :python)
   #+(or)(setf *package* (find-package :python)))
 
-(format t "~%;;To compile and load, execute these forms:~%~s~%~s~%"
+(format t "~%;;To compile and load, execute these forms:~%~s~%~s~%~%"
 	'(excl:compile-system :python)
 	'(excl:load-system    :python))
 
-(format t "~%;;Or use the shortcuts:~%~s~%~s~%"
+(format t ";;Or use the shortcuts:~%~s~%~s~%~%"
 	'(compy)
 	'(loadpy))
 
