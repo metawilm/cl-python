@@ -33,7 +33,9 @@
 	  (cond ((and err (not val))
 		 (if (typep err 'StopIteration)
 		     (return-from map-over-py-object)
-		   (error err)))
+		   (progn
+		     #+(or)(warn "MAP-OVER-PY-OBJECT error (func ~S, py-func-iterator ~S): ~S" f fi err)
+		     (error err))))
 		(val (funcall f val))
 		(t   (return-from map-over-py-object))))))))
 
@@ -50,8 +52,8 @@
 (defmethod map-over-py-object ((f function) (x list))
   (mapc f x))
 
-(defmethod map-over-py-object ((f function) (x hash-table))
-  (loop for key being the hash-key in x
+(defmethod map-over-py-object ((f function) (x py-dict))
+  (loop for key being the hash-key in (py-dict-hash-table x)
       do (funcall f key)))
 
 (defmethod map-over-py-object ((f function) (x py-xrange))

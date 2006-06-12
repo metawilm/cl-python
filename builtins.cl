@@ -285,8 +285,13 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
   (declare (ignore string filename kind flags dont-inherit))
   (error "todo: py-compile"))
 
-(defun pybf:delattr (x name)
-  (setf (py-attr x name) nil))
+(defun pybf:delattr (x attr)
+  (assert (stringp attr))
+  (let ((attr.sym (if (string= (symbol-name *py-attr-sym*) attr)
+		      *py-attr-sym*
+		    (or (find-symbol attr #.*package*)
+			(intern attr #.*package*)))))
+    (setf (py-attr x attr.sym) nil)))
 
 (defun pybf:dir (&optional x)
   "Without args, returns names in current scope. ~@
@@ -328,9 +333,14 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
 
 (defun pybf:getattr (x attr &optional default)
   ;; Exceptions raised during py-attr are not catched.
-  (let ((val (catch :getattr-block
+  (assert (stringp attr))
+  (let* ((attr.sym (if (string= (symbol-name *py-attr-sym*) attr)
+		       *py-attr-sym*
+		     (or (find-symbol attr #.*package*)
+			 (intern attr #.*package*))))
+	 (val (catch :getattr-block
 	       (handler-case
-		   (py-attr x attr :via-getattr t)
+		   (py-attr x attr.sym :via-getattr t)
 		 (AttributeError () :py-attr-not-found)))))
     
     (if (eq val :py-attr-not-found)
@@ -609,7 +619,12 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
 
 (defun pybf:setattr (x attr val)
   ;; XXX attr symbol/string
-  (setf (py-attr x attr) val))
+  (assert (stringp attr))
+  (let ((attr.sym (if (string= (symbol-name *py-attr-sym*) attr)
+		      *py-attr-sym*
+		    (or (find-symbol attr #.*package*)
+			(intern attr #.*package*)))))
+    (setf (py-attr x attr.sym) val)))
 
 (defun pybf:sorted (x)
   ;;; over sequences, or over all iterable things?
