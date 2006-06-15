@@ -1,0 +1,211 @@
+<html>
+<body>
+<h1>CLPython</h1>
+
+<p>
+CLPython is an implementation of Python in Common Lisp. Most features
+of the Python language are implemented by CLPython. There are some
+recently introduced features and modules missing; they will be added
+in the future.
+
+<p>
+CLPython can already be used to execute Python commands and to run
+existing Python modules. Work on bridging the Python and Lisp worlds
+in a powerful way is ongoing.
+
+<h2>Background</h2>
+
+There are already several other implementations of Python. One is the
+"reference implementation", written in C, and is therefore called
+"CPython". Some other implementations are Jython (Java) and IronPython
+(C#). 
+
+<p>
+Besides supporting the Python language, each implementation has its
+own characteristics. For example, Jython offers integration with Java
+classes). In the same way, CLPython can offer a bridge between Lisp
+and Python code.
+
+<p>
+CLPython is developed by Willem Broekema, with support from Franz
+Inc. For questions and comments, please contact Willem at
+&lt;metawilm@gmail.com>.
+
+<p>
+Currently CLPython requires Allegro CL 8.0. Among others, CLPython depends on 
+<i>YACC</i> (parsing Python code) and <i>environments</i> (compiling
+Python code).
+
+<p>
+The intention is to make CLPython portable, so it will run on other
+Common Lisp implementations as well.
+
+<p>
+The source code of CLPython ...XXX
+
+<h2>Loading CLPython</h2>
+
+:ld defsys, (compy), (loadpy)  XXX
+
+<p>
+or: (require clpython)
+
+<h2>Read-eval-print loop</h2>
+
+The main functionality of CLPython is the Python read-eval-print loop,
+started by <b>(repl)</b>. A sample interaction is shown below.
+
+<pre>
+python(1): <b>(repl)</b>
+[CLPython -- type `:q' to quit, `:help' for help]
+>>> <b>def fact(n):</b>
+...   <b>if n <= 1:</b>
+...     <b>return 1</b>
+...   <b>else:</b>
+...     <b>return n * fact(n-1)</b>
+... 
+#&lt;python-function fact @ #x726b8bda>
+>>> <b>fact(6)</b>
+720
+>>> 
+</pre>
+
+<h2>Importing Modules</h2>
+
+Existing Python modules can be imported into CLPython (as long as they
+are written in the subset of Python supported by CLPython, which will
+often be the case). In the background, such a module is translated
+into a Lisp file, which is subsequently compiled and loaded into the
+Python image.
+
+For example, assume <i>test.py</i> contains the following:
+
+<pre>
+class Person:
+  def __init__(self, name, age):
+    self.name = name
+    self.age = age
+
+  def __repr__(self):
+    return "%s (%s)" % (self.name, self.age)
+</pre>
+
+Then <i>test.py</i> can be imported as follows:
+
+<pre>
+>>> <b>import person</b>
+;;; Compiling file person.py
+;;; Writing fasl file /x/dev/franz/python/person.fasl
+;;; Fasl write complete
+; Fast loading /x/dev/franz/python/person.fasl
+#&lt;module `person' from file "person.py" @ #x7221a06a>
+>>> <b>person.Person</b>
+#&lt;class Person @ #x7221b172>
+>>> <b>John = person.Person("John", 60)</b>
+John (60)
+>>> 
+</pre>
+
+<h2>Python Language Support</h2>
+
+<h3>Supported features</h3>
+
+The following features of the Python language are implemented in CLPython:
+
+<ul>
+ <li>classes, metaclasses, attributes, class redefinition
+ <li>generators
+ <li>several built-in classes (numbers, list, tuple, module, file, dict, module)
+</ul>
+
+<h3>Missing features</h3>
+
+Some (recently introduced) language features are not supported
+yet. Expect them to be included in a next release:
+
+
+<ul>
+ <li>Enhanced generators ("x = yield y")
+ <li>Try/except/finally (but try/except and try/finally are both supported)
+ <li>Decimal and Set types
+</ul>
+
+<h3>Incompatibilities</h3>
+
+
+<p>
+The most important aspects in which CLPython differs from CPython are:
+
+<ul>
+ <li>CLPython has only "new style classes"
+ <li>In CLPython, all strings are unicode
+ <li>Textual representation differences: CLPython uses <i>print-unreadable-object</i> style
+     represenation for class instances, like #&lt;...>, while CPython generally uses &lt;...>.
+</ul>
+
+<h2>Python - Lisp Integration</h2>
+
+Development of a Python-Lisp interface is ongoing. For now, the Python
+and Lisp worlds can interact in the following way:
+
+<ul>
+ <li>
+To evaluate a Lisp expression in the read-eval-print loop, prefix the
+Lisp form with a space.
+
+ <li>
+To use Python values in Lisp expressions, note that the value of the
+last expression in the read-eval-print loop is bound to the variable
+"_". This variable can be used both in Python and in Lisp (it is both
+a module-level variable in Python, and a
+<i>special</i> variable in Lisp). The variable "__" (two underscores)
+contains the penultimate value, and "___" (three underscores) the
+value before that.
+</ul>
+
+<p>
+In the example interaction below, first a function is defined. The
+function is called from Python and from Lisp. The function is then
+inserted into a Python list, and then in a Lisp list. Note especially
+the space in front of the Lisp expressions:
+
+<pre>
+[CLPython -- type `:q' to quit, `:help' for help]
+>>> <b>def f(x,y): return x+y</b>
+... 
+#&lt;python-function f @ #x74db9122>
+>>> <b>f(1,2)</b>
+3
+>>>  <b>(funcall _ 1 2)</b>
+3
+>>> <b>[1,2,_,4,5]</b>
+[1, 2, #&lt;python-function f @ #x74db9122>, 4, 5]
+>>> <b>f</b>
+#&lt;python-function f @ #x74db9122>
+>>>  <b>(list 1 2 _ 4 5)</b>
+(1 2 #&lt;py-function "f" @ #x74db9122> 4 5)
+</pre>
+
+
+<h2>Performance</h2>
+
+<h3>CLPython vs CPython</h3>
+
+The relative speed of CLPython compared to CPython depends on the kind
+of application.
+
+<p>
+For example, in numerical calculations the comparison is effectively
+between CPython's and the Lisp compiler's arithmetic algorithms, and
+the performance is approximately the same.
+
+<p>
+On the other hand, for algorithms that heavily use Python's dynamics
+(in particular, lots of attribute lookups), CPython can be 4 times
+faster than CLPython.
+
+<p>Work on improving the efficiency of CLPython is ongoing.
+
+
+</body>
+</html>
