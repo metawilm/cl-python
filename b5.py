@@ -2,7 +2,7 @@
 # Test existence and performance of builtins that aren't used elsewhere
 
 show = True
-__debug__ = False
+#__debug__ = False
 
 def check(a, b):
     if __debug__:
@@ -335,8 +335,7 @@ def check_descriptors(i, j):
         B = C.__bases__[-1]
         save = B.__getattribute__
         del B.__getattribute__
-        print C0.__getattribute__
-        check(c1.spam, 42)
+	check(c1.spam, 42)
         check(getattr(c1, "hello"), "booh")
         save2 = C.__getattribute__
         del C.__getattribute__

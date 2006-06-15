@@ -35,7 +35,7 @@
 (defvar __  nil) ;; second-last
 (defvar ___ nil) ;; third-last
 
-(defvar *repl-time* nil)
+(defvar *repl-prof* nil)
 
 (defun repl ()
   (setf *repl-mod* (make-module))
@@ -58,7 +58,7 @@
 			       ("<space><command>"  "execute Lisp <command>")))
 	       (format t "~%In the Lisp debugger:~%")
 	       (print-cmds-1 '((":ptl" "back to Python top level")
-			       (":rt"  "retry the last, failed Python command")))
+			       (":re"  "retry the last (failed) Python command")))
 	       (format t "~%"))
 	     
 	     (remember-value (val)
@@ -77,10 +77,7 @@
 
 		 (let ((val (block :val
 			      (loop
-				(with-simple-restart
-				    (retry-repl-comp
-				     "Retry the compilation of the REPL command. [:rc]")
-				  (let ((helper-func
+				(let ((helper-func
 					 (compile nil `(lambda ()
 							 (declare (optimize (debug 3)))
 							 (with-this-module-context (,*repl-mod*)
@@ -90,7 +87,7 @@
 					  (retry-repl-eval
 					   "Retry the execution the compiled REPL command. [:re]")
 					(return-from :val
-					  (case *repl-time*
+					  (case *repl-prof*
 					    (:ptime (prof:with-profiling (:type :time)
 						      (funcall helper-func))
 						    (terpri)
@@ -105,7 +102,7 @@
 						       (funcall helper-func))
 						     (terpri)
 						     (prof:show-call-graph))
-					    (t (funcall helper-func))))))))))))
+					    (t (funcall helper-func)))))))))))
 		   (when val
 		     (remember-value val)
 		     (block :repr

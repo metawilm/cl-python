@@ -152,12 +152,7 @@
 
 (defmethod (setf py-subs) (val (x py-dict) item)
   (if (eq (class-of x) (ltv-find-class 'py-dict))
-      
-      (if (null val)
-	  (or (remhash item (py-dict-hash-table x))
-	      (call-next-method))
-	(setf (gethash item (py-dict-hash-table x)) val))
-    
+      (py-dict.__setitem__ x item val)
     (call-next-method)))
 
 ;;; Comparison: ==

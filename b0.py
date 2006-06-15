@@ -1,11 +1,13 @@
-#  __debug__ = 1
+__debug = 0
 
+print 1
 def check(a, b):
     if not a == b:
         raise AssertionError("%.30r != %.30r" % (a, b))
     else:
         print "checking: ok!"
 
+print 2
 def proto___new__(cls, name):
     if name in cls.name2num:
         return cls.name2num[name]
@@ -17,6 +19,7 @@ def proto___new__(cls, name):
 def proto___repr__(self):
     return self.__class__.num2name[self]
 
+print 3
 class MetaToken(type):
     def __new__(metacls, name, bases, vars):
         cls = type.__new__(metacls, name, bases, vars)
@@ -27,7 +30,10 @@ class MetaToken(type):
         cls.num2name = {}
         return cls
 
+print 4
 Token = MetaToken('Token', (int,), {})
+
+print 5
 
 EOF = Token('EOF')
 INDENT = Token('INDENT')
@@ -37,6 +43,8 @@ NAME = Token('NAME')
 NUMBER = Token('NUMBER')
 STRING = Token('STRING')
 OPERATOR = Token('OPERATOR')
+
+print 6
 
 class Scanner(object):
 
@@ -782,8 +790,8 @@ def cleanup(s):
 
 def write(s):
     s = cleanup(s)
-    #if __debug__:
-    #    print s,
+    if __debug:
+        print s,
     print >>output, s,
 
 def writeln(s=''):

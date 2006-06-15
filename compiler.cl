@@ -377,38 +377,6 @@ XXX Make +mod-debug+ instead?")
 (defun call-expr-* (prim *-args)
   (apply #'py-call prim (py-iterate->lisp-list *-args)))
 
-(defun call-expr-special (func locals-dict globals-dict)
-  (lambda (&rest args)
-    
-    (cond ((and args
-		(member func (load-time-value (list #'pybf:locals #'pybf:globals))))
-	   (py-raise 'TypeError
-		     "Function ~A must be called without args (got: ~A)" func args))
-	  
-	  ((eq func (load-time-value #'pybf:locals)) 
-	   locals-dict)
-	  
-	  ((eq func (load-time-value #'pybf:globals))
-	   globals-dict)
-	  
-	  ((eq func (load-time-value #'pybf:eval))
-	   (if (or (some #'keywordp args)
-		   (not (<= 1 (length args) 3)))
-	     
-	       (py-raise 'TypeError
-			 "Function `eval' must be called with 1 to 3 pos args (got: ~A)" args)
-	     
-	     (pybf:eval (first args)
-			(or (second args) globals-dict)
-			(or (third args)  locals-dict)))))))
-
-#||
-(defun call-expr-special-p (prim)
-  (or (eq prim (load-time-value #'pybf:locals))
-      (eq prim (load-time-value #'pybf:globals))
-      (eq prim (load-time-value #'pybf:eval))))
-||#
-
 (define-compiler-macro call-expr (&whole whole primary (pos-args kwd-args *-arg **-arg))
   ;; XXX locals(), globals()
   (cond ((and (listp primary) 
@@ -451,24 +419,29 @@ XXX Make +mod-debug+ instead?")
 	    (py-call ,primary ,@pos-args)))
 	
 	
-	;; XXX todo: Optimize obj.__get__(...) in b0.py
+	;; XXX todo: Optimize obj.__get__(...) (in b0.py)
 	
 	(t whole)))
 
 (defmacro py-attr-call (prim attr &rest args)
   ;; A method call with only positional args: <prim>.<attr>(p1, p2, .., pi)
   
-  #||
   (if (inlineable-method-p attr args)
-
-      `(with-eval-once-form (x prim)
-	 ,(multiple-value-bind (test outcome)
-	      (inlineable-method-code x attr args)
-	    `(if ,test
+      
+      (let ((prim-var (if (multi-eval-safe prim)
+			  prim
+			(with-gensyms (evaled-prim)
+			  evaled-prim))))
+	
+	(multiple-value-bind (test outcome)
+	    (inlineable-method-code prim-var attr args)
+	  `(let ,(unless (eq prim-var prim)
+		   `((,prim-var ,prim)))
+	     (if ,test
 		 ,outcome
-	       (py-call (py-attr ,x ',attr) ,@args)))))
-    ||#  
-    `(py-call (py-attr ,prim ',attr) ,@args))
+	       (py-call (py-attr ,prim-var ',attr) ,@args)))))
+  
+    `(py-call (py-attr ,prim ',attr) ,@args)))
 	    
 
 (defmacro classdef-stmt (name inheritance suite &environment e)
@@ -732,6 +705,9 @@ XXX Make +mod-debug+ instead?")
 		 (new-context-stack        (cons fname (get-pydecl :context-stack e)))
 		 (context-fname            (intern (format nil "~{~A~^.~}" (reverse new-context-stack))
 						   #.*package*))
+		 (locals-and-args-but-not-tuplevars (set-difference all-locals-and-arg-names
+								    tuple-vars))
+		 
 		 (func-lambda
 		  `(py-arg-function
 		    ,context-fname
@@ -745,10 +721,10 @@ XXX Make +mod-debug+ instead?")
 		      (block :function-body
 			
 			(flet
-			    ,(when (contains-call-p suite)
+			    ,(when (funcdef-should-save-locals-p suite)
 			       `((.locals. () ;; lambdas and gen-exprs have 'locals()' too
 					   (make-locals-dict 
-					    ',all-locals-and-arg-names
+					    ',locals-and-args-but-not-tuplevars
 					    (list ,@all-locals-and-arg-names)))))
 			  
 			  (with-pydecl ((:lexically-declared-globals  ;; funcdef globals are also valid
@@ -759,8 +735,7 @@ XXX Make +mod-debug+ instead?")
 					(:inside-function-p t)
 					
 					(:lexically-visible-vars
-					 ,(append (set-difference all-locals-and-arg-names
-								  tuple-vars)
+					 ,(append locals-and-args-but-not-tuplevars
 						  (get-pydecl :lexically-visible-vars e)))
 					
 					(:safe-lex-visible-vars
@@ -845,7 +820,7 @@ XXX Make +mod-debug+ instead?")
 	   (let ((ix (position name (get-pydecl :mod-globals-names e))))
 	     (if ix
 		 `(or (fast (svref +mod-static-globals-values+ ,ix))
-		      (unbound-variable-error ',name))
+		      (unbound-variable-error ',name t))
 	       `(identifier-expr-module-lookup-dyn ',name +mod-dyn-globals+))))
 	 
 	 (local-lookup ()
@@ -853,7 +828,7 @@ XXX Make +mod-debug+ instead?")
 	       (progn #+(or)(warn "safe: ~A" name)
 		      name)
 	     `(or ,name
-		  (unbound-variable-error ',name)))))
+		  (unbound-variable-error ',name t)))))
     
     (ecase (get-pydecl :context e)
 
@@ -1020,7 +995,7 @@ XXX Make +mod-debug+ instead?")
     ;; Updating this dict really modifies the globals.
     +mod-static-globals-names+ +mod-static-globals-values+ +mod-dyn-globals+))
 
-(defun unbound-variable-error (name)
+(defun unbound-variable-error (name &optional resumable)
   (declare (special *py-signal-conditions*))
   
   (when *py-signal-conditions*
@@ -1029,12 +1004,22 @@ XXX Make +mod-debug+ instead?")
       (use-value (val)
 	(return-from unbound-variable-error val))))
   
-  (py-raise 'NameError "Variable '~A' is unbound" name))
+  (if resumable
+      (restart-case
+	  (py-raise 'NameError "Variable '~A' is unbound" name)
+	(cl:use-value (val)
+	    :report (lambda (stream)
+		      (format stream "Enter a value to use for '~A'" name))
+	    :interactive (lambda () 
+			   (format t "Enter new value for '~A': " name)
+			   (multiple-value-list (eval (read))))
+	  (return-from unbound-variable-error val)))
+    (py-raise 'NameError "Variable '~A' is unbound" name)))
 
 (defun identifier-expr-module-lookup-dyn (name +mod-dyn-globals+)
   (or (gethash name +mod-dyn-globals+)
       (builtin-value name)
-      (unbound-variable-error name)))
+      (unbound-variable-error name t)))
 
 (defun delete-identifier-at-module-level (name ix +mod+)
   (with-slots (globals-names globals-values dyn-globals) +mod+
@@ -1261,27 +1246,18 @@ XXX Make +mod-debug+ instead?")
 ;;; Detecting whether we need to use gensyms in order to evaluate a form just
 ;;; once.
 
-(defmacro with-eval-once-form ((evaled-var form) &body body)
-  (let ((var-needed (cond ((and (listp form)
-				(= (length form) 2)
-				(eq (car form) 'identifier-expr))
-			   t)
-			  
-			  ((listp form)
-			   ;; self-evaluating
-			   nil)
-			  
-			  (t nil))))
-    (if var-needed
+(defun multi-eval-safe (form)
+  ;; Can FORM be evaluated multiple times or would that cause side effects?
+  ;; Only variable lookup is considered safe.
+  (cond ((and (listp form)
+	      (= (length form) 2)
+	      (eq (car form) 'identifier-expr))
+	 t)
 	
-	`(with-gensyms (evaled)
-	   `(let ((,evaled ,form))
-	      ,(let ((evaled-var evaled))
-		 ,@body)))
-      
-      `(let ((,evaled-var ,form))
-	 ,@body))))
-	   
+	((listp form)
+	 nil)
+	
+	(t t)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;
@@ -1326,9 +1302,9 @@ XXX Make +mod-debug+ instead?")
 	  (strip   0 stringp      py-string.strip  )
 	  (upper   0 stringp      py-string.upper  )
 	  	  
-	  (keys    0 hash-table-p py-dict.keys     )
-	  (items   0 hash-table-p py-dict.items    )
-	  (values  0 hash-table-p py-dict.values   )
+	  (keys    0 py-dict-p py-dict.keys     )
+	  (items   0 py-dict-p py-dict.items    )
+	  (values  0 py-dict-p py-dict.values   )
 	  	  
 	  (next    0 py-func-iterator-p py-func-iterator.next)
 	  
@@ -1370,12 +1346,17 @@ XXX Make +mod-debug+ instead?")
 		(cons    (<= (car req-args) (length args) (cdr req-args)))))
       
       (let ((check-code (ecase check
-			  ((stringp vectorp hash-table-p) `(,check ,prim))
-			  (filep   `(eq (class-of ,prim)
-					(load-time-value (find-class 'py-func-iterator))))
+			  ((stringp vectorp) `(,check ,prim))
+			  
+			  (filep             `(eq (class-of ,prim)
+						  (load-time-value (find-class 'py-func-iterator))))
+			  
+			  (py-dict-p         `(eq (class-of ,prim)
+						  (load-time-value (find-class 'py-dict))))
 			  
 			  (py-func-iterator-p `(eq (class-of ,prim) 
 						   (load-time-value (find-class 'py-func-iterator))))))
+	    
 	    (run-code `(,func ,prim ,@args)))
 	(values check-code run-code)))))
 
@@ -2034,14 +2015,63 @@ statements, as then variables can be guaranteed to be bound."
   nil)
   
 
-(defun contains-call-p (ast)
+(defun funcdef-should-save-locals-p (ast)
+  (or (func-ast-contains-locals-call ast)
+      (func-ast-contains-globals-call ast)
+      (func-ast-contains-exec ast)))
+       
+(defun func-ast-contains-locals-call (ast)
   (with-py-ast (form ast)
     (case (car form)
-      (call-expr                                (return-from contains-call-p t))
-      ((classdef-stmt funcdef-stmt lambda-expr) (values nil t))
-      (t                                        form)))
+      (call-expr 
+       (destructuring-bind (primary (pos-args kwd-args *-arg **-arg))
+	   (cdr form)
+	 (when (and (listp primary)
+		    (eq (first primary) 'identifier-expr)
+		    (eq (second primary) 'locals)
+		    (null (or pos-args kwd-args *-arg **-arg)))
+	   (return-from func-ast-contains-locals-call t)))
+       form)
+      
+      ((classdef-stmt funcdef-stmt lambda-expr)
+       (values nil t))
+      
+      (t
+       form)))
   nil)
-	
+
+(defun func-ast-contains-globals-call (ast)
+  (with-py-ast (form ast)
+    (case (car form)
+      (call-expr 
+       (destructuring-bind (primary (pos-args kwd-args *-arg **-arg))
+	   (cdr form)
+	 (when (and (listp primary)
+		    (eq (first primary) 'identifier-expr)
+		    (eq (second primary) 'globals)
+		    (null (or pos-args kwd-args *-arg **-arg)))
+	   (return-from func-ast-contains-globals-call t)))
+       form)
+      
+      ((classdef-stmt funcdef-stmt lambda-expr)
+       (values nil t))
+      
+      (t
+       form)))
+  nil)
+
+(defun func-ast-contains-exec (ast)
+  (with-py-ast (form ast)
+    (case (car form)
+      (exec-stmt
+       (return-from func-ast-contains-exec t))
+      
+      ((classdef-stmt funcdef-stmt lambda-expr)
+       (values nil t))
+      
+      (t
+       form)))
+  nil)
 
 (defun rewrite-generator-funcdef-suite (fname suite)
   ;; Returns the function body

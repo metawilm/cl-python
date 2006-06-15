@@ -352,17 +352,21 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
   ;; Exceptions raised during py-attr are not catched.
   ;; Returns :class-attr <meth> <inst>
   ;;      or <value>
-  (multiple-value-bind (a b c)
-      (catch :getattr-block
-	       (handler-case
-		   (py-attr x attr :via-getattr t :bind-class-attr nil)
-		 (AttributeError () nil)))
-    (case a
-      (:class-attr (values a b c))
-      ((nil)       (or default
-		       (py-raise 'AttributeError
-				 "[getattr:] ~A has no attr `~A'" x attr)))
-      (t           a))))
+  (let ((attr.sym (if (string= (symbol-name *py-attr-sym*) attr)
+		      *py-attr-sym*
+		    (or (find-symbol attr #.*package*)
+			(intern attr #.*package*)))))
+    (multiple-value-bind (a b c)
+	(catch :getattr-block
+	  (handler-case
+	      (py-attr x attr.sym :via-getattr t :bind-class-attr nil)
+	    (AttributeError () nil)))
+      (case a
+	(:class-attr (values a b c))
+	((nil)       (or default
+			 (py-raise 'AttributeError
+				   "[getattr:] ~A has no attr `~A'" x attr)))
+	(t           a)))))
 
 #+(or) ;; groks AttributeError, which is wrong (i think)
 (defun pybf:getattr (x attr &optional default)
@@ -585,7 +589,7 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
     (or res
 	(py-raise 'TypeError "reduce() of empty sequence with no initial value"))))
 
-(defun pybf:reload (m &optional verbose)
+(defun pybf:reload (m &optional (verbose 1))
   ;; VERBOSE is not a CPython argument
   (py-import (py-string-val->symbol (slot-value m 'name))
 	     :force-reload t
