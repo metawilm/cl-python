@@ -334,19 +334,6 @@
     whole))
 
 
-;;; Calling objects
-
-#|| ;; too risky for now
-(define-compiler-macro py-call (x &rest args)
-  #+(or)(when (and (listp x) (eq (car x) 'py-attr))
-	  (warn "py-call-attr ~A" x))
-  `(let ((.x ,x))
-     (if (functionp .x)
-	 (excl::fast (funcall (the function .x) ,@args))
-       (locally (declare (notinline py-call))
-	 (py-call .x ,@args)))))
-||#
-
 (defmethod py-hash ((x string)) (py-string.__hash__ x))
 (defmethod py-hash ((x number)) (py-number.__hash__ x))
 
@@ -356,7 +343,12 @@
 (defmethod py-str ((x string)) x)
 (defmethod py-str ((x vector)) (py-list.__str__ x))
 (defmethod py-str ((x list))   (py-tuple.__str__ x))
-(defmethod py-str ((x fixnum)) (format nil "~D" x))
+(defmethod py-str ((x fixnum)) (if (<= 0 x 100)
+				   (svref (load-time-value
+					   (coerce (loop for i from 0 to 100
+						       collect (format nil "~D" i)) 'array))
+					  x)
+				 (format nil "~D" x)))
 
 (defmethod py-repr ((x string))
   ;; A rough filter for now

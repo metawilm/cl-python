@@ -14,57 +14,64 @@
   (let ((is-mapping-fs (ecase (fs-type-of-arg fs)
 			 (:mapping t)
 			 (:list    nil))))
-    (loop
-	with list-args = (unless is-mapping-fs
-			   (let ((args (deproxy arg)))
+    (excl:with-stack-list (one-arg-list arg)
+      (loop
+	  with list-args = (unless is-mapping-fs
+			     (let ((args (deproxy arg)))
 			     
-			     ;; ".." % x  is same as  ".." % (x,)  when x used for list of args
-			     (unless (listp args) (setf args (list args)))
+			       ;; ".." % x  is same as  ".." % (x,)  when x used for list of args
+			       (unless (listp args) (setf args one-arg-list))
 			     
-			     (unless (= (length args) (fs-list-num-args fs))
-			       (py-raise 
-				'ValueError "Wrong number of arguments for format string ~
+			       (unless (= (length args) (fs-list-num-args fs))
+				 (py-raise 
+				  'ValueError "Wrong number of arguments for format string ~
                                              (wanted ~A, got ~A)"
-				(fs-list-num-args fs) (length args)))
-			     args))
+				  (fs-list-num-args fs) (length args)))
+			       args))
 				 
-	with mapping-getitem = (when is-mapping-fs
-				 (recursive-class-lookup-and-bind arg '__getitem__))
+	  with mapping-getitem-unb = (when is-mapping-fs
+				       (recursive-class-dict-lookup (py-class-of arg) '__getitem__))
+	  with mapping-getitem-bound = (when mapping-getitem-unb
+					 ;; for efficiency, skip making bound method
+					 (unless (functionp mapping-getitem-unb)
+					   (bind-val mapping-getitem-unb arg (py-class-of arg))))
+				     
+	  with collected-strings = ()
 			       
-	with collected-strings = ()
-			       
-	for rec across (fs-recipes fs)
-	do (ecase (pop rec)
-	     (:literal (push (car rec) collected-strings))
-	     (:format  (destructuring-bind
-			   (map-key conv-flags min-field-width precision conv-type) rec
+	  for rec across (fs-recipes fs)
+	  do (ecase (pop rec)
+	       (:literal (push (car rec) collected-strings))
+	       (:format  (destructuring-bind
+			     (map-key conv-flags min-field-width precision conv-type) rec
 			 
-			 (when precision
-			   #+(or)(warn "Formatting: ignoring 'precision' field value (~S)." precision))
+			   (when precision
+			     #+(or)(warn "Formatting: ignoring 'precision' field value (~S)." precision))
 			 
-			 (when (eq min-field-width :arg) (setf min-field-width (pop list-args)))
+			   (when (eq min-field-width :arg) (setf min-field-width (pop list-args)))
 			 
-			 (when (eq precision :arg) (setf precision (pop list-args)))
+			   (when (eq precision :arg) (setf precision (pop list-args)))
 			 
-			 (let* ((obj (if map-key
-					 (py-call mapping-getitem map-key) 
-				       (pop list-args)))
+			   (let* ((obj (if map-key
+					   (if mapping-getitem-bound
+					       (py-call mapping-getitem-bound map-key)
+					     (funcall mapping-getitem-unb arg map-key))
+					 (pop list-args)))
 				
-				(obj.f (format-object conv-type obj))
+				  (obj.f (format-object conv-type obj))
 				
-				(obj.f2 (if (or conv-flags min-field-width precision)
-					    (apply-fmt-ops conv-type obj obj.f
-							   conv-flags min-field-width)
-					  obj.f)))
+				  (obj.f2 (if (or conv-flags min-field-width precision)
+					      (apply-fmt-ops conv-type obj obj.f
+							     conv-flags min-field-width)
+					    obj.f)))
 			   
-			   (push obj.f2 collected-strings)))))
+			     (push obj.f2 collected-strings)))))
 	   
-	finally (setf collected-strings (nreverse collected-strings))
-		#+(or)(warn "collected: ~S" collected-strings)
-		(loop for s in collected-strings
-		    sum (length s) into s.len
-		    finally (return-from make-formatted-string
-			      (apply #'concatenate 'string collected-strings))))))
+	  finally (setf collected-strings (nreverse collected-strings))
+		  #+(or)(warn "collected: ~S" collected-strings)
+		  (loop for s in collected-strings
+		      sum (length s) into s.len
+		      finally (return-from make-formatted-string
+				(apply #'concatenate 'string collected-strings)))))))
 
 (defun format-object (conv-type obj)
   (ecase conv-type

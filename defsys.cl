@@ -1,11 +1,7 @@
-(eval-when (compile)
-  (error "This defsys file should be loaded interpreted, not compiled."))
-
 (in-package :user)
 
-(declaim (optimize (debug 3)))
-
-;; (setf compiler::*compile-with-compilation-unit-override* nil)
+(eval-when (compile)
+  (error "This defsys file should be loaded interpreted, not compiled."))
 
 (excl:defsystem :python
     (:default-pathname #.*load-pathname*)
@@ -32,22 +28,13 @@
   ("classes" (:uses-definitions-from "pyprint" "formatstring")) ;; py-pprint
   )
 
-
 (defun compy ()
   (excl:compile-system :python))
 
 (defun loadpy ()
-  (excl:load-system :python)
-  #+(or)(setf *package* (find-package :python)))
+  (excl:load-system :python))
 
-(format t "~%;;To compile and load, execute these forms:~%~s~%~s~%~%"
-	'(excl:compile-system :python)
-	'(excl:load-system    :python))
-
-(format t ";;Or use the shortcuts:~%~s~%~s~%~%"
-	'(compy)
-	'(loadpy))
-
-(format t ";;To create a single fasl file, execute:~%~s~%~%"
-	'(excl:concatenate-system :python "python.fasl"))
+;; To create a single fasl file:
+;; 
+;;   (excl:concatenate-system :python "python.fasl")
 

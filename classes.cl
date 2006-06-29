@@ -1112,7 +1112,6 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 	(py-call get-meth val (or x *the-none*) (or x.class *the-none*))
       val)))
 
-#+(or)
 (define-compiler-macro bind-val (val x x.class)
   `(locally (declare (notinline bind-val))
      (let ((.val ,val)
@@ -1262,9 +1261,17 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 	 
 	 (c (mop:ensure-class
 	     (make-symbol (symbol-name name)) 
-	     :direct-superclasses (or supers
-				      (load-time-value
-				       (list (find-class 'py-user-object))))
+	     
+	     :direct-superclasses (if supers
+				      (let ((res (subst (ltv-find-class 'py-user-object)
+							(ltv-find-class 'py-object)
+							supers)))
+					(unless (member (ltv-find-class 'py-user-object) res :test #'eq)
+					  (setf (cdr (last res))
+					    (load-time-value (list (find-class 'py-user-object)))))
+					res)
+				    (load-time-value (list (find-class 'py-user-object))))
+	     
 	     :metaclass (ecase cls-type
 			  (:metaclass (ltv-find-class 'py-meta-type))
 			  (:class     metacls))
@@ -2222,7 +2229,6 @@ Creates a function for doing fast lookup, using jump table"
   (let* ((suffix-max (1- (expt 2 *symbol-dict-suffix-bits*)))
 	 (f `(lambda (x)
 	       "Foo bar"
-	       (declare (optimize (speed 3) (safety 0) (debug 0)))
 	       #+(or)(assert (symbolp x))
 	       ;; For symbols, calling excl::symbol-hash-fcn is
 	       ;; approximately 4 times faster than calling sxhash.
@@ -3064,11 +3070,13 @@ Creates a function for doing fast lookup, using jump table"
 ;;; Attributes are a fundamental thing: getting, setting, deleting
 
 (defvar *py-attr-sym* nil)
+(defvar *py-builtin-attr-hashtable* (make-hash-table :test #'eq))
 
 (defun py-attr (x attr.as_sym &key (bind-class-attr t) via-getattr)
   ;; When BIND-CLASS-ATTR = NIL, then only if attr is a function, 
   ;; found in a class dict, as values:  :class-attr class-attr-val x
   ;; will be returned
+  (declare (optimize (speed 3) (safety 0) (debug 0)))
   (assert (symbolp attr.as_sym))
   (let* ((attr.as_string  (symbol-name attr.as_sym))
 	 (class-attr-val   nil)
@@ -3087,8 +3095,7 @@ Creates a function for doing fast lookup, using jump table"
 		  (eq c (ltv-find-class 'standard-class))
 		  (eq c (ltv-find-class 'py-dict-mixin))
 		  (eq c (ltv-find-class 'py-class-mixin))
-		  (eq c (ltv-find-class 'standard-generic-function))
-		  )
+		  (eq c (ltv-find-class 'standard-generic-function)))
 	      
 	for c.dict = (cond ((eq c (ltv-find-class 'py-user-object))
 			    nil) ;; has no methods
@@ -3927,27 +3934,9 @@ the ~/.../ directive: ~/python:repr-fmt/"
   (let ((s (py-repr-string argument)))
     (write-string s stream)))
 
-#||
-(defgeneric py-del-subs (x item)
-  (:method (x item) (let* ((x.cls (py-class-of x))
-			   (__delitem__ (recursive-class-dict-lookup x.cls '__delitem__)))
-		      (if __delitem__
-			    (py-call __delitem__ x item)
-			(py-raise 'TypeError
-				  "Object ~A (a ~A) has no `__delitem__' method"
-				  x (class-name (py-class-of x)))))))
-||#
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-
-
 ;; general useful iteration constructs
-(defparameter *py-iterate-func-types* (make-hash-table :test 'eq))
-
-(defmethod get-py-iterate-fun :around (x)
-  (incf (gethash (class-of x) *py-iterate-func-types* 0))
-  (call-next-method))
    
 (defgeneric get-py-iterate-fun (x)
   (:documentation
@@ -3956,8 +3945,10 @@ next value gotten by iterating over X. Returns NIL, NIL upon exhaustion.")
   (:method ((x t))
 	   (let* ((x.cls       (py-class-of x))
 		  (__iter__    (recursive-class-dict-lookup x.cls '__iter__))
-		  (__getitem__ (unless __iter__
-				 (recursive-class-dict-lookup x.cls '__getitem__))))
+		  (__getitem__-unb (unless __iter__
+				     (recursive-class-dict-lookup x.cls '__getitem__)))
+		  (__getitem__ (when __getitem__-unb
+				 (bind-val __getitem__-unb x x.cls))))
 
 	     ;; TODO: binding __getitem__ using __get__ is not done at
 	     ;; all yet.
@@ -3968,36 +3959,41 @@ next value gotten by iterating over X. Returns NIL, NIL upon exhaustion.")
 	     (cond (__iter__ ;; Preferable, use __iter__ to retrieve x's iterator
 		    (let* ((iterator     (py-call (bind-val __iter__ x x.cls)))
 			   (iterator.cls (py-class-of iterator))
-			   (next-meth    (or (bind-val (recursive-class-dict-lookup iterator.cls 'next)
-						       iterator iterator.cls)
-					     (py-raise
-					      'TypeError
-					      "The value returned by ~A's `__iter__' method ~
-                  		               is ~A, which is not an iterator (no `next' method)"
-					      x iterator))))
+				
+			   ;; Efficiency optimization: skip creation of bound methods
+			   (next-meth-unbound (or (recursive-class-dict-lookup iterator.cls 'next)
+						  (py-raise
+						   'TypeError
+						   "The value returned by ~A's `__iter__' method ~
+                            		            is ~A, which is not an iterator (no `next' method)"
+						   x iterator)))
+			   (next-meth-bound   (unless (functionp next-meth-unbound)
+						(bind-val next-meth-unbound iterator iterator.cls))))
 		      
 		      ;; Note that we just looked up the `next' method
 		      ;; before the first value is demanded. This is
 		      ;; semantically incorrect in an ignorable way.
 		      
-		      (excl:named-function (:py-iterate-fun using __iter__)
-			(lambda ()
-			  (handler-case (values (py-call next-meth))
-			    (StopIteration () (values nil nil))
-			    (:no-error (val)  (values val t)))))))
+		      ;; (excl:named-function (:py-iterate-fun using __iter__)
+		      (lambda ()
+			(handler-case (values (if next-meth-bound
+						  (py-call next-meth-bound)
+						(funcall next-meth-unbound iterator)))
+			  (StopIteration () (values nil nil))
+			  (:no-error (val)  (values val t)))))) ;; )
 		   
 		   
 		   (__getitem__ ;; Fall-back: call __getitem__ with successive integers
 		    (let ((index 0))
-		      (excl:named-function (:py-iterate-fun using __getitem__)
-			(lambda ()
-			  (handler-case (values (py-call __getitem__ x index))
-			    
-			    ;; ok if this happens when index = 0: then it's an empty sequence
-			    (IndexError () (values nil nil)) 
-			    
-			    (:no-error (val) (progn (incf index)
-						    (values val t))))))))
+		      ;; (excl:named-function (:py-iterate-fun using __getitem__)
+		      (lambda ()
+			(handler-case (values (py-call __getitem__ index))
+			  
+			  ;; ok if this happens when index = 0: then it's an empty sequence
+			  (IndexError () (values nil nil)) 
+			  
+			  (:no-error (val) (progn (incf index)
+						  (values val t))))))) ;; )
 		   
 		   (t
 		    (py-raise 'TypeError "Iteration over non-sequence (got: ~A)" x))))))
