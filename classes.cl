@@ -1,3 +1,10 @@
+;; This software is Copyright (c) Franz Inc. and Willem Broekema.
+;; Franz Inc. and Willem Broekema grant you the rights to
+;; distribute and use this software as governed by the terms
+;; of the Lisp Lesser GNU Public License
+;; (http://opensource.franz.com/preamble.html),
+;; known as the LLGPL.
+
 (in-package :python)
 
 ;;;; Python classes and metaclasses; the built-in classes including
@@ -19,7 +26,7 @@
 (eval-when (compile load eval)
   
   (defparameter *dict-id-counter* 1)
-
+  
   (defclass py-dict () ;; Class redefinition  below, to set PY-CORE-OBJECT as superclass.
     ((id              :accessor py-dict-id               :initform (new-dict-id) )
      (symdict-func    :accessor py-dict-symdict-func     :initform nil )
@@ -31,17 +38,21 @@
   (defun py-==->lisp-val (x y)
     (/= (py-== x y) 0))
   
-  (defun py-hash (x)
-    ;; Dummy
-    #+(or)(warn "py-hash dummy")
-    (sxhash x))
   
-  (defgeneric py-== (x y)
-    ;; Dummy
-    (:method (x y)
-	     #+(or)(warn "py-== dummy")
-	     (if (equalp x y) 1 0)))
+  ;; In order to avoid warning about double definition of PY-== and
+  ;; PY-HASH in this file, (SETF FDEFINITION) is used instead of
+  ;; DEFUN here. These functions are needed for bootstrapping, but
+  ;; can't be really defined here.
+
+  (setf (fdefinition 'py-hash)
+    (lambda (x)
+      (sxhash x)))
   
+  (setf (fdefinition 'py-==)
+    (lambda (x y)
+      (if (equalp x y) 1 0)))
+    
+    
   (defun new-dict-id ()
     (1- (incf *dict-id-counter*)))
 
@@ -62,7 +73,8 @@
 	       (string)
 	       (t (setf (py-dict-non-string-keysp d) t)))
 	     (setf (gethash k (py-dict-hash-table d)) v)))
-  )
+  
+) ;; eval-when
 
 (defclass py-dict-mixin ()
   ((dict :initarg :dict
@@ -1517,6 +1529,7 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 
 (defun py-import (mod-name &key force-reload (verbose t))
   ;; Registers module in *py-modules* and returns it.
+  ;; XXX Cannot import from directories yet...
   (assert (symbolp mod-name))
   
   (flet ((safe-file-mtime (fname)
@@ -3824,6 +3837,7 @@ finished; F will then not be called again."
 
 (def-comparison  <  py-<   (=  (the (integer -1 1) (pybf:cmp x y)) -1))
 (def-comparison  >  py->   (=  (the (integer -1 1) (pybf:cmp x y))  1))
+(fmakunbound 'py-==)
 (def-comparison ==  py-==  (=  (the (integer -1 1) (pybf:cmp x y))  0))
 (def-comparison !=  py-!=  (/= (the (integer -1 1) (pybf:cmp x y))  0)) ;; parser: <> -> !=
 (def-comparison <=  py-<=  (<= (the (integer -1 1) (pybf:cmp x y))  0))
@@ -3842,7 +3856,7 @@ finished; F will then not be called again."
 (defmethod py-== ((x symbol) y)
   (py-== (symbol-name x) y))
 
-(defmethod py-== ((x symbol) y)
+(defmethod py-== (x (y symbol))
   (py-== x (symbol-name y)))
 
 
