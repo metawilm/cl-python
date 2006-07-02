@@ -128,7 +128,7 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; Special conditions, used for internal communication in REPL/Lispy
 
-(defvar *py-signal-conditions* t) ;; should be NIL by default, later
+(defvar *py-signal-conditions* nil)
 
 (define-condition py-syntax-eof-condition ()
   ())

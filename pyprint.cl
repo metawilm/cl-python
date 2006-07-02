@@ -98,17 +98,17 @@
 			    (case ch
 			      (#\Bell      "\\a") 
 			      (#\Backspace "\\b")
-			      (#\Page      "\\f")
+			      (#\Page      "\\p")
 			      (#\Newline   "\\n")
 			      (#\Return    "\\r")
-			      (#\Tab       "\\t")
-			      (#\VT        "\\v")
+			      (#\Tab       "\t")
+			      (#\VT        "\v")
 			      (#\Space     " " )
 			      
 			      ;; Maybe there are more cases to catch before
 			      ;; we encode the character in octal code?
 			      
-			      (t (format nil "\\0~3,vO" #\0 (char-code ch))))
+			      (t (format nil "\0~3,vO" #\0 (char-code ch))))
 			    
 			  do (write-char ch stream)))))
       
@@ -253,40 +253,39 @@
     #+(or) ;; this version does not treat docstrings specially
     (suite-stmt        (format stream "~&~<    ~@;~@{~A~^~&~}~:>~&" (second x)))
     
-    (suite-stmt (destructuring-bind (item-1 &rest items) (second x)
+    (suite-stmt #+(or)
+		;; docstring at the head of the suite: print as:  """docstring"""
+		;; There are still issues with escaping; let's leave it out for now.
+		(destructuring-bind (item-1 &rest items) (second x)
 		  (if (stringp item-1)
-		      
-		      ;; docstring at the head of the suite: print as:  """docstring"""
-		      ;; hmm maybe there are still issues with escaping
 		      (let ((body-s (with-standard-io-syntax
 				      (format nil "\"\"\"~A\"\"\"~&" item-1)))
 			    (items-s (mapcar (lambda (x) (format nil "~A" x)) items)))
 			
-			#+(or)(with-standard-io-syntax
-				(break "body-s: ~S item-s: ~S" body-s items-s))
+			(with-standard-io-syntax
+			  (break "body-s: ~S item-s: ~S" body-s items-s))
 			
 			;; standard syntax, otherwise strings are
 			;; printed with Python string escapes
 			
 			(with-standard-io-syntax
-			  (format stream "~&~@<    ~@;~A~{~A~^~&~}~:>~&" body-s items-s)))
-		    
-		    #+(or)
-		    (format stream "~&~<    ~@;~@{~A~^~&~}~:>~&" (second x))
-		    
-		    (progn (let ((*suite-no-newline* nil))
-			     (format stream "~&~<    ~@;~@{~A~^~&~}~:>" (second x)))
-			   (unless *suite-no-newline*
-			     (format stream "~&"))))))
+			  (format stream "~&~@<    ~@;~A~{~A~^~&~}~:>~&" body-s items-s)))))
+		
+		#+(or)
+		(format stream "~&~<    ~@;~@{~A~^~&~}~:>~&" (second x))
+		
+		(progn (let ((*suite-no-newline* nil))
+			 (format stream "~&~<    ~@;~@{~A~^~&~}~:>" (second x)))
+		       (unless *suite-no-newline*
+			 (format stream "~&"))))
 	   
-    (tuple-expr (let ((brackets? t #+(or)(/= *precedence-level* -1)))
-		  (format stream "~:[~;(~]~{~A~^, ~}~:[~;,~]~:[~;)~]"
-			  brackets? (second x) (cdr (second x)) brackets?)))
-    
-    #+(or)(try-except-stmt (destructuring-bind (try-suite except-suites else-suite)
-			       (cdr x)
-			     (format stream "try: ~A~:{except~@[ ~A~@[, ~A~]~]: ~2@*~A~}~@[else: ~A~]"
-				     try-suite except-suites else-suite)))
+    (tuple-expr (let* ((items (second x)))
+		  (if items
+		      (let ((brackets? t #+(or)(/= *precedence-level* -1))
+			    (post-comma? (not (cdr items))))
+			(format stream "~@[(~*~]~{~A~^, ~}~@[,~*~]~@[)~*~]"
+				brackets? items post-comma? brackets?))
+		    (format stream "()"))))
     
     (try-except-stmt (destructuring-bind (try-suite except-suites else-suite)
 			       (cdr x)
@@ -294,12 +293,8 @@
 			 (format stream "try: ~A~:{~&except~@[ ~A~@[, ~A~]~]: ~2@*~A~}~@[~&else: ~A~]"
 				     try-suite except-suites else-suite))))
     
-    #+(or)(try-finally-stmt (format stream "try: ~Afinally: ~A" (second x) (third x)))
-    
     (try-finally-stmt (let ((*suite-no-newline* nil))
 			(format stream "try: ~Afinally: ~A" (second x) (third x))))
-    
-    (tuple-expr   (format stream "(~{~A~^, ~}~@[,~])" (second x) (not (cdr (second x)))))
     
     (unary-expr (let* ((lev (cdr (assoc (second x) *unary-op-precedence*)))
 		       (brackets? (< lev *precedence-level*)))

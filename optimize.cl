@@ -24,13 +24,6 @@
 (defmethod py-iterate->lisp-list ((x list))
   x)
 
-#+(or) ;; already in classes.cl
-(defmethod map-over-py-object ((func function) (object t))
-  (warn "map over ~A" object)
-  (loop with it-fun = (get-py-iterate-fun object)
-      for val = (funcall it-fun)
-      while val do (funcall func val)))
-
 (defmethod map-over-py-object ((f function) (fi py-func-iterator))
   (with-slots (stopped-yet func) fi
     (unless stopped-yet
@@ -52,9 +45,7 @@
       do (funcall f str)))
 
 (defmethod map-over-py-object ((f function) (v vector))
-  #+(or)(warn "begin calling ~A on vector ~A" f v)
-  (loop for x across v do (funcall f x))
-  #+(or)(warn "end   calling ~A on vector ~A" f v))
+  (loop for x across v do (funcall f x)))
 
 (defmethod map-over-py-object ((f function) (x list))
   (mapc f x))

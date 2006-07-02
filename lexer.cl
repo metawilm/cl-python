@@ -107,15 +107,15 @@ READ-CHAR."
 		    ;; followed by a DEDENT for every currently active
 		    ;; indent.
 		    
-		    (lex-todo eof 'eof)
+		    (lex-todo eof 'eof) ;; part of yacc, not grammar terminal
 		    (loop while (> (car indentation-stack) 0)
 			do (pop indentation-stack)
-			   (lex-todo dedent 'dedent))
-		    (lex-return newline 'newline))
+			   (lex-todo |dedent| '|dedent|))
+		    (lex-return |newline| '|newline|))
 		   
 		   
 		   ((digit-char-p c 10)
-		    (lex-return number (read-number c)))
+		    (lex-return |number| (read-number c)))
 
 		   ((identifier-char1-p c)
 		    (let ((token (read-identifier c)))
@@ -137,11 +137,11 @@ READ-CHAR."
 					  (member token '(u ur U UR)))
 					 (is-raw
 					  (member token '(r ur R UR))))
-				     (lex-return string
+				     (lex-return |string|
 						 (read-string ch :unicode is-unicode :raw is-raw)))
 				 (progn
 				   (when ch (unread-chr ch))
-				   (lex-return identifier token)))))
+				   (lex-return |identifier| token)))))
 			    
 			    ((reserved-word-p token)
 			     (when *lex-debug*
@@ -150,10 +150,10 @@ READ-CHAR."
 			       (values (find-token-code token) token)))
 			    
 			    (t
-			     (lex-return identifier token)))))
+			     (lex-return |identifier| token)))))
 
 		   ((char-member c '(#\' #\"))
-		    (lex-return string (read-string c)))
+		    (lex-return |string| (read-string c)))
 
 		   ((or (punct-char1-p c)
 			(punct-char-not-punct-char1-p c))
@@ -193,19 +193,19 @@ READ-CHAR."
 
 		       ((< (car indentation-stack) new-indent) ; one indent
 			(push new-indent indentation-stack)
-			(lex-todo indent 'indent))
+			(lex-todo |indent| '|indent|))
 
 		       ((> (car indentation-stack) new-indent) ; dedent(s)
 			(loop while (> (car indentation-stack) new-indent)
 			    do (pop indentation-stack)
-			       (lex-todo dedent 'dedent))
+			       (lex-todo |dedent| '|dedent|))
 			
 			(unless (= (car indentation-stack) new-indent)
 			  (py-raise 'SyntaxError
 				    "Dedent did not arrive at a previous indentation level (line ~A)."
 				    *curr-src-line*))))
 		      
-		      (lex-return newline 'newline)))
+		      (lex-return |newline| '|newline|)))
 		   
 		   ((char= c #\#)
 		    (read-comment-line c)
@@ -225,7 +225,7 @@ READ-CHAR."
 		    (let ((str (coerce (loop for ch = (read-chr-error)
 					   while (char/= ch #\$) collect ch)
 				       'string)))
-		      (lex-return lispy-lisp-form (read-from-string str))))
+		      (lex-return |lispy-lisp-form| (read-from-string str))))
 		    
 		   (t (with-simple-restart 
 			  (:continue "Discard the character and continue parsing.")
@@ -328,95 +328,6 @@ C must be either a character or NIL."
 	      (and (< ,code 128)
 		   (= (aref ,arr ,code) 1)))))))
 
-#+(or)
-(defconstant +id-history-size+ 15 "Number of previous identifiers to cache.")
-
-#+(or)
-(defconstant +id-char-vec-length+ 15
-  "Cached vector for identifier, used for looking up identifier in cache
-before allocating a vector on its own.")
-
-#+(or) ;; use old for now
-(defun read-identifier (first-char)
-  "Read an identifier (which is possibly a reserved word) and return it as a
-symbol. Identifiers start with an underscore or alphabetic character, while
-second and later characters must be alphanumeric or underscore."
-  
-  ;; By caching the last returned identifiers, which are likely to
-  ;; recur, a lot less arrays have to be allocated.
-  
-  (declare (optimize (speed 3) (safety 1) (debug 0)))
-  (assert (identifier-char1-p first-char))
-  
-  (let ((symbol-cache (load-time-value (make-array +id-history-size+)))
-	(symbol-name-cache (load-time-value (make-array +id-history-size+)))
-	(symbol-cache-replace-ix (load-time-value (list 0)))
-	(char-vec     (load-time-value (make-array +id-char-vec-length+ :element-type 'character))))
-    
-    (macrolet ((cache-symbol (s)
-		 (let ((sym '#:sym))
-		   `(let ((,sym ,s))
-		      (setf (svref symbol-cache (car symbol-cache-replace-ix)) ,sym)
-		      (setf (svref symbol-name-cache (car symbol-cache-replace-ix)) (symbol-name ,sym))
-		      (when (= (incf (car symbol-cache-replace-ix)) +id-history-size+)
-			(setf (car symbol-cache-replace-ix) 0))
-		      ,sym))))
-			 
-      (loop
-	  for ch = first-char then (read-chr-nil)
-	  for i from 0 below +id-char-vec-length+
-	  while (identifier-char2-p ch) do (setf (aref char-vec i) ch)
-	  finally
-	    (when (and ch (not (identifier-char2-p ch)))
-	      (unread-chr ch))
-	    (return
-	      (if (or (< i +id-char-vec-length+) (null ch))
-
-		  ;; eof or other token following relatively short ID
-		  (loop for ci from 0 below +id-history-size+
-		      when (loop with cached-sym-str = (svref symbol-name-cache ci)
-			       initially (when (/= (length (the string cached-sym-str)) i)
-					   (return nil))
-			       for j from 0 below i
-			       unless (eql (the character (char cached-sym-str j))
-					   (the character (schar char-vec j)))
-			       return nil
-			       finally (return t))
-		      do (return (aref symbol-cache ci))
-		      finally
-			(return (loop with arr = (make-array i :element-type 'character)
-				    for j from 0 below i
-				    do (setf (schar arr j) (schar char-vec j))
-				    finally
-				      (return (cache-symbol (or (find-symbol arr #.*package*)
-								(intern arr #.*package*)))))))
-		
-		(loop with arr = (make-array (+ +id-char-vec-length+ 5) 
-					     :element-type 'character
-					     :adjustable t
-					     :fill-pointer +id-char-vec-length+)
-		    initially (loop for i from 0 below i
-				  do (setf (char arr i) (schar char-vec i)))
-		    for ch = (read-chr-nil)
-		    while (identifier-char2-p ch) do (vector-push-extend ch arr)
-		    finally (when ch (unread-chr ch))
-			    (return
-			      (loop for ci from 0 below +id-history-size+
-				  when (string= (svref symbol-cache ci) arr)
-				  return (svref symbol-cache ci)
-				  finally
-				    (return (cache-symbol (or (find-symbol arr #.*package*)
-							      (intern arr #.*package*)))))))))))))
-
-(defun identifier-p (string-or-sym)
-  (let ((s (string string-or-sym)))
-    (and (>= (length s) 1)
-	 (identifier-char1-p (char s 0))
-	 (loop for i from 1 below (length s)
-	     unless (identifier-char2-p (char s i))
-	     return nil
-	     finally (return t)))))
-			    
 
 #+(or) ;; Equivalent, but a bit slower, original code. Allocates an array for every identifier.
 (defun read-identifier (first-char)
@@ -447,7 +358,7 @@ second and later characters must be alphanumeric or underscore."
 	     
 	     ;; Oops... the symbol `nil', `pi' or 't'.
 	     ;; Use our own uninterned symbol, instead.
-	     ;; Maybe we should have used the package system for this...
+	     ;; (Maybe we should have used the package system for this...)
 	     (let* ((ht (load-time-value (make-hash-table :test #'eq)))
 		    (our-sym (gethash sym ht)))
 	       
@@ -458,9 +369,6 @@ second and later characters must be alphanumeric or underscore."
 	    (sym sym)
 	    (t (intern (simple-string-from-vec res) #.*package*))))))
 
-;; NEW
-
-
 (defconstant +id-cache-string-size+ 10)
 
 (defun spacy-length (x)
@@ -469,16 +377,6 @@ second and later characters must be alphanumeric or underscore."
       if (char= xi #\Space) return i
       else do (incf i)
       finally (return i)))
-
-#+(or) ;; faster, more dangerous version
-(defun spacy-length-1 (x)
-  (declare (optimize (speed 3) (safety 0) (debug 0)))
-  (the fixnum
-    (let ((len (the fixnum (length (the string x)))))
-      (loop for i fixnum from 0 below (min +id-cache-string-size+ len)
-	  if (char= (schar (the string x) i) #\Space)
-	  do (return-from spacy-length-1 i))
-      len)))
 
 (defun identifier-ht-test (x y)
   (let ((x.len (spacy-length x))
@@ -565,9 +463,6 @@ second and later characters must be alphanumeric or underscore."
 
 (defun read-string (first-char &key unicode raw)
   "Returns string as a string"
-  ;; Rules:
-  ;; <http://meta.kabel.utwente.nl/specs/Python-Docs-2.3.3/ref/strings.html>
-
   (assert (char-member first-char '( #\' #\" )))
   
   (when raw
@@ -943,7 +838,7 @@ second and later characters must be alphanumeric or underscore."
 	;; octal (becomes decimal!!?)  and allows 'L' for decimal,
 	;; hex, octal
 	
-	
+
 	;; suffix `L' for `long integer'
 	(unless (or has-frac has-exp)
 	  (let ((ch (read-chr-nil)))

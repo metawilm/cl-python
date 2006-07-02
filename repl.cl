@@ -54,19 +54,32 @@
 	  (gethash '___ dyn-globals) *the-none*
 	  (gethash '__name__ dyn-globals) "__main__")
     
-    (labels ((print-cmds-1 (cmds)
-	       (loop for (cmd expl) in cmds do (format t "  ~19A: ~A~%" cmd expl)))
-	     (print-cmds ()
-	       (format t "~%In the Python interpreter:~%")
-	       (print-cmds-1 '((":help"             "print (this) help")
-			       (":q"                "quit")
-			       ("<command>"         "execute Python or Lisp <command>")
-			       ("<space><command>"  "execute Lisp <command>")))
-	       (format t "~%In the Lisp debugger:~%")
-	       (print-cmds-1 '((":ptl" "back to Python top level")
-			       (":re"  "retry the last (failed) Python command")))
-	       (format t "~%"))
-	     
+    (labels ((print-cmds ()
+	       (format t "
+In the Python interpreter:
+
+     :help          => print (this) help
+     :q             => quit
+
+  <command>         => execute Python or Lisp <command>
+  <space><command>  => execute Lisp <command>
+
+
+In the Lisp debugger:
+
+     :ptl           => back to Python top level
+     :re            => retry the last (failed) Python command
+
+
+Relevant Lisp variables:
+
+   *repl-prof*     => profile all Python commands
+                      value must be one of:
+                         :time    = like (TIME ...)
+                         :ptime   = time call graph
+                         :space   = list of allocations
+                         :pspace  = space call graph
+"))
 	     (remember-value (val)
 	       ;; Make last three return values available as _, __, ___
 	       ;; for both Python (repl module namespace) and Lisp (dynamic vars).
@@ -223,33 +236,3 @@
 	 (terpri)
 	 (prof:show-call-graph))
     (:time (time (funcall f)))))
-
-
-;; stuff (possibly) used by emacs
-
-(defun run-py-code-string (str)
-  (let ((ast (parse-python-string str)))
-    (run-ast ast)))
- 
-(defun run-ast (ast)
-  (when (eq (car ast) 'module-stmt)
-    (setq ast (cadr ast)))
-  
-  (let ((func (compile nil `(lambda ()
-			      (with-this-module-context (,*repl-mod*)
-				,ast)))))
-    (funcall func)))
-
-
-(defun mod-make-fasl (mod-name)
-  (let* ((ast (parse-python-file (format nil "~A.py" mod-name)))
-	 (func (compile nil `(lambda () ,ast)))
-	 (fasl-file (format nil "~A.fasl" mod-name)))
-    (excl:fasl-write func fasl-file t t)))
-
-(defun mod-fasl (mod-name)
-  (let ((fasl-file (format nil "~A.fasl" mod-name)))
-    (car (excl:fasl-read fasl-file))))
-    
-(defun dummy (&rest args)
-  (warn "dummy: ~A" args))

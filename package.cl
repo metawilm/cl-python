@@ -16,18 +16,8 @@
 
 
 (defpackage :python
-  (:documentation "An implementation Python in Common Lisp.")
+  (:documentation "An implementation of Python in Common Lisp.")
   (:use :common-lisp)
-  #+(or)(:export :python-type :python-object
-		 :python-class :def-python-class :python-class-p
-		 :python-class-instance-p
-		 :python-function :make-function :python-function-p
-		 :python-unbound-method :make-unbound-method
-		 :python-bound-method :make-bound-method
-		 :python-none  :*None*
-		 :set-attribute :get-attribute
-		 :def-class-method :call :dir :dir2
-		 :test)
   (:shadow ))
 
 
@@ -59,15 +49,4 @@
   (:nicknames :pybv)
   (:use )
   (:export
-   :None :Ellipsis :True :False :NotImplemented
-
-   ;; CLPython:
-   :brek))
-
-
-(defpackage :python-builtin-clpy
-  (:nicknames :pyb-clpy)
-  (:use )
-  (:export :brek))
-
-
+   :None :Ellipsis :True :False :NotImplemented))

@@ -1124,6 +1124,8 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 	(py-call get-meth val (or x *the-none*) (or x.class *the-none*))
       val)))
 
+;; ACL 7.0 has an issue with compiler-macro + notinline.
+#+(and allegro-version>= (version>= 8 0))
 (define-compiler-macro bind-val (val x x.class)
   `(locally (declare (notinline bind-val))
      (let ((.val ,val)
@@ -1240,14 +1242,6 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
     (when val
       (bind-val val x x.cls))))
     
-#+(or)
-(defun recursive-class-lookup-and-bind (x attr)
-  #+(or)(warn "recursive-class-lookup-and-bind ~A ~A" x attr)
-  (let* ((x.cls (py-class-of x))
-	 (val   (recursive-class-dict-lookup x.cls attr)))
-    (when val
-      (bind-val val x x.cls))))
-
 (def-py-method py-object.__get__ (value instance class)
   (declare (ignore instance class))
   value)
@@ -1310,15 +1304,9 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 
 (def-py-method py-type.__bases__ :attribute-write (cls bases^)
   (assert (excl::classp cls))
-  #+(or)(break "Old class: ~A" cls)
   (let ((bases (py-iterate->lisp-list bases)))
-    #||(unless (member (find-class 'py-user-object) bases :test #'eq)
-	 (setf bases (append bases (list (find-class 'py-user-object)))))
-    ||#
-    #+(or)(warn "bases: ~S" bases)
     (mop:ensure-class-using-class cls (mop::class-name cls) 
 				  :direct-superclasses bases)
-    #+(or)(break "New class: ~A" cls)
     cls))
 
 (def-py-method py-type.__mro__ :attribute (x)
@@ -1502,19 +1490,6 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 
 (defparameter *py-modules* (make-hash-table :test #'eq))
 
-#+(or)
-(defun compile-module (path)
-  (ignore-errors 
-   (let ((*readtable* (copy-readtable nil))
-	 (f (lambda (stream char)
-	      (unread-char char stream)
-	      (parse-python-file stream))))
-     (loop for i from 0 below 256
-	 unless (or (char= (code-char i) #\:)
-		    (char= (code-char i) #\())
-	 do (set-macro-character (code-char i) f))
-     (compile-file "b2.py"))))
-						
 (defmacro with-py-readtable (&body body)
   ;; In this context every character is dispatched to the Python parser.
   `(let ((*readtable* (load-time-value
@@ -1976,7 +1951,7 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
     (t
      x)))
 
-#+(or) ;; original version; probably a bit slower
+#+(or) ;; original version; a bit slower
 (defgeneric deproxy (x)
   (:method ((x py-lisp-object))  (proxy-lisp-val x))
   (:method ((x t))               x))
@@ -2222,7 +2197,6 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
   #+(or)(assert (not (py-dict-non-string-keysp x)) (x)
     "Cannot create symdict-func for dict, as it has non-string keys")
   #+(or)(break "comp ~A" x)
-  ;;(return-from py-dict-make-symdict-func t)
   (loop for k being the hash-key in (py-dict-hash-table x)
       using (hash-value v)
       for k.sym = (if (symbolp k)
@@ -2241,7 +2215,6 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 Creates a function for doing fast lookup, using jump table"
   (let* ((suffix-max (1- (expt 2 *symbol-dict-suffix-bits*)))
 	 (f `(lambda (x)
-	       "Foo bar"
 	       #+(or)(assert (symbolp x))
 	       ;; For symbols, calling excl::symbol-hash-fcn is
 	       ;; approximately 4 times faster than calling sxhash.
@@ -2294,8 +2267,7 @@ Creates a function for doing fast lookup, using jump table"
   ;; XXX logic of filling dict must be moved to __init__
   (if (eq cls (ltv-find-class 'py-dict))
       (make-dict)
-    (progn #+(or)(break "py-dict.__new__")
-	   (make-instance cls :lisp-object (make-dict)))))
+    (make-instance cls :lisp-object (make-dict))))
 
 (def-py-method py-dict.__init__ (x &rest kwargs)
   (case (length kwargs)
@@ -2397,31 +2369,6 @@ Creates a function for doing fast lookup, using jump table"
 
 (def-py-method py-dict.__nonzero__ (dict)
   (py-bool (> (hash-table-count (py-dict-hash-table dict)) 0)))
-
-;;#+(or)
-(def-py-method py-dict.__repr__ (x)
-  (with-output-to-string (s)
-    (let ((ht (py-dict-hash-table x)))
-      (write-char #\{ s)
-      (loop with c = (hash-table-count ht)
-	  for key being the hash-key in ht
-	  using (hash-value val)
-	  for i from 1
-	  do (write-string (py-repr-string key) s)
-	     (write-char #\: s)
-	     (write-char #\Space s)
-	     (write-string (py-repr-string val) s)
-	     (unless (= i c)
-	       (write-string ", " s)))
-      (write-char #\} s))))
-
-#+(or)
-(def-py-method py-dict.__repr__ (x)
-  (with-output-to-string (s)
-    (print-unreadable-object (x s)
-      (with-slots (id lookup-counter non-string-keys) x
-	(format s "items: ~A  id: ~A  lookups: ~A  non-strings: ~A" 
-		(hash-table-count (py-dict-hash-table x)) id lookup-counter non-string-keys)))))
 
 (def-py-method py-dict.__setitem__ (x key val)
   (py-dict-setitem x key val))
@@ -3252,6 +3199,7 @@ Creates a function for doing fast lookup, using jump table"
 		x attr.as_string x.class))))
 
 
+#+(and allegro-version>= (version>= 8 0))
 (define-compiler-macro py-attr (&whole whole x attr &key (bind-class-attr t) via-getattr)
   (declare (ignore bind-class-attr via-getattr))
   (if (and (listp attr)
@@ -3491,6 +3439,7 @@ finished; F will then not be called again."
 ;; in that this function is used many times in this module already,
 ;; and we benefit from inlining it.
 
+#+(and allegro-version>= (version>= 8 0))
 (define-compiler-macro py-call (&whole whole prim &rest args)
   (declare (ignorable whole))
   #+(or)(warn "py-call ~A" whole)
@@ -3544,21 +3493,6 @@ finished; F will then not be called again."
 			   (funcall (the function .prim) ,@args))
 		  (py-call .prim ,@args)))))))
 
-#||
-  `(let ((.x ,x))
-     (if (functionp .x)
-	 (excl::fast (funcall (the function x) ,@args))
-       (let ((x.cls (class-of .x)))
-	 (locally (declare (notinline py-call))
-	   (if (eq x.cls (ltv-find-class 'py-bound-method))
-	       
-	       (with-slots ((func .func) (instance .instance)) .x
-		 (if (functionp .func)
-		     (excl::fast (funcall (the function .func)) ,@args)
-		   (sdf .func .x ,@args)))
-	     
-	     (sdf .x ,@args))))))
-||#
 
 ;;; Subscription of items (sequences, mappings)
 
@@ -3787,7 +3721,7 @@ finished; F will then not be called again."
   (:method ((x t) (seq t))
 	   (py-not (py-in x seq))))
 
-(setf (gethash 'in *binary-op-funcs-ht*) 'py-in)
+(setf (gethash '|in| *binary-op-funcs-ht*) 'py-in)
 (setf (gethash '|not in| *binary-op-funcs-ht*) 'py-not-in)
 
 (defgeneric py-is (x y)

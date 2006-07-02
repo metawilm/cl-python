@@ -42,7 +42,7 @@
 		      (type         py-type         )
 		      (unicode      py-string       )
 		      (xrange       py-xrange       ))
-		  for sym = (intern (string name) pbt-pkg)
+		  for sym = (intern (string-downcase name) pbt-pkg)
 		  collect `(defconstant ,sym (find-class ',py-cls))
 		  collect `(export ',sym ,pbt-pkg)))))
 
@@ -54,7 +54,7 @@
 (defmacro def-bi-excs ()
   (let ((pbt-pkg (find-package :python-builtin-types)))
     `(progn ,@(loop for c in *exception-classes*
-		  for sym = (intern (string (class-name c)) pbt-pkg)
+		  for sym = (intern (string-downcase (class-name c)) pbt-pkg)
 		  collect `(defconstant ,sym ,c)
 		  collect `(export ',sym ,pbt-pkg)))))
 (def-bi-excs)
@@ -107,24 +107,6 @@ POS-ARGS is any iterable object; KW-DICT must be of type PY-DICT."
   "Returns whether x can be called (function, class, or callable class instance)
    as True or False."
   (py-bool (recursive-class-dict-lookup (py-class-of x) '__call__)))
-
-#+(or)
-(defgeneric pybf::callable-1 (x)  
-  (:documentation "Returns callable-ness as T or NIL")
-  (:method ((x function))  t)
-  (:method ((x py-type))   
-	   ;; Classes are considered callable, even though some
-	   ;; (NoneType) disallow creating instances and raise an
-	   ;; exception when called.
-	   t)
-  (:method ((x py-meta-type)) t)
-  (:method ((x py-function))  t)
-  (:method ((x py-method))    t)
-  (:method ((x py-user-object)) (recursive-class-dict-lookup (py-class-of x) '__call__))
-  (:method ((x t))
-	   (warn "pybf:callable-1: got ~A, assuming nil" x)
-	   nil))
-
 
 (defun pybf:chr (x)
   "Return a string of one character whose ASCII code is the integer i. ~@
@@ -375,27 +357,6 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
 				   "[getattr:] ~A has no attr `~A'" x attr)))
 	(t           a)))))
 
-#+(or) ;; groks AttributeError, which is wrong (i think)
-(defun pybf:getattr (x attr &optional default)
-  "Return the value of attribute NAME of X. ~@
-   If attribute doesn't exist, returns supplied DEFAULT or raises AttributeError."
-  
-  (let ((val (catch :getattr-block
-	       (handler-case
-		   (values (py-attr x attr :via-getattr t))
-		 (AttributeError () :py-attr-not-found)
-		 (:no-error (val) val)))))
-    
-    (if (eq val :py-attr-not-found)
-	
-	(or default
-	    (py-raise 'AttributeError "[getattr:] ~A has no attr `~A'" x attr))
-      
-      val)))
-
-
-
-
 (defun pybf:globals ()
   "Return a dictionary (namespace) representing the current global symbol table. ~@
    This is the namespace of the current module."
@@ -408,14 +369,12 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
   (py-bool (ignore-errors (py-attr x (intern name #.*package*)))))
 
 (defun pybf:hash (x)
-  ;; XX todo: once calculated, store hash in object
   (py-hash x))
 
 (defun pybf:hex (x)
   (py-hex x))
 
 (defun pybf:id (x)
-  
   ;; In contrast to CPython, in Allegro the `id' (memory location) of
   ;; Python objects can change during their lifetime.
   #+allegro
@@ -691,6 +650,31 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
 			      :fill-pointer (length tuples)
 			      :initial-contents tuples)))
 
+;; Make sure built-in functions are accessible via lowercase symbols
+
+#-(and allegro-version>= (version>= 7 0))
+;; ANSI: copy functions to downcased symbol names
+(do-symbols (s :pybf)
+  (when (fdefinition s)
+    (setf (fdefinition (intern (string-downcase s) :pybf)) (fdefinition s))))
+
+#+(and allegro-version>= (version>= 7 0))
+(ecase excl::*current-case-mode*
+  (:case-sensitive-lower )
+  
+  (:case-insensitive-upper  
+   ;; ANSI: copy functions to downcased symbol names
+   (do-symbols (s :pybf)
+     (when (fdefinition s)
+       (setf (fdefinition (intern (string-downcase s) :pybf)) (fdefinition s)))))
+	 
+  (:case-insensitive-lower
+   ;; Copy functions to upcased symbol names
+   (do-symbols (s :pybf)
+     (when (fdefinition s)
+       (setf (fdefinition (intern (string-upcase s) :pybf)) (fdefinition s))))))
+
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 ;;; 3) Built-in values
@@ -700,12 +684,3 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
 (defvar pybv:True           *the-true*           )
 (defvar pybv:False          *the-false*          )
 (defvar pybv:NotImplemented *the-notimplemented* )
-
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-;;; 4) CLPY extras
-
-(defun pyb-clpy:brek (&rest args) (break (format nil "~{~A~^; ~}" args)))
-
-(defvar pybv:brek #'pyb-clpy:brek)

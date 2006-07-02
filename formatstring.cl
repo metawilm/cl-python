@@ -50,9 +50,10 @@
 	       (:literal (push (car rec) collected-strings))
 	       (:format  (destructuring-bind
 			     (map-key conv-flags min-field-width precision conv-type) rec
-			 
+
+			   #+(or)
 			   (when precision
-			     #+(or)(warn "Formatting: ignoring 'precision' field value (~S)." precision))
+			     (warn "Formatting: ignoring 'precision' field value (~S)." precision))
 			 
 			   (when (eq min-field-width :arg) (setf min-field-width (pop list-args)))
 			 
@@ -125,7 +126,7 @@
       (unless (numberp obj)
 	(py-raise 'TypeError
 		  "The `#', `+' and ` ' (space) conversion flags may only be used ~
-                     for numeric arguments (got: ~S)." obj)))
+                   for numeric arguments (got: ~S)." obj)))
     
     (when (and alt-form-p (/= 0 obj))
       (push (case conv-type
@@ -197,7 +198,6 @@
   (or (gethash string *parsed-format-strings*)
       (setf (gethash string *parsed-format-strings*)
 	(parse-format-string string))))
-
 
 (defun parse-format-string (string)
   "Returns a FORMAT-STRING struct that can be called in MAKE-FORMATTED-STRING."

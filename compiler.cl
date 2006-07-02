@@ -54,7 +54,6 @@
 ;;  :safe-lex-visible-vars      : list of all variables guaranteed to be lexically visible and bound;
 ;;                                subset of :LEXICALLY-VISIBLE-VARS.
 
-;#+(or)
 (sys:define-declaration
     pydecl (&rest property-pairs) nil :declare
     (lambda (declaration env)
@@ -63,22 +62,7 @@
 		    (nconc (copy-list (cdr declaration))
 			   (sys:declaration-information 'pydecl env))))))
 
-#+(or) ;; For debugging
-(sys:define-declaration
-    pydecl (&rest property-pairs) nil :declare
-    (lambda (declaration env)
-      (let* ((declaration-copy (copy-tree declaration))
-	     (old-info (copy-tree (sys:declaration-information 'pydecl env)))
-	     (new-info (cons 'pydecl
-			     (nconc (cdr (copy-tree declaration))
-				    (sys:declaration-information 'pydecl env)))))
-	(warn "decl ~S + old ~S => ~S" declaration-copy old-info new-info)
-	(values :declare
-		new-info))))
-
 (defun get-pydecl (var env)
-  #+(or)(break "get-pydecl ~A ~A" var env)
-  #+(or)(warn "decl info: ~S" (sys:declaration-information 'pydecl env))
   (second (assoc var (sys:declaration-information 'pydecl env) :test #'eq)))
 
 (defmacro with-pydecl (pairs &body body)
@@ -86,23 +70,16 @@
      ,@body))
 
 
-;; Sometimes Python code is macroexpanded without a real environment
-;; object (it's NIL). For example, the (ACL) compiler invokes CONSTANTP
-;; (which invokes MACROEXPAND) without environment.
+;; Allegro CL 8.0, during file compilation, sometimes calls CONSTANTP without
+;; environment. However, in case of operations on Python variables, the
+;; environment is needed to look up what kind of variable we're dealing with.
 ;; 
-;; Macros that really need a real environment (because they use certain
-;; PYDECL values) macroexpand into a form refering *the-great-unknown*,
-;; (which is an always-unbound dynamic variable). This way, the compiler
-;; can run CONSTANTP without problems, and our answer *the-great-unknown*
-;; gives the compiler the hint that the code is not constant.
-;; 
-;; XXX Why is in this case CONSTANTP not called with same ENV as the macro
-;; that called CONSTANTP uses?
+;; As a workaround, those variable operations macroexpand into a
+;; reference to *the-great-unknown*, about which nothing is known --
+;; least of all, if it's constant or not...
 
 (defvar *the-great-unknown*)
 
-
-;; Utils
 
 (defmacro with-gensyms (list &body body)
   ;; Actually, the new symbols are uninterned fresh symbols with
@@ -121,8 +98,7 @@
   "The ASSERT-STMT uses the value of *__debug__* to determine whether
 or not to include the assertion code.
  
-XXX Currently there is not way to set *__debug__* to False.
-XXX Make +mod-debug+ instead?")
+XXX Currently there is not way to set *__debug__* to False.")
 
 (defvar *current-module-name* "__main__"
   "The name of the module now being compiled; module.__name__ is set to it.")
@@ -169,8 +145,6 @@ XXX Make +mod-debug+ instead?")
 	      (identifier-expr        (push (second x) res))
 	      ((list-expr tuple-expr) (setf todo (nconc todo (second x))))))
       res)))
-
-  
   
 (defmacro assign-stmt (value targets &environment e)
   
@@ -232,7 +206,6 @@ XXX Make +mod-debug+ instead?")
 	`(let ((,val ,value))
 	   ,@(mapcar #'assign-one targets))))))
 
-
 (define-compiler-macro assign-stmt (&whole whole value targets &environment e)
   (declare (ignore e))
   
@@ -254,7 +227,6 @@ XXX Make +mod-debug+ instead?")
 		     collect `(,te ,va))
 	     ,@(loop for te in temp-items for tg in tg-items
 		   collect `(assign-stmt ,te (,tg))))))
-    
     whole))
 
 (defmacro attributeref-expr (item attr)
@@ -339,8 +311,6 @@ XXX Make +mod-debug+ instead?")
 
 (defmacro call-expr (primary (pos-args kwd-args *-arg **-arg))
   
-  ;; XXX todo: check that key args are after pos args (or in parser?)
-  
   ;; For complete Python semantics, we should check for every call if
   ;; the function being called is one of the built-in functions EVAL,
   ;; LOCALS or GLOBALS, because they access the variable scope of the
@@ -410,7 +380,6 @@ XXX Make +mod-debug+ instead?")
 	 ;; This saves allocation of bound method
 	 
 	 ;; As primary is IDENTIFIER-EXPR, accessing it is side effect-free.
-	 #+(or)(warn "Inlining:  getattr(x,y)(...)")
 	 `(if (eq ,(second primary) (symbol-function 'pybf:getattr))
 	      
 	      ,(destructuring-bind ((obj attr) k s ss)
@@ -419,14 +388,13 @@ XXX Make +mod-debug+ instead?")
 		 `(multiple-value-bind (.a .b .c)
 		      (pybf::getattr-nobind ,obj ,attr nil)
 		    (if (eq .a :class-attr)
-			(progn #+(or)(warn "getattr: saved bound method")
-			       (funcall .b .c ,@pos-args))
+			(funcall .b .c ,@pos-args)
 		      (py-call .a ,@pos-args))))
 
 	    (py-call ,primary ,@pos-args)))
 	
 	
-	;; XXX todo: Optimize obj.__get__(...) (in b0.py)
+	;; XXX todo: Optimize obj.__get__(...)
 	
 	(t whole)))
 
@@ -616,9 +584,6 @@ XXX Make +mod-debug+ instead?")
        (funcall (compile nil `(lambda () ,lambda-body))))))
 
 (defmacro for-in-stmt (target source suite else-suite)
-  ;; potential special cases:
-  ;;  - <dict>.{items,keys,values}()
-  ;;  - constant list/tuple/string
   (with-gensyms (f x)
     `(tagbody
        (let* ((,f (lambda (,x)
@@ -811,10 +776,9 @@ XXX Make +mod-debug+ instead?")
 (defmacro global-stmt (names &environment e)
   ;; GLOBAL statements are already determined and used at the moment a
   ;; FUNCDEF-STMT is handled.
-  ;; XXX global in class def scope?
   (declare (ignore names))
   (unless (get-pydecl :inside-function-p e)
-    (warn "Bogus `global' statement found at top-level (not inside a function)")))
+    (warn "Bogus `global' statement found at top-level.")))
 
 (defmacro identifier-expr (name &environment e)
   
@@ -910,7 +874,6 @@ XXX Make +mod-debug+ instead?")
   
   `(funcdef-stmt nil :lambda ,args (suite-stmt ((return-stmt ,expr)))))
   
-
 (defmacro listcompr-expr (item for-in/if-clauses)
   (with-gensyms (list)
     `(let ((,list ()))
@@ -923,11 +886,8 @@ XXX Make +mod-debug+ instead?")
 	    finally (return res))
        (make-py-list-from-list (nreverse ,list)))))
 
-
 (defmacro list-expr (items)
   `(make-py-list-unevaled-list ,items))
-
-
 
 (defmacro with-this-module-context ((module) &body body)
   ;; Used by expansions of `module-stmt' and by function `eval'.
@@ -995,7 +955,6 @@ XXX Make +mod-debug+ instead?")
 	    ,@(when call-hook
 		`((when *module-hook*
 		    (funcall *module-hook* +mod+)))))))
-
 
 (defmacro create-module-globals-dict ()
   `(module-make-globals-dict
@@ -1150,7 +1109,7 @@ XXX Make +mod-debug+ instead?")
 	   (if *last-raised-exception*
 	       (error *last-raised-exception*)
 	     (py-raise 'ValueError "There is not exception to re-raise (got bare `raise')."))))))
-    
+
 (defmacro raise-stmt (exc var tb)
   (when (stringp exc)
     (warn "Raising string exceptions not supported (got: 'raise ~S')" exc))
@@ -1273,8 +1232,7 @@ XXX Make +mod-debug+ instead?")
 (defun builtin-name-p (x)
   (or (find-symbol (string x) (load-time-value (find-package :python-builtin-functions)))
       (find-symbol (string x) (load-time-value (find-package :python-builtin-types)))
-      (find-symbol (string x) (load-time-value (find-package :python-builtin-values)))
-      (find-symbol (string x) (load-time-value (find-package :python-builtin-clpy)))))
+      (find-symbol (string x) (load-time-value (find-package :python-builtin-values)))))
 
 (defun builtin-value (x)
   (let ((sym (builtin-name-p x)))
@@ -1285,9 +1243,7 @@ XXX Make +mod-debug+ instead?")
 	      ((eq pkg (load-time-value (find-package :python-builtin-types)))
 	       (symbol-value sym))
 	      ((eq pkg (load-time-value (find-package :python-builtin-values)))
-	       (symbol-value sym))
-	      ((eq pkg (load-time-value (find-package :python-builtin-clpy)))
-	       (symbol-function sym)))))))
+	       (symbol-value sym)))))))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -1315,15 +1271,15 @@ XXX Make +mod-debug+ instead?")
 	  	  
 	  (next    0 py-func-iterator-p py-func-iterator.next)
 	  
-	  (read      (0 . 1) filep  py-file.read     )   
-	  (readline  (0 . 1) filep  py-file.readline )   
-	  (readlines (0 . 1) filep  py-file.readlines)   
-	  (xreadlines 0      filep  py-file.xreadlines)
-	  (write      1      filep  py-file.write  )
+	  (read       (0 . 1) filep    py-file.read      )
+	  (readline   (0 . 1) filep    py-file.readline  )
+	  (readlines  (0 . 1) filep    py-file.readlines )
+	  (xreadlines  0      filep    py-file.xreadlines)
+	  (write       1      filep    py-file.write  )
 	  
-	  (append  1       vectorp  py-list.append )
-	  (sort    0       vectorp  py-list.sort   )
-	  (pop     (0 . 1) vectorp  py-list.pop    ))
+	  (append      1      vectorp  py-list.append )
+	  (sort        0      vectorp  py-list.sort   )
+	  (pop        (0 . 1) vectorp  py-list.pop    ))
 	
       do (when (gethash (car item) *inlineable-methods*)
 	   (warn "Replacing existing entry in *inlineable-methods* for attr ~A:~% ~A => ~A"
@@ -1449,8 +1405,8 @@ XXX Make +mod-debug+ instead?")
   ;; variables used at the top level. The latter two (func/class) can
   ;; be detected by looking for the required `global' declaration.
   ;; 
-  ;; However, the resulting list of names is an _underestimate_ of the
-  ;; total list of global variables in the module, as more can be
+  ;; However, the resulting list of names is a subset (underestimate)
+  ;; of the total list of global variables in the module, as more can be
   ;; created dynamically from outside the module by another module,
   ;; and also by code in an "exec" stmt in this module.
   
@@ -1504,7 +1460,6 @@ XXX Make +mod-debug+ instead?")
     
     globals))
 
-
 (defun funcdef-stmt-suite-globals-locals (suite params enclosing-declared-globals)
   "Lists with the locals and globals of the function."
   
@@ -1555,7 +1510,6 @@ XXX Make +mod-debug+ instead?")
     
     (values declared-globals locals)))
 
-
 (defun classdef-stmt-suite-globals-locals (suite enclosing-declared-globals)
   "Lists with the locals and globals of the class."
   
@@ -1563,7 +1517,6 @@ XXX Make +mod-debug+ instead?")
   ;; inside the class' suite.
   
   (funcdef-stmt-suite-globals-locals suite () enclosing-declared-globals))
-
 
 (defun check-class/func-not-global (ast &rest globals-lists)
   (ecase (car ast)
@@ -1585,7 +1538,6 @@ XXX Make +mod-debug+ instead?")
 	 (py-raise 'SyntaxError
 		   "SyntaxError: inner function name may not be declared global ~
                     (function: '~A', at ~A)." fname))))))
-
 
 (defun member* (item &rest lists)
   (dolist (list lists)
@@ -2445,11 +2397,6 @@ statements, as then variables can be guaranteed to be bound."
 	(t (loop for elm in form
 	       append (multiple-value-list (apply-splits elm))))))
 
-
-
-
-
-
 ;; `global' in a class def leaks into the methods within:
 ;; 
 ;; def f():
@@ -2483,42 +2430,3 @@ statements, as then variables can be guaranteed to be bound."
 ;; ---
 ;; f()()() -> prints 'global', not 'af'
 
-
-#||
-(let ((*readtable* (copy-readtable nil))
-		   (f (lambda (stream char)
-			(unread-char char stream)
-			(parse-python-file stream))))
-	       (loop for i from 0 below 256
-		   do (set-macro-character (code-char i) f))
-	       (compile-file "b2.py"))
-||#
-
-#||
-(defun foo (x y &optional e1 e2)
-  (declare (optimize (speed 3) (safety 0) (debug 0)))
-  (tagbody
-    
-   0 (if (symbolp x)
-	 (progn (setf x y)
-		(go 2))
-       (go 1))
-    
-   1 (if (symbolp y)
-	 (progn (setf y e1)
-		(go ok))
-       (when e1
-	 (go error)))
-
-   2 (if (symbolp e1)
-	 (progn (setf y e2)
-		(go ok))
-       (setf y e1)
-       (when e2
-	 (go error)))
-   ok
-    (return-from foo (py-+ x y))
-    
-   error
-    (py-raise 'TypeError "Whatever")))
-||#
