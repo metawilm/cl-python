@@ -41,7 +41,5 @@
 (defun loadpy ()
   (excl:load-system :python))
 
-;; To create a single fasl file:
-;; 
-;;   (excl:concatenate-system :python "python.fasl")
-
+(defun make-python-fasl ()
+  (excl:concatenate-system :python "clpython.fasl"))
