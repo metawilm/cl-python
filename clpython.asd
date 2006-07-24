@@ -19,21 +19,26 @@
 ;; Solution for now: a dummy ASDF system, that when compiled or loaded
 ;; executes the corresponding EXCL:DEFSYSTEM commands.
 
+(eval-when (compile)
+  (error "This ASDF file should be run interpreted"))
+
 (asdf:defsystem "clpython"
     :version "1.0")
 
 (defmethod asdf::traverse ((o asdf:compile-op) (s (eql (asdf:find-system "clpython"))))
   (format t "Compiling CLPython using defsys...")
-  (load "defsys")
-  (compy)
+  (let ((*default-pathname-defaults* #.*load-truename*))
+    (load "defsys.cl")
+    (compy))
   ;; returns value are the steps to take: none
   nil)
 
 (defmethod asdf::traverse ((o asdf:load-op) (s (eql (asdf:find-system "clpython"))))
   (format t "Loading CLPython using defsys...")
-  (load "defsys")
-  (compy)
-  (loadpy)
+  (let ((*default-pathname-defaults* #.*load-truename*))
+    (load "defsys.cl")
+    (compy)
+    (loadpy))
   ;; returns value are the steps to take: none
   nil)
 
