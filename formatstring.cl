@@ -37,7 +37,8 @@
 			       args))
 				 
 	  with mapping-getitem-unb = (when is-mapping-fs
-				       (recursive-class-dict-lookup (py-class-of arg) '__getitem__))
+				       (recursive-class-dict-lookup (py-class-of arg)
+								    '|__getitem__|))
 	  with mapping-getitem-bound = (when mapping-getitem-unb
 					 ;; for efficiency, skip making bound method
 					 (unless (functionp mapping-getitem-unb)
@@ -87,7 +88,7 @@
     (#\r (py-repr-string obj))
     (#\c (setf obj (deproxy obj))
 	 (typecase obj
-	   (integer (pybf:chr obj))
+	   (integer (pybf:|chr| obj))
 	   (string  (unless (= (length obj) 1)
 		      (py-raise 'TypeError
 				"The %c formatting code wants 1-char string (got: ~S)."

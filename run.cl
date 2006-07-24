@@ -19,7 +19,7 @@
       ;; When a SyntaxError S is thrown by us in the lexer, the parser
       ;; first signals S, then it raises a GRAMMAR-PARSE-ERROR.
       
-      (SyntaxError (e) ;; signaled
+      (|SyntaxError| (e) ;; signaled
 	(error e))
       
       (grammar-parse-error (c)
@@ -29,10 +29,10 @@
 	       (encl-error (yacc::grammar-parse-error-enclosed-error c)))
 	  
 	  (when encl-error
-	    (assert (not (typep encl-error 'SyntaxError)))
+	    (assert (not (typep encl-error '|SyntaxError|)))
 	    (error encl-error))
 	  
-	  (py-raise 'SyntaxError
+	  (py-raise '|SyntaxError|
 		    (if encl-error
 			(format nil "Parse error at line ~A~@[, at token `~S'~].~%[inner error: ~A]"
 				line token encl-error)

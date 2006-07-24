@@ -110,18 +110,18 @@ READ-CHAR."
 		    (lex-todo eof 'eof) ;; part of yacc, not grammar terminal
 		    (loop while (> (car indentation-stack) 0)
 			do (pop indentation-stack)
-			   (lex-todo |dedent| '|dedent|))
-		    (lex-return |newline| '|newline|))
+			   (lex-todo dedent 'dedent))
+		    (lex-return newline 'newline))
 		   
 		   
 		   ((digit-char-p c 10)
-		    (lex-return |number| (read-number c)))
+		    (lex-return number (read-number c)))
 
 		   ((identifier-char1-p c)
 		    (let ((token (read-identifier c)))
 		      (assert (symbolp token))
 		      
-		      (cond ((member token '(u r ur U R UR))
+		      (cond ((member token '(|u| |r| |ur| |U| |R| |UR|))
 			     ;; u"abc"    : `u' stands for `Unicode string'
 			     ;; u + b     : `u' is an identifier
 			     ;; r"s/f\af" : `r' stands for `raw string'
@@ -134,14 +134,14 @@ READ-CHAR."
 			       (if (and ch (char-member ch '(#\' #\")))
 				   
 				   (let ((is-unicode
-					  (member token '(u ur U UR)))
+					  (member token '(|u| |ur| |U| |UR|)))
 					 (is-raw
-					  (member token '(r ur R UR))))
-				     (lex-return |string|
+					  (member token '(|r| |ur| |R| |UR|))))
+				     (lex-return string
 						 (read-string ch :unicode is-unicode :raw is-raw)))
 				 (progn
 				   (when ch (unread-chr ch))
-				   (lex-return |identifier| token)))))
+				   (lex-return identifier token)))))
 			    
 			    ((reserved-word-p token)
 			     (when *lex-debug*
@@ -150,10 +150,10 @@ READ-CHAR."
 			       (values (find-token-code token) token)))
 			    
 			    (t
-			     (lex-return |identifier| token)))))
+			     (lex-return identifier token)))))
 
 		   ((char-member c '(#\' #\"))
-		    (lex-return |string| (read-string c)))
+		    (lex-return string (read-string c)))
 
 		   ((or (punct-char1-p c)
 			(punct-char-not-punct-char1-p c))
@@ -193,19 +193,19 @@ READ-CHAR."
 
 		       ((< (car indentation-stack) new-indent) ; one indent
 			(push new-indent indentation-stack)
-			(lex-todo |indent| '|indent|))
+			(lex-todo indent 'indent))
 
 		       ((> (car indentation-stack) new-indent) ; dedent(s)
 			(loop while (> (car indentation-stack) new-indent)
 			    do (pop indentation-stack)
-			       (lex-todo |dedent| '|dedent|))
+			       (lex-todo dedent 'dedent))
 			
 			(unless (= (car indentation-stack) new-indent)
-			  (py-raise 'SyntaxError
+			  (py-raise '|SyntaxError|
 				    "Dedent did not arrive at a previous indentation level (line ~A)."
 				    *curr-src-line*))))
 		      
-		      (lex-return |newline| '|newline|)))
+		      (lex-return newline 'newline)))
 		   
 		   ((char= c #\#)
 		    (read-comment-line c)
@@ -215,7 +215,7 @@ READ-CHAR."
 		    (let ((c2 (read-chr-nil)))
 		      (if (and c2 (char= c2 #\Newline))
 			  (go next-char)
-			(py-raise 'SyntaxError
+			(py-raise '|SyntaxError|
 				  "Continuation character '\\' must be followed by Newline, ~
                                    but got: '~A' (~S) (line ~A)."
 				  c2 c2 *curr-src-line*))))
@@ -229,7 +229,7 @@ READ-CHAR."
 		    
 		   (t (with-simple-restart 
 			  (:continue "Discard the character and continue parsing.")
-			(py-raise 'SyntaxError
+			(py-raise '|SyntaxError|
 				  "Nobody expected this character: '~A' (~S) (line ~A)."
 				  c c *curr-src-line*))
 		      (go next-char))))))))))))
@@ -254,7 +254,7 @@ READ-CHAR."
   (declare (special *py-signal-conditions*))
   (when *py-signal-conditions*
     (signal 'py-syntax-eof-condition))
-  (py-raise 'SyntaxError "Unexpected end of file (line ~A)." *curr-src-line*))
+  (py-raise '|SyntaxError| "Unexpected end of file (line ~A)." *curr-src-line*))
 
 (define-compiler-macro read-chr-error ()
   `(locally (declare (optimize (speed 3) (safety 1) (debug 0)))
@@ -366,7 +366,11 @@ C must be either a character or NIL."
 		   (let ((new-sym (make-symbol res)))
 		     (setf (gethash sym ht) new-sym)
 		     new-sym))))
-	    (sym sym)
+	    
+	    ((string= (symbol-name sym) res)
+	     ;; Prevent case matches in Allegro ANSI mode
+	     sym)
+	    
 	    (t (intern (simple-string-from-vec res) #.*package*))))))
 
 (defconstant +id-cache-string-size+ 10)
@@ -440,7 +444,9 @@ C must be either a character or NIL."
 		   do (setf (aref full-string (+ +id-cache-string-size+ i))
 			(pop more-chars)))
 	       
-	       (or (find-symbol full-string #.*package*)
+	       (or (let ((found (find-symbol full-string #.*package*)))
+		     (when (string= found full-string)
+		       found))
 		   (intern full-string #.*package*))))
 	    
 	    ((< n-filled +id-cache-string-size+)
@@ -487,7 +493,7 @@ C must be either a character or NIL."
 			   with ch = (read-chr-error)
 			   do (setf code (+ (* code 16)
 					    (or (digit-char-p ch 16)
-						(py-raise 'SyntaxError
+						(py-raise '|SyntaxError|
 							  "Non-hex digit in \"\u...\": ~S (line ~A)."
 							  ch *curr-src-line*)))
 				    ch (read-chr-error))
@@ -536,7 +542,7 @@ C must be either a character or NIL."
        
      (t ;; Non-empty string with one starting quote, possibly containing escapes
       (unless third
-	(py-raise 'SyntaxError "Quoted string not finished (line ~A)." *curr-src-line*))
+	(py-raise '|SyntaxError| "Quoted string not finished (line ~A)." *curr-src-line*))
       (let ((res (load-time-value
 		  (make-array 30 :element-type 'character :adjustable t :fill-pointer 0)))
 	    (c third)
@@ -565,7 +571,7 @@ C must be either a character or NIL."
 		     
 		   (let ((ch2 (read-chr-error))) 
 		     (unless (char= ch2 #\{)
-		       (py-raise 'SyntaxError
+		       (py-raise '|SyntaxError|
 				 "In Unicode string: \N{...} expected, but got ~S after \N (line ~A)."
 				 ch2 *curr-src-line*))
 		     (loop with ch = (read-chr-error)
@@ -591,7 +597,7 @@ C must be either a character or NIL."
 					  code (+ (* 16 code) 
 						  (or (digit-char-p ch 16)
 						      (py-raise
-						       'SyntaxError
+						       '|SyntaxError|
 						       "Non-hex digit in \"\~A...\": ~S (line ~A)."
 						       c ch *curr-src-line*))))
 				 finally (vector-push-extend (code-char code) res))
@@ -617,7 +623,7 @@ C must be either a character or NIL."
 			  (b (read-chr-error)))
 		     
 		     (cond ((not (digit-char-p a 16))
-			    (py-raise 'SyntaxError "Non-hex digit found in \x..: ~S (line ~A)."
+			    (py-raise '|SyntaxError| "Non-hex digit found in \x..: ~S (line ~A)."
 				      a *curr-src-line*))
 			   
 			   ((digit-char-p b 16)
@@ -805,7 +811,7 @@ C must be either a character or NIL."
 		     ((char= ch2 #\-)       (setf minus t))
 		     ((digit-char-p ch2 10) (setf exp (digit-char-p ch2 10)
 						  got-num t))
-		     (t (py-raise 'SyntaxError 
+		     (t (py-raise '|SyntaxError| 
 				  "Exponent for literal number invalid: ~A ~A (line ~A)."
 				  ch ch2 *curr-src-line*)))
 		  
@@ -813,7 +819,7 @@ C must be either a character or NIL."
 		      (let ((ch3 (read-chr-error)))
 			(if (digit-char-p ch3 10)
 			    (setf exp (+ (* 10 exp) (digit-char-p ch3 10)))
-			  (py-raise 'SyntaxError
+			  (py-raise '|SyntaxError|
 				    "Exponent for literal number invalid: ~A ~A ~A (line ~A)."
 				    ch ch2 ch3 *curr-src-line*))))
 		    
@@ -910,14 +916,14 @@ C must be either a character or NIL."
 	    (if (and c2 (char= #\. c1 c2))
 		(if (char= (read-chr-error) #\.)
 		    '|...|
-		  (py-raise 'SyntaxError
+		  (py-raise '|SyntaxError|
 			    "Dots `..' may only occur as part of a triple `...' (line ~A)."
 			    *curr-src-line*))
 	      (if (punct-char1-p c1)
 		  (progn (when c2 (unread-chr c2))
 			 (lookup-1char c1))
 		(progn (assert (char= c1 #\!))
-		       (py-raise 'SyntaxError
+		       (py-raise '|SyntaxError|
 				 "Character `!' may only occur as in `!=', not standalone (line ~A)."
 				 *curr-src-line*))))))))
 

@@ -14,7 +14,7 @@
   (use-package :yacc))
 
 
-(defvar *reserved-words*
+(defparameter *reserved-words*
     ;; A few of these are not actually reserved words in CPython yet,
     ;; because of backward compatilibity reasons, but they will be in
     ;; the future (`as' is an example).
@@ -39,12 +39,12 @@
   (:left-associative << >> )
   (:left-associative + -)
   (:left-associative * / % //)
-  (:left-associative |unary-plusmin| )
+  (:left-associative unary-plusmin )
   (:left-associative ~)
   (:right-associative **)
-  (:non-associative |high-prec|)
-  (:lexemes |identifier| |number| |string| 
-	    |newline| |indent| |dedent|
+  (:non-associative high-prec)
+  (:lexemes identifier number string 
+	    newline indent dedent
 	    ;; punctuation:
 	    = [ ] |(| |)| < > { } |.| |,| |:| |\|| ^ % + - * / ~ & |`|
             &= // << >>  <> != += -= *= /= //= %= ** <= >= ^= |\|=| ==
@@ -106,14 +106,14 @@
  (python-grammar (file-input) (`(module-stmt (suite-stmt ,(nreverse $1)))))
 
  (file-input () ())
- (file-input (file-input |newline|) ($1))
+ (file-input (file-input newline) ($1))
  (file-input (file-input stmt) ((cons $2 $1)))
 
  (:decorator*)
- (decorator (|@| dotted-name                 |newline|) ($2))
- (decorator (|@| dotted-name |(| arglist |)| |newline|) ((list 'call-expr $2 $4)))
+ (decorator (|@| dotted-name                 newline) ($2))
+ (decorator (|@| dotted-name |(| arglist |)| newline) ((list 'call-expr $2 $4)))
 
- (funcdef (decorator* |def| |identifier| |(| parameters |)| |:| suite)
+ (funcdef (decorator* |def| identifier |(| parameters |)| |:| suite)
 	  (`(funcdef-stmt ,$1 (identifier-expr ,$3) ,$5 ,$8)))
 
  (parameters ()               ((list nil nil nil nil)))
@@ -148,10 +148,10 @@
  (defparameter+ (defparameter+ |,| defparameter) ((append $1 (list $3))))
 
  (ni-*-ident  ( |,| *-ident    ) ($2))
- (*-ident     ( |*| |identifier| ) ($2))
+ (*-ident     ( |*| identifier ) ($2))
 
  (ni-**-ident ( |,| **-ident    ) ($2))
- (**-ident    ( |**| |identifier| ) ($2))
+ (**-ident    ( |**| identifier ) ($2))
 
  (defparameter (fpdef         ) ($1))
  (defparameter (fpdef |=| test) (`(:key ,$1 ,$3)))
@@ -160,7 +160,7 @@
  ;;   def f((x,y), z, q=4): ...
  
  (fpdef :or
-	(( |identifier|   ) . (`(identifier-expr ,$1)))
+	(( identifier     ) . (`(identifier-expr ,$1)))
 	(( |(| fplist |)| ) . (`(tuple-expr ,$2))))
 
  (fplist (fpdef comma--fpdef* comma?) ((cons $1 $2)))
@@ -171,7 +171,7 @@
  (comma (|,|) ((list $1)))
 
  (stmt :or simple-stmt compound-stmt)
- (simple-stmt (small-stmt semi--small-stmt* semi? |newline|)
+ (simple-stmt (small-stmt semi--small-stmt* semi? newline)
 	      ((if $2 (list 'suite-stmt (cons $1 $2)) $1)))
 
  (semi--small-stmt (|;| small-stmt) ($2))
@@ -239,27 +239,27 @@
  (:comma--import-as-name*)
  (comma--import-as-name (|,| import-as-name) ($2))
  
- (import-as-name (|identifier|)                   
-		 (`(as (identifier-expr ,$1) (identifier-expr ,$1))))
- (import-as-name (|identifier| |as| |identifier|)
-		 (`(as (identifier-expr ,$1) (identifier-expr ,$3))))
+ (import-as-name (identifier)                   
+		 (`(|as| (identifier-expr ,$1) (identifier-expr ,$1))))
+ (import-as-name (identifier |as| identifier)
+		 (`(|as| (identifier-expr ,$1) (identifier-expr ,$3))))
  (dotted-as-name (dotted-name)
-		 (`(as ,$1 ,$1)))
- (dotted-as-name (dotted-name |as| |identifier|)  
-		 (`(as ,$1 (identifier-expr ,$3))))
+		 (`(|as| ,$1 ,$1)))
+ (dotted-as-name (dotted-name |as| identifier)  
+		 (`(|as| ,$1 (identifier-expr ,$3))))
  
- (dotted-name (|identifier| dot--name*)
+ (dotted-name (identifier dot--name*)
 	      ((if $2
 		   `(attributeref-expr (identifier-expr ,$1) ,@$2)
 		 `(identifier-expr ,$1))))
  (:dot--name*)
- (dot--name (|.| |identifier|) (`(identifier-expr ,$2)))
+ (dot--name (|.| identifier) (`(identifier-expr ,$2)))
 
- (global-stmt (|global| |identifier| comma--identifier*)
+ (global-stmt (|global| identifier comma--identifier*)
 	      (`(global-stmt ,(if $3 (cons $2 $3) (list $2)))))
  
  (:comma--identifier*)
- (comma--identifier (|,| |identifier|) (`(identifier-expr ,$2)))
+ (comma--identifier (|,| identifier) (`(identifier-expr ,$2)))
  
  (exec-stmt (|exec| expr                   ) ((list 'exec-stmt $2 nil nil)))
  (exec-stmt (|exec| expr |in| test         ) ((list 'exec-stmt $2  $4 nil)))
@@ -278,7 +278,7 @@
  (:else--suite?)
  (for-stmt (|for| exprlist |in| testlist |:| suite else--suite?)
 	   ((list 'for-in-stmt $2 $4 $6 $7))
-	   (:precedence |high-prec|))
+	   (:precedence high-prec))
  (try-stmt :or
 	   ((|try| |:| suite except--suite+ else--suite?) . (`(try-except-stmt ,$3 ,$4 ,$5)))
 	   ((|try| |:| suite |finally| |:| suite)  	  . (`(try-finally-stmt ,$3 ,$6)))
@@ -295,8 +295,8 @@
  (except--suite+ (except--suite+ except--suite) ((append $1 (list $2))))
 
  (suite :or
-	((simple-stmt)                       . ((list 'suite-stmt (list $1))))
-	((|newline| |indent| stmt+ |dedent|) . ((list 'suite-stmt $3))))
+	((simple-stmt)                 . ((list 'suite-stmt (list $1))))
+	((newline indent stmt+ dedent) . ((list 'suite-stmt $3))))
 
  (stmt+ (stmt)       ((list $1)))
  (stmt+ (stmt+ stmt) ((append $1 (list $2))))
@@ -347,9 +347,9 @@
 	     ((list 'binary-expr '|is not| $1 $4)) (:precedence |is|))
  
  (binop2-expr (|+| binop2-expr) ((list 'unary-expr $1 $2))
-	      (:precedence |unary-plusmin|))
+	      (:precedence unary-plusmin))
  (binop2-expr (|-| binop2-expr) ((list 'unary-expr $1 $2))
-	      (:precedence |unary-plusmin|))
+	      (:precedence unary-plusmin))
 
  (atom :or
        ((|(| comma? |)|)        . ((list 'tuple-expr nil)))
@@ -359,14 +359,14 @@
        ((|{|           |}|)     . ((list 'dict-expr nil)))
        ((|{| dictmaker |}|)     . ((list 'dict-expr $2)))
        ((|`| testlist1 |`|)     . ((list 'backticks-expr $2)))
-       ((|identifier|)          . ((list 'identifier-expr $1)))
-       ((|number|)              . ($1))
+       ((identifier)            . ((list 'identifier-expr $1)))
+       ((number)                . ($1))
        ((string+)               . ($1))
        ((|lispy-lisp-form|)     . ($1)))
 
  ;; consecutive string literals are joined: "s" "b" => "sb"
- (string+ (|string|) ($1)) 
- (string+ (string+ |string|) ((concatenate 'string $1 $2))) 
+ (string+ (string) ($1)) 
+ (string+ (string+ string) ((concatenate 'string $1 $2))) 
 
  (listmaker (test list-for) ((list 'listcompr-expr $1 $2)))
  (listmaker (test comma--test* comma?) ((list 'list-expr (cons $1 $2))))
@@ -380,10 +380,10 @@
  (trailer+ :or
 	   ((|(| arglist      |)|)           . ((list (list 'call-expr $2))))
 	   ((|[| subscriptlist |]|)          . ((list (list 'subscription-expr $2))))
-	   ((|.| |identifier|)               . (`((attributeref-expr (identifier-expr ,$2)))))
+	   ((|.| identifier)                 . (`((attributeref-expr (identifier-expr ,$2)))))
 	   ((trailer+ |(| arglist |)|)       . ((append $1 (list (list 'call-expr $3)))))
 	   ((trailer+ |[| subscriptlist |]|) . ((append $1 (list (list 'subscription-expr $3)))))
-	   ((trailer+ |.| |identifier|)      . ((append $1 `((attributeref-expr
+	   ((trailer+ |.| identifier)        . ((append $1 `((attributeref-expr
 							      (identifier-expr ,$3)))))))
 
  (subscriptlist (subscript comma--subscript* comma?)
@@ -427,7 +427,7 @@
  (:comma--test--\:--test*)
  (comma--test--\:--test (|,| test |:| test) ((cons $2 $4)))
  
- (classdef (|class| |identifier| inheritance |:| suite)
+ (classdef (|class| identifier inheritance |:| suite)
 	   (`(classdef-stmt (identifier-expr ,$2) ,$3 ,$5)))
 
  (inheritance (                ) ('(tuple-expr nil)))
@@ -463,9 +463,9 @@
  (:comma--**--test?)
  (comma--**--test (|,| |**| test) ($3))
 
- (argument (test)                  (`(:pos ,$1)))
- (argument (|identifier| |=| test) (`(:key (identifier-expr ,$1) ,$3)))
- (argument (test gen-for)          (`(:pos (generator-expr ,$1 ,$2))))
+ (argument (test)                (`(:pos ,$1)))
+ (argument (identifier |=| test) (`(:key (identifier-expr ,$1) ,$3)))
+ (argument (test gen-for)        (`(:pos (generator-expr ,$1 ,$2))))
 
  (list-iter :or list-for list-if)
  (list-for (|for| exprlist |in| testlist-safe list-iter?) 

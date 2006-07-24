@@ -113,7 +113,7 @@ XXX Currently there is not way to set *__debug__* to False.")
 (defun assert-stmt-1 (test test-ast raise-arg)
   (with-simple-restart (:continue "Ignore the assertion failure")
     (unless (py-val->lisp-bool test)
-      (py-raise 'AssertionError (or raise-arg 
+      (py-raise '|AssertionError| (or raise-arg 
 				    (format nil "Failing test: ~A"
 					    (with-output-to-string (s)
 					      (py-pprint s test-ast))))))))
@@ -125,7 +125,7 @@ XXX Currently there is not way to set *__debug__* to False.")
 (defun assign-stmt-list-vals (iterable num-targets)
   (let ((val-list (py-iterate->lisp-list iterable)))
     (unless (= (length val-list) num-targets)
-      (py-raise 'ValueError
+      (py-raise '|ValueError|
 		"Assignment to several vars: wanted ~A values, but got ~A"
 		num-targets (length val-list)))
     val-list))
@@ -246,7 +246,7 @@ XXX Currently there is not way to set *__debug__* to False.")
 
     (ecase (car place)
     
-      (tuple-expr (py-raise 'SyntaxError
+      (tuple-expr (py-raise '|SyntaxError|
 			    "Augmented assignment to multiple places not possible (got: ~S)"
 			    `(,place ,op ,val)))
 
@@ -306,7 +306,7 @@ XXX Currently there is not way to set *__debug__* to False.")
 (defmacro break-stmt (&environment e)
   (if (get-pydecl :inside-loop-p e)
       `(go :break)
-    (py-raise 'SyntaxError "BREAK was found outside loop")))
+    (py-raise '|SyntaxError| "BREAK was found outside loop")))
 
 
 (defmacro call-expr (primary (pos-args kwd-args *-arg **-arg))
@@ -380,7 +380,7 @@ XXX Currently there is not way to set *__debug__* to False.")
 	 ;; This saves allocation of bound method
 	 
 	 ;; As primary is IDENTIFIER-EXPR, accessing it is side effect-free.
-	 `(if (eq ,(second primary) (symbol-function 'pybf:getattr))
+	 `(if (eq ,(second primary) (symbol-function 'pybf:|getattr|))
 	      
 	      ,(destructuring-bind ((obj attr) k s ss)
 		   (third primary)
@@ -460,11 +460,11 @@ XXX Currently there is not way to set *__debug__* to False.")
 				      :supers (list ,@(second inheritance))
 				      :cls-metaclass (py-dict-getitem +cls-namespace+ "__metaclass__")
 				      :mod-metaclass
-				      ,(let ((ix (position '__metaclass__
+				      ,(let ((ix (position '|__metaclass__|
 							   (get-pydecl :mod-globals-names e))))
 					 (if ix
 					     `(svref +mod-static-globals-values+ ,ix)
-					   `(gethash '__metaclass__ +mod-dyn-globals+))))))
+					   `(gethash '|__metaclass__| +mod-dyn-globals+))))))
 	     (assign-stmt ,cls (,name))))))))
 
 (defmacro comparison-expr (cmp left right)
@@ -474,7 +474,7 @@ XXX Currently there is not way to set *__debug__* to False.")
 (defmacro continue-stmt (&environment e)
   (if (get-pydecl :inside-loop-p e)
       `(go :continue)
-    (py-raise 'SyntaxError "CONTINUE was found outside loop")))
+    (py-raise '|SyntaxError| "CONTINUE was found outside loop")))
 
 (defmacro del-stmt (item &environment e)
   (ecase (car item)
@@ -758,9 +758,9 @@ XXX Currently there is not way to set *__debug__* to False.")
 		     ;; XXX check whether this works correctly when user does same explicitly
 		     ;; 
 		     ,@(when (and (eq (get-pydecl :context e) :class)
-				  (eq fname '__new__))
+				  (eq fname '|__new__|))
 			 
-			 `((assign-stmt (call-expr pybt:staticmethod
+			 `((assign-stmt (call-expr pybt:|staticmethod|
 						   (((identifier-expr ,fname)) nil nil nil))
 					((identifier-expr ,fname)))))
 		     ;;
@@ -826,7 +826,7 @@ XXX Currently there is not way to set *__debug__* to False.")
 
 (defmacro import-stmt (args)
   `(progn ,@(loop for (as mod-path bind-name) in args
-		do (assert (eq as 'as))
+		do (assert (eq as '|as|))
 		collect (ecase (car mod-path)
 			  
 			  (attributeref-expr
@@ -861,7 +861,7 @@ XXX Currently there is not way to set *__debug__* to False.")
 		      do (py-module-set-kv +mod+ k v)))
 		  
 	     `(progn ,@(loop for (as item bind-name) in items
-			   do (assert (eq as 'as))
+			   do (assert (eq as '|as|))
 			      (assert (eq (car item) 'identifier-expr))
 			      (assert (eq (car bind-name) 'identifier-expr))
 			   collect
@@ -933,8 +933,8 @@ XXX Currently there is not way to set *__debug__* to False.")
 	    ,@(when set-builtins
 		`((map-into +mod-static-globals-values+ #'identity +mod-static-globals-builtin-values+)))
 
-	    (loop for (k v) in '((__name__  ,(or module-name "__main__"))
-				 (__debug__  1))
+	    (loop for (k v) in '((|__name__|  ,(or module-name "__main__"))
+				 (|__debug__|  1))
 		do (let ((ix (position k +mod-static-globals-names+)))
 		     (when (and ix
 				(null (svref +mod-static-globals-values+ ix)))
@@ -972,7 +972,7 @@ XXX Currently there is not way to set *__debug__* to False.")
   
   (if resumable
       (restart-case
-	  (py-raise 'NameError "Variable '~A' is unbound" name)
+	  (py-raise '|NameError| "Variable '~A' is unbound" name)
 	(cl:use-value (val)
 	    :report (lambda (stream)
 		      (format stream "Enter a value to use for '~A'" name))
@@ -980,7 +980,7 @@ XXX Currently there is not way to set *__debug__* to False.")
 			   (format t "Enter new value for '~A': " name)
 			   (multiple-value-list (eval (read))))
 	  (return-from unbound-variable-error val)))
-    (py-raise 'NameError "Variable '~A' is unbound" name)))
+    (py-raise '|NameError| "Variable '~A' is unbound" name)))
 
 (defun identifier-expr-module-lookup-dyn (name +mod-dyn-globals+)
   (or (gethash name +mod-dyn-globals+)
@@ -1034,7 +1034,7 @@ XXX Currently there is not way to set *__debug__* to False.")
 (defmacro return-stmt (val &environment e)
   (if (get-pydecl :inside-function-p e)
       `(return-from :function-body ,(or val `(load-time-value *the-none*)))
-    (py-raise 'SyntaxError "RETURN found outside function")))
+    (py-raise '|SyntaxError| "RETURN found outside function")))
 
 (defmacro slice-expr (start stop step)
   `(make-slice ,start ,stop ,step))
@@ -1092,7 +1092,7 @@ XXX Currently there is not way to set *__debug__* to False.")
     
     (cond ((stringp (deproxy exc))
 	   (break "String exceptions are not supported (got: ~S)" (deproxy exc))
-	   (py-raise 'TypeError
+	   (py-raise '|TypeError|
 		     "String exceptions are not supported (got: ~S)" (deproxy exc)))
 	    
 	  ((and exc var)
@@ -1108,7 +1108,7 @@ XXX Currently there is not way to set *__debug__* to False.")
 	  (t
 	   (if *last-raised-exception*
 	       (error *last-raised-exception*)
-	     (py-raise 'ValueError "There is not exception to re-raise (got bare `raise')."))))))
+	     (py-raise '|ValueError| "There is not exception to re-raise (got bare `raise')."))))))
 
 (defmacro raise-stmt (exc var tb)
   (when (stringp exc)
@@ -1152,7 +1152,7 @@ XXX Currently there is not way to set *__debug__* to False.")
       
 	`(block :try-except-stmt
 	   (tagbody
-	     (handler-bind ((Exception ,handler-form))
+	     (handler-bind ((|Exception| ,handler-form))
 	       
 	       (progn (with-py-errors ,suite)
 		      ,@(when else-suite `((go :else)))))
@@ -1255,31 +1255,31 @@ XXX Currently there is not way to set *__debug__* to False.")
 (defun register-inlineable-methods ()
   (clrhash *inlineable-methods*)
   (loop for item in
-	'((isalpha 0 stringp      py-string.isalpha)
-	  (isalnum 0 stringp      py-string.isalnum)
-	  (isdigit 0 stringp      py-string.isdigit)
-	  (islower 0 stringp      py-string.islower)
-	  (isspace 0 stringp      py-string.isspace)
-	  (join    0 stringp      py-string.join   )
-	  (lower   0 stringp      py-string.lower  )
-	  (strip   0 stringp      py-string.strip  )
-	  (upper   0 stringp      py-string.upper  )
+	'((|isalpha| 0 stringp      py-string.isalpha)
+	  (|isalnum| 0 stringp      py-string.isalnum)
+	  (|isdigit| 0 stringp      py-string.isdigit)
+	  (|islower| 0 stringp      py-string.islower)
+	  (|isspace| 0 stringp      py-string.isspace)
+	  (|join|    0 stringp      py-string.join   )
+	  (|lower|   0 stringp      py-string.lower  )
+	  (|strip|   0 stringp      py-string.strip  )
+	  (|upper|   0 stringp      py-string.upper  )
 	  	  
-	  (keys    0 py-dict-p py-dict.keys     )
-	  (items   0 py-dict-p py-dict.items    )
-	  (values  0 py-dict-p py-dict.values   )
+	  (|keys|    0 py-dict-p py-dict.keys     )
+	  (|items|   0 py-dict-p py-dict.items    )
+	  (|values|  0 py-dict-p py-dict.values   )
 	  	  
-	  (next    0 py-func-iterator-p py-func-iterator.next)
+	  (|next|    0 py-func-iterator-p py-func-iterator.next)
 	  
-	  (read       (0 . 1) filep    py-file.read      )
-	  (readline   (0 . 1) filep    py-file.readline  )
-	  (readlines  (0 . 1) filep    py-file.readlines )
-	  (xreadlines  0      filep    py-file.xreadlines)
-	  (write       1      filep    py-file.write  )
+	  (|read|       (0 . 1) filep    py-file.read      )
+	  (|readline|   (0 . 1) filep    py-file.readline  )
+	  (|readlines|  (0 . 1) filep    py-file.readlines )
+	  (|xreadlines|  0      filep    py-file.xreadlines)
+	  (|write|       1      filep    py-file.write  )
 	  
-	  (append      1      vectorp  py-list.append )
-	  (sort        0      vectorp  py-list.sort   )
-	  (pop        (0 . 1) vectorp  py-list.pop    ))
+	  (|append|      1      vectorp  py-list.append )
+	  (|sort|        0      vectorp  py-list.sort   )
+	  (|pop|        (0 . 1) vectorp  py-list.pop    ))
 	
       do (when (gethash (car item) *inlineable-methods*)
 	   (warn "Replacing existing entry in *inlineable-methods* for attr ~A:~% ~A => ~A"
@@ -1308,17 +1308,18 @@ XXX Currently there is not way to set *__debug__* to False.")
 		(integer (= (length args) req-args))
 		(cons    (<= (car req-args) (length args) (cdr req-args)))))
       
-      (let ((check-code (ecase check
-			  ((stringp vectorp) `(,check ,prim))
-			  
-			  (filep             `(eq (class-of ,prim)
-						  (load-time-value (find-class 'py-func-iterator))))
-			  
-			  (py-dict-p         `(eq (class-of ,prim)
-						  (load-time-value (find-class 'py-dict))))
-			  
-			  (py-func-iterator-p `(eq (class-of ,prim) 
-						   (load-time-value (find-class 'py-func-iterator))))))
+      (let ((check-code
+	     (ecase check
+	       ((stringp vectorp) `(,check ,prim))
+	       
+	       (filep             `(eq (class-of ,prim)
+				       (load-time-value (find-class 'py-func-iterator))))
+	       
+	       (py-dict-p         `(eq (class-of ,prim)
+				       (load-time-value (find-class 'py-dict))))
+	       
+	       (py-func-iterator-p `(eq (class-of ,prim) 
+					(load-time-value (find-class 'py-func-iterator))))))
 	    
 	    (run-code `(,func ,prim ,@args)))
 	(values check-code run-code)))))
@@ -1371,8 +1372,8 @@ XXX Currently there is not way to set *__debug__* to False.")
   ;; 
   ;; XXX CPython checks that ** args are unique (also w.r.t. k=v args supplied before it).
   ;;     We catch errors while the called function parses its args.
-  (let* ((items-meth (or (recursive-class-lookup-and-bind **-arg 'items)
-			 (py-raise 'TypeError
+  (let* ((items-meth (or (recursive-class-lookup-and-bind **-arg '|items|)
+			 (py-raise '|TypeError|
 				   "The ** arg in call must be mapping, ~
                                    supporting 'items' (got: ~S)" **-arg)))
 	 (items-list (py-iterate->lisp-list (py-call items-meth))))
@@ -1381,7 +1382,7 @@ XXX Currently there is not way to set *__debug__* to False.")
 	for k-v in items-list
 	do (let ((k-and-v (py-iterate->lisp-list k-v)))
 	     (unless (= (length k-and-v) 2)
-	       (py-raise 'TypeError
+	       (py-raise '|TypeError|
 			 "The ** arg must be list of 2-element tuples (got: ~S)"
 			 k-v))
 	     (destructuring-bind (k v) k-and-v
@@ -1455,7 +1456,7 @@ XXX Currently there is not way to set *__debug__* to False.")
 	(t form)))
     
     ;; Every module has some special names predefined
-    (dolist (n '(__name__ __debug__))
+    (dolist (n '(|__name__| |__debug__|))
       (pushnew n globals))
     
     globals))
@@ -1494,12 +1495,12 @@ XXX Currently there is not way to set *__debug__* to False.")
 	
 	(global-stmt     (dolist (name (second form))
 			   (cond ((member name params)
-				  (py-raise 'SyntaxError
+				  (py-raise '|SyntaxError|
 					    "Function param `~A' may not be declared ~
                                              `global'" name))
 			       
 				 ((member name locals)
-				  (py-raise 'SyntaxError
+				  (py-raise '|SyntaxError|
 					    "The `global' declaration of variable ~
                                              `~A' must be lexically before it is ~
                                              first used." name))
@@ -1527,7 +1528,7 @@ XXX Currently there is not way to set *__debug__* to False.")
        (declare (ignore inheritance csuite))
        (assert (eq identifier 'identifier-expr))
        (when (apply #'member* cname globals-lists)
-	 (py-raise 'SyntaxError
+	 (py-raise '|SyntaxError|
 		   "A class name may not be declared `global' (class: '~A')." cname))))
     
     (funcdef-stmt
@@ -1535,8 +1536,8 @@ XXX Currently there is not way to set *__debug__* to False.")
        (declare (ignore decorators suite args))
        (assert (eq identifier-expr 'identifier-expr))
        (when (apply #'member* fname globals-lists)
-	 (py-raise 'SyntaxError
-		   "SyntaxError: inner function name may not be declared global ~
+	 (py-raise '|SyntaxError|
+		   "Inner function name may not be declared global ~
                     (function: '~A', at ~A)." fname))))))
 
 (defun member* (item &rest lists)
@@ -1580,20 +1581,21 @@ Non-negative integer denoting the number of args otherwise."
 
 
 (defun raise-invalid-key-arg-error (key allowed-keys)
-  (py-raise 'TypeError "Invalid key argument supplied to function: ~S (allowed keys: ~S)"
+  (py-raise '|TypeError| "Invalid key argument supplied to function: ~S (allowed keys: ~S)"
 	    key allowed-keys))
 
 (defun raise-double-arg-supplied-error (key)
-  (py-raise 'TypeError "Duplicate value for function argument named ~A" key))
+  (py-raise '|TypeError| "Duplicate value for function argument named ~A" key))
 
 (defun raise-too-many-pos-args-error ()
-  (py-raise 'TypeError "Too many positional arguments supplied to function"))
+  (py-raise '|TypeError| "Too many positional arguments supplied to function"))
 
 (defun raise-too-few-args-error ()
-  (py-raise 'TypeError "Too few arguments supplied to function"))
+  (py-raise '|TypeError| "Too few arguments supplied to function"))
 
 (defun raise-invalid-func-args-error ()
-  (py-raise 'TypeError "Function got incorrect number of arguments, or unknown keyword arguments"))
+  (py-raise '|TypeError|
+	    "Function got incorrect number of arguments, or unknown keyword arguments"))
 
 (defmacro py-arg-function (name (pos-args key-args *-arg **-arg) &body body)
   ;; Non-consing argument parsing! (except when *-arg or **-arg
@@ -1826,7 +1828,7 @@ Non-negative integer denoting the number of args otherwise."
 		  ;; Reconsing because %args might be dynamic-extent.
 		  (loop until (symbolp (car %args)) collect (fast (pop %args))))
 
-	      (py-raise 'TypeError
+	      (py-raise '|TypeError|
 			"Function ~A got too many positional args (got ~A, wanted at most ~A)"
 			(fa-func-name fa) (length orig-%args) (fa-num-pos-args fa)))))
     
@@ -1899,7 +1901,7 @@ Non-negative integer denoting the number of args otherwise."
 
 (defun check-max-with-py-error-level ()
   (when (> *with-py-error-level* *max-py-error-level*)
-    (py-raise 'RuntimeError "Stack overflow (~A)" *max-py-error-level*)))
+    (py-raise '|RuntimeError| "Stack overflow (~A)" *max-py-error-level*)))
 
 (defmacro with-py-errors (&body body)
   `(let ((*with-py-error-level* (1+ *with-py-error-level*)))
@@ -1912,7 +1914,7 @@ Non-negative integer denoting the number of args otherwise."
 	 
 	 ((division-by-zero (lambda (c) 
 			      (declare (ignore c))
-			      (py-raise 'ZeroDivisionError
+			      (py-raise '|ZeroDivisionError|
 					"Division or modulo by zero")))
 	  
 	  (storage-condition (lambda (c)
@@ -1923,14 +1925,14 @@ Non-negative integer denoting the number of args otherwise."
 	   (lambda (c)
 	     (if (string= (simple-condition-format-control c)
 			  "~1@<Stack overflow (signal 1000)~:@>")
-		 (py-raise 'RuntimeError "Stack overflow")
-	       (py-raise 'RuntimeError "Synchronous OS signal: ~A" c))))
+		 (py-raise '|RuntimeError| "Stack overflow")
+	       (py-raise '|RuntimeError| "Synchronous OS signal: ~A" c))))
 	  
 	  (excl:interrupt-signal
 	   (lambda (c)
 	     (let ((args (simple-condition-format-arguments c)))
 	       (when (string= (cadr args) "Keyboard interrupt")
-		 (py-raise 'KeyboardInterrupt "Keyboard interrupt")))))
+		 (py-raise '|KeyboardInterrupt| "Keyboard interrupt")))))
        
 	  #+(or)
 	  (error (lambda (c)
@@ -1987,7 +1989,7 @@ statements, as then variables can be guaranteed to be bound."
 	   (cdr form)
 	 (when (and (listp primary)
 		    (eq (first primary) 'identifier-expr)
-		    (eq (second primary) 'locals)
+		    (eq (second primary) '|locals|)
 		    (null (or pos-args kwd-args *-arg **-arg)))
 	   (return-from func-ast-contains-locals-call t)))
        form)
@@ -2007,7 +2009,7 @@ statements, as then variables can be guaranteed to be bound."
 	   (cdr form)
 	 (when (and (listp primary)
 		    (eq (first primary) 'identifier-expr)
-		    (eq (second primary) 'globals)
+		    (eq (second primary) '|globals|)
 		    (null (or pos-args kwd-args *-arg **-arg)))
 	   (return-from func-ast-contains-globals-call t)))
        form)
@@ -2163,8 +2165,9 @@ statements, as then variables can be guaranteed to be bound."
 		    
 		  (return-stmt
 		   (when (second form)
-		     (break "SyntaxError: Inside generator, RETURN statement may not have ~
-                             an argument (got: ~S)" form))
+		     (py-raise '|SyntaxError|
+			       "Inside generator, RETURN statement may not have ~
+                                an argument (got: ~S)" form))
 		    
 		   ;; From now on, we will always return to this state
 		   (values `(generator-finished)
@@ -2238,8 +2241,9 @@ statements, as then variables can be guaranteed to be bound."
 		  (try-finally
 		   (destructuring-bind (try-suite finally-suite) (cdr form)
 		     (when (generator-ast-p try-suite)
-		       (break "SyntaxError: YIELD is not allowed in the TRY suite of ~
-                               a TRY/FINALLY statement (got: ~S)" form))
+		       (py-raise '|SyntaxError|
+				 "YIELD is not allowed in the TRY suite of ~
+                                  a TRY/FINALLY statement (got: ~S)" form))
 		     
 		     (let ((fin-catched-exp '#:fin-catched-exc))
 		       
@@ -2339,9 +2343,9 @@ statements, as then variables can be guaranteed to be bound."
 	     ((funcdef-stmt classdef-stmt) (values form t))
 	     
 	     (return-stmt (when (second form)
-			    (error "SyntaxError: Inside generator, RETURN ~
-                                    statement may not have an argument ~
-                                    (got: ~S)" form))
+			    (py-raise '|SyntaxError|
+				      "Inside generator, RETURN statement may ~
+				       not have an argument (got: ~S)" form))
 			  
 			  (values `(return-from :function-body :explicit-return)
 				  t))
