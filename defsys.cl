@@ -7,12 +7,8 @@
 
 (in-package #:user)
 
-(eval-when (compile)
-  (error "This defsys file should be loaded interpreted, not compiled."))
-
-(excl:defsystem #:python
-    (:default-pathname #.*load-pathname*)
-
+(excl:defsystem python
+    ( #| no options |# )
   ("package")
   
   ("pyprint" (:uses-definitions-from "package"))
@@ -33,10 +29,10 @@
   ("repl"    (:uses-definitions-from "package" "compiler" "run" "classes")))
 
 (defun compy ()
-  (excl:compile-system #:python))
+  (excl:compile-system 'python))
 
 (defun loadpy ()
-  (excl:load-system #:python))
+  (excl:load-system 'python))
 
 (defun make-python-fasl ()
-  (excl:concatenate-system #:python "clpython.fasl"))
+  (excl:concatenate-system 'python "clpython.fasl"))
