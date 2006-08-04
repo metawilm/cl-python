@@ -148,10 +148,17 @@ Relevant Lisp variables:
 			(format t (if acc "... " ">>> "))
 			(let ((x (read-line)))
 			  (cond
-			 
-			   ((string= x ":help")        (print-cmds))
-			   ((string= x ":q")           (return-from repl 'Bye))
-			 
+			   
+			   ((and (> (length x) 0)
+				 (char= (aref x 0) #\:))
+			    (multiple-value-bind (cmd ix)
+				(read-from-string x)
+			      (declare (ignore ix))
+			      (case cmd
+				(:help  (print-cmds))
+				(:q     (return-from repl 'Bye))
+				(t      (warn "Unknown command: ~S" cmd)))))
+			   
 			   ((string= x "")
 			    (let ((total (apply #'concatenate 'string (nreverse acc))))
 			      (setf acc ())

@@ -1324,7 +1324,8 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
    (loop for cls in (mop:class-precedence-list x)
        until (or (eq cls (ltv-find-class 'standard-class))
 		 (eq cls (ltv-find-class 'standard-object)))
-       unless (member (class-name cls) '(py-lisp-object py-dictless-object t
+       unless (member (class-name cls) '(py-user-object
+					 py-lisp-object py-dictless-object t
 					 py-class-mixin py-dict-mixin))
        collect cls into res
        finally (let ((base-cls (if (subtypep x 'py-meta-type)
@@ -3056,9 +3057,13 @@ Creates a function for doing fast lookup, using jump table"
 (defvar *py-builtin-attr-hashtable* (make-hash-table :test #'eq))
 
 (defun py-attr (x attr.as_sym &key (bind-class-attr t) via-getattr)
-  ;; When BIND-CLASS-ATTR = NIL, then only if attr is a function, 
-  ;; found in a class dict, as values:  :class-attr class-attr-val x
-  ;; will be returned
+  ;; If BIND-CLASS-ATTR = NIL, then if the attribute value is a function
+  ;; found in a class dict, these values are returned:
+  ;;   :class-attr <class-attr-val> <x>
+  ;; which saves allcation of bound method.
+  ;;
+  ;; If VIA-GETATTR is true, then when lookup fails a THROW to
+  ;; :getattr-block takes place; this saves creation of condition.
   (declare (optimize (speed 3) (safety 0) (debug 0)))
   (assert (symbolp attr.as_sym))
   (let* ((attr.as_string  (symbol-name attr.as_sym))
