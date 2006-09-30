@@ -32,18 +32,9 @@ Version History:
 
 """
 
-LOOPS = 500
+LOOPS = 50000
 
-# from time import clock
-
-clock_i = 42
-
-def clock():
-  print "(clock)"
-  global clock_i
-  clock_i += 100 + clock_i
-  return clock_i
-
+from time import clock
 
 __version__ = "1.1"
 
@@ -68,9 +59,9 @@ FALSE = 0
 
 def main():
     benchtime, stones = pystones()
-    #print "Pystone(%s) time for %d passes = %g" % \
-    #      (__version__, LOOPS, benchtime)
-    #print "This machine benchmarks at %g pystones/second" % stones
+    print "Pystone(%s) time for %d passes = %g" % \
+          (__version__, LOOPS, benchtime)
+    print "This machine benchmarks at %g pystones/second" % stones
     print "finished"
 
 
@@ -117,7 +108,6 @@ def Proc0(loops=LOOPS):
     Array2Glob[8][7] = 10
 
     starttime = clock()
-    print "starttime", starttime
 
     for i in range(loops):
         Proc5()
@@ -144,9 +134,7 @@ def Proc0(loops=LOOPS):
         IntLoc1 = Proc2(IntLoc1)
 
     endtime = clock()
-    print "endtime", endtime
     benchtime = endtime - starttime - nulltime
-    print "benchtime", benchtime
     return benchtime, (1.0*loops / benchtime)
 
 def Proc1(PtrParIn):
