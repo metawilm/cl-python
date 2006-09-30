@@ -1385,8 +1385,9 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
    (globals-values :initarg :globals-values :type vector :initform #())
    (dyn-globals    :initarg :dyn-globals    :type hash-table
 		   :initform (make-hash-table :test #'eq))
-   (name           :initarg :name           :type symbol :initform "__main__")
-   (filepath       :initarg :path                        :initform nil))
+   (name           :initarg :name           :type symbol :initform "__main__" :accessor py-module-name)
+   (filepath       :initarg :path                        :initform nil)
+   (builtinp       :initarg :builtin        :initform nil))
   (:metaclass py-user-type))
 
 ;; XXX module has dict attribute, but it is not updated correctly
@@ -1406,8 +1407,11 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 (def-py-method py-module.__repr__ (x^)
   (with-output-to-string (s)
     (print-unreadable-object (x s :identity t)
-      (with-slots (name filepath) x
-	(format s "module `~A' from file ~S" name filepath)))))
+      (with-slots (name filepath builtinp) x
+	(format s "~@[~A ~]module `~A'~@[ from file ~S~]"
+		(when builtinp "builtin") 
+		name
+		(unless builtinp filepath))))))
 
 (defmethod print-object ((x py-module) stream)
   (write-string (py-module.__repr__ x) stream))
@@ -1482,6 +1486,8 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
       (raise-attr-error (or attr.sym attr)))))
 
 (def-py-method py-module.__setattr__ (x^ attr val)
+  (when (slot-value x 'builtinp)
+    (warn "Setting attribute '~A' on built-in module ~A." attr x))
   (let ((attr.sym (py-string-val->symbol attr :intern nil)))
     (with-slots (name globals-names globals-values dyn-globals) x
 
@@ -1539,6 +1545,16 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 	(when existing-mod
 	  (return-from py-import existing-mod))))
     
+    (when (and force-reload
+	       (let ((imported-module (gethash mod-name *py-modules*))
+		     (builtin-module (gethash mod-name *builtin-modules*)))
+		 (and imported-module 
+		      builtin-module
+		      (eq imported-module builtin-module))))
+      ;; reloading built-in module
+      ;; for now, does not remove user-set attributes (import sys; sys.a = 3; reload(sys); sys.a == 3)
+      (return-from py-import (gethash mod-name *builtin-modules*)))
+       
     (let* ((py-fname (format nil "~A.py" mod-name))
 	   (fasl-fname (format nil "~A.fasl" mod-name))
 	   (old-module (gethash mod-name *py-modules*))

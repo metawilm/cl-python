@@ -1,8 +1,5 @@
 (in-package :python)
 
-(defparameter *builtin-module-names* (make-tuple-from-list ())
-  "Tuple containing names of modules built into the interpreter")
-
 (defparameter *builtin-modules* (make-hash-table :test #'eq) "List of module objects")
 
 (defmacro with-builtin-module ((name) &body body)
@@ -10,7 +7,8 @@
 	(dg '#:dg)
 	(name.sym (if (symbolp name) name (intern name #.*package*))))
     `(let* ((,m (make-module :name ',name.sym
-			     :path (format nil "/builtin-module/~A" ',name.sym)))
+			     :path (format nil "/builtin-module/~A" ',name.sym)
+			     :builtin t))
 	    (,dg (slot-value ,m 'dyn-globals)))
        
        (setf (gethash ',name.sym *builtin-modules*) ,m)
@@ -39,7 +37,9 @@
   
   (register 'copyright "Copyright (c) Franz Inc. and Willem Broekema.")
 
-  (register 'builtin_module_names *builtin-module-names*)
+  (register 'builtin_module_names (make-tuple-from-list
+				   (loop for hk being the hash-value in *builtin-modules*
+				       collect (string (py-module-name hk)))))
   
   ;; Func of one arg, called by REPL to print val
   (register 'displayhook *the-none*) ;; xxx not called by repl yet
@@ -110,7 +110,8 @@
 (with-builtin-module ("time")
   
   ;; Current processor time, in seconds, floating point
-  (register 'clock (lambda () (floor (mp:process-cpu-msec-used sys:*current-process*) 1000))))
+  (register 'clock (lambda () (coerce (/ (mp:process-cpu-msec-used sys:*current-process*) 1000)
+				      'float))))
 
 (defun initial-py-modules ()
   (let ((ht (make-hash-table :test #'eq)))
