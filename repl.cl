@@ -45,7 +45,7 @@
 
 (defun repl ()
   (setf *repl-mod* (make-module))
-  (clrhash *py-modules*)
+  (setf *py-modules* (initial-py-modules))
   (let* ((dyn-globals (slot-value *repl-mod* 'dyn-globals)))
     
     (declare (special *the-none*))
@@ -220,7 +220,8 @@ Relevant Lisp variables:
 					       (not (member lisp-form '(def class for while if try)))) 
 				      (multiple-value-bind (res err) 
 					  (ignore-errors (eval lisp-form))
-					(if err
+					(if (and (null res)
+						 (typep err 'condition))
 					    (format t ";; Evaluation as Lisp failed: ~A~%" err)
 					  (progn
 					    (remember-value res)

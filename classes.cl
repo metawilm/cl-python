@@ -1498,7 +1498,10 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 ;; Modules are kept in a dictionary `sys.modules', mapping from string
 ;; to module object. For now, we keep a symbol->module hash table.
 
-(defparameter *py-modules* (make-hash-table :test #'eq))
+(defparameter *py-modules*)
+
+(defmethod get-loaded-module ((name symbol))
+  (gethash name *py-modules*))
 
 (defmacro with-py-readtable (&body body)
   ;; In this context every character is dispatched to the Python parser.
@@ -1517,27 +1520,20 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
   ;; XXX Cannot import from directories yet...
   (assert (symbolp mod-name))
   
-  (flet ((safe-file-mtime (fname)
-	   (let ((stat (handler-case (excl.osi:stat fname)
-			 (excl:syscall-error () nil))))
-	     (when stat
-	       (excl.osi:stat-mtime stat))))
-	 
-	 (recompile-py-if-needed (mod-name py-fname fasl-fname)
+  (flet ((recompile-py-if-needed (mod-name py-fname fasl-fname path)
 	   (let* ((*current-module-name* (string mod-name)) ;; used by compiler
-		  (*current-module-path* py-fname)) ;; XXX must become path
+		  (*current-module-path* path)) ;; XXX must become path
 	     (declare (special *current-module-name* *current-module-path*))
 	     (with-py-readtable
 		 (declare (special *current-module-name* *current-module-path*))
-	       (compile-file py-fname
-			     :output-file fasl-fname
-			     :if-newer (if force-reload
-					   nil
-					 t)
-			     :verbose verbose)))))
+	       (let ((fname (format nil "~A/~A" path py-fname)))
+		 (when (handler-case (excl.osi:stat fname)
+			 (excl:syscall-error () nil))
+		   (compile-file fname
+				 :output-file (format nil "~A/~A" path fasl-fname)
+				 :if-newer (not force-reload)
+				 :verbose verbose)))))))
 	   
-    ;; XXX need to look for file in all directories of sys.path
-    
     (unless force-reload
       (let ((existing-mod (gethash mod-name *py-modules*)))
 	(when existing-mod
@@ -1551,12 +1547,17 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 	   (*module-hook* (lambda (mod) (setf new-module mod))))
       (declare (special *module-hook*))
       
-      (recompile-py-if-needed mod-name py-fname fasl-fname)
-      (load fasl-fname :verbose verbose)
+      (loop for path in (py-iterate->lisp-list (py-attr (gethash 'sys *py-modules*) 'path))
+	  for found = (recompile-py-if-needed mod-name py-fname fasl-fname path)
+	  when found do
+	    (load fasl-fname
+		  :search-list (list path)
+		  :verbose verbose)
+	    (return))
        
       (unless new-module
 	(py-raise '|ImportError|
-		  "Module did not call *module-hook* upon loading"))
+		  "CLPython bug: Module did not call *module-hook* upon loading"))
        
       (when old-module
 	;; Update old module object with info from new one
@@ -2561,7 +2562,7 @@ Creates a function for doing fast lookup, using jump table"
 	 (x.len (length x))
 	 (res.len (* n x.len))
 	 (res (make-array res.len :adjustable t :fill-pointer res.len
-			  :initial-elemnent (when (= x.len 1) 
+			  :initial-element (when (= x.len 1) 
 					      (aref x 0)))))
     (unless (= x.len 1)
       (loop for ni from 0 below res.len by x.len
