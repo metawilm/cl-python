@@ -103,10 +103,15 @@
 (defmacro ltv-find-class (clsname)
   `(load-time-value (find-class ,clsname)))
 
+(defun normal-pydict-p (x)
+  (let ((x.cn (class-name (class-of x))))
+    (or (eq x.cn 'py-dict)
+	(eq x.cn 'py-dict-classdict))))
+
 (defun this-dict-get (d key)
   #+(or)(assert (stringp key))
   #+(or)(assert d)
-  (if (eq (class-of d) (ltv-find-class 'py-dict))
+  (if (normal-pydict-p d)
       (py-dict-getitem d key)
     ;;#+(or) ;; don't bind in this function
     (py-classlookup-bind-call d '|__getitem__| key)))
@@ -114,7 +119,7 @@
 (defun dict-del (x key)
   (check-type key string)
   (let ((d (ensure-dict x)))
-    (if (eq (class-of d) (ltv-find-class 'py-dict))
+    (if (normal-pydict-p d)
 	(py-dict.__delitem__ d key)
       (py-classlookup-bind-call d '|__delitem__| key))))
 
@@ -127,11 +132,11 @@
 (defun (setf this-dict-get) (val d key)
   (if (null val)
       
-      (if (eq (class-of d) (ltv-find-class 'py-dict))
+      (if (normal-pydict-p d)
 	  (py-dict-delitem d key)
 	(py-classlookup-bind-call d '|__setitem__| key val))
       
-    (if (eq (class-of d) (ltv-find-class 'py-dict))
+    (if (normal-pydict-p d)
 	(py-dict-setitem d key val)
       (py-classlookup-bind-call d '|__setitem__| key val))))
 
@@ -226,6 +231,10 @@
   ()
   (:metaclass py-core-type))
 
+(defclass py-class-attribute-method (py-attribute-method)
+  ()
+  (:metaclass py-core-type))
+
 (defclass py-writable-attribute-method (py-attribute-method)
   (write-func)
   (:metaclass py-core-type))
@@ -297,6 +306,9 @@
 					 :func (function ,cls.meth)))
 		   
 		   (:attribute        `(make-instance 'py-attribute-method
+					 :func (function ,cls.meth)))
+		   
+		   (:class-attribute  `(make-instance 'py-class-attribute-method
 					 :func (function ,cls.meth)))
 		   
 		   (:attribute-read   `(let ((x (make-instance 'py-writable-attribute-method
@@ -398,7 +410,7 @@
 		    (make-symbol (symbol-name name))
 		    :direct-superclasses supers
 		    :metaclass (ltv-find-class 'py-meta-type)
-		    :dict namespace)))
+		    :dict (mark-as-classdict namespace))))
 	  (return-from make-py-class cls)))
       
       
@@ -588,6 +600,13 @@
   (with-output-to-string (s)
     (print-unreadable-object (x s :type t :identity t))))
 
+;; py-class-attribute-method
+
+(def-py-method py-class-attribute-method.__get__ (x inst class)
+  (when (or (null inst)
+	    (eq inst *the-none*))
+    (py-call (slot-value x 'func) class)))
+
 ;; py-writable-attribute-method
 
 (def-py-method py-writable-attribute-method.__set__ (x obj val)
@@ -659,7 +678,7 @@
   (with-output-to-string (s)
     (print-unreadable-object (x s :identity t :type t)
       (with-slots (class func) x
-	(format s "~A.~A" class func)))))
+	(format s "~A::~A" (class-name class) (py-function-name func))))))
 
 (def-py-method py-unbound-method.__call__ (x &rest args)
   (with-slots (class func) x
@@ -767,6 +786,10 @@
 (defmethod py-function-name ((x function))
   ;; OK?
   (string (excl::func_name x)))
+
+(defmethod py-function-name ((x t))
+  ;; fall-back
+  (format nil "~A" x))
    
 (def-py-method py-function.__call__ (func)
   func)
@@ -1224,7 +1247,7 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 	    
       do (let* ((d (dict c))
 		(val (when d
-		       (if (eq (class-of d) (ltv-find-class 'py-dict))
+		       (if (normal-pydict-p d)
 			   (py-dict-getitem d attr)
 			 (let ((*py-attr-sym* attr))
 			   (declare (special *py-attr-sym*))
@@ -1290,7 +1313,7 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 	     :metaclass (ecase cls-type
 			  (:metaclass (ltv-find-class 'py-meta-type))
 			  (:class     metacls))
-	     :dict dict)))
+	     :dict (mark-as-classdict dict))))
     
     (mop:finalize-inheritance c)
     
@@ -1304,8 +1327,12 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
   ;; XXX remove prefix `py-' etc
   (symbol-name (class-name cls)))
 
-(def-py-method py-type.__dict__ :attribute (cls)
+(def-py-method py-type.__dict__ :attribute-read (cls)
   (dict cls))
+
+(def-py-method py-type.__dict__ :attribute-write (cls new-dict)
+  (setf (slot-value cls 'dict) (mark-as-classdict new-dict))
+  (signal-class-dict-replacement cls (dict cls) new-dict))
 
 (def-py-method py-type.__bases__ :attribute-read (cls)
   (make-tuple-from-list
@@ -1318,7 +1345,7 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 				  :direct-superclasses bases)
     cls))
 
-(def-py-method py-type.__mro__ :attribute (x)
+(def-py-method py-type.__mro__ :class-attribute (x)
   ;; We could filter out the Lisp implementation classes.
   (make-tuple-from-list
    (loop for cls in (mop:class-precedence-list x)
@@ -1504,7 +1531,7 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 ;; Modules are kept in a dictionary `sys.modules', mapping from string
 ;; to module object. For now, we keep a symbol->module hash table.
 
-(defparameter *py-modules*)
+(defparameter *py-modules* (make-hash-table :test #'eq))
 
 (defmethod get-loaded-module ((name symbol))
   (gethash name *py-modules*))
@@ -1524,6 +1551,7 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 (defun py-import (mod-name &key force-reload (verbose t))
   ;; Registers module in *py-modules* and returns it.
   ;; XXX Cannot import from directories yet...
+  (declare (special *builtin-modules*))
   (assert (symbolp mod-name))
   
   (flet ((recompile-py-if-needed (mod-name py-fname fasl-fname path)
@@ -1531,14 +1559,13 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 		  (*current-module-path* path)) ;; XXX must become path
 	     (declare (special *current-module-name* *current-module-path*))
 	     (with-py-readtable
-		 (declare (special *current-module-name* *current-module-path*))
-	       (let ((fname (format nil "~A/~A" path py-fname)))
-		 (when (handler-case (excl.osi:stat fname)
-			 (excl:syscall-error () nil))
-		   (compile-file fname
-				 :output-file (format nil "~A/~A" path fasl-fname)
-				 :if-newer (not force-reload)
-				 :verbose verbose)))))))
+		 (let ((fname (format nil "~A/~A" path py-fname)))
+		   (when (handler-case (excl.osi:stat fname)
+			   (excl:syscall-error () nil))
+		     (compile-file fname
+				   :output-file (format nil "~A/~A" path fasl-fname)
+				   :if-newer (not force-reload)
+				   :verbose verbose)))))))
 	   
     (unless force-reload
       (let ((existing-mod (gethash mod-name *py-modules*)))
@@ -2044,6 +2071,7 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
     (expt x y)))
 
 (def-py-method py-number.__repr__ (x^) (format nil "~A" (deproxy x)))
+(def-py-method py-number.__str__ (x^)  (py-number.__repr__ x))
 (def-py-method py-number.__sub__ (x^ y^) (- x y))
 
 (def-py-method py-number.__truediv__ (x^ y^) (/ x y)) ;; overruled for integers
@@ -2292,6 +2320,7 @@ Creates a function for doing fast lookup, using jump table"
 
 (def-py-method py-dict.__new__ :static (cls &rest kwargs)
   ;; XXX logic of filling dict must be moved to __init__
+  (assert (not (eq (class-name cls) 'py-dict-classdict))) ;; loading order issue, so cmp name
   (if (eq cls (ltv-find-class 'py-dict))
       (make-dict)
     (make-instance cls :lisp-object (make-dict))))
@@ -2415,12 +2444,12 @@ Creates a function for doing fast lookup, using jump table"
   (py-dict-setitem x key val))
   
 (def-py-method py-dict.fromkeys :static (seq &optional val)
-	       (unless val
-		 (setf val *the-none*))
-	       (let* ((d (make-dict)))
-		 (map-over-py-object (lambda (key) (py-dict-setitem d key val))
-				     seq)
-		 d))
+  (unless val
+    (setf val *the-none*))
+  (let* ((d (make-dict)))
+    (map-over-py-object (lambda (key) (py-dict-setitem d key val))
+			seq)
+    d))
 
 (def-py-method py-dict.items (x)
   (make-py-list-from-list
@@ -2437,6 +2466,26 @@ Creates a function for doing fast lookup, using jump table"
   (make-py-list-from-list
    (loop for v being the hash-value in (py-dict-hash-table x)
        collect v)))
+
+(defclass py-dict-classdict (py-dict)
+  ()
+  (:metaclass py-core-type))
+
+
+
+(defgeneric mark-as-classdict (dict)
+  (:method ((x py-dict))           (change-class x 'py-dict-classdict))
+  (:method ((x py-dict-classdict)) x))
+
+(defun make-class-dict ()
+  (mark-as-classdict (make-dict)))
+
+(defmethod py-dict-delitem :after ((x py-dict-classdict) key)
+  (signal-class-dict-del-key x key))
+
+(defmethod py-dict-setitem :after ((x py-dict-classdict) key val)
+  (signal-class-dict-set-key x key val))
+
 
 ;; List (Lisp object: adjustable array)
 
@@ -3071,7 +3120,6 @@ Creates a function for doing fast lookup, using jump table"
 ;;; Attributes are a fundamental thing: getting, setting, deleting
 
 (defvar *py-attr-sym* nil)
-(defvar *py-builtin-attr-hashtable* (make-hash-table :test #'eq))
 
 (defun py-attr (x attr.as_sym &key (bind-class-attr t) via-getattr)
   ;; If BIND-CLASS-ATTR = NIL, then if the attribute value is a function
@@ -3081,13 +3129,9 @@ Creates a function for doing fast lookup, using jump table"
   ;;
   ;; If VIA-GETATTR is true, then when lookup fails a THROW to
   ;; :getattr-block takes place; this saves creation of condition.
-  (declare (optimize (speed 3) (safety 0) (debug 0)))
   (assert (symbolp attr.as_sym))
   (let* ((attr.as_string  (symbol-name attr.as_sym))
-	 (class-attr-val   nil)
-	 (__getattr__      nil)
-	 (__getattribute__ nil)
-	 (x.class          (py-class-of x))
+	 (x.class         (py-class-of x))
 	 (inside-object-getattribute (loop for (obj . at) in *py-object.__getattribute__-active*
 					 when (and (eq obj x)
 						   (string= (py-val->string at) attr.as_string))
@@ -3095,35 +3139,76 @@ Creates a function for doing fast lookup, using jump table"
 					 finally (return nil)))
 	 (*py-attr-sym* attr.as_sym))
     
+    (multiple-value-bind (result __getattr__ class-attr-val)
+	(py-attr-class-dicts x x.class attr.as_string attr.as_sym inside-object-getattribute)
+      #+(or)(format t "p-a-c-d ~A ~A => ~A ~A ~A" x x.class result __getattr__ class-attr-val)
+      
+      ;; Check if result determined by __getattribute__
+      (when result (return-from py-attr result))
+
+      ;; A class attribute that is a data descriptor (i.e. has a `__set__' attribute)
+      ;; has higher priority than an instance attribute.
+      (when (and class-attr-val (data-descriptor-p class-attr-val))
+	(return-from py-attr
+	  (if (and (not bind-class-attr)
+		   (functionp class-attr-val))
+	      (values :class-attr class-attr-val x)
+	    (if (excl::classp x)
+		(bind-val class-attr-val nil x)
+	      (bind-val class-attr-val x x.class)))))
+
+      ;; Try instance dict
+      (let ((val (py-attr-instance-dict x attr.as_sym attr.as_string)))
+	(when val
+	  (return-from py-attr val)))
+
+      ;; Fall back to a class attribute that is not a `data descriptor'.
+      (when class-attr-val
+	(return-from py-attr
+	  (if (and (not bind-class-attr)
+		   (functionp class-attr-val))
+	      (values :class-attr class-attr-val x)
+	    (bind-val class-attr-val x x.class))))
+
+      ;; Fall back to the __getattr__ hook (AttributeError is not caught)
+      (when __getattr__
+	(return-from py-attr
+	  (py-call (bind-val __getattr__ x x.class) attr.as_string)))
+
+      (when (eq attr.as_sym '|__dict__|)
+	(return-from py-attr (py-get-dict-attr x x.class)))
+      
+      ;; Give up.
+      (if via-getattr
+	  (throw :getattr-block :py-attr-not-found)
+	(py-raise '|AttributeError|
+		  "No such attribute: ~A `~A' (class: ~A)"
+		  x attr.as_string x.class)))))
+ 
+(defun py-attr-class-dicts (x x.class attr.as_string attr.as_sym inside-object-getattribute)
+  ;; values RESULT, __GETATTR__, CLASS-ATTR-VAL
+  (declare (notinline py-call))
+  (let (__getattribute__ __getattr__ class-attr-val)
     (loop for c in (mop:class-precedence-list x.class)
-	until (or (progn #+(or)(warn "c: ~A" c) nil)
-		  (eq c (ltv-find-class 'standard-class))
+	until (or (eq c (ltv-find-class 'standard-class))
 		  (eq c (ltv-find-class 'py-dict-mixin))
 		  (eq c (ltv-find-class 'py-class-mixin))
 		  (eq c (ltv-find-class 'standard-generic-function)))
-	      
-	for c.dict = (cond ((eq c (ltv-find-class 'py-user-object))
-			    nil) ;; has no methods
-			   
-			   ((eq c (ltv-find-class 'py-object))
-			    (load-time-value (dict (find-class 'py-object))))
-			   
-			   ((eq c (ltv-find-class 'py-function))
-			    (load-time-value (dict (find-class 'py-function))))
-			   
-			   (t (dict c))) ;; may be NIL
-		     
-	for c.dict.class = (when c.dict
-			     (class-of c.dict))
 	    
-	when c.dict
-	do 
-	  (unless (or inside-object-getattribute
-		      __getattribute__)
+	for c.dict = (cond
+		      ((eq c (ltv-find-class 'py-user-object)) nil) ;; has no methods
+		      ((eq c (ltv-find-class 'py-object))      (load-time-value (dict (find-class 'py-object))))
+		      ((eq c (ltv-find-class 'py-function))    (load-time-value (dict (find-class 'py-function))))
+		      (t                                       (dict c))) ;; may be NIL
+		   
+	for c.dict.class = (when c.dict (class-of c.dict))
+	when c.dict do 
+	  (unless (or inside-object-getattribute __getattribute__)
 	    ;; Try only the first __getattribute__ method found (but not py-object's).
 	    (let ((getattribute-meth (cond ((eq c (ltv-find-class 'py-object))
 					    #'py-object.__getattribute__)
-					   ((eq c.dict.class (ltv-find-class 'py-dict))
+					   ((or (eq c.dict.class (ltv-find-class 'py-dict))
+						(eq c.dict.class (ltv-find-class 'py-dict-classdict)))
 					    (py-dict-getitem c.dict '|__getattribute__|))
 					   (t (let ((*py-attr-sym* '|__getattribute__|))
 						(this-dict-get c.dict "__getattribute__"))))))
@@ -3131,75 +3216,44 @@ Creates a function for doing fast lookup, using jump table"
 			 (not (eq getattribute-meth #'py-object.__getattribute__)))
 		(setf __getattribute__ getattribute-meth)
 		#+(or)(warn "__getattribute__ for ~A ~A = ~A" x x.class __getattribute__)
-		
+	      
 		(handler-case
 		    (values (py-call (bind-val getattribute-meth x x.class) attr.as_string))
-		  
-		  (|AttributeError| ()
-		    #+(or)(warn "__getattribute__ ~S ~S gave exception; also trying __getattr__ (if any)"
-				x attr)
-		    nil)
-		  (:no-error (val)
-		    (return-from py-attr val))))))
+		  (|AttributeError| () nil) ;; __getattribute__ gave exception; also trying __getattr__ (if present)
+		  (:no-error (val) (return-from py-attr-class-dicts val))))))
 	  
 	  (unless class-attr-val
 	    ;; Try to find attribute in class dict.
-	    (let ((val (cond ((eq c.dict.class (ltv-find-class 'py-dict))
+	    (let ((val (cond ((or (eq c.dict.class (ltv-find-class 'py-dict))
+				  (eq c.dict.class (ltv-find-class 'py-dict-classdict)))
 			      (py-dict-getitem c.dict attr.as_sym))
 			     (t
 			      (this-dict-get c.dict attr.as_string)))))
-	      (when val
-		(setf class-attr-val val))))
-	  
-	  (unless (or inside-object-getattribute
-		      __getattr__)
-	    ;; Look for __getattr__ method (but don't call it yet:
-	    ;; only if instance/class dicts fail).
-	    (let ((getattr-meth 
-		   (cond ((eq c (ltv-find-class 'py-object))
-			  nil)
-			 ((eq c.dict.class (ltv-find-class 'py-dict))
-			  (py-dict-getitem c.dict '|__getattr__|))
-			 (t (let ((*py-attr-sym* '|__getattr__|))
-			      (this-dict-get c.dict "__getattr__"))))))
-	      (when getattr-meth
-		(setf __getattr__ getattr-meth)))))
-
-    ;; Arriving here means: no __getattribute__ (or one that raised AttributeError),
-    ;; but perhaps __getattr__ or class-attr-val.
-    
-    ;; When __getattribute__ exists, but raised AttributeError, then call __getattr__
-    ;; irrespective (!) of presence of attribute in instance or class/superclasses:
-    
-    (when (and __getattribute__ __getattr__)
-      #+(or)(warn "Both __getattribute__ and __getattr__: calling it  ~A ~A" x attr)
-      (return-from py-attr
-	(py-call (bind-val __getattr__ x x.class) attr.as_string)))
-
-    ;; A class attribute that is a data descriptor (i.e. has a
-    ;; `__set__' attribute) has higher priority than an instance
-    ;; attribute.
-    
-    (when (and class-attr-val (data-descriptor-p class-attr-val))
-      (return-from py-attr
-	(if (and (not bind-class-attr)
-		 (functionp class-attr-val))
-	    (values :class-attr class-attr-val x)
-	  (bind-val class-attr-val x x.class))))
-    
-    ;; Try instance dict
-    
-    (if (typep x 'class)
+	      (when val (setf class-attr-val val))))
 	
+	  (unless (or inside-object-getattribute __getattr__)
+	    ;; Look for __getattr__ method (but don't call it yet: only if instance/class dicts fail).
+	    (let ((getattr-meth (cond ((eq c (ltv-find-class 'py-object)) nil)
+				      ((normal-pydict-p c.dict)           (py-dict-getitem c.dict '|__getattr__|))
+				      (t                                  (let ((*py-attr-sym* '|__getattr__|))
+									    (this-dict-get c.dict "__getattr__"))))))
+	      (when getattr-meth (setf __getattr__ getattr-meth)))))
+    (values nil __getattr__ class-attr-val)))
+
+(defun py-attr-instance-dict (x attr.as_sym attr.as_string)
+  (if (typep x 'class)
+
+      (progn
+	#+(or)(break "cls ~A: cpl ~A" x (mop:class-precedence-list x))
 	(loop for c in (mop:class-precedence-list x)
 	    until (or (eq c (ltv-find-class 'standard-class))
 		      (eq c (ltv-find-class 'py-dict-mixin))
 		      (eq c (ltv-find-class 'py-class-mixin)))
 		  
 	    for c.dict = (dict c) ;; may be NIL
-					 
+			 
 	    for val = (when c.dict
-			(if (eq (class-of c.dict) (ltv-find-class 'py-dict))
+			(if (normal-pydict-p c.dict)
 			    (py-dict-getitem c.dict attr.as_sym)
 			  (this-dict-get c.dict attr.as_string)))
 	    when val do
@@ -3209,68 +3263,50 @@ Creates a function for doing fast lookup, using jump table"
 		  ;; Binding can result in NIL: attribute-method bounded to
 		  ;; class (e.g. "complex.real").
 		  ;; Otherwise probably unbound method, or classmeth -> func.
-		  (return-from py-attr bound-val))))
+		  (return-from py-attr-instance-dict bound-val)))))
 
-      (let ((x.dict (dict x)))
-	(when x.dict
-	  (let ((val (if (eq (class-of x.dict) (ltv-find-class 'py-dict))
-			 (py-dict-getitem x.dict attr.as_sym)
-		       (this-dict-get x.dict attr.as_string))))
-	    (when val
-	      ;; don't bind: coming from instance dict
-	      (return-from py-attr val))))))
-    
-    ;; Fall back to a class attribute that is not a `data descriptor'.
-    (when class-attr-val
-      (return-from py-attr
-	(if (and (not bind-class-attr)
-		 (functionp class-attr-val))
-	    (values :class-attr class-attr-val x)
-	  (bind-val class-attr-val x x.class))))
-    
-    ;; Fall back to the __getattr__ hook (not checked whether it raises AttributeError)
-    (when __getattr__
-      (return-from py-attr
-	(py-call (bind-val __getattr__ x x.class) attr.as_string)))
-     
-    (when (eq attr.as_sym '|__dict__|)
-      (return-from py-attr (py-get-dict-attr x x.class)))
-    
-    ;; Give up.
-    (if via-getattr
-	(throw :getattr-block :py-attr-not-found)
-      (py-raise '|AttributeError| 
-		"No such attribute: ~A `~A' (class: ~A)"
-		x attr.as_string x.class))))
-
+    (let ((x.dict (dict x)))
+      (when x.dict
+	(let ((val (if (normal-pydict-p x.dict)
+		       (py-dict-getitem x.dict attr.as_sym)
+		     (this-dict-get x.dict attr.as_string))))
+	  (when val
+	    ;; don't bind: coming from instance dict
+	    (return-from py-attr-instance-dict val)))))))
 
 #+(and allegro-version>= (version>= 8 0))
-(define-compiler-macro py-attr (&whole whole x attr &key (bind-class-attr t) via-getattr)
+(define-compiler-macro py-attr (&whole whole x attr &key (bind-class-attr t) via-getattr &environment e)
   (declare (ignore bind-class-attr via-getattr))
-  (if (and (listp attr)
-	   (eq (car attr) 'quote))
-      
-      (case (second attr)
+  
+  ;; Work around Allegro CL issues w.r.t. compiler macros and SETF forms:
+  ;; don't run this PY-ATTR compilar macro on (setf (py-attr ..) ..) forms
+  ;; if the expanded form is invalid -- e.g. if expansion becomes a 'let,
+  ;; then 'setf form becomes (setf (let ..) ..) which is invalid.
+  
+  (cond ((eq attr '|__class__|)  
+	 ;; As "x.__class__ = y" is intercepted, __class__ is always a valid class.
+	 `(py-class-of ,x))
 	
-	;; "x.__class__ = y" is intercepted, ensuring __class__ is always a valid class
-	(|__class__| `(py-class-of ,x))
+	((and (fboundp 'get-pydecl)
+	      (not (get-pydecl :inside-setf-py-attr e))
+	      (listp attr)
+	      (eq (first attr) 'identifier-expr))
+	 (case (second attr)
+	   (|__name__|  `(let ((.x ,x))
+			   (if (excl::classp .x)
+			       (symbol-name (class-name .x))
+			     
+			     (locally
+				 (declare (notinline py-attr))
+			       (py-attr .x ,attr)))))
 	
-	(|__name__|  `(let ((.x ,x))
-			(if (excl::classp .x)
-			    
-			    (symbol-name (class-name .x))
-			  
-			  (locally 
-			      (declare (notinline py-attr))
-			    (py-attr .x ,attr)))))
+	   (|__dict__|  `(let ((x ,x))
+			   (or (dict x)
+			       (py-raise '|TypeError| "No __dict__ attribute: ~A" x))))
 	
-	(|__dict__|  `(let ((x ,x))
-			(or (dict x)
-			    (py-raise '|TypeError| "No __dict__ attribute: ~A" x))))
+	   (t            whole)))
 	
-	(t           whole))
-    
-    whole))
+	(t whole)))
 
 (defun (setf py-class-of) (new-cls x)
   (change-class x new-cls))
@@ -3315,7 +3351,7 @@ Creates a function for doing fast lookup, using jump table"
 		(when d
 		  #+(or)(warn "delattr ~A ~A: removing from dict ~A"
 			      x attr.sym d)
-		  (or (if (eq (class-of d) (ltv-find-class 'py-dict))
+		  (or (if (normal-pydict-p d)
 			  (py-dict-delitem d attr.sym)
 			(let ((*py-attr-sym* attr.sym))
 			  (setf (this-dict-get d (symbol-name attr.sym)) nil)))
@@ -3356,9 +3392,17 @@ Creates a function for doing fast lookup, using jump table"
 			    x attr.sym)
 		(py-call x.attr.__set__ x val)))
 	    
+	    (when (eq attr.sym '__dict__)
+	      (setf (slot-value x 'dict) val)
+	      t)
+	    
+	    (when (eq attr.sym '__class__)
+	      (setf (py-class-of x) val)
+	      t)
+	    
 	    (let ((d (dict x)))
 	      (when d
-		(or (if (eq (class-of d) (ltv-find-class 'py-dict))
+		(or (if (normal-pydict-p d)
 			(py-dict-setitem d attr.sym val)
 		      (let ((*py-attr-sym* attr.sym))
 			(setf (this-dict-get d (symbol-name attr.sym)) val)))
@@ -4087,3 +4131,112 @@ the lisp list will be returned).")
 	     (py-call write-func (py-string-from-char #\Newline))))
       ||#
       )))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Class change signals; only called for user-defined classes that are not
+;; at the metaclass level.
+
+(excl:without-redefinition-warnings
+ ;; already defined above; not really needed
+ (defmethod initialize-instance :after ((cls py-type) &rest initargs)
+   (declare (ignore initargs))
+   (mop:finalize-inheritance cls)
+   (signal-class-created cls)))
+
+(defmethod reinitialize-instance :before ((cls py-type) &rest initargs)
+  (declare (ignore initargs))
+  (signal-class-changed-before cls))
+
+(defmethod reinitialize-instance :after ((cls py-type) &rest initargs)
+  (declare (ignore initargs))
+  (signal-class-changed-after cls))
+
+(defun signal-class-dict-replacement (cls old new)
+  (declare (ignore old new))
+  #+(or)(warn "** dict replacement cls ~A" (class-name cls)))
+
+(defun signal-class-changed-before (cls) 
+  (declare (ignore cls))
+  nil)
+
+(defun signal-class-changed-after (cls)
+  #+(or)(warn "** Class ~A changed" (class-name cls)))
+
+(defun signal-class-created (cls)
+  #+(or)(warn "** Class ~A created" (class-name cls)))
+
+(defun signal-class-dict-changed (dict attr)
+  (declare (ignore dict))
+  #+(or)(warn "** Class had attribute ~A modified" attr))
+   
+(defun signal-class-dict-set-key (dict key val)
+  (declare (ignore dict val))
+  #+(or)(warn "** Class dict changed, key ~A" key))
+
+(defun signal-class-dict-del-key (dict key)
+  (declare (ignore dict))
+  #+(or)(warn "** Class dict deleted key ~A" key))
+
+
+(defparameter class-dict->classes (make-hash-table :test #'eq)
+  "From dict to list of classes")
+
+(defparameter class->info-st (make-hash-table :test #'eq))
+
+(defstruct classinfo
+  normal-metaclass-p
+  (dict           :type p-dict)
+  (dict-timestamp :type integer)
+  __getattribute__
+  __getattr__
+  class-attr-ht)
+
+(defun create-classinfo (cls)
+  (make-classinfo :normal-metaclass-p (eq (class-of cls) (ltv-find-class 'py-meta-type))
+		  :dict (dict cls)
+		  :dict-timestamp (py-dict-id (dict cls))
+		  :__getattribute__ (let ((ga (recursive-class-dict-lookup cls '|__getattribute__|)))
+				      (unless (eq ga #'py-object.__getattribute__)
+					ga))
+		  :__getattr__ (recursive-class-dict-lookup cls '|__getattr__|)
+		  :class-attr-ht (make-hash-table :test #'eq))) ;; attr -> class that has it in dict
+
+(defun py-attr-class-dicts-cached (x x.class attr.as_string attr.as_sym inside-object-getattribute)
+  (let ((cls-info (gethash x.class class->info-st)))
+    (when (and cls-info
+	       (classinfo-normal-metaclass-p cls-info))
+      
+      (assert (= (classinfo-dict-timestamp cls-info) (py-dict-id (dict x.class))))
+
+      (let ((class-attr-val nil)
+	    (__getattribute__ (classinfo-__getattribute__ cls-info))
+	    (__getattr__ (classinfo-__getattr__ cls-info)))
+	
+	;; Try __getattribute__
+	(unless inside-object-getattribute
+	  (when __getattribute__
+	    (assert (not (eq __getattribute__ #'py-object.__getattribute__)))
+	    (handler-case
+		(values (py-call (bind-val __getattribute__ x x.class) attr.as_string))
+	      (|AttributeError| () nil)
+		;; __getattribute__ gave exception; also trying __getattr__ (if present)
+	      (:no-error (val) (return-from py-attr-class-dicts-cached val)))))
+      
+	;; when __getattribute__ raised error, try __getattr__
+	(when (and __getattribute__ __getattr__)
+	  (return-from py-attr-class-dicts-cached
+	    (py-call (bind-val __getattr__ x x.class) attr.as_string)))
+	
+	;; class attribute
+	(let ((attrib-class (gethash attr.as_sym (classinfo-class-attr-ht cls-info))))
+	  (unless (eq attrib-class :nowhere)
+	    (assert (excl::classp attrib-class))
+	     (let* ((d (dict attrib-class))
+			 (val (if (normal-pydict-p d)
+				  (py-dict-getitem d attr.as_sym)
+				(this-dict-get d attr.as_string))))
+		    (assert val () "Class ~A should have attrib ~A init dict, but it does not."
+			    (class-name attrib-class) attr.as_sym)
+		    (setf class-attr-val val))))
+	
+	(values nil nil __getattr__ class-attr-val)))))

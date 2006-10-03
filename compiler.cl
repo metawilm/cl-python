@@ -53,6 +53,9 @@
 ;;
 ;;  :safe-lex-visible-vars      : list of all variables guaranteed to be lexically visible and bound;
 ;;                                subset of :LEXICALLY-VISIBLE-VARS.
+;;
+;;  :inside-setf-py-attr        : T if insides a (setf (py-attr ..) ..) form (to work around Allegro CL
+;;                                issues w.r.t. compiler macros and setf forms.
 
 (sys:define-declaration
     pydecl (&rest property-pairs) nil :declare
@@ -156,7 +159,8 @@ XXX Currently there is not way to set *__debug__* to False.")
 		 
 		 (attributeref-expr 
 		  (destructuring-bind (item attr) (cdr tg)
-		    `(setf (py-attr ,item ',(second attr)) ,val)))
+		    `(with-pydecl ((:inside-setf-py-attr t))
+		       (setf (py-attr ,item ',(second attr)) ,val))))
 		 
 		 (subscription-expr
 		  (destructuring-bind (item subs) (cdr tg)
@@ -488,7 +492,9 @@ XXX Currently there is not way to set *__debug__* to False.")
     (attributeref-expr
      (destructuring-bind (object (id-ex attr-name)) (cdr item)
        (assert (eq id-ex 'identifier-expr))
-       `(setf (py-attr ,object ',attr-name) nil)))
+       
+       `(with-pydecl ((:inside-setf-py-attr t))
+	  (setf (py-attr ,object ',attr-name) nil))))
     
     (identifier-expr
      (let* ((name (second item))
