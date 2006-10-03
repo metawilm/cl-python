@@ -26,7 +26,8 @@
   
   ("compiler" (:uses-definitions-from "builtins" "walk" "run")) ;; fill asts, parse-python-string
 
-  ("repl"    (:uses-definitions-from "package" "compiler" "run" "classes")))
+  ("repl"    (:uses-definitions-from "package" "compiler" "run" "classes"))
+  ("modules"  (:uses-definitions-from "compiler"))) ;; xxx figure out real dependencies
 
 (defun compy ()
   (excl:compile-system 'python))

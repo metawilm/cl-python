@@ -2,6 +2,11 @@
 
 (defparameter *builtin-modules* (make-hash-table :test #'eq) "List of module objects")
 
+(defun initial-py-modules ()
+  (let ((ht (make-hash-table :test #'eq)))
+    (maphash (lambda (k v) (setf (gethash k ht) v)) *builtin-modules*)
+    ht))
+
 (defmacro with-builtin-module ((name) &body body)
   (let ((m '#:m)
 	(dg '#:dg)
@@ -113,7 +118,4 @@
   (register 'clock (lambda () (coerce (/ (mp:process-cpu-msec-used sys:*current-process*) 1000)
 				      'float))))
 
-(defun initial-py-modules ()
-  (let ((ht (make-hash-table :test #'eq)))
-    (maphash (lambda (k v) (setf (gethash k ht) v)) *builtin-modules*)
-    ht))
+
