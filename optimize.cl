@@ -68,17 +68,21 @@
 
 (defmethod get-py-iterate-fun ((x string))
   (let ((i 0))
+    (declare (type (integer 0 #.most-positive-fixnum) i))
     (lambda ()
-      (when (< i (length x))
-	(prog1 (string (aref x i))
-	  (incf i))))))
+      (fast
+       (when (< i (length x))
+	 (prog1 (string (aref x i))
+	   (incf i)))))))
 
 (defmethod get-py-iterate-fun ((x vector))
   (let ((i 0))
+    (declare (type (integer 0 #.most-positive-fixnum) i))
     (lambda ()
-      (when (< i (length x))
-	(prog1 (aref x i)
-	  (incf i))))))
+      (fast
+       (when (< i (length x))
+	 (prog1 (aref x i)
+	   (incf i)))))))
 	  
 
 ;; Membership test

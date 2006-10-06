@@ -38,21 +38,12 @@
   (defun py-==->lisp-val (x y)
     (/= (py-== x y) 0))
   
-  
-  ;; In order to avoid warning about double definition of PY-== and
-  ;; PY-HASH in this file, (SETF FDEFINITION) is used instead of
-  ;; DEFUN here. These functions are needed for bootstrapping, but
-  ;; can't be really defined here.
+  ;; The functions PY-HASH and PY-== are needed for bootstrapping, but
+  ;; the definition below is only temporary; below redefinition occurs.
 
-  (setf (fdefinition 'py-hash)
-    (lambda (x)
-      (sxhash x)))
-  
-  (setf (fdefinition 'py-==)
-    (lambda (x y)
-      (if (equalp x y) 1 0)))
-    
-    
+  (defun py-hash (x) (sxhash x))
+  (defun py-== (x y) (if (equalp x y) 1 0))
+      
   (defun new-dict-id ()
     (1- (incf *dict-id-counter*)))
 
@@ -65,7 +56,6 @@
   
   (defgeneric py-dict-setitem (dict key val)
     (:documentation "Returns ITEM, or NIL")
-    
     (:method ((d py-dict) k v)
 	     (touch-py-dict d)
 	     (typecase k
@@ -77,9 +67,7 @@
 ) ;; eval-when
 
 (defclass py-dict-mixin ()
-  ((dict :initarg :dict
-	 :initform (make-dict)
-	 :accessor dict)))
+  ((dict :initarg :dict :initform (make-dict) :accessor dict)))
 
 (eval-when (compile load eval)
   (defun make-dict ()
@@ -90,10 +78,8 @@
   nil)
 
 (defun ensure-dict (x)
-  (let ((d (dict x)))
-    (unless d
-      (error "dict-get on ~A, which does not have dict" x))
-    d))
+  (or (dict x)
+      (error "dict-get on ~A, which does not have dict" x)))
 
 (defun dict-get (x key)
   #+(or)(assert (stringp key))
@@ -105,6 +91,7 @@
 
 (defun normal-pydict-p (x)
   (let ((x.cn (class-name (class-of x))))
+    ;; Bootstrapping: classes not available, so test on class name instead.
     (or (eq x.cn 'py-dict)
 	(eq x.cn 'py-dict-classdict))))
 
@@ -113,7 +100,6 @@
   #+(or)(assert d)
   (if (normal-pydict-p d)
       (py-dict-getitem d key)
-    ;;#+(or) ;; don't bind in this function
     (py-classlookup-bind-call d '|__getitem__| key)))
 
 (defun dict-del (x key)
@@ -319,9 +305,8 @@
 		   (:attribute-write  `(let ((f (function ,func-name))
 					     (read-f (or (gethash ',cls.meth
 								  *writable-attribute-methods*)
-							 (error
-							  "Attribute read function ~A not defined yet"
-							  ',cls.meth))))
+							 (error "Attribute read function ~A not defined yet"
+								',cls.meth))))
 					 (setf (slot-value read-f 'write-func) f)
 					 nil ;; read function is already stored in dict
 					 )))))
@@ -369,14 +354,12 @@
       (py-raise 'TypeError "Superclasses are at different levels (some metaclass, ~
                             some regular class) (got: ~A)." supers))
     
-
     ;; Python class `object' corresponds to Lisp class 'py-dictless-object
     ;; but the new class should have a dict:
     ;; [XXX perhaps not needed anymore, as py-object has a dict?]
-    (substitute (ltv-find-class 'py-object)
-		(ltv-find-class 'py-dictless-object)
-		supers)
-    
+    (setf supers (nsubstitute (ltv-find-class 'py-object)
+			      (ltv-find-class 'py-dictless-object)
+			      supers))
     
     (let ((metaclass (or cls-metaclass
 			 (when supers (class-of (car supers)))
@@ -393,18 +376,14 @@
 	(py-raise '|TypeError| 
 		  "Metaclass must be subclass of `type' (got class: ~A)" metaclass))
       
-
       ;; When inheriting from py-lisp-type (like `int'), use
       ;; py-user-type as metaclass.
       ;; XXX subclassing `function' ?
-      
       (when (or (eq metaclass (ltv-find-class 'py-lisp-type))
 		(eq metaclass (ltv-find-class 'py-core-type)))
 	(setf metaclass (ltv-find-class 'py-user-type)))
       
-      
       ;; Subclass of `type' has metaclass 'py-meta-type
-      
       (when (eq metaclass (ltv-find-class 'py-meta-type))
 	(let ((cls (mop:ensure-class
 		    (make-symbol (symbol-name name))
@@ -412,23 +391,17 @@
 		    :metaclass (ltv-find-class 'py-meta-type)
 		    :dict (mark-as-classdict namespace))))
 	  (return-from make-py-class cls)))
-      
-      
+            
       ;; Not a subclass of `type', so at the `object' level
-      
       (let ((__new__ (recursive-class-dict-lookup metaclass '|__new__|)))
-	
 	(assert __new__ ()
-	  "recur: no __new__ found for class ~A, yet it is a subclass of PY-TYPE ?!"
-	  metaclass)
+	  "recur: no __new__ found for class ~A, yet it is a subclass of PY-TYPE ?!" metaclass)
 
 	#+(or)(warn "binding __new__: ~A ~A" __new__ metaclass)
-
 	(let ((cls (if (and (eq (class-of __new__) (ltv-find-class 'py-static-method))
 			    (eq (py-method-func __new__) (symbol-function 'py-type.__new__)))
 		       
 		       ;; Optimize common case:  py-type.__new__
-		       
 		       (progn 
 			 #+(or)(warn "Inlining make-py-class")
 			 (py-type.__new__ metaclass
@@ -440,26 +413,20 @@
 		       ;; If __new__ is a static method, then bound-_new_ will
 		       ;; be the underlying function.
 		       
-		       (or 
-			(py-call bound-_new_
-				 metaclass
-				 (string name) 
-				 (make-tuple-from-list supers) ;; ensure not NIL
-				 namespace)
-			(break "Class' bound __new__ returned NIL: ~A" bound-_new_))))))
+		       (or (py-call bound-_new_ metaclass
+				    (string name) 
+				    (make-tuple-from-list supers) ;; ensure not NIL
+				    namespace)
+			   (break "Class' bound __new__ returned NIL: ~A" bound-_new_))))))
 
-	  
 	  ;; Call __init__ when the "thing" returned by
 	  ;; <metaclass>.__new__ is of type <metaclass>.
-	  
 	  (if (typep cls metaclass)
 		
 	      (let ((__init__ (recursive-class-dict-lookup metaclass '|__init__|)))
-		(if __init__
-		    (progn #+(or)(warn "  __init__ method is: ~A" __init__)
-			   (py-call __init__ cls))
-		  #+(or)(warn "No __init__ found, for class ~A returned by metaclass ~A"
-			      cls metaclass)))
+		#+(or)(warn "  __init__ method ~A is: ~A" metaclass __init__)
+		(when __init__
+		  (py-call __init__ cls)))
 	    
 	    #+(or)(warn "Not calling __init__ method, as class ~A is not instance of metaclass ~A"
 			cls metaclass))
@@ -803,7 +770,6 @@
 
 (mop:finalize-inheritance (find-class 'py-enumerate))
 
-
 (def-py-method py-enumerate.__new__ :static (cls iterable)
   #+(or)(assert (subtypep cls 'py-enumerate))
   (let ((gener (make-iterator-from-function
@@ -816,11 +782,14 @@
 			      (prog1 
 				  (make-tuple-from-list (list i val))
 				(incf i)))))))))
-    (make-instance cls) :gener gener))
+    (make-instance cls :gener gener)))
 
 (def-py-method py-enumerate.__repr__ (x)
   (with-output-to-string (s)
     (print-unreadable-object (x s :identity t :type t))))
+
+(def-py-method py-enumerate.__iter__ (x)
+  (slot-value x 'gener))
 
 
 (defclass py-slice (py-core-object)
@@ -905,13 +874,10 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 	 reversed-p)
     
     (setf step  (if (eq step *the-none*) 1 (py-val->integer step))
-	  
 	  reversed-p (< step 0)
-	  
 	  start (if (eq start *the-none*) 
 		    (if reversed-p (1- length) 0)
 		  (py-val->integer start))
-	  
 	  stop  (if (eq stop *the-none*)
 		    (if reversed-p -1 length)
 		  (py-val->integer stop)))
@@ -978,8 +944,6 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 	  
 	  (t (break :unexpected)))))
 
-
-
 ;; super( <B class>, <C instance> ) where C derives from B:
 ;;   :object = <C instance>
 ;;   :current-class = <B class>
@@ -994,7 +958,6 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
   ((object        :initarg :object)
    (current-class :initarg :current-class))
   (:metaclass py-core-type))
-
 
 (def-py-method py-super.__new__ :static (cls class-arg &optional second-arg)
   (cond ((not (typep class-arg 'class))
@@ -1013,7 +976,6 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 	 ;; CPython returns a `super' instance and not directly the
 	 ;; class to allow subclassing class `super' and overriding
 	 ;; the __getattribute__ method.
-	 
 	 (make-instance cls :object second-arg :current-class class-arg))
 	
 	((typep second-arg 'class)
@@ -1106,14 +1068,13 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
     (print-unreadable-object (x s :identity t :type t)
       (with-slots (start stop step) x
 	(format s ":start ~A :stop ~A :step ~A" start stop step)))))
-;; None
 
+;; None
 
 (defmethod make-load-form ((x (eql *the-none*)) &optional e)
   (declare (ignore e))
   `(locally (declare (special *the-none*))
      *the-none*))
-
 
 (defun none-p (x) (eq x *the-none*))
 
@@ -1132,6 +1093,7 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
      *the-ellipsis*))
 
 ;; NotImlemented
+
 (defclass py-notimplemented (py-core-type) () (:metaclass py-core-type))
 (defvar *the-notimplemented* (make-instance 'py-notimplemented))
 
@@ -1142,9 +1104,7 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
 ;;; User objects (Object, Module, File, Property)
-
 
 ;; Object (User object)
 
@@ -1218,9 +1178,7 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
   (make-instance cls))
 
 (def-py-method py-object.__init__ (&rest attr)
-  (declare (ignore attr))
-  ;; nothing
-  )
+  (declare (ignore attr)))
 
 (def-py-method py-object.__class__ :attribute-read (x)
   (py-class-of x))
@@ -1365,14 +1323,14 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 (def-py-method py-type.__subclasses__ (x)
   (make-py-list-from-list (mop:class-direct-subclasses x)))
 
-(def-py-method py-type.__repr__ (x) ;; XXX deproxy not needed?
+(def-py-method py-type.__repr__ (x) ;; XXX deproxy not needed
   (with-output-to-string (s)
     (print-unreadable-object (x s :identity t)
       (format s "~@[meta~*~]class ~A"
 	      (typep x (ltv-find-class 'py-meta-type))
 	      (class-name x)))))
 
-(def-py-method py-type.__str__ (x) ;; XXX deproxy not needed?
+(def-py-method py-type.__str__ (x) ;; XXX deproxy not needed
   (py-type.__repr__ x))
 
 (def-py-method py-type.__call__ (cls &rest args)
@@ -1560,12 +1518,15 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 	     (declare (special *current-module-name* *current-module-path*))
 	     (with-py-readtable
 		 (let ((fname (format nil "~A/~A" path py-fname)))
+		   (warn "fn: ~A" fname)
 		   (when (handler-case (excl.osi:stat fname)
 			   (excl:syscall-error () nil))
-		     (compile-file fname
-				   :output-file (format nil "~A/~A" path fasl-fname)
-				   :if-newer (not force-reload)
-				   :verbose verbose)))))))
+		     (let ((fasl-name (format nil "~A/~A" path fasl-fname)))
+		       (compile-file fname
+				     :output-file fasl-name
+				     :if-newer (not force-reload)
+				     :verbose verbose)
+		       fasl-name)))))))
 	   
     (unless force-reload
       (let ((existing-mod (gethash mod-name *py-modules*)))
@@ -1591,11 +1552,9 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
       (declare (special *module-hook*))
       
       (loop for path in (py-iterate->lisp-list (py-attr (gethash 'sys *py-modules*) 'path))
-	  for found = (recompile-py-if-needed mod-name py-fname fasl-fname path)
-	  when found do
-	    (load fasl-fname
-		  :search-list (list path)
-		  :verbose verbose)
+	  for fasl-file = (recompile-py-if-needed mod-name py-fname fasl-fname path)
+	  when fasl-file do
+	    (load fasl-file :verbose verbose)
 	    (return))
        
       (unless new-module
@@ -1996,14 +1955,9 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 
 (defun deproxy (x)
   (typecase x
-    ((or number string list function vector hash-table)
-     x)
-    
-    (py-lisp-object
-     (proxy-lisp-val x))
-    
-    (t
-     x)))
+    ((or number string list function vector hash-table)  x)
+    (py-lisp-object                                      (proxy-lisp-val x))
+    (t                                                   x)))
 
 #+(or) ;; original version; a bit slower
 (defgeneric deproxy (x)
@@ -2076,20 +2030,12 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 
 (def-py-method py-number.__truediv__ (x^ y^) (/ x y)) ;; overruled for integers
 
-
 ;; In CPython, only complex numbers have 'real','imag' and 'conjugate'
-;; attributes, here all numbers have them:
+;; attributes; in our world all numbers have them.
 
-(def-py-method py-number.real :attribute (x^)
-	       (realpart x))
-
-(def-py-method py-number.imag :attribute (x^)
-	       (imagpart x))
-
-(def-py-method py-number.conjugate (x^)
-  (conjugate x))
-
-
+(def-py-method py-number.real :attribute (x^) (realpart x))
+(def-py-method py-number.imag :attribute (x^) (imagpart x))
+(def-py-method py-number.conjugate       (x^) (conjugate x))
 
 ;; Complex
 
@@ -2178,6 +2124,7 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
        
 (def-py-method py-int.__lshift__ (x^ y^)  (ash x y))
 (def-py-method py-int.__rshift__ (x^ y^)  (ash x (- y)))
+
 (def-py-method py-int.__xor__ (x^ y^) (logxor x y))
 (def-py-method py-int.__and__ (x^ y^) (logand x y))
 (def-py-method py-int.__or__  (x^ y^) (logior x y))
@@ -2234,7 +2181,6 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 
 ;; Class py-dict is already defined above, as it's needed for
 ;; bootstrapping Python class hierarchy.
-
 
 (defconstant +dict-symhash-trigger+ 20)
 
@@ -2319,7 +2265,6 @@ Creates a function for doing fast lookup, using jump table"
       finally (return d)))
 
 (def-py-method py-dict.__new__ :static (cls &rest kwargs)
-  ;; XXX logic of filling dict must be moved to __init__
   (assert (not (eq (class-name cls) 'py-dict-classdict))) ;; loading order issue, so cmp name
   (if (eq cls (ltv-find-class 'py-dict))
       (make-dict)
@@ -2491,8 +2436,8 @@ Creates a function for doing fast lookup, using jump table"
 
 (def-proxy-class py-list)
 
-(defun make-py-list ()
-  (make-array 0 :adjustable t :fill-pointer 0))
+(defun make-py-list (&optional (size 0))
+  (make-array size :adjustable t :fill-pointer 0))
 
 (def-py-method py-list.__new__ :static (cls &optional iterable)
 	       (declare (ignore iterable))
@@ -2514,8 +2459,7 @@ Creates a function for doing fast lookup, using jump table"
 (def-py-method py-list.__add__ (x^ y^)
   (unless (and (vectorp x) (vectorp y))
     (py-raise '|TypeError| "list.__add__: only lists as second arg (got: ~A)" y))
-  (let ((vec (make-py-list)))
-    (adjust-array vec (+ (length x) (length y)))
+  (let ((vec (make-py-list (+ (length x) (length y)))))
     (let ((i 0))
       (loop for xi across x
 	  do (setf (aref vec i) xi)
@@ -2524,6 +2468,16 @@ Creates a function for doing fast lookup, using jump table"
 	  do (setf (aref vec i) yi)
 	     (incf i))
       (setf (fill-pointer vec) i))
+    vec))
+
+(def-py-method py-list.__add2__ (x^ y^)
+  (unless (and (vectorp x) (vectorp y))
+    (py-raise '|TypeError| "list.__add__: only lists as second arg (got: ~A)" y))
+  (let* ((sz (+ (length x) (length y)))
+	 (vec (make-py-list sz)))
+    (setf (fill-pointer vec) sz)
+    (replace vec x)
+    (replace vec y :start1 (length x))
     vec))
 
 (def-py-method py-list.__cmp__ (x^ y^)
@@ -2547,12 +2501,11 @@ Creates a function for doing fast lookup, using jump table"
 	       (py-raise '|ValueError|
 			 "del <list>[i] : i outside range (got ~A, length list = ~A)"
 			 item (length x)))
-	     (loop for i from item below (1- (length x))
-		 do (setf (aref x i) (aref x (1+ i))))
+	     (replace x x :start1 item :start2 (1+ item))
 	     (decf (fill-pointer x)))
     (py-slice (with-slots (start stop step) item
-		(cond ((and (eq start *the-none*) (eq stop *the-none*) (eq step *the-none*))
-		       (loop for i from 0 below (length x) do (setf (aref x i) nil))
+		(cond ((and (eq start *the-none*) (eq stop *the-none*) (eq step *the-none*)) ;; del x[:]
+		       (fill x nil)
 		       (setf (fill-pointer x) 0))
 		      (t (break "unexpected")))))))
 
@@ -2630,9 +2583,8 @@ Creates a function for doing fast lookup, using jump table"
 			  :initial-element (when (= x.len 1) 
 					      (aref x 0)))))
     (unless (= x.len 1)
-      (loop for ni from 0 below res.len by x.len
-	  do (loop for i from 0 below x.len
-		 do (setf (aref res (+ ni i)) (aref x i)))))
+      (dotimes (i n)
+	(replace res x :start1 (* i x.len))))
     res))
 
 (def-py-method py-list.__repr__ (x^)
@@ -2679,19 +2631,13 @@ Creates a function for doing fast lookup, using jump table"
     (let ((ix (if (< index 0) (+ index x.len) index)))
       (if (<= 0 ix (1- x.len))
 	  (prog1 (aref x ix)
-	    (loop for i from (1+ ix) below x.len
-		do (setf (aref x (1- i)) (aref x i)))
+	    (replace x x :start1 ix :start2 (1+ ix))
 	    (decf (fill-pointer x)))
 	(py-raise '|ValueError|
 		  "list.pop(x, i): ix wrong (got: ~A; x.len: ~A)"
 		  ix x.len)))))
 
 (def-py-method py-list.sort (x^ &optional fn)
-  
-  ;; XXX Here it is assumed that SORT does not return a vector that is
-  ;; different from the original one. This is explicitly not
-  ;; guaranteed by ANSI.
-  
   (let* ((sort-fun (if fn
 		       (lambda (x y) (< (signum (deproxy (py-call fn x y))) 0))
 		     (lambda (x y) (< (signum (pybf:|cmp| x y)) 0))))
@@ -2699,25 +2645,23 @@ Creates a function for doing fast lookup, using jump table"
 
     ;; It's not guaranteed by ANSI that (eq res x).
     (unless (eq res x)
-      (loop for i from 0
-	  for res.i across res
-	  do (setf (aref x i) res.i)))
+      (replace x res))
     
     *the-none*))
 
 
 (defmacro make-py-list-unevaled-list (items)
   (let ((vec '#:vec))
-    `(let ((,vec (make-array ,(length items) :adjustable t :fill-pointer ,(length items))))
-       ,@(loop for x in items and i from 0
-	     collect `(setf (aref ,vec ,i) ,x))
+    `(let ((,vec (make-array ,(length items)
+			     :adjustable t
+			     :fill-pointer ,(length items)
+			     :initial-contents (list ,@items))))
        ,vec)))
 
 (defun make-py-list-from-list (list)
   (let* ((len (length list))
 	 (vec (make-array len :adjustable t :fill-pointer t)))
-    (loop for x in list and i from 0
-	do (setf (aref vec i) x))
+    (replace vec list)
     vec))
 
 (defun make-py-list-from-vec (vec)
@@ -2869,9 +2813,7 @@ Creates a function for doing fast lookup, using jump table"
 			       (py-string-from-char char/charlist)
 			     (coerce char/charlist 'string)))))
 
-(def-py-method py-string.__hash__ (x^)
-  (sxhash x))
-
+(def-py-method py-string.__hash__ (x^)  (sxhash x))
 (def-py-method py-string.__len__  (x^)  (length x))
 
 (def-py-method py-string.__mod__ (x^ args)
@@ -2881,15 +2823,14 @@ Creates a function for doing fast lookup, using jump table"
 (def-py-method py-string.__mul__ (x^ n^)
   (unless (typep n '(integer 0 *))
     (py-raise '|TypeError| "str.__mul__: arg must be nonzero integer (got: ~S)" n))
-  (if (or (= n 0)
-	  (= (length x) 0))
+  (let ((x.len (length x)))
+    (if (or (= n 0)
+	    (= x.len 0))
       ""
-    (let ((res (make-array (* n (length x)) :element-type 'character)))
-      (loop for i from 0 below n
-	  do (loop for xi from 0 below (length x)
-		 do (setf (aref res (+ (* i (length x)) xi))
-		      (aref x xi))))
-      res)))
+    (let ((res (make-array (* n x.len) :element-type 'character)))
+      (dotimes (i n)
+	(replace res x :start1 (* i x.len)))
+      res))))
 
 (def-py-method py-string.__repr__ (x^)
   (with-output-to-string (s) (py-pprint s x))) ;; XXX todo: optimize
@@ -2917,26 +2858,23 @@ Creates a function for doing fast lookup, using jump table"
 		(every (lambda (ch) (member ch '(#\Space #\Tab #\Newline)))
 		       x))))
 
-
 (def-py-method py-string.join (x^ seq-of-strings)
-  (let* ((strings (mapcar #'py-val->string (py-iterate->lisp-list seq-of-strings))))
-    
-    (unless strings
-      (return-from py-string.join ""))
-    
-    (let* ((num-strings (length strings))
-	   (tot-num-chars (+ (* (1- num-strings) (length x))
-			     (apply #'+ (mapcar #'length strings))))
-	   (res (make-array tot-num-chars :element-type 'character)))
-      (loop
-	  with res-i = 0
-	  for s in strings and i from 0
-	  do (loop for ch across s do (setf (aref res res-i) ch)
-				      (incf res-i))
-	  unless (= i (1- num-strings))
-	  do (loop for ch across x do (setf (aref res res-i) ch)
-				      (incf res-i)))
-      res)))
+  (let ((strings (mapcar #'py-val->string (py-iterate->lisp-list seq-of-strings))))
+    (cond ((null strings)        "")
+	  ((null (cdr strings))  (car strings))
+	  (t                     (let* ((num-strings (length strings))
+					(tot-num-chars (reduce #'+ strings
+							       :key #'length
+							       :initial-value (* (length x) (1- num-strings))))
+					(res (make-array tot-num-chars :element-type 'character)))
+				   (replace res (car strings))
+				   (loop with ix = (length (car strings))
+				       for s in (cdr strings)
+				       do (replace res x :start1 ix)
+					  (incf ix (length x))
+					  (replace res s :start1 ix)
+					  (incf ix (length s)))
+				   res)))))
 
 (def-py-method py-string.lower (x^)
   (string-downcase x))
@@ -3860,8 +3798,8 @@ finished; F will then not be called again."
 
 (def-comparison  <  py-<   (=  (the (integer -1 1) (pybf:|cmp| x y)) -1))
 (def-comparison  >  py->   (=  (the (integer -1 1) (pybf:|cmp| x y))  1))
-(fmakunbound 'py-==)
-(def-comparison ==  py-==  (=  (the (integer -1 1) (pybf:|cmp| x y))  0))
+(excl:without-redefinition-warnings
+ (def-comparison ==  py-==  (=  (the (integer -1 1) (pybf:|cmp| x y))  0)))
 (def-comparison !=  py-!=  (/= (the (integer -1 1) (pybf:|cmp| x y))  0)) ;; parser: <> -> !=
 (def-comparison <=  py-<=  (<= (the (integer -1 1) (pybf:|cmp| x y))  0))
 (def-comparison >=  py->=  (>= (the (integer -1 1) (pybf:|cmp| x y))  0))
@@ -3913,8 +3851,8 @@ finished; F will then not be called again."
 (def-py-shortcut-func py-len  |__len__| )
 (def-py-shortcut-func py-nonzero |__nonzero__| )
 
-(fmakunbound 'py-hash)
-(def-py-shortcut-func py-hash |__hash__|)
+(excl:without-redefinition-warnings
+ (def-py-shortcut-func py-hash |__hash__|))
 
 (defmethod py-hash ((x symbol))
   (py-hash (symbol-name x)))
@@ -4152,7 +4090,7 @@ the lisp list will be returned).")
   (signal-class-changed-after cls))
 
 (defun signal-class-dict-replacement (cls old new)
-  (declare (ignore old new))
+  (declare (ignore cls old new))
   #+(or)(warn "** dict replacement cls ~A" (class-name cls)))
 
 (defun signal-class-changed-before (cls) 
@@ -4160,21 +4098,23 @@ the lisp list will be returned).")
   nil)
 
 (defun signal-class-changed-after (cls)
+  (declare (ignore cls))
   #+(or)(warn "** Class ~A changed" (class-name cls)))
 
 (defun signal-class-created (cls)
+  (declare (ignore cls))
   #+(or)(warn "** Class ~A created" (class-name cls)))
 
 (defun signal-class-dict-changed (dict attr)
-  (declare (ignore dict))
+  (declare (ignore dict attr))
   #+(or)(warn "** Class had attribute ~A modified" attr))
    
 (defun signal-class-dict-set-key (dict key val)
-  (declare (ignore dict val))
+  (declare (ignore dict key val))
   #+(or)(warn "** Class dict changed, key ~A" key))
 
 (defun signal-class-dict-del-key (dict key)
-  (declare (ignore dict))
+  (declare (ignore dict key))
   #+(or)(warn "** Class dict deleted key ~A" key))
 
 

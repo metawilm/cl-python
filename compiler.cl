@@ -1271,9 +1271,9 @@ XXX Currently there is not way to set *__debug__* to False.")
 	  (|strip|   0 stringp      py-string.strip  )
 	  (|upper|   0 stringp      py-string.upper  )
 	  	  
-	  (|keys|    0 py-dict-p py-dict.keys     )
-	  (|items|   0 py-dict-p py-dict.items    )
-	  (|values|  0 py-dict-p py-dict.values   )
+	  (|keys|    0 py-dict-p    py-dict.keys     )
+	  (|items|   0 py-dict-p    py-dict.items    )
+	  (|values|  0 py-dict-p    py-dict.values   )
 	  	  
 	  (|next|    0 py-func-iterator-p py-func-iterator.next)
 	  
@@ -1876,8 +1876,7 @@ Non-negative integer denoting the number of args otherwise."
 		(t (error "Got unknown keyword arg and no **-arg: ~A ~A" key val))))
     
     ;; Ensure all positional arguments covered
-    (loop for i fixnum from num-filled-by-pos-args below (the fixnum
-							   (fa-num-pos-args fa))
+    (loop for i fixnum from num-filled-by-pos-args below (the fixnum (fa-num-pos-args fa))
 	unless (svref arg-val-vec i)
 	do (error "Positional arg ~A has no value" (svref (fa-arg-name-vec fa) i)))
     
@@ -1906,11 +1905,12 @@ Non-negative integer denoting the number of args otherwise."
 (defvar *with-py-error-level* 0)
 
 (defun check-max-with-py-error-level ()
-  (when (> *with-py-error-level* *max-py-error-level*)
-    (py-raise '|RuntimeError| "Stack overflow (~A)" *max-py-error-level*)))
+  (fast
+   (when (> (the fixnum *with-py-error-level*) (the fixnum *max-py-error-level*))
+     (py-raise '|RuntimeError| "Stack overflow (~A)" *max-py-error-level*))))
 
 (defmacro with-py-errors (&body body)
-  `(let ((*with-py-error-level* (1+ *with-py-error-level*)))
+  `(let ((*with-py-error-level* (fast (1+ (the fixnum *with-py-error-level*)))))
      (check-max-with-py-error-level)
      
      ;; Using handler-bind, so uncatched errors are shown in precisely
