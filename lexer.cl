@@ -299,11 +299,18 @@ READ-CHAR."
 (defun identifier-char1-p (c)
   "Is C a character with which an identifier can start?
 C must be either a character or NIL."
-  (and c
-       (or (alpha-char-p c)
-	   (char= c #\_))))
-
-
+  (let ((arr #.(make-array 128
+			   :element-type 'bit 
+			   :initial-contents
+			   (loop for i from 0 below 128
+			       if (or (<= (char-code #\a) i (char-code #\z))
+				      (<= (char-code #\A) i (char-code #\Z))
+				      (= i (char-code #\_))) collect 1
+			       else collect 0))))
+    (and c
+	 (< (char-code c) 128)
+	 (when (= (sbit arr (char-code c)) 1)
+	   t))))
 
 (defun identifier-char2-p (c)
   "Can C occur in an identifier as second or later character?
