@@ -3082,7 +3082,8 @@ Creates a function for doing fast lookup, using jump table"
 	 (*py-attr-sym* attr.as_sym))
     
     (multiple-value-bind (result __getattr__ class-attr-val)
-	(py-attr-class-dicts x x.class attr.as_string attr.as_sym inside-object-getattribute)
+	(funcall (if *use-py-attr-cache* #'py-attr-class-dicts-cached #'py-attr-class-dicts)
+		 x x.class attr.as_string attr.as_sym inside-object-getattribute)
       #+(or)(format t "p-a-c-d ~A ~A => ~A ~A ~A" x x.class result __getattr__ class-attr-val)
       
       ;; Check if result determined by __getattribute__
@@ -3127,73 +3128,71 @@ Creates a function for doing fast lookup, using jump table"
 		  "No such attribute: ~A `~A' (class: ~A)"
 		  x attr.as_string x.class)))))
 
-(define-condition attr-cache-signal (condition)
-  ((key :initarg :key :initform nil)
-   (val :initarg :val :initform nil)))
+(defun try-calling-getattribute (ga x x.class attr.as_string)
+  (handler-case
+      (values (py-call (bind-val ga x x.class) attr.as_string))
+    (|AttributeError| () nil) ;; __getattribute__ gave exception; also trying __getattr__ (if present)
+    (:no-error (val) (return-from try-calling-getattribute val))))
 
-(defun py-attr-class-dicts (x x.class attr.as_string attr.as_sym inside-object-getattribute &optional signals)
-  ;; Returns:  RESULT
-  ;;      or:  NIL, __GETATTR__, CLASS-ATTR-VAL
+(defun py-attr-class-dicts (x x.class attr.as_string attr.as_sym inside-object-getattribute &key just-look)
+  ;; If JUST-LOOK, then returns: __GETATTRIBUTE__ __GETATTR__ CLASS-ATTR
+  ;;
+  ;; Else, returns: RESULT (if determined by __getattribute__)
+  ;;            or:  NIL, __GETATTR__, CLASS-ATTR
   (declare (notinline py-call))
-  (flet ((signal-uncacheable () (signal (make-condition 'attr-cache-signal :key :uncacheable)))
-	 (signal-__getattribute__ (g) (signal (make-condition 'attr-cache-signal :key :__getattribute__ :val g)))
-	 (signal-class-attr (v) (signal (make-condition 'attr-cache-signal :key :class-attr :val v))))
+  (let (__getattribute__ __getattr__ class-attr)
     
-    (let (__getattribute__ __getattr__ class-attr-val)
-      (loop for c in (mop:class-precedence-list x.class)
-	  until (or (eq c (ltv-find-class 'standard-class))
-		    (eq c (ltv-find-class 'py-dict-mixin))
-		    (eq c (ltv-find-class 'py-class-mixin))
-		    (eq c (ltv-find-class 'standard-generic-function)))
-	    
-	  for c.dict = (cond
-			((eq c (ltv-find-class 'py-user-object)) nil) ;; has no methods
-			((eq c (ltv-find-class 'py-object))      (load-time-value (dict (find-class 'py-object))))
-			((eq c (ltv-find-class 'py-function))    (load-time-value (dict (find-class 'py-function))))
-			(t                                       (dict c))) ;; may be NIL
-		   
-	  for c.dict.class = (when c.dict (class-of c.dict))
-	  when c.dict do 
-	    (unless (or inside-object-getattribute __getattribute__)
-	      ;; Try only the first __getattribute__ method found (but not py-object's).
-	      (let ((getattribute-meth (cond ((eq c (ltv-find-class 'py-object))
-					      #'py-object.__getattribute__)
-					     ((or (eq c.dict.class (ltv-find-class 'py-dict))
-						  (eq c.dict.class (ltv-find-class 'py-dict-classdict)))
-					      (py-dict-getitem c.dict '|__getattribute__|))
-					     (t (when signals (signal-uncacheable))
-						(let ((*py-attr-sym* '|__getattribute__|))
-						  (this-dict-get c.dict "__getattribute__"))))))
-		(when (and getattribute-meth
-			   (not (eq getattribute-meth #'py-object.__getattribute__)))
-		  (setf __getattribute__ getattribute-meth)
-		  (when signals (signal-__getattribute__ __getattribute__))
-		  #+(or)(warn "__getattribute__ for ~A ~A = ~A" x x.class __getattribute__)
+    (loop for c in (mop:class-precedence-list x.class)
+	until (or (eq c (ltv-find-class 'standard-class))
+		  (eq c (ltv-find-class 'py-dict-mixin))
+		  (eq c (ltv-find-class 'py-class-mixin))
+		  (eq c (ltv-find-class 'standard-generic-function)))
 	      
-		  (handler-case
-		      (values (py-call (bind-val getattribute-meth x x.class) attr.as_string))
-		    (|AttributeError| () nil) ;; __getattribute__ gave exception; also trying __getattr__ (if present)
-		    (:no-error (val) (return-from py-attr-class-dicts val))))))
+	for c.dict = (cond
+		      ((eq c (ltv-find-class 'py-user-object)) nil) ;; has no methods
+		      ((eq c (ltv-find-class 'py-object))      (load-time-value (dict (find-class 'py-object))))
+		      ((eq c (ltv-find-class 'py-function))    (load-time-value (dict (find-class 'py-function))))
+		      (t                                       (dict c))) ;; may be NIL
+		     
+	for c.dict.class = (when c.dict (class-of c.dict))
+	when c.dict do 
+	  (unless (or inside-object-getattribute __getattribute__)
+	    ;; Try only the first __getattribute__ method found (but not py-object's).
+	    (let ((getattribute-meth (cond ((eq c (ltv-find-class 'py-object))
+					    #'py-object.__getattribute__)
+					   ((or (eq c.dict.class (ltv-find-class 'py-dict))
+						(eq c.dict.class (ltv-find-class 'py-dict-classdict)))
+					    (py-dict-getitem c.dict '|__getattribute__|))
+					   (t (let ((*py-attr-sym* '|__getattribute__|))
+						(this-dict-get c.dict "__getattribute__"))))))
+	      (when (and getattribute-meth
+			 (not (eq getattribute-meth #'py-object.__getattribute__)))
+		(setf __getattribute__ getattribute-meth)
+		(unless just-look
+		  (let ((res (try-calling-getattribute __getattribute__ x x.class attr.as_string)))
+		    (when res (return-from py-attr-class-dicts res))
+		    ;; If __getattribute__ exists but gave exception, class-attr will not be looked up.
+		    (setf class-attr nil))))))
 	  
-	    (unless (or class-attr-val __getattribute__)
-	      ;; Try to find attribute in class dict.
-	      (let ((val (cond ((or (eq c.dict.class (ltv-find-class 'py-dict))
-				    (eq c.dict.class (ltv-find-class 'py-dict-classdict)))
-				(py-dict-getitem c.dict attr.as_sym))
-			       (t
-				(this-dict-get c.dict attr.as_string)))))
-		(when val
-		  (setf class-attr-val val)
-		  (when signals (signal-class-attr val)))))
-	
-	    (unless (or inside-object-getattribute __getattr__)
-	      ;; Look for __getattr__ method (but don't call it yet: only if instance/class dicts fail).
-	      (let ((getattr-meth (cond ((eq c (ltv-find-class 'py-object)) nil)
-					((normal-pydict-p c.dict)           (py-dict-getitem c.dict '|__getattr__|))
-					(t                                  (let ((*py-attr-sym* '|__getattr__|))
-									      (this-dict-get c.dict "__getattr__"))))))
-		(when getattr-meth (setf __getattr__ getattr-meth)))))
-      (values nil __getattr__ class-attr-val))))
+	  (unless (or class-attr __getattribute__)
+	    ;; Try to find attribute in class dict.
+	    (let ((val (cond ((or (eq c.dict.class (ltv-find-class 'py-dict))
+				  (eq c.dict.class (ltv-find-class 'py-dict-classdict)))
+			      (py-dict-getitem c.dict attr.as_sym))
+			     (t
+			      (this-dict-get c.dict attr.as_string)))))
+	      (when val
+		(setf class-attr val))))
+	  
+	  (unless (or inside-object-getattribute __getattr__)
+	    ;; Look for __getattr__ method (used if instance/class dicts fail).
+	    (let ((getattr-meth (cond ((eq c (ltv-find-class 'py-object)) nil)
+				      ((normal-pydict-p c.dict)           (py-dict-getitem c.dict '|__getattr__|))
+				      (t                                  (let ((*py-attr-sym* '|__getattr__|))
+									    (this-dict-get c.dict "__getattr__"))))))
+	      (when getattr-meth (setf __getattr__ getattr-meth)))))
+
+    (values (when just-look __getattribute__) __getattr__ class-attr)))
 
 (defun py-attr-instance-dict (x attr.as_sym attr.as_string)
   (if (typep x 'class)
@@ -4106,8 +4105,10 @@ the lisp list will be returned).")
   (declare (ignore initargs))
   (signal-class-changed-after cls))
 
+
 (defun signal-class-dict-replacement (cls old new)
-  (declare (ignore cls old new))
+  (declare (ignore old new))
+  (clear-cached-classinfo cls)
   #+(or)(warn "** dict replacement cls ~A" (class-name cls)))
 
 (defun signal-class-changed-before (cls) 
@@ -4115,30 +4116,36 @@ the lisp list will be returned).")
   nil)
 
 (defun signal-class-changed-after (cls)
-  (declare (ignore cls))
+  (clear-cached-classinfo cls)
   #+(or)(warn "** Class ~A changed" (class-name cls)))
 
 (defun signal-class-created (cls)
   (declare (ignore cls))
   #+(or)(warn "** Class ~A created" (class-name cls)))
 
-(defun signal-class-dict-changed (dict attr)
-  (declare (ignore dict attr))
+(defun signal-class-dict-changed (dict key)
+  (declare (ignore key))
+  (mapcar #'clear-cached-classinfo (gethash dict *class-dict->classes*)) ;; not all clearing is required... XXX
   #+(or)(warn "** Class had attribute ~A modified" attr))
    
 (defun signal-class-dict-set-key (dict key val)
-  (declare (ignore dict key val))
+  (declare (ignore val))
+  (signal-class-dict-changed dict key)
   #+(or)(warn "** Class dict changed, key ~A" key))
 
 (defun signal-class-dict-del-key (dict key)
-  (declare (ignore dict key))
+  (signal-class-dict-changed dict key)
   #+(or)(warn "** Class dict deleted key ~A" key))
 
 
-(defparameter class-dict->classes (make-hash-table :test #'eq)
+(defparameter *class-dict->classes* (make-hash-table :test #'eq)
   "From dict to list of classes")
 
-(defparameter class->info-st (make-hash-table :test #'eq))
+(defparameter *class->info-st* (make-hash-table :test #'eq))
+
+(defun clear-cached-classinfo (c)
+  (check-type c class)
+  (setf (gethash c *class->info-st*) nil)) ;; or remhash
 
 (defstruct classinfo
   normal-metaclass-p
@@ -4150,7 +4157,9 @@ the lisp list will be returned).")
 
 (defun create-classinfo (cls)
   (make-classinfo :normal-metaclass-p (eq (class-of cls) (ltv-find-class 'py-meta-type))
-		  :dict (dict cls)
+		  :dict (let ((d (dict cls)))
+			  (push cls (gethash d *class-dict->classes*))
+			  d)
 		  :dict-timestamp (py-dict-id (dict cls))
 		  :__getattribute__ (let ((ga (recursive-class-dict-lookup cls '|__getattribute__|)))
 				      (unless (eq ga #'py-object.__getattribute__)
@@ -4158,66 +4167,34 @@ the lisp list will be returned).")
 		  :__getattr__ (recursive-class-dict-lookup cls '|__getattr__|)
 		  :class-attr-ht (make-hash-table :test #'eq))) ;; attr -> class that has it in dict
 
+(defparameter *use-py-attr-cache* nil)
+
 (defun py-attr-class-dicts-cached (x x.class attr.as_string attr.as_sym inside-object-getattribute)
-  (let ((cls-info (gethash x.class class->info-st)))
-    
-    (unless cls-info
-      (warn "new")
-      ;; Nothing known about cls yet
-      (let ((cacheable t) __getattribute__ __getattr__ class-attr)
-	(handler-bind ((attr-cache-signal (lambda (c)
-					    (ecase (slot-value c 'key)
-					      (:uncacheable (setf cacheable nil))
-					      (:__getattribute__ (setf __getattribute__ (slot-value c 'val)))
-					      (:__getattr__      (setf __getattr__ (slot-value c 'val)))
-					      (:class-attr       (setf class-attr (slot-value c 'val)))))))
-
-	  (let ((res (multiple-value-list
-		      (py-attr-class-dicts x x.class attr.as_string attr.as_sym inside-object-getattribute t))))
-	    
-	    ;; We don't come here if attribute lookup raised exception
-	    
-	    (cond ((null cacheable) 
-		   ;; Mark as never cacheable
-		   (setf (gethash x.class class->info-st) :uncacheable))
-		  
-		  (cacheable
-		   ;; Create struct for class
-		   (setf (gethash x.class class->info-st)
-		     (make-classinfo :normal-metaclass-p t ; XXX
-				     :dict (dict x.class)
-				     :dict-timestamp (py-dict-id (dict x.class))
-				     :__getattribute__ __getattribute__
-				     :__getattr__ __getattr__
-				     :class-attr-ht (let ((ht (make-hash-table :test #'eq)))
-						      (setf (gethash attr.as_sym ht) class-attr)
-						      ht)))))
-	    
-	    (return-from py-attr-class-dicts-cached (apply #'values res))))))
-    #+(or)(warn "cached")
-    (assert cls-info)
-    (assert (= (classinfo-dict-timestamp cls-info) (py-dict-id (dict x.class))))
-
+  "If attribute value Returns "
+  
+  (let ((cls-info (or (gethash x.class class->info-st)
+		      (multiple-value-bind (__getattribute__ __getattr__ class-attr)
+			  (py-attr-class-dicts x x.class attr.as_string attr.as_sym inside-object-getattribute
+					       :just-look t)
+			  
+			(setf (gethash x.class class->info-st)
+			  (make-classinfo :normal-metaclass-p t ; XXX
+					  :dict (dict x.class)
+					  :dict-timestamp (py-dict-id (dict x.class))
+					  :__getattribute__ __getattribute__
+					  :__getattr__ __getattr__
+					  :class-attr-ht (let ((ht (make-hash-table :test #'eq)))
+							   (setf (gethash attr.as_sym ht) class-attr)
+							   ht)))))))
+      
     (let ((__getattribute__ (classinfo-__getattribute__ cls-info))
-	  (__getattr__      (classinfo-__getattr__ cls-info)))
-      
-      ;; Try __getattribute__
-      (unless inside-object-getattribute
-	(when __getattribute__
-	  (assert (not (eq __getattribute__ #'py-object.__getattribute__)))
-	  (handler-case
-	      (values (py-call (bind-val __getattribute__ x x.class) attr.as_string))
-	    (|AttributeError| () nil)
-	    ;; __getattribute__ gave exception; also trying __getattr__ (if present)
-	    (:no-error (val) (return-from py-attr-class-dicts-cached val)))))
-      
-      ;; when __getattribute__ raised error, try __getattr__
-      (when (and __getattribute__ __getattr__)
-	(return-from py-attr-class-dicts-cached
-	  (py-call (bind-val __getattr__ x x.class) attr.as_string)))
-      
-      ;; class attribute
-      (let ((val (gethash attr.as_sym (classinfo-class-attr-ht cls-info))))
-	(when val
-	  (return-from py-attr-class-dicts-cached
-	    (values nil __getattr__ val)))))))
+	  (__getattr__      (classinfo-__getattr__ cls-info))
+	  (class-attr       (gethash attr.as_sym (classinfo-class-attr-ht cls-info))))
+
+      (when __getattribute__
+	(let ((res (try-calling-getattribute __getattribute__ x x.class attr.as_string)))
+	  (when res (return-from py-attr-class-dicts-cached res))
+	  ;; If __getattribute__ exists but gave exception, class-attr will not be looked up.
+	  (setf class-attr nil)))
+
+      (values nil __getattr__ class-attr))))
