@@ -1371,8 +1371,9 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
    (dyn-globals    :initarg :dyn-globals    :type hash-table
 		   :initform (make-hash-table :test #'eq))
    (name           :initarg :name           :type symbol :initform "__main__" :accessor py-module-name)
-   (filepath       :initarg :path                        :initform nil)
-   (builtinp       :initarg :builtin        :initform nil))
+   (filepath       :initarg :path           :initform nil)
+   (builtinp       :initarg :builtin        :initform nil)
+   (packagep       :initarg :package        :initform :maybe :accessor py-module-package-p))
   (:metaclass py-user-type))
 
 ;; XXX module has dict attribute, but it is not updated correctly
@@ -1403,12 +1404,17 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 
 (defun py-module-get-items (x &key import-*)
   (check-type x py-module)
-  (with-slots (globals-names globals-values dyn-globals) x
-    (let ((full-list (nconc (loop for k across globals-names and v across globals-values
-				when v collect (cons k v))
-			    (loop for k being the hash-key in dyn-globals
-				using (hash-value v)
-				collect (cons k v)))))
+  (flet ((return-name-p (name)
+	   (or (not import-*)
+	       (char/= (aref name 0) #\_))))
+    (with-slots (globals-names globals-values dyn-globals) x
+      (let ((full-list (nconc (loop for k across globals-names and v across globals-values
+				  when (and v (return-name-p k))
+				  collect (cons k v))
+			      (loop for k being the hash-key in dyn-globals
+				  using (hash-value v)
+				  when (return-name-p k)
+				  collect (cons k v)))))
       (when import-*
 	;; Only those names listed in the module's __all__ attribute
 	;; XXX Error when name in __all__ not bound?
@@ -1419,7 +1425,7 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 		(delete-if-not (lambda (kv) (member (car kv) all-names-list :test #'string=))
 			       full-list))))))
 
-      full-list)))
+      full-list))))
 
 (defun py-module-set-kv (x k v)
   (check-type x py-module)
@@ -1473,6 +1479,10 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 (def-py-method py-module.__setattr__ (x^ attr val)
   (when (slot-value x 'builtinp)
     (warn "Setting attribute '~A' on built-in module ~A." attr x))
+  (set-module-attr x attr val))
+  
+(defun set-module-attr (x attr val)
+  (check-type x py-module)
   (let ((attr.sym (py-string-val->symbol attr :intern nil)))
     (with-slots (name globals-names globals-values dyn-globals) x
 
@@ -1481,10 +1491,22 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 	;; If symbol not interned, then it cannot be in the globals-names vector
 	(let ((i (position attr.sym globals-names :test #'eq)))
 	  (when i
-	    (setf (svref globals-values i) val)
-	    (return-from py-module.__setattr__))))
+	    (let ((old (svref globals-values i)))
+	      (setf (svref globals-values i) val)
+	      (return-from set-module-attr old)))))
       
-      (setf (gethash (or attr.sym attr) dyn-globals) val))))
+      (prog1
+	  (gethash (or attr.sym attr) dyn-globals)
+	(if val
+	    (setf (gethash (or attr.sym attr) dyn-globals) val)
+	  (remhash (or attr.sym attr) dyn-globals))))))
+  
+(def-py-method py-module.__delattr__ (x^ attr)
+  (when (slot-value x 'builtinp)
+    (warn "Deleting attribute '~A' on built-in module ~A." attr x))
+  (set-module-attr x attr nil)
+  *the-none*)
+  
 
 ;; Modules are kept in a dictionary `sys.modules', mapping from string
 ;; to module object. For now, we keep a symbol->module hash table.
@@ -1506,73 +1528,132 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 			 rt))))
      ,@body))
 
-(defun py-import (mod-name &key force-reload (verbose t))
+(defun py-import (mod-name-as-list &rest options &key force-reload (verbose t))
   ;; Registers module in *py-modules* and returns it.
-  ;; XXX Cannot import from directories yet...
-  (declare (special *builtin-modules*))
-  (assert (symbolp mod-name))
+  (declare (special *builtin-modules*)
+	   (optimize (debug 3)))
+  (assert (listp mod-name-as-list))
   
-  (flet ((recompile-py-if-needed (mod-name py-fname fasl-fname path)
-	   (let* ((*current-module-name* (string mod-name)) ;; used by compiler
-		  (*current-module-path* path)) ;; XXX must become path
-	     (declare (special *current-module-name* *current-module-path*))
-	     (with-py-readtable
-		 (let ((fname (format nil "~A/~A" path py-fname)))
-		   (when (handler-case (excl.osi:stat fname)
-			   (excl:syscall-error () nil))
-		     (let ((fasl-name (format nil "~A/~A" path fasl-fname)))
-		       (compile-file fname
-				     :output-file fasl-name
-				     :if-newer (not force-reload)
-				     :verbose verbose)
-		       fasl-name)))))))
+  (labels ((builtin-module (name)
+	     (when (listp name)
+	       (setf name (dotted-name name)))
+	     (assert (stringp name))
+	     (gethash (intern name #.*package*) *builtin-modules*))
+	   (imported-module (name)
+	     (when (listp name)
+	       (setf name (dotted-name name)))
+	     (assert (stringp name))
+	     (gethash (intern name #.*package*) *py-modules*))
+	   (register-module (name mod-obj)
+	     (when (listp name)
+	       (setf name (dotted-name name)))
+	     (assert (stringp name))
+	     (setf (gethash (intern name #.*package*) *py-modules*) mod-obj))
+	   (path-kind (path)
+	     (assert (stringp path))
+	     (cond ((not (probe-file path))       nil)
+		   ((excl:file-directory-p path) :directory)
+		   (t                            :file)))
+	   (dotted-name (list-name)
+	     (format nil "~{~A~^.~}" list-name))
+	   (recompile-py-if-needed (mod-name py-fname fasl-fname)
+	     (let* ((*current-module-name* (string mod-name)) ;; used by compiler
+		    (*current-module-path* py-fname))
+	       (declare (special *current-module-name* *current-module-path*))
+	       (with-py-readtable
+		   (compile-file py-fname
+				 :output-file fasl-fname
+				 :if-newer (not force-reload)
+				 :verbose verbose))))
+	   (search-paths ()
+	     (if (> (length mod-name-as-list) 1)
+		 
+		 (let ((parent-mod (apply #'py-import (butlast mod-name-as-list) options)))
+		   (unless (py-module-package-p parent-mod)
+		     (py-raise '|ImportError|
+			       "Cannot import '~A', as '~A' is not a package (directory)"
+			       (dotted-name mod-name-as-list)
+			       (dotted-name (butlast mod-name-as-list))))
+		   (let ((parent-path (slot-value parent-mod 'filepath)))
+		     (assert (eq (path-kind parent-path) :file))
+		     (list (excl.osi:dirname parent-path))))
+	       
+	       (py-iterate->lisp-list (py-attr (gethash 'sys *py-modules*) 'path))))
 	   
-    (unless force-reload
-      (let ((existing-mod (gethash mod-name *py-modules*)))
-	(when existing-mod
-	  (return-from py-import existing-mod))))
+	   (py-file-to-load (paths pkg-name init-file file-name fasl-name)
+	     (dolist (path paths)
+	       ;; Try as package
+	       (let ((pkg-path (format nil "~A/~A" path pkg-name)))
+		 (when (eq (path-kind pkg-path) :directory)
+		   (let ((fn (format nil "~A/~A/~A" path pkg-name init-file)))
+		     (when (eq (path-kind fn) :file)
+		       (return-from py-file-to-load
+			 (values fn (format nil "~A/~A/__init__.fasl" path pkg-name))))
+		     (warn "During import of ~A: Directory ~A skipped, as it does not ~
+                            contain __init__.py" (dotted-name mod-name-as-list) path))))
+	       ;; Try as file
+	       (let ((fn (format nil "~A/~A" path file-name)))
+		 (when (eq (path-kind fn) :file)
+		   (return-from py-file-to-load
+		     (values fn (format nil "~A/~A" path fasl-name))))))))
     
+    ;; Module already imported earlier?
+    (unless force-reload
+      (when (imported-module mod-name-as-list)
+	(return-from py-import (imported-module mod-name-as-list))))
+    
+    ;; Reloading built-in module?
     (when (and force-reload
-	       (let ((imported-module (gethash mod-name *py-modules*))
-		     (builtin-module (gethash mod-name *builtin-modules*)))
-		 (and imported-module 
-		      builtin-module
-		      (eq imported-module builtin-module))))
+	       (imported-module mod-name-as-list)
+	       (eq (imported-module mod-name-as-list) (builtin-module mod-name-as-list)))
       ;; reloading built-in module
       ;; for now, does not remove user-set attributes (import sys; sys.a = 3; reload(sys); sys.a == 3)
-      (return-from py-import (gethash mod-name *builtin-modules*)))
-       
-    (let* ((py-fname (format nil "~A.py" mod-name))
-	   (fasl-fname (format nil "~A.fasl" mod-name))
-	   (old-module (gethash mod-name *py-modules*))
-	   (new-module nil)
-	  
-	   (*module-hook* (lambda (mod) (setf new-module mod))))
-      (declare (special *module-hook*))
+      (return-from py-import (builtin-module mod-name-as-list)))
+
+    ;; In case of a dotted import ("import a.b"), search in at parent module directory.
+    ;; Otherwise, look in `sys.path'.
+    (let* ((pkg-name     (string (car (last mod-name-as-list))))
+	   (file-name    (format nil "~A.py" pkg-name))
+	   (fasl-name    (format nil "~A.fasl" pkg-name))
+	   (init-file    "__init__.py"))
       
-      (loop for path in (py-iterate->lisp-list (py-attr (gethash 'sys *py-modules*) 'path))
-	  for fasl-file = (recompile-py-if-needed mod-name py-fname fasl-fname path)
-	  when fasl-file do
-	    (load fasl-file :verbose verbose)
-	    (return))
-       
-      (unless new-module
-	(py-raise '|ImportError|
-		  "CLPython bug: Module did not call *module-hook* upon loading"))
-       
-      (when old-module
-	;; Update old module object with info from new one
-	;; (slot `name' is assumed to be set correctly)
-	(dolist (f '(globals-names globals-values dyn-globals))
-	  (setf (slot-value old-module f) (slot-value new-module f)))
-	  
-	(setf new-module old-module))
+      (multiple-value-bind (py-file fasl-file)
+	  (py-file-to-load (search-paths) pkg-name init-file file-name fasl-name)
 	
-      (setf (gethash mod-name *py-modules*) new-module)
+	;; The user can shadow built-in module, therefore check only now.
+	(unless py-file
+	  (when (builtin-module mod-name-as-list)
+	    (return-from py-import (builtin-module mod-name-as-list))))
+		
+	(unless py-file (py-raise '|ImportError| "Could not find module '~A'"
+				  (dotted-name mod-name-as-list)))
+	;; Compile .py -> .fasl
+	(recompile-py-if-needed (dotted-name mod-name-as-list) py-file fasl-name)
+	
+	;; Load .fasl
+	(let* ((old-module (gethash mod-name-as-list *py-modules*))
+	       (new-module nil)
+	       (*module-hook* (lambda (mod) (setf new-module mod))))
+	  (declare (special *module-hook*))
+	  
+	  (load fasl-file :verbose verbose)
+	  
+	  (unless new-module
+	    (py-raise '|ImportError|
+		      "CLPython bug: Module ~A did not call *module-hook* upon loading"
+		      (dotted-name mod-name-as-list)))
+	  
+	  (if old-module
 
-      ;; Return new or update module
-      new-module)))
-
+	      (progn 
+		;; Update old module object with info from new one
+		;; (slot `name' is assumed to be set correctly)
+		(dolist (f '(globals-names globals-values dyn-globals))
+		  (setf (slot-value old-module f) (slot-value new-module f)))
+		(return-from py-import old-module))
+	    
+	    (progn (register-module mod-name-as-list new-module)
+		   (return-from py-import new-module))))))))
 
 ;; File (User object)
 
@@ -2363,6 +2444,12 @@ Creates a function for doing fast lookup, using jump table"
 	   (gethash k (py-dict-hash-table d))))
 
 (def-py-method py-dict.__iter__ (dict)
+  ;; Iterator over the keys.
+  ;; Due to the following in CLHS, the code is not portable:
+  ;;  "It is unspecified what happens if any of the implicit interior state of
+  ;;   an iteration is returned outside the dynamic extent of the
+  ;;   with-hash-table-iterator form such as by returning some closure over
+  ;;   the invocation form."
   (with-hash-table-iterator (next-func (py-dict-hash-table dict))
     (make-iterator-from-function
      :name :py-dict-iterator

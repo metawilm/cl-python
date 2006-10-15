@@ -558,7 +558,7 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
 
 (defun pybf:|reload| (m &optional (verbose 1))
   ;; VERBOSE is not a CPython argument
-  (py-import (py-string-val->symbol (slot-value m 'name))
+  (py-import (list (py-string-val->symbol (slot-value m 'name)))
 	     :force-reload t
 	     :verbose (when verbose (py-val->lisp-bool verbose)))
   m)

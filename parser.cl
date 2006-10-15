@@ -225,7 +225,14 @@
  (raise-stmt (|raise| test |,| test         ) ((list 'raise-stmt  $2  $4 nil)))
  (raise-stmt (|raise| test |,| test |,| test) ((list 'raise-stmt  $2  $4  $6)))
  
- ;; "import" module ["as" name] ( "," module ["as" name] )*
+ ;; import a, b        (import-stmt (((a)   nil) ((b) nil)))
+ ;; import a, b as b2  (import-stmt (((a)   nil) ((b) b2)))
+ ;; import a.b         (import-stmt (((a b) nil)))
+ ;; import a.b as c    (import-stmt (((a b) c)))
+ ;; from a   import b, c        (import-from-stmt (a)   ((b nil) (c nil)))
+ ;; from a.b import b, c as c2  (import-from-stmt (a b) ((b nil) (c c2)))
+ ;; from a   import *           (import-from-stmt (a)   *)
+ ;; from a.b import *           (import-from-stmt (a b) *)
  (import-stmt :or import-normal import-from)
  
  (import-normal (|import| dotted-as-name comma--dotted-as-name*) (`(import-stmt (,$2 ,@$3))))
@@ -233,27 +240,19 @@
  (comma--dotted-as-name ( |,| dotted-as-name) ($2))
  
  (import-from (|from| dotted-name |import| import-from-2) (`(import-from-stmt ,$2 ,$4)))
- (import-from-2 :or
-		|*|
-		((import-as-name comma--import-as-name*) . ((cons $1 $2))))
+ (import-from-2 :or |*| 
+		    ((import-as-name comma--import-as-name*) . ((cons $1 $2))))
  (:comma--import-as-name*)
  (comma--import-as-name (|,| import-as-name) ($2))
  
- (import-as-name (identifier)                   
-		 (`(|as| (identifier-expr ,$1) (identifier-expr ,$1))))
- (import-as-name (identifier |as| identifier)
-		 (`(|as| (identifier-expr ,$1) (identifier-expr ,$3))))
- (dotted-as-name (dotted-name)
-		 (`(|as| ,$1 ,$1)))
- (dotted-as-name (dotted-name |as| identifier)  
-		 (`(|as| ,$1 (identifier-expr ,$3))))
+ (import-as-name (identifier)                  (`(,$1 nil)))
+ (import-as-name (identifier |as| identifier)  (`(,$1 ,$3)))
+ (dotted-as-name (dotted-name)                 (`(,$1 nil)))
+ (dotted-as-name (dotted-name |as| identifier) (`(,$1 ,$3)))
  
- (dotted-name (identifier dot--name*)
-	      ((if $2
-		   `(attributeref-expr (identifier-expr ,$1) ,@$2)
-		 `(identifier-expr ,$1))))
+ (dotted-name (identifier dot--name*) (`(,$1 ,@$2)))
  (:dot--name*)
- (dot--name (|.| identifier) (`(identifier-expr ,$2)))
+ (dot--name (|.| identifier) ($2))
 
  (global-stmt (|global| identifier comma--identifier*)
 	      (`(global-stmt ,(if $3 (cons $2 $3) (list $2)))))

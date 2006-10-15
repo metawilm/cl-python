@@ -830,50 +830,35 @@ XXX Currently there is not way to set *__debug__* to False.")
 	 ,@(when else-clause
 	     `((t ,else-clause)))))
 
-(defmacro import-stmt (args)
-  `(progn ,@(loop for (as mod-path bind-name) in args
-		do (assert (eq as '|as|))
-		collect (ecase (car mod-path)
-			  
-			  (attributeref-expr
-			   ;; import a.b
-			   (break "TODO: (import-stmt ~A" args))
-			  
-			  (identifier-expr   ;; import a [as b]
-			   (let ((mod-name (second mod-path)))
-			     `(let ((module-obj (py-import ',mod-name)))
-				(assign-stmt module-obj (,bind-name)))))))))
-  
-(defmacro import-from-stmt (source-name items)
-  (ecase (car source-name)
-    
-    (attributeref-expr
-     ;; "from a.b import ..."
-     (break "TODO: dotted import, like:  from x.y import ..."))
-    
-    (identifier-expr
-     ;; "from a import ..."
-     (let ((mod-name (second source-name)))
-       `(let ((mod-obj (or (gethash ',mod-name *py-modules*)
-			   (py-import ',mod-name))))
-	  
-	  ,(if (eq items '|*|)
-	       
-	       ;; Bind all objects in module's dict in this namespace,
-	       ;; but skip names starting with underscore.
-	       `(let ((src-items (py-module-get-items mod-obj :import-* t)))
-		  (loop for (k . v) in src-items
-		      unless (char= (aref (symbol-name k) 0) #\_)
-		      do (py-module-set-kv +mod+ k v)))
-		  
-	     `(progn ,@(loop for (as item bind-name) in items
-			   do (assert (eq as '|as|))
-			      (assert (eq (car item) 'identifier-expr))
-			      (assert (eq (car bind-name) 'identifier-expr))
-			   collect
-			     `(assign-stmt (attributeref-expr mod-obj ,item)
-					   (,bind-name))))))))))
+(defmacro import-stmt (items)
+  `(values ,@(loop for (mod-name-as-list bind-name) in items
+		 collect (loop for m in mod-name-as-list
+				  for res = (list m) then (nconc res (list m))
+				  append `(let ((module-obj (py-import ',res)))
+					     (declare (ignorable module-obj))
+					     ,(cond ((= (length res) 1)
+						     (if (= 1 (length mod-name-as-list))
+							 `(assign-stmt module-obj
+								       ((identifier-expr ,(or bind-name
+											      (car mod-name-as-list)))))
+						       `(assign-stmt module-obj ((identifier-expr ,(car mod-name-as-list))))))
+						    ((and bind-name (= (length res) (length mod-name-as-list)))
+						     `(assign-stmt module-obj ((identifier-expr ,bind-name)))))
+					     ,(when (equalp res mod-name-as-list)
+						`module-obj))))))
 
+(defmacro import-from-stmt (mod-name-as-list items)
+  `(let ((mod-obj (py-import ',mod-name-as-list)))
+     ,@(if (eq items '|*|)
+
+	  `((let ((src-items (py-module-get-items mod-obj :import-* t)))
+	     (loop for (k . v) in src-items
+		 do (py-module-set-kv +mod+ k v))))
+	
+	 (loop for (item bind-name) in items
+	     collect `(assign-stmt (attributeref-expr mod-obj (identifier-expr ,item))
+				   ((identifier-expr ,(or bind-name item))))))))
+       
 (defmacro lambda-expr (args expr)
   ;; XXX Maybe treating lambda as a funcdef-stmt results in way more
   ;; code than necessary for the just one expression it contains.
