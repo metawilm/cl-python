@@ -94,7 +94,8 @@ Relevant Lisp variables:
 		 (assert (eq module-stmt 'module-stmt))
 		 (assert (eq (car suite) 'suite-stmt))
 
-		 (let ((val (block :val
+		 (let ((vals (multiple-value-list
+			     (block :val
 			      (loop
 				(let ((helper-func
 					 (compile nil `(lambda ()
@@ -121,20 +122,21 @@ Relevant Lisp variables:
 						       (funcall helper-func))
 						     (terpri)
 						     (prof:show-call-graph))
-					    (t (funcall helper-func)))))))))))
-		   (when val
-		     (remember-value val)
+					    (t (funcall helper-func))))))))))))
+		   (when (car vals)
+		     (remember-value (car vals))
 		     (block :repr
 		       (loop
 			 (with-simple-restart
 			     (:continue "Retry printing the object.")
 			   ;; Write string with quotes around it; convert other objects
 			   ;; using __str__ and print without quotes.
-			   (if (stringp val)
-			       (write-string (py-repr val)) 
-			     (let ((str-val (py-str-string val)))
-			       (write-string (py-val->string str-val)))) 
-			   (write-char #\Newline))
+			   (loop for val in vals
+			       do (if (stringp val)
+				      (write-string (py-repr val)) 
+				    (let ((str-val (py-str-string val)))
+				      (write-string (py-val->string str-val)))) 
+				  (write-char #\Newline)))
 			 (return-from :repr))))))))
     
       (loop
@@ -219,14 +221,15 @@ Relevant Lisp variables:
 				    (when (and lisp-form
 					       (not (member lisp-form '(def class for while if try)))) 
 				      (multiple-value-bind (res err) 
-					  (ignore-errors (eval lisp-form))
+					  (ignore-errors (multiple-value-list (eval lisp-form)))
 					(if (and (null res)
 						 (typep err 'condition))
 					    (format t ";; Evaluation as Lisp failed: ~A~%" err)
 					  (progn
-					    (remember-value res)
-					    (write res)
-					    (write-char #\Newline)
+					    (remember-value (car res))
+					    (dolist (r res)
+					      (write r)
+					      (write-char #\Newline))
 					    (setf acc nil))))))))))))))))))
 
 (defun prof (f kind)
