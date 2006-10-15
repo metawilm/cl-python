@@ -115,7 +115,8 @@
 (with-builtin-module ("time")
   
   ;; Current processor time, in seconds, floating point
-  (register 'clock (lambda () (coerce (/ (mp:process-cpu-msec-used sys:*current-process*) 1000)
+  (register 'clock (lambda () (coerce (/ (get-internal-run-time)
+					 internal-time-units-per-second)
 				      'float))))
 
 
