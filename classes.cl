@@ -1628,7 +1628,7 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 	(unless py-file (py-raise '|ImportError| "Could not find module '~A'"
 				  (dotted-name mod-name-as-list)))
 	;; Compile .py -> .fasl
-	(recompile-py-if-needed (dotted-name mod-name-as-list) py-file fasl-name)
+	(recompile-py-if-needed (dotted-name mod-name-as-list) py-file fasl-file)
 	
 	;; Load .fasl
 	(let* ((old-module (gethash mod-name-as-list *py-modules*))

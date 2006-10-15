@@ -832,9 +832,9 @@ XXX Currently there is not way to set *__debug__* to False.")
 
 (defmacro import-stmt (items)
   `(values ,@(loop for (mod-name-as-list bind-name) in items
-		 collect (loop for m in mod-name-as-list
-				  for res = (list m) then (nconc res (list m))
-				  append `(let ((module-obj (py-import ',res)))
+		 append (loop for m in mod-name-as-list
+				  for res = (list m) then (append res (list m))
+				  collect `(let ((module-obj (py-import ',res)))
 					     (declare (ignorable module-obj))
 					     ,(cond ((= (length res) 1)
 						     (if (= 1 (length mod-name-as-list))
