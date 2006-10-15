@@ -717,31 +717,16 @@ C must be either a character or NIL."
 	     (loop with vec = (make-array 5 :adjustable t :fill-pointer 0
 					  :element-type 'character)
 		 with ch = (read-chr-nil)
-			   
 		 initially 
-		 (when (/= 0 res)
-		   (vector-push-extend (code-char (+ (char-code #\0) res)) vec))
-			  
+		   (when (/= 0 res)
+		     (vector-push-extend (code-char (+ (char-code #\0) res)) vec))
+		 
 		 while (and ch (digit-char-p ch base))
 		 do (vector-push-extend ch vec)
 		    (setf ch (read-chr-nil))
 		    
-		 finally (when ch 
-			   (unread-chr ch))
-			 (with-standard-io-syntax 
-			   (let ((*read-base* base))
-			     (return (read-from-string vec)))))
-	     
-	     #+(or)
-	     ;; Equivalent code, but not calling the lisp reader,
-	     ;; slightly slower than the above.
-	     (loop with ch = (read-chr-nil)
-			while (and ch (digit-char-p ch base))
-			do (setf res (+ (* res base) (digit-char-p ch base))
-				 ch (read-chr-nil))
-			finally (when ch 
-				  (unread-chr ch))
-				(return res))))
+		 finally (when ch (unread-chr ch))
+			 (return (parse-integer vec :radix base)))))
 	  
       (if (char= first-char #\0)
 
@@ -795,9 +780,7 @@ C must be either a character or NIL."
 				    (unread-chr ch)
 				    (return (with-standard-io-syntax
 					      (read-from-string 
-					       (make-array (length lst)
-							   :initial-contents lst
-							   :element-type 'character)))))))
+					       (coerce lst 'string)))))))
 		      
 	      (when dot? (unread-chr dot?)))))
 	
@@ -851,7 +834,6 @@ C must be either a character or NIL."
 	;; octal (becomes decimal!!?)  and allows 'L' for decimal,
 	;; hex, octal
 	
-
 	;; suffix `L' for `long integer'
 	(unless (or has-frac has-exp)
 	  (let ((ch (read-chr-nil)))

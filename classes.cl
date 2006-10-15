@@ -1518,7 +1518,6 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 	     (declare (special *current-module-name* *current-module-path*))
 	     (with-py-readtable
 		 (let ((fname (format nil "~A/~A" path py-fname)))
-		   (warn "fn: ~A" fname)
 		   (when (handler-case (excl.osi:stat fname)
 			   (excl:syscall-error () nil))
 		     (let ((fasl-name (format nil "~A/~A" path fasl-fname)))
@@ -2081,6 +2080,10 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 			       base (py-val->integer base :min 0))
 			 
 			 (flet ((read-arg (arg &optional (base 10))
+				  ;; Can't use (parse-integer arg :radix base)
+				  ;; because that does not accept "1.2".
+				  ;; Can't use (parse-integer arg :radix base :junk-allowed t)
+				  ;; because that accepts "1.2asdjfkalsjdf".
 				  (let ((v (with-standard-io-syntax
 					     (let ((*read-base* base))
 					       (read-from-string arg)))))
@@ -2891,35 +2894,24 @@ Creates a function for doing fast lookup, using jump table"
       else if (and (setf c (py-val->string c))
 		   (= (length c) 1)) collect (aref c 0)
       else do (py-raise '|ValueError|
-			"string.strip wants list of single-char string, got: ~S"
+			"string.strip wants list of single-char strings, got: ~S"
 			char-list)))
 
 (def-py-method py-string.lstrip (x^ &optional (chars '(#\Newline #\Space #\Tab)))
-  (let* ((veri-cs (verify-string-strip-chars chars))
-	 (new-start (loop for ch across x and i from 0
-			while (member ch veri-cs)
-			finally (return i))))
-    (subseq x new-start)))
+  (string-left-trim (verify-string-strip-chars chars) x))
   
 (def-py-method py-string.rstrip (x^ &optional (chars '(#\Newline #\Space #\Tab)))
-  (let* ((veri-cs (verify-string-strip-chars chars))
-	 (new-end (1+ (loop for i from (1- (length x)) downto 0
-			  while (member (aref x i) veri-cs)
-			  finally (return i)))))
-    (subseq x 0 new-end)))
+  (string-right-trim (verify-string-strip-chars chars) x))
 
 (def-py-method py-string.strip (x &optional (chars '(#\Newline #\Space #\Tab)))
-  (py-string.rstrip (py-string.lstrip x chars) chars))
+  (string-trim (verify-string-strip-chars chars) x))
 
 (def-py-method py-string.replace (x^ old new &optional count^)
-  (let ((olds (py-val->string old))
-	(news (py-val->string new)))
-    (substitute news olds x :count count)))
+  (substitute (py-val->string new) (py-val->string old) x :count count))
 
 (def-py-method py-string.upper (x^)
   (string-upcase x))
    
-
 
 ;; Tuple (Lisp object: consed list)
 
@@ -3062,6 +3054,7 @@ Creates a function for doing fast lookup, using jump table"
 ;;; Attributes are a fundamental thing: getting, setting, deleting
 
 (defvar *py-attr-sym* nil)
+(defparameter *use-py-attr-cache* nil)
 
 (defun py-attr (x attr.as_sym &key (bind-class-attr t) via-getattr)
   ;; If BIND-CLASS-ATTR = NIL, then if the attribute value is a function
@@ -4125,6 +4118,7 @@ the lisp list will be returned).")
 
 (defun signal-class-dict-changed (dict key)
   (declare (ignore key))
+  (declare (special *class-dict->classes*))
   (mapcar #'clear-cached-classinfo (gethash dict *class-dict->classes*)) ;; not all clearing is required... XXX
   #+(or)(warn "** Class had attribute ~A modified" attr))
    
@@ -4167,17 +4161,15 @@ the lisp list will be returned).")
 		  :__getattr__ (recursive-class-dict-lookup cls '|__getattr__|)
 		  :class-attr-ht (make-hash-table :test #'eq))) ;; attr -> class that has it in dict
 
-(defparameter *use-py-attr-cache* nil)
-
 (defun py-attr-class-dicts-cached (x x.class attr.as_string attr.as_sym inside-object-getattribute)
   "If attribute value Returns "
   
-  (let ((cls-info (or (gethash x.class class->info-st)
+  (let ((cls-info (or (gethash x.class *class->info-st*)
 		      (multiple-value-bind (__getattribute__ __getattr__ class-attr)
 			  (py-attr-class-dicts x x.class attr.as_string attr.as_sym inside-object-getattribute
 					       :just-look t)
 			  
-			(setf (gethash x.class class->info-st)
+			(setf (gethash x.class *class->info-st*)
 			  (make-classinfo :normal-metaclass-p t ; XXX
 					  :dict (dict x.class)
 					  :dict-timestamp (py-dict-id (dict x.class))
