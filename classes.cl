@@ -757,10 +757,9 @@
 (defmethod py-function-name ((x t))
   ;; fall-back
   (format nil "~A" x))
-   
-(def-py-method py-function.__call__ (func)
-  func)
 
+(def-py-method py-function.__call__ (func &rest args)
+  (apply func args))
 
 ;; Enumerate (core object)
 
