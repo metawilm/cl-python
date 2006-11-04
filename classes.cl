@@ -1481,24 +1481,28 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
   (set-module-attr x attr val))
   
 (defun set-module-attr (x attr val)
+  "Returns new value"
   (check-type x py-module)
   (let ((attr.sym (py-string-val->symbol attr :intern nil)))
     (with-slots (name globals-names globals-values dyn-globals) x
 
       ;; XXX Does x.attr.__set__ play a role? (Think not)
-      (when attr.sym 
+      (when attr.sym
 	;; If symbol not interned, then it cannot be in the globals-names vector
 	(let ((i (position attr.sym globals-names :test #'eq)))
 	  (when i
-	    (let ((old (svref globals-values i)))
-	      (setf (svref globals-values i) val)
-	      (return-from set-module-attr old)))))
+	    (unless (or val (svref globals-names i))
+	      (py-raise 'Attribute "Module ~A has no attribute ~A to delete" x attr))
+	    (setf (svref globals-values i) val)
+	    (return-from set-module-attr val))))
       
-      (prog1
-	  (gethash (or attr.sym attr) dyn-globals)
+      (progn
+	(unless (or val (gethash (or attr.sym attr) dyn-globals))
+	  (py-raise '|AttributeError| "Module ~A has no attribute ~A to delete" x attr))
 	(if val
 	    (setf (gethash (or attr.sym attr) dyn-globals) val)
-	  (remhash (or attr.sym attr) dyn-globals))))))
+	  (remhash (or attr.sym attr) dyn-globals))
+	val))))
   
 (def-py-method py-module.__delattr__ (x^ attr)
   (when (slot-value x 'builtinp)
@@ -1527,12 +1531,14 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 			 rt))))
      ,@body))
 
-(defun py-import (mod-name-as-list &rest options &key force-reload (verbose t))
+(defun py-import (mod-name-as-list &rest options &key force-reload (verbose t) src-mod)
   ;; Registers module in *py-modules* and returns it.
+  ;; If SRC-MOD is supplied, then the directory of that module's .py file is the first
+  ;; directory in the search path. 
   (declare (special *builtin-modules*)
 	   (optimize (debug 3)))
   (assert (listp mod-name-as-list))
-  
+  (warn "py-import ~A  src=~A" mod-name-as-list src-mod) 
   (labels ((builtin-module (name)
 	     (when (listp name)
 	       (setf name (dotted-name name)))
@@ -1577,7 +1583,10 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 		     (assert (eq (path-kind parent-path) :file))
 		     (list (excl.osi:dirname parent-path))))
 	       
-	       (py-iterate->lisp-list (py-attr (gethash 'sys *py-modules*) 'path))))
+	       (append
+		(when (and src-mod (slot-value src-mod 'filepath))
+		  (list (excl:path-pathname (slot-value src-mod 'filepath)))) ;; XXX take directory
+		(py-iterate->lisp-list (py-attr (gethash 'sys *py-modules*) 'path)))))
 	   
 	   (py-file-to-load (paths pkg-name init-file file-name fasl-name)
 	     (dolist (path paths)
@@ -1624,8 +1633,8 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 	  (when (builtin-module mod-name-as-list)
 	    (return-from py-import (builtin-module mod-name-as-list))))
 		
-	(unless py-file (py-raise '|ImportError| "Could not find module '~A'"
-				  (dotted-name mod-name-as-list)))
+	(unless py-file (py-raise '|ImportError| "Could not find module '~A'; ~_search paths tried: ~A"
+				  (dotted-name mod-name-as-list) (search-paths)))
 	;; Compile .py -> .fasl
 	(recompile-py-if-needed (dotted-name mod-name-as-list) py-file fasl-file)
 	
