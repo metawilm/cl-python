@@ -120,3 +120,5 @@
 				      'float))))
 
 
+(with-builtin-module ("math")
+  (register 'pi pi)) 
