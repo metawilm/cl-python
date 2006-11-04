@@ -212,13 +212,18 @@ READ-CHAR."
 		    (go next-char))
 
 		   ((char= c #\\) ;; next line is continuation of this one
-		    (let ((c2 (read-chr-nil)))
-		      (if (and c2 (char= c2 #\Newline))
-			  (go next-char)
-			(py-raise '|SyntaxError|
+		    (let ((c2 (read-chr-error)))
+		      (cond ((char= c2 #\Newline))
+			    ((char= c2 #\Return)
+			     (let ((c3 (read-chr-nil)))
+			       (unless (char= c3 #\Newline) ;; \r\n
+				 (unread-char c3))))
+			    (t 
+			      (py-raise '|SyntaxError|
 				  "Continuation character '\\' must be followed by Newline, ~
-                                   but got: '~A' (~S) (line ~A)."
-				  c2 c2 *curr-src-line*))))
+                                   but got: '~A' (~S) (line ~A)." c2 c2 *curr-src-line*))))
+		    (incf *curr-src-line*)
+		    (go next-char))
 		   
 		   ((char= c #\$)
 		    ;; Lisp-Python syntax
