@@ -1557,6 +1557,11 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 	       (setf name (dotted-name name)))
 	     (assert (stringp name))
 	     (setf (gethash (intern name #.*package*) *py-modules*) mod-obj))
+	   (unregister-module (name)
+	     (when (listp name)
+	       (setf name (dotted-name name)))
+	     (assert (stringp name))
+	     (remhash (intern name #.*package*) *py-modules*))
 	   (path-kind (path)
 	     (assert (stringp path))
 	     (cond ((not (probe-file path))       nil)
@@ -1636,7 +1641,7 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 	  (when (builtin-module mod-name-as-list)
 	    (return-from py-import (builtin-module mod-name-as-list))))
 		
-	(unless py-file (py-raise '|ImportError| "Could not find module '~A'; ~_search paths tried: ~A"
+	(unless py-file (py-raise '|ImportError| "Could not find module '~A'; ~_search paths tried: ~{~S~^, ~}"
 				  (dotted-name mod-name-as-list) (search-paths)))
 	;; Compile .py -> .fasl
 	(recompile-py-if-needed (dotted-name mod-name-as-list) py-file fasl-file)
@@ -1651,8 +1656,15 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 				(register-module mod-name-as-list new-module))))
 	  (declare (special *module-hook*))
 	  
-	  (load fasl-file :verbose verbose)
-	  
+	  (let ((success nil))
+	    (unwind-protect
+		(progn (load fasl-file :verbose verbose)
+		       (setf success t))
+	      (unless success
+		(unregister-module mod-name-as-list)
+		(warn "Loading of module \"~A\" aborted ~@[(within ~A)~]"
+		      (dotted-name mod-name-as-list) src-mod))))
+	  	  
 	  (unless new-module
 	    (py-raise '|ImportError|
 		      "CLPython bug: Module ~A did not call *module-hook* upon loading"
@@ -2472,6 +2484,9 @@ Creates a function for doing fast lookup, using jump table"
 			(declare (ignore val))
 			(when ret key))))))
 
+(def-py-method py-dict.__len__ (dict)
+  (hash-table-count (py-dict-hash-table dict)))
+
 (def-py-method py-dict.__nonzero__ (dict)
   (py-bool (> (hash-table-count (py-dict-hash-table dict)) 0)))
 
@@ -2509,6 +2524,10 @@ Creates a function for doing fast lookup, using jump table"
 			seq)
     d))
 
+(def-py-method py-dict.get (x k &optional (default *the-none*))
+  (or (py-dict-getitem x k)
+      default))
+      
 (def-py-method py-dict.has_key (x k)
   (py-bool (py-dict-getitem x k)))
   
