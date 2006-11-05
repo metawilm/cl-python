@@ -1404,6 +1404,9 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 (defun py-module-get-items (x &key import-*)
   (check-type x py-module)
   (flet ((return-name-p (name)
+	   (when (symbolp name)
+	     (setf name (symbol-name name)))
+	   (check-type name string)
 	   (or (not import-*)
 	       (char/= (aref name 0) #\_))))
     (with-slots (globals-names globals-values dyn-globals) x
@@ -2337,7 +2340,7 @@ Creates a function for doing fast lookup, using jump table"
 						  (if candidates
 						      `(cond ,@(loop for (c val) in candidates
 								   collect `((eq x ',c)
-									     ,val)))
+									     ',val)))
 						    nil))))))))))))
     (compile nil f)))
 
@@ -2488,7 +2491,16 @@ Creates a function for doing fast lookup, using jump table"
   
 (def-py-method py-dict.__setitem__ (x key val)
   (py-dict-setitem x key val))
-  
+
+(def-py-method py-dict.copy (x)
+  (loop
+      with copy = (make-dict)
+      with copy.ht = (py-dict-hash-table copy)
+      with x.ht = (py-dict-hash-table x)
+      for k being the hash-key in x.ht using (hash-value v)
+      do (setf (gethash k copy.ht) v)
+      finally (return copy)))
+
 (def-py-method py-dict.fromkeys :static (seq &optional val)
   (unless val
     (setf val *the-none*))
@@ -2497,6 +2509,9 @@ Creates a function for doing fast lookup, using jump table"
 			seq)
     d))
 
+(def-py-method py-dict.has_key (x k)
+  (py-bool (py-dict-getitem x k)))
+  
 (def-py-method py-dict.items (x)
   (make-py-list-from-list
    (loop for k being the hash-key in (py-dict-hash-table x)
