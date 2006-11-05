@@ -1641,7 +1641,11 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 	;; Load .fasl
 	(let* ((old-module (gethash mod-name-as-list *py-modules*))
 	       (new-module nil)
-	       (*module-hook* (lambda (mod) (setf new-module mod))))
+	       (*module-hook* (lambda (mod)
+				(setf new-module mod)
+				;; Need to register module before it is fully loaded,
+				;; otherwise infinite recursion if modules import each other.
+				(register-module mod-name-as-list new-module))))
 	  (declare (special *module-hook*))
 	  
 	  (load fasl-file :verbose verbose)
@@ -1660,8 +1664,7 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 		  (setf (slot-value old-module f) (slot-value new-module f)))
 		(return-from py-import old-module))
 	    
-	    (progn (register-module mod-name-as-list new-module)
-		   (return-from py-import new-module))))))))
+	    (return-from py-import new-module)))))))
 
 ;; File (User object)
 

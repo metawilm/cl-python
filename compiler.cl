@@ -879,16 +879,16 @@ XXX Currently there is not way to set *__debug__* to False.")
 		for v across +mod-static-globals-values+
 		do (format t "~A: ~A~%" n v))
 	    
+	    ,@(when call-hook
+		`((when *module-hook*
+		    (funcall *module-hook* +mod+))))
+	    
 	    (with-pydecl
 		((:mod-globals-names  ,glob-names)
 		 (:context            :module)
 		 (:mod-futures        :todo-parse-module-ast-future-imports))
 	      
-	      ,@body)
-
-	    ,@(when call-hook
-		`((when *module-hook*
-		    (funcall *module-hook* +mod+)))))))
+	      ,@body))))
 
 (defmacro create-module-globals-dict ()
   `(module-make-globals-dict
