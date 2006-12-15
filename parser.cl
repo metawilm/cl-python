@@ -127,7 +127,7 @@
 				      (push (cdr p) kw)
 				      (setf seen-kwarg (cdr p)))
 				     (seen-kwarg
-				      (py-raise 'SyntaxError
+				      (py-raise '|SyntaxError|
 						"Positional arguments should precede keyword arguments ~
                                                  (found pos arg `~A' after kw arg `~A')" seen-kwarg p))
 				     (t (push p pos)))
