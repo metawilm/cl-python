@@ -140,12 +140,15 @@
   (let* ((x.len (length x))
 	 (i2 (if (< item 0) (+ item x.len) item)))
     (if (<= 0 i2 (1- x.len))
-	(if (null val)
-	    (progn (loop for i from (1+ i2) below x.len
-		       do (setf (aref x (1- i)) (aref x i)))
-		   (decf (fill-pointer x)))
-	  (setf (aref x i2) val))
-      (call-next-method))))
+	(progn
+	  (when (stringp x)
+	    (call-next-method)) ;; error
+	  (if (null val)
+	      (progn (loop for i from (1+ i2) below x.len
+			 do (setf (aref x (1- i)) (aref x i)))
+		     (decf (fill-pointer x)))
+	    (setf (aref x i2) val)))
+      (call-next-method)))) ;; error
 
 (defmethod py-subs ((x py-dict) item)
   (if (eq (class-of x) (ltv-find-class 'py-dict))
