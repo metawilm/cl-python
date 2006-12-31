@@ -49,10 +49,10 @@
   (let* ((dyn-globals (slot-value *repl-mod* 'dyn-globals)))
     
     (declare (special *the-none*))
-    (setf (gethash '_   dyn-globals) *the-none*
-	  (gethash '__  dyn-globals) *the-none*
-	  (gethash '___ dyn-globals) *the-none*
-	  (gethash '__name__ dyn-globals) "__main__")
+    (setf (gethash '|_|        dyn-globals) *the-none*
+	  (gethash '|__|       dyn-globals) *the-none*
+	  (gethash '|___|      dyn-globals) *the-none*
+	  (gethash '|__name__| dyn-globals) "__main__")
     
     (labels ((print-cmds ()
 	       (format t "
