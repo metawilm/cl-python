@@ -285,7 +285,7 @@ VALUE and TARGET context."
     
     (import-stmt
      ;; XXX http://www.python.org/doc/essays/packages.html
-     (warn "walking import-stmt: TODO")
+     #+(or)(warn "walking import-stmt: TODO")
      #+(or)(assert (not (or value target)))
      (values form t)
     
