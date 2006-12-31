@@ -287,23 +287,42 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
   "Without args, returns names in current scope. ~@
    With arg X, return list of valid attributes of X. ~@
    Result is sorted alphabetically, and may be incomplete."
-  (declare (ignore x))
-  (error "todo: dir"))
+  (let (res)
+    (flet ((add-dict (d)
+	     (when d
+	       (dolist (k (py-iterate->lisp-list (py-dict.keys d)))
+		 (pushnew k res)))))
+      ;; instance dict
+      (let ((d (dict x)))
+	(when d
+	  (add-dict (dict x))
+	  (pushnew "__dict__" res :test #'string=)))
+      (let ((x.class (py-class-of x)))
+        (loop for c in (mop:class-precedence-list x.class)
+	    until (or (eq c (ltv-find-class 'standard-class))
+		      (eq c (ltv-find-class 'py-dict-mixin))
+		      (eq c (ltv-find-class 'py-class-mixin))
+		      (eq c (ltv-find-class 'standard-generic-function)))
+	    do (add-dict (dict c)))))
+    (assert (every #'stringp res))
+    (setf res (sort res #'string<))
+    res))
 
 (defun pybf:|divmod| (x y)
   "Return (x/y, x%y) as tuple"
   (py-divmod x y))
 
 (defun pybf:|eval| (s &optional globals locals)
+  "Returns value of expression."
   (declare (ignore s globals locals))
-  ;; ( [user-]py-eval ...)
-  (error "todo: eval-string"))
+  (pybf::error-indirect-special-call '|eval|))
 
 (defun pybf:|execfile| (filename &optional globals locals)
   "Executes Python file FILENAME in a scope with LOCALS (defaulting ~@
    to GLOBALS) and GLOBALS (defaulting to scope in which `execfile' ~@
-   is called) as local and global variables. Returns None."
+   is called) as local and global variables. Returns value of None."
   (declare (ignore filename globals locals))
+  
   (error "todo: execfile"))
 
 (defun pybf:|filter| (func iterable)
@@ -361,7 +380,7 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
 (defun pybf:|globals| ()
   "Return a dictionary (namespace) representing the current global symbol table. ~@
    This is the namespace of the current module."
-  (error "todo: globals"))
+  (pybf::error-indirect-special-call '|globals|))
 
 (defun pybf:|hasattr| (x name)
   "Returns True is X has attribute NAME, False if not. ~@
@@ -447,8 +466,13 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
   (py-len x))
 
 (defun pybf:|locals| ()
-  ;; return local variables
-  (error "todo: locals()"))
+  (pybf::error-indirect-special-call '|locals|))
+
+(defun pybf::error-indirect-special-call (which)
+  (py-raise '|ValueError| "Attempt to call the special built-in function `~A' indirectly. ~_~
+                           Either (1) call `~A' directly, e.g. `~A()' instead of ~
+                           `x = ~A; x()';~_    or (2) set ~A to ~A and recompile/re-evaluate the Python code."
+	    which which which which '*allow-indirect-special-call* t))
 
 (defun pybf:|map| (func &rest sequences)
   

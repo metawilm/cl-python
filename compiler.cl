@@ -80,21 +80,31 @@
 ;; 
 ;; As a workaround, those variable operations macroexpand into a
 ;; reference to *the-great-unknown*, about which nothing is known --
-;; least of all, if it's constant or not...
+;; least of all, whether it is a constant...
 
 (defvar *the-great-unknown*)
 
-
 (defmacro with-gensyms (list &body body)
-  ;;Actually, the new symbols are uninterned fresh symbols with
+  ;; Actually, the new symbols are uninterned fresh symbols with
   ;; the same name, not gensyms.
   `(let ,(loop for x in list
 	     collect `(,x (gensym ,(symbol-name x))))
      ,@body))
 
-;;; Compiler debugging and optimization options.
+
+;;; Compiler optimization and debugging options.
+
+(defvar *allow-indirect-special-call* nil
+  "Whether `eval', `locals' and `globals' can be called indirectly, like `x = locals; x()'
+When true, call expressions result in more code. It is rare for Python code to require this.")
+
 (defvar *mangle-private-variables* t ;; XXX not used yet
   "In class definitions, replace __foo by _C__foo, like CPython does")
+
+(defmacro with-complete-python-semantics (&body body)
+  `(let ((*allow-indirect-special-call* t)
+	 (*mangle-private-variables*    t))
+     ,@body))
 
 ;; Various settings
 
@@ -219,54 +229,136 @@ XXX Currently there is not way to set *__debug__* to False.")
 
 (defmacro binary-lazy-expr (op left right)
   (ecase op
-    (or `(let ((.left ,left))
-	   (if (py-val->lisp-bool .left)
-	       .left
-	     (let ((.right ,right))
-	       (if (py-val->lisp-bool .right)
-		   .right
-		 *the-false*)))))
+    (|or| `(let ((.left ,left))
+	     (if (py-val->lisp-bool .left)
+		 .left
+	       (let ((.right ,right))
+		 (if (py-val->lisp-bool .right)
+		     .right
+		   *the-false*)))))
     
-    (and `(let ((.left ,left))
-	    (if (py-val->lisp-bool .left)
-		,right
-	      .left)))))
+    (|and| `(let ((.left ,left))
+	      (if (py-val->lisp-bool .left)
+		  ,right
+		.left)))))
 
 (defmacro break-stmt (&environment e)
   (if (get-pydecl :inside-loop-p e)
       `(go :break)
     (py-raise '|SyntaxError| "BREAK was found outside loop")))
 
+(defparameter *special-calls*
+    (list (cons '|locals|  #'pybf:|locals|  )
+	  (cons '|globals| #'pybf:|globals| )
+	  (cons '|eval|    #'pybf:|eval|    )))
 
-(defmacro call-expr (primary (pos-args kwd-args *-arg **-arg))
-  
+(defmacro call-expr (&whole whole primary all-args &environment e)
   ;; For complete Python semantics, we should check for every call if
   ;; the function being called is one of the built-in functions EVAL,
   ;; LOCALS or GLOBALS, because they access the variable scope of the
-  ;; _caller_ (which is ugly).
+  ;; caller.
   ;; 
-  ;; At the module level, globals() and locals() are equivalent.
+  ;; As a compromise, by default we only check in case the name is
+  ;; literally used, so "x = locals()" will work, while
+  ;; "y = locals; y()" will not.
+  ;;
+  ;; But when *allow-indirect-special-call* is true, all calls
+  ;; are checked regardless the primitive's name
+  
+  (destructuring-bind (pos-args kwd-args *-arg **-arg)
+      all-args
+    
+    (labels ((%there-are-args ()
+	       (cond ((or pos-args kwd-args) `t)
+		     ((and *-arg **-arg)     `(or (py-iterate->lisp-list ,*-arg)
+						  (py-iterate->lisp-list ,**-arg)))
+		     (*-arg                  `(py-iterate->lisp-list ,*-arg))
+		     (**-arg                 `(py-iterate->lisp-list ,**-arg))
+		     (t                      `nil)))
+	     
+	     (%pos-args ()
+	       `(nconc (list ,@pos-args) ,(when *-arg `(py-iterate->lisp-list ,*-arg))))
+	     
+	     (%there-are-key-args ()
+	       (cond (kwd-args  `t)
+		     (**-arg    `(py-iterate->lisp-list ,**-arg))
+		     (t         `nil)))
+	     
+	     (%locals-dict ()
+	       (if (get-pydecl :inside-function-p e)
+		   `(.locals.)
+		  `(create-module-globals-dict)))
+	     
+	     (%globals-dict ()
+	       `(create-module-globals-dict))
+	     
+	     (%special-call (kind)
+	       (ecase kind
+		 ( |locals|  `(call-expr-locals  ,(%locals-dict)  ,(%there-are-args)))
+		 ( |globals| `(call-expr-globals ,(%globals-dict) ,(%there-are-args)))
+		 ( |eval|    `(call-expr-eval    ,(%locals-dict)  ,(%globals-dict)
+						 ,(%pos-args) ,(%there-are-key-args))))))
+      
+      (cond (*allow-indirect-special-call*
+	     ;; This could be refactored, by declaring one inner function in every funcdef,
+	     ;; handling the special calls.
+	     `(let* ((.prim ,primary)
+		     (.special-f (find .prim *special-calls* :key #'cdr)))
+		(ecase (car .special-f)
+		  ((nil)   (call-expr-1 .prim ,@(cddr whole)))
+		  ,@(loop for (name . nil) in *special-calls*
+			collect `(,name ,(%special-call name))))))
+	    
+	    ((and (listp primary)
+		  (eq (car primary) 'identifier-expr))
+	     ;; Support calling special functions by proper name.
+	     (let ((spec (find (second primary) *special-calls* :key #'car)))
+	       (if spec
+		   `(let* ((.prim ,primary))
+		      (if (eq .prim ,(cdr spec))
+			  ,(%special-call (car spec))
+			(call-expr-1 .prim ,@(cddr whole))))
+		 `(call-expr-1 ,@(cdr whole)))))
+	      
+	    (t     
+	     `(call-expr-1 ,@(cdr whole)))))))
 
+(defun call-expr-locals (locals-dict args-p)
+  (when args-p
+    (py-raise '|TypeError| "Built-in function `locals' does not take args."))
+  locals-dict)
+
+(defun call-expr-globals (globals-dict args-p)
+  (when args-p
+    (py-raise '|TypeError| "Built-in function `globals' does not take args."))
+  globals-dict)
+
+(defun call-expr-eval (locals-dict globals-dict pos-args key-args-p)
+  (when (or key-args-p 
+	    (not pos-args)
+	    (> (length pos-args) 3))
+    (py-raise '|TypeError| "Built-in function `eval' takes from 1 to three positional args."))
+  (let* ((string (pop pos-args))
+	 (glob-d (or (pop pos-args) globals-dict))
+	 (loc-d  (or (pop pos-args) locals-dict)))
+    
+    ;; Make it an EXEC stmt, but be sure to save the result.
+    (let* ((res nil)
+	   (*exec-stmt-result-handler* (lambda (val) (setf res val))))
+      (declare (special *exec-stmt-result-handler*))
+      (exec-stmt string glob-d loc-d :allowed-stmts '(module-stmt suite-stmt))
+      res)))
+
+(defmacro call-expr-1 (primary (pos-args kwd-args *-arg **-arg))
   (let ((kw-args (loop for ((i-e key) val) in kwd-args
 		     do (assert (eq i-e 'identifier-expr))
 		     collect (intern (symbol-name key) :keyword)
 		     collect val)))
-
-    ;; XXX Need to special-case "locals()", "globals()"
-    
-    (cond ((or kw-args **-arg)
-	   `(call-expr-pos+*+kw+** ,primary (list ,@pos-args) ,*-arg (list ,@kw-args) ,**-arg))
-	  
-	  ((and pos-args *-arg)
-	   `(call-expr-pos+* ,primary (list ,@pos-args) ,*-arg))
-	  
-	  (*-arg
-	   `(call-expr-* ,primary ,*-arg))
-	  
-	  (t
-	   `(py-call ,primary ,@pos-args)))))
-
-
+    (cond
+     ((or kw-args **-arg)  `(call-expr-pos+*+kw+** ,primary (list ,@pos-args) ,*-arg (list ,@kw-args) ,**-arg))
+     ((and pos-args *-arg) `(call-expr-pos+* ,primary (list ,@pos-args) ,*-arg))
+     (*-arg                `(call-expr-* ,primary ,*-arg))
+     (t                    `(py-call ,primary ,@pos-args)))))
 
 (defun call-expr-pos+*+kw+** (prim pos-args *-arg kw-args **-arg)
   (apply #'py-call prim
@@ -284,7 +376,6 @@ XXX Currently there is not way to set *__debug__* to False.")
   (apply #'py-call prim (py-iterate->lisp-list *-args)))
 
 (define-compiler-macro call-expr (&whole whole primary (pos-args kwd-args *-arg **-arg))
-  ;; XXX locals(), globals()
   (cond ((and (listp primary) 
 	      (eq (car primary) 'attributeref-expr)
 	      (null (or kwd-args *-arg **-arg)))
@@ -363,37 +454,48 @@ XXX Currently there is not way to set *__debug__* to False.")
 				      #.*package*)))
       
       (with-gensyms (cls)
-	`(let ((+cls-namespace+ (make-dict)))
-	   
-	   ;; First, run the statements in the body of the class
-	   ;; definition. This will fill +cls-namespace+ with the
-	   ;; class attributes and methods.
-	   
-	   (with-pydecl ((:context :class)
-			 (:context-stack ,new-context-stack)
-			 (:lexically-declared-globals ,(append 
-							(get-pydecl :lexically-declared-globals e)
-							globals)))
-
-	     ;; Note that the local class variables are not locally visible
-	     ;; i.e. they don't extend ":lexically-visible-vars"
-	   
-	     ,suite)
+	`(let ((new-cls-dict 
+		
+		;; Need a nested LET, as +cls-namespace+ may not be set when the ASSIGN-STMT
+		;; below is executed, as otherwise nested classes don't work.
+		(let ((+cls-namespace+ (make-dict)))
+		  
+		  ;; First, run the statements in the body of the class
+		  ;; definition. This will fill +cls-namespace+ with the
+		  ;; class attributes and methods.
+		  
+		  (with-pydecl ((:context :class)
+				(:context-stack ,new-context-stack)
+				(:lexically-declared-globals
+				 ,(append 
+				   (get-pydecl :lexically-declared-globals e)
+				   globals)))
+		    
+		    ;; Note that the local class variables are not locally visible
+		    ;; i.e. they don't extend ":lexically-visible-vars"
+		    ,suite)
+		  
+		  +cls-namespace+)))
 	   
 	   ;; Second, now that +cls-namespace+ is filled, make the
 	   ;; class with that as namespace.
-	   
 	   (let ((,cls (make-py-class :name ',cname
 				      :context-name ',context-cname
-				      :namespace +cls-namespace+
+				      :namespace new-cls-dict
 				      :supers (list ,@(second inheritance))
-				      :cls-metaclass (py-dict-getitem +cls-namespace+ "__metaclass__")
+				      :cls-metaclass (py-dict-getitem new-cls-dict "__metaclass__")
 				      :mod-metaclass
 				      ,(let ((ix (position '|__metaclass__|
 							   (get-pydecl :mod-globals-names e))))
 					 (if ix
 					     `(svref +mod-static-globals-values+ ,ix)
 					   `(gethash '|__metaclass__| +mod-dyn-globals+))))))
+
+	     ;; See comment for record-source-file at funcdef-stmt
+	     (excl:record-source-file ',context-cname :type :type)
+	     ,(let ((upcase-sym (intern (string-upcase context-cname) #.*package*)))
+		`(excl:record-source-file ',upcase-sym :type :type))
+	     
 	     (assign-stmt ,cls (,name))))))))
 
 (defmacro comparison-expr (cmp left right)
@@ -416,57 +518,71 @@ XXX Currently there is not way to set *__debug__* to False.")
 (defmacro dict-expr (alist)
   `(make-dict-unevaled-list ,alist))
 
-;; TODO review
-(defmacro exec-stmt (code globals locals &environment e)
+(defvar *exec-stmt-result-handler* nil)
+
+(defmacro exec-stmt (code globals locals &key (allowed-stmts t) &environment e)
   ;; TODO:
   ;;   - allow code object etc as CODE
   ;;   - when code is a constant string, parse it already at compile time etc
-  
+  ;;
   ;; An EXEC-STMT is translated into a Python suite containing a
   ;; function definition and a subsequent call of the function.
+  ;;
+  ;; ALLOWED-STMTS: if T:      allow all statements
+  ;;                   a list: allow only those statements
+  ;;                   NIL:    allow no statements
+  ;;  (not evaluated)
   
-  (let ((context (get-pydecl :context e)))
+  (let ((context (if locals
+		     "context-not-needed"
+		   (get-pydecl :context e))))
     
-    `(let* ((ast (parse-python-string ,code))
-	    (ast-suite (destructuring-bind (module-stmt suite) ast
-			 (assert (eq module-stmt 'module-stmt))
-			 (assert (eq (car suite) 'suite-stmt))
-			 suite))
-	      
-	    (locals-ht  (convert-to-namespace-ht 
-			 ,(or locals
-			      (if (eq context :module) `(.globals.) `(.locals.)))))
-	      
-	    (globals-ht (convert-to-namespace-ht ,(or globals `(.globals.))))
-	      
-	    (loc-kv-pairs (loop for k being the hash-key in locals-ht
-			      using (hash-value val)
-			      for k-sym = (py-string->symbol k)
-			      collect `(,k-sym ,val)))
-	      
-	    (lambda-body `(with-module-context (#() #() ,globals-ht)
-			    (suite-stmt
+    `(let ((ast (parse-python-string ,code)))
+       (when (ast-contains-stmt-p ast :allowed-stmts ,allowed-stmts)
+	 (py-raise '|TypeError|
+		   "No statements allowed in Python code string (got: ~S)" ,code))
+    
+       (let* ((ast-suite (destructuring-bind (module-stmt suite) ast
+			   (assert (eq module-stmt 'module-stmt))
+			   (assert (eq (car suite) 'suite-stmt))
+			   suite))
+	      (locals-ht  (convert-to-namespace-ht 
+			   ,(or locals
+				(if (eq context :module) `(create-module-globals-dict) `(.locals.)))))
+	      (globals-ht (convert-to-namespace-ht ,(or globals `(create-module-globals-dict))))
+	      (loc-kv-pairs (loop for k being the hash-key in (py-dict-hash-table locals-ht)
+				using (hash-value val)
+				for k-sym = (py-string->symbol k)
+				collect (list k-sym val)))
+	      (lambda-body `(with-module-context (#() #() (py-dict-hash-table ,globals-ht) :create-mod t)
+			      (suite-stmt
 
-			     ;; Create helper function
-			     ((funcdef-stmt  
-			       nil (identifier-expr exec-stmt-helper-func)
-			       (nil nil nil nil)
-			       (suite-stmt 
-
-				;; set local variables
-				,(loop for (k v) in loc-kv-pairs
-				     collect `(assign-stmt ,v ((identifier-expr ,k))))
-
-				;; execute suite
-				,ast-suite))
-			      
-			      ;; Call helper function
-			      (call-expr (identifier-expr exec-stmt-helper-func)
-					 (nil nil nil nil)))))))
-	      
-       (warn "EXEC-STMT: lambda-body: ~A" lambda-body)
-	 
-       (funcall (compile nil `(lambda () ,lambda-body))))))
+			       ;; Create helper function
+			       ((funcdef-stmt  
+				 nil (identifier-expr exec-stmt-helper-func)
+				 (nil nil nil nil)
+				 (suite-stmt
+				  ((block :foobar
+				     (suite-stmt 
+				      
+				      ;; set local variables
+				      (,@(loop for (k v) in loc-kv-pairs
+					     collect `(assign-stmt ,v ((identifier-expr ,k))))
+					 
+					 ;; execute suite
+					 (let ((res ,ast-suite))
+					   (when *exec-stmt-result-handler*
+					     (funcall *exec-stmt-result-handler* res))
+					   (return-from :foobar res))))))))
+				
+				;; Call helper function
+				(call-expr (identifier-expr exec-stmt-helper-func)
+					   (nil nil nil nil)))))))
+		       
+		       #+(or)(warn "EXEC-STMT: lambda-body: ~A" lambda-body)
+		       (funcall (compile nil `(lambda ()
+						(locally (declare (optimize (debug 3)))
+						  ,lambda-body))))))))
 
 (defmacro for-in-stmt (target source suite else-suite)
   (with-gensyms (f x)
@@ -578,11 +694,11 @@ XXX Currently there is not way to set *__debug__* to False.")
 		      (block :function-body
 			
 			(flet
-			    ,(when (funcdef-should-save-locals-p suite)
-			       `((.locals. () ;; lambdas and gen-exprs have 'locals()' too
-					   (make-locals-dict 
-					    ',locals-and-args-but-not-tuplevars
-					    (list ,@all-locals-and-arg-names)))))
+			    (,@(when (funcdef-should-save-locals-p suite)
+				 `((.locals. () ;; lambdas and gen-exprs have 'locals()' too
+					     (make-locals-dict 
+					      ',locals-and-args-but-not-tuplevars
+					      (list ,@all-locals-and-arg-names))))))
 			  
 			  (with-pydecl ((:lexically-declared-globals  ;; funcdef globals are also valid
 					 ,(append func-explicit-globals  ;; for inner functions
@@ -650,6 +766,13 @@ XXX Currently there is not way to set *__debug__* to False.")
 					((identifier-expr ,fname)))))
 		     ;;
 		     ;;;;;;;;;
+		     
+		     ;; Make source location known to Allegro, using "fi:lisp-find-definition".
+		     ;; Also record upper case version, apparently otherwise lower
+		     ;; case names must be |escaped|.
+		     (excl:record-source-file ',context-fname :type :operator)
+		     ,(let ((upcase-sym (intern (string-upcase context-fname) #.*package*)))
+			`(excl:record-source-file ',upcase-sym :type :operator))
 		     
 		     (identifier-expr ,fname)))))))))))
 
@@ -727,10 +850,8 @@ XXX Currently there is not way to set *__debug__* to False.")
 	       del-form)))))))) ;; bonus
 
 (defmacro identifier-expr (name &environment e)
-  
   ;; The identifier is used for its value; it is not an assignent
   ;; target (as the latter case is handled by ASSIGN-STMT).
-  
   (assert (symbolp name))
   
   (flet ((module-lookup ()
@@ -748,7 +869,7 @@ XXX Currently there is not way to set *__debug__* to False.")
 		  (unbound-variable-error ',name t)))))
     
     (ecase (get-pydecl :context e)
-
+      
       (:function (if (or (member name (get-pydecl :lexically-declared-globals e))
 			 (not (member name (get-pydecl :lexically-visible-vars e))))
 		     (module-lookup)
@@ -839,8 +960,8 @@ XXX Currently there is not way to set *__debug__* to False.")
 			       &body body)
   (check-type glob-names vector)
   ;;(check-type dyn-glob hash-table)
-  (assert (and (or create-mod existing-mod)
-	       (not (and create-mod existing-mod))))
+  (assert (or create-mod existing-mod))
+  (assert (not (and create-mod existing-mod)))
   `(progn (in-package :python)
 	  
 	  (let* ((+mod-static-globals-names+  ,glob-names)
@@ -891,9 +1012,9 @@ XXX Currently there is not way to set *__debug__* to False.")
 	      ,@body))))
 
 (defmacro create-module-globals-dict ()
-  `(module-make-globals-dict
-    ;; Updating this dict really modifies the globals.
-    +mod-static-globals-names+ +mod-static-globals-values+ +mod-dyn-globals+))
+  ;; Updating this dict really modifies the globals.
+  `(module-make-globals-dict +mod+
+			     +mod-static-globals-names+ +mod-static-globals-values+ +mod-dyn-globals+))
 
 (defun unbound-variable-error (name &optional resumable)
   (declare (special *py-signal-conditions*))
@@ -1011,7 +1132,7 @@ XXX Currently there is not way to set *__debug__* to False.")
 		 until (and (listp s) (eq (car s) 'assign-stmt))
 		 collect s into before
 		 finally (return (values before s (cdr sublist))))
-	 
+	   #+(or)(warn "bef: ~A  ass: ~A  after: ~A" before-stmts ass-stmt after-stmts)
 	   (assert ass-stmt)
 	   `(progn ,@(when before-stmts
 		       `((suite-stmt ,before-stmts))) ;; recursive, but doesn't contain assign-stmt
@@ -1063,17 +1184,22 @@ XXX Currently there is not way to set *__debug__* to False.")
     (warn "Raising string exceptions not supported (got: 'raise ~S')" exc))
   `(raise-stmt-1 ,exc ,var ,tb))
 
+(defparameter *try-except-current-handled-exception* nil)
 
 (defmacro try-except-stmt (suite except-clauses else-suite)
-
   ;; The Exception class in a clause is evaluated only after an
   ;; exception is thrown.
-  
   (with-gensyms (the-exc)
-      
     (flet ((handler->cond-clause (except-clause)
 	
 	     (destructuring-bind (exc var handler-suite) except-clause
+
+	       ;; Every handler should store the exception, so it can be returned
+	       ;; in sys.exc_info().
+	       (setq handler-suite
+		 `(progn (setf *try-except-current-handled-exception* ,the-exc)
+			 ,handler-suite))
+	       
 	       (cond ((null exc)
 		      `(t (progn ,handler-suite
 				 (return-from :try-except-stmt nil))))
@@ -1176,6 +1302,28 @@ XXX Currently there is not way to set *__debug__* to False.")
 ;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defun ast-contains-stmt-p (ast &key allowed-stmts)
+  (when (eq allowed-stmts t)
+    (return-from ast-contains-stmt-p nil))
+  (labels ((is-stmt-sym (s)
+	     (loop with s.name = (symbol-name s)
+		 when (<= (length s.name) 5) return nil
+		 with test = "-stmt" 
+		 for s.i from (- (length s.name) (length test))
+		 for j across test
+		 when (char= j (aref s.name s.i)) return t
+		 finally (return nil)))
+	   
+	   (test (ast)
+	     (typecase ast
+	       (list (loop for x in ast when (test x) return t finally (return nil)))
+	       (symbol (unless (member ast allowed-stmts :test #'eq)
+			 (when (is-stmt-sym ast)
+			   (return-from test t))))
+	       (t    nil))))
+    (test ast)))
+
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;
@@ -1303,39 +1451,28 @@ XXX Currently there is not way to set *__debug__* to False.")
   (make-dict-from-symbol-alist
    (delete nil (mapcar #'cons name-list value-list) :key #'cdr)))
 
-(defun module-make-globals-dict (names-vec values-vec dyn-globals-ht)
-  (warn "todo: module-make-globals-dict as proxy")
-  (make-dict-from-symbol-alist
-   (nconc (loop for name across names-vec and val across values-vec
-	      unless (null val) collect (cons name val))
-	  (loop for k being the hash-key in dyn-globals-ht using (hash-value v)
-	      collect (cons k v)))))
+(defun module-make-globals-dict (mod names-vec values-vec dyn-globals-ht)
+  (let ((d (make-dict-from-symbol-alist
+	    (nconc (loop for name across names-vec and val across values-vec
+		       unless (null val) collect (cons name val))
+		   (loop for k being the hash-key in dyn-globals-ht using (hash-value v)
+		       collect (cons k v))))))
+    (change-class d 'py-dict-moduledictproxy :module mod)
+    d))
 
 (defgeneric convert-to-namespace-ht (x)
-  
-  (:method :around (x)
-	   (declare (ignore x))
-	   (break "convert-to-namespace-ht needs to be updated to new DICT style"))
-  
   ;; Convert a Python dict to a namespace, by replacing all string
   ;; keys by corresponding symbols.
-  
-  (:method ((x hash-table))
-	   (loop with d = (make-hash-table :test #'eq) ;; XXX sometimes not needed
-	       for k being the hash-key in x using (hash-value v)
-	       for k-sym = (typecase k
-			     (string (intern k #.*package*))
-			     (symbol k)
-			     (t (error "Not a valid namespace hash-table,
-                                        as key is neither string or symbol: ~A ~A"
-				       k (type-of k))))
-	       do (setf (gethash k-sym d) v)
-	       finally (return d)))
-  
-  (:method ((x t))
-	   (let ((x2 (deproxy x)))
-	     (when (eq x x2) (error "invalid namespace: ~A" x))
-	     (convert-to-namespace-ht x2))))
+  (:method ((x py-dict))
+	   (let ((new (make-class-dict)))
+	     (loop for k being the hash-key in (py-dict-hash-table x) using (hash-value v)
+		 if (typep k '(or string symbol))
+		 do (py-dict-setitem new k v)
+		 else do (py-raise
+			  '|TypeError|
+			  "Cannot use ~A as namespace dict, because non-string key present: ~A"
+			  x k)
+		 finally (return new)))))
 
 (defun py-**-mapping->lisp-arg-list (**-arg)
   ;; Return list: ( :|key1| <val1> :|key2| <val2> ... )
@@ -1612,7 +1749,6 @@ Non-negative integer denoting the number of args otherwise."
 	 (make-array ,num-key-args :initial-contents (list ,@key-arg-default-asts)))
        
        (excl:named-function ,name
-	 
 	 (lambda (&rest %args)
 	   (declare (dynamic-extent %args)
 		    (optimize (safety 3) (debug 3)))

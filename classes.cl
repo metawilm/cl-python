@@ -174,14 +174,12 @@
 (defclass py-core-type   (py-type)   ())
 
 ;; User type/object
-
 (defclass py-user-type   (py-type) ())
 (defclass py-user-object (py-object)
   ((dict :initform (make-dict)))  ;; XXX __slots__ ignored
   (:metaclass py-user-type))
 
 ;; Lisp type/object
-
 (defclass py-lisp-type (py-type)
   ()
   (:documentation "Metaclass for proxy classes"))
@@ -193,7 +191,6 @@
 
 
 ;; Fix py-dict, to have py-core-object as superclass
-
 (mop:ensure-class 'py-dict
 		  :direct-superclasses (list 'py-lisp-object)
 		  :metaclass 'py-core-type)
@@ -751,8 +748,7 @@
 	       (py-function-name func))
 
 (defmethod py-function-name ((x function))
-  ;; OK?
-  (string (excl::func_name x)))
+  (format nil "~A" (excl::func_name x)))
 
 (defmethod py-function-name ((x t))
   ;; fall-back
@@ -1191,6 +1187,11 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
     (print-unreadable-object (x s :identity t :type nil)
       (format s "~A" (type-of x)))))
 
+(def-py-method py-object.__nonzero__ (x)
+  ;; By default, objects are nonzero. Override in subclass.
+  (declare (ignore x))
+  (py-bool t))
+
 (defun recursive-class-dict-lookup (cls attr &optional cls-list)
   ;; Look for ATTR in class CLS and all its superclasses.
   ;; and finally (which is in this implementation not a superclass of a class).
@@ -1440,7 +1441,9 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 	do (setf (aref globals-values i) v)
 	   (return)
 	finally
-	  (setf (gethash k dyn-globals) v))))
+	  (if (null v)
+	      (remhash k dyn-globals)
+	    (setf (gethash k dyn-globals) v)))))
 
 
 ;; Utils
@@ -1534,6 +1537,8 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 			 rt))))
      ,@body))
 
+(defvar *py-import-force-reload* nil "Force recompile of imported modules (for debugging)")
+
 (defun py-import (mod-name-as-list &rest options &key force-reload (verbose t) src-mod)
   ;; Registers module in *py-modules* and returns it.
   ;; If SRC-MOD is supplied, then the directory of that module's .py file is the first
@@ -1541,7 +1546,6 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
   (declare (special *builtin-modules*)
 	   (optimize (debug 3)))
   (assert (listp mod-name-as-list))
-  (warn "py-import ~A  src=~A" mod-name-as-list src-mod) 
   (labels ((builtin-module (name)
 	     (when (listp name)
 	       (setf name (dotted-name name)))
@@ -1576,7 +1580,7 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 	       (with-py-readtable
 		   (compile-file py-fname
 				 :output-file fasl-fname
-				 :if-newer (not force-reload)
+				 :if-newer (not (or *py-import-force-reload* force-reload))
 				 :verbose verbose))))
 	   (search-paths ()
 	     (if (> (length mod-name-as-list) 1)
@@ -1594,7 +1598,9 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 	       (append
 		(when (and src-mod (slot-value src-mod 'filepath))
 		  (list (excl:path-pathname (slot-value src-mod 'filepath)))) ;; XXX take directory
-		(py-iterate->lisp-list (py-attr (gethash 'sys *py-modules*) 'path)))))
+		(let ((sys-mod (gethash '|sys| *py-modules*)))
+		  (assert sys-mod () "The built-in `sys' module has disappeared")
+		  (py-iterate->lisp-list (py-attr sys-mod '|path|))))))
 	   
 	   (py-file-to-load (paths pkg-name init-file file-name fasl-name)
 	     (dolist (path paths)
@@ -1605,8 +1611,8 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 		     (when (eq (path-kind fn) :file)
 		       (return-from py-file-to-load
 			 (values fn (format nil "~A/~A/__init__.fasl" path pkg-name))))
-		     (warn "During import of ~A: Directory ~A skipped, as it does not ~
-                            contain __init__.py" (dotted-name mod-name-as-list) path))))
+		     (warn "During import of `~A': Directory `~A' skipped, as it does not ~
+                            contain `__init__.py'" (dotted-name mod-name-as-list) path))))
 	       ;; Try as file
 	       (let ((fn (format nil "~A/~A" path file-name)))
 		 (when (eq (path-kind fn) :file)
@@ -1640,9 +1646,11 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 	(unless py-file
 	  (when (builtin-module mod-name-as-list)
 	    (return-from py-import (builtin-module mod-name-as-list))))
-		
-	(unless py-file (py-raise '|ImportError| "Could not find module '~A'; ~_search paths tried: ~{~S~^, ~}"
-				  (dotted-name mod-name-as-list) (search-paths)))
+	
+	(unless py-file
+	  (py-raise '|ImportError| "Could not find module '~A'; ~_search paths tried: ~{~S~^, ~}"
+		    (dotted-name mod-name-as-list) (search-paths)))
+	
 	;; Compile .py -> .fasl
 	(recompile-py-if-needed (dotted-name mod-name-as-list) py-file fasl-file)
 	
@@ -2087,20 +2095,31 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 
 (def-py-method py-number.__abs__ (x^) (abs x))
 
-(def-py-method py-number.__add__ (x^ y^) (+ x y))
+(def-py-method py-number.__add__ (x^ y^) 
+  (if (and (numberp x) (numberp y))
+      (+ x y)
+    (load-time-value *the-notimplemented*)))
 
-(def-py-method py-number.__cmp__ (x^ y^) 
-  (cond ((= x y) 0) ;; also for complex
+(def-py-method py-number.__cmp__ (x^ y^)
+  (cond ((not (and (numberp x) (numberp y)))
+	 (load-time-value *the-notimplemented*))
+	((= x y) 0) ;; also for complex
 	((and (realp x) (realp y))
 	 (cond ((< x y) -1)
 	       (t       +1)))
 	((or (complexp x) (complexp y))
 	 (py-raise '|TypeError| "Cannot compare complexes"))))
 
-(def-py-method py-number.__div__ (x^ y^) (/ x y))  ;; overruled for integers
+(def-py-method py-number.__div__ (x^ y^)
+  (if (and (numberp x) (numberp y))
+      (/ x y) ;; overruled for integers
+    (load-time-value *the-notimplemented*)))
 
 (def-py-method py-number.__divmod__ (x y)
-  (make-tuple-from-list (list (py-/ x y) (py-% x y))))
+  (cond ((not (and (numberp x) (numberp y)))
+	 (load-time-value *the-notimplemented*))
+	(t
+	 (make-tuple-from-list (list (py-/ x y) (py-% x y))))))
 
 (def-py-method py-number.__hash__ (x^)
   (cond ((integerp x)   (sxhash x))
@@ -2118,12 +2137,14 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 	
 	(t (break :unexpected))))
 
-(def-py-method py-number.__eq__  (x^ y^) (py-bool (and (numberp y) (= x y))))
-
-(def-py-method py-number.__mul__ (x^ y^) (* x y))
+(def-py-method py-number.__eq__  (x^ y^) (py-bool (and (numberp x) (numberp y) (= x y))))
+(def-py-method py-number.__mul__ (x^ y^) 
+  (if (and (numberp x) (numberp y))
+      (* x y)
+    (load-time-value *the-notimplemented*)))
 
 (def-py-method py-number.__neg__ (x^) (- x))
-
+(def-py-method py-number.__nonzero__ (x^) (py-bool (/= x 0)))
 (def-py-method py-number.__pow__ (x^ y^ &optional z^) 
   (if z
       (progn (setf z (py-val->integer z))
@@ -2227,10 +2248,12 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 (def-py-method py-int.__floordiv__ (x^ y^)
   (values (floor x y)))
 
-(def-py-method py-int.__div__ (x^ y^) 
-  (if (and (integerp x) (integerp y))
-      (floor x y)
-    (/ x y)))
+(def-py-method py-int.__div__ (x^ y^)
+  (cond ((and (integerp x) (integerp y))
+	 (floor x y))
+	((and (numberp x) (numberp y))
+	 (/ x y))
+	(t (load-time-value *the-notimplemented*))))
        
 (def-py-method py-int.__lshift__ (x^ y^)  (ash x y))
 (def-py-method py-int.__rshift__ (x^ y^)  (ash x (- y)))
@@ -2371,7 +2394,7 @@ Creates a function for doing fast lookup, using jump table"
 (defun make-dict-from-symbol-alist (alist)
   (loop with d = (make-dict)
       for (k . v) in alist 
-      do (py-dict-setitem d k v)
+      do (py-dict-setitem d (string k) v)
       finally (return d)))
 
 (def-py-method py-dict.__new__ :static (cls &rest kwargs)
@@ -2547,11 +2570,10 @@ Creates a function for doing fast lookup, using jump table"
    (loop for v being the hash-value in (py-dict-hash-table x)
        collect v)))
 
+;; Dictionaries that act as class dicts need to signal changes 
 (defclass py-dict-classdict (py-dict)
   ()
   (:metaclass py-core-type))
-
-
 
 (defgeneric mark-as-classdict (dict)
   (:method ((x py-dict))           (change-class x 'py-dict-classdict))
@@ -2566,6 +2588,28 @@ Creates a function for doing fast lookup, using jump table"
 (defmethod py-dict-setitem :after ((x py-dict-classdict) key val)
   (signal-class-dict-set-key x key val))
 
+;; Dictionaries that act as proxy for module can be accessed using
+;; "globals()"; apply changes to module too.
+(defclass py-dict-moduledictproxy (py-dict)
+  ((module :initarg :module :accessor mdp-module))
+  (:metaclass py-core-type))
+
+(defvar *module-dict-ht* (make-hash-table :test #'eq :weak-keys t)
+  "Mapping from dict to list of py-dict-moduledictproxy instances")
+			  
+(defmethod initialize-instance :after ((x py-dict-moduledictproxy) &key module &allow-other-keys)
+  (assert module)
+  (push x (gethash module *module-dict-ht*)))
+
+(defmethod py-dict-setitem :after ((x py-dict-moduledictproxy) key val)
+  (mapc (lambda (mdp)
+	  (py-module-set-kv mdp (py-string->symbol key) val))
+	(gethash (mdp-module x) *module-dict-ht*)))
+
+(defmethod py-dict-delitem :after ((x py-dict-moduledictproxy) key)
+  (mapc (lambda (mdp)
+	  (py-module-set-kv mdp (py-string->symbol key) nil))
+	(gethash (mdp-module x) *module-dict-ht*)))
 
 ;; List (Lisp object: adjustable array)
 
@@ -2967,6 +3011,7 @@ Creates a function for doing fast lookup, using jump table"
 	(replace res x :start1 (* i x.len)))
       res))))
 
+(def-py-method py-string.__nonzero__ (x^) (py-bool (> (length x) 0)))
 (def-py-method py-string.__repr__ (x^)
   (with-output-to-string (s) (py-pprint s x))) ;; XXX todo: optimize
 
@@ -3249,9 +3294,7 @@ Creates a function for doing fast lookup, using jump table"
       ;; Give up.
       (if via-getattr
 	  (throw :getattr-block :py-attr-not-found)
-	(py-raise '|AttributeError|
-		  "No such attribute: ~A `~A' (class: ~A)"
-		  x attr.as_string x.class)))))
+	(py-raise '|AttributeError| "No such attribute: ~A `~A'" x attr.as_string)))))
 
 (defun try-calling-getattribute (ga x x.class attr.as_string)
   (handler-case
@@ -3940,7 +3983,9 @@ finished; F will then not be called again."
 (def-comparison  <  py-<   (=  (the (integer -1 1) (pybf:|cmp| x y)) -1))
 (def-comparison  >  py->   (=  (the (integer -1 1) (pybf:|cmp| x y))  1))
 (fmakunbound 'py-==)
-(def-comparison ==  py-==  (=  (the (integer -1 1) (pybf:|cmp| x y))  0))
+(excl:without-redefinition-warnings
+ (fmakunbound 'py-==)
+ (def-comparison ==  py-==  (=  (the (integer -1 1) (pybf:|cmp| x y))  0)))
 (def-comparison !=  py-!=  (/= (the (integer -1 1) (pybf:|cmp| x y))  0)) ;; parser: <> -> !=
 (def-comparison <=  py-<=  (<= (the (integer -1 1) (pybf:|cmp| x y))  0))
 (def-comparison >=  py->=  (>= (the (integer -1 1) (pybf:|cmp| x y))  0))
@@ -3992,8 +4037,9 @@ finished; F will then not be called again."
 (def-py-shortcut-func py-len  |__len__| )
 (def-py-shortcut-func py-nonzero |__nonzero__| )
 
-(fmakunbound 'py-hash)
-(def-py-shortcut-func py-hash |__hash__|)
+(excl:without-redefinition-warnings
+ (fmakunbound 'py-hash)
+ (def-py-shortcut-func py-hash |__hash__|))
 
 (defmethod py-hash ((x symbol))
   (py-hash (symbol-name x)))
@@ -4012,7 +4058,7 @@ finished; F will then not be called again."
 	i
       (py-raise '|TypeError| "Expected an integer ~@[>= ~A~]; got: ~S" min x))))
 
-(defun py-val->number (x)
+integer(defun py-val->number (x)
   (let ((n (deproxy x)))
     (if (numberp n)
 	n
