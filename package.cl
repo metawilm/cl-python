@@ -25,9 +25,9 @@
 (defpackage :python-builtin-types
   (:nicknames :pybt)
   (:use )
-  (:export "basestring" "bool" "complex" "dict" "enumerate" "float" "int" "list"
-	   "long" "slice" "str" "super" "tuple" "xrange" "classmethod"
-	   "staticmethod" "property" "object" "type" "unicode"))
+  (:export "basestring" "bool" "classmethod" "complex" "dict" "enumerate" "file"
+	   "float" "int" "list" "long" "number" "object" "property" "slice"
+	   "staticmethod" "str" "super" "tuple" "type" "unicode" "xrange"))
 
 (defpackage :python-builtin-values
   (:nicknames :pybv)
