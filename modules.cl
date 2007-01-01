@@ -172,63 +172,78 @@
       ( #\f  single-float       nil) ;; float
       ( #\f  double-float       nil) ;; double
       ))
-#||
-(def-py-method py-array.__new__ :static (typecode &optional initializer)
-  ;; Both creation and initialization, as array size is depentend on initializer.
-  (setf typecode (py-val->string typecode))
-  (unless (= (length typecode) 1)
-    (py-raise 'TypeError "Type indicator must be char (got: ~S)" typecode))
-  
-  (let* ((type-code (aref typecode 0))
-	 (kind (find type-code *py-array-types* :test #'char= :key #'car)))
-    
-    (unless kind
-      (py-raise 'ValueError "Unknown array type indicator: ~S" (aref typecode 0)))
-    
-    (let* ((lisp-type (second kind))
-	   (size      (or (third kind)
-			  ;; Determine item size by writing to file and reading file size.
-			  ;; (Is there a better way?)
-			  (setf (third kind)
-			    (let ((fname (format nil "__tmp_~A" (gensym))))
-			      (with-open-file (f fname
-					       :direction :output
-					       :element-type lisp-type
-					       :if-does-not-exist :create
-					       :if-exists :supersede)
-				(write-byte 0 f))
-			      (with-open-file (f fname
-					       :direction :input
-					       :element-type '(unsigned-byte 8)
-					       :if-does-not-exist :error)
-				(file-length f))))))
-	   
-	   (initial-num-items (when initializer
-				(typecase initializer
-				  ;; XXX how about user-defined subclasses?
-				  (string (py-array.fromstring initializer))
-				  (vector (py-array.fromlist   initializer))
-				  (t      (py-array.extend     initializer))))))
-      
-      (warn "type ~A: ~A bytes per item" lisp-type size)
-      
-	(initial-items (when initializer
-			 
-    
-    
-			       
-			       
-			       
 
-	   (make-instance 'py-array
-	     
-  (typecase initializer
-    (null   (make-array 0 :element-type t))
-    (string (from-string 
-	     
-  (
+(def-py-method py-array.__new__ :static (cls typecode &optional initializer)
+  ;; Both creation and initialization, as array size is dependent on initializer.
+  (assert (eq cls (find-class 'py-array)) () "Subclassing ARRAY not yet supported...") 
+  (let* ((type-code (let ((s (py-val->string typecode)))
+		      (if (= (length s) 1)
+			  (aref typecode 0)
+			(py-raise 'TypeError "Type indicator must be char (got: ~S)" typecode))))
+	 (kind (or (find type-code *py-array-types* :test #'char= :key #'car)
+		   (py-raise 'ValueError "Unknown array type indicator: ~S" (aref typecode 0))))
+	 (lisp-type (second kind))
+	 (item-size (or (third kind)
+			;; Determine item size by writing to file and reading file size.
+			;; XXX Is there a better way?
+			(setf (third kind)
+			  (let ((fname (format nil "__tmp_~A" (gensym))))
+			    (with-open-file (f fname
+					     :direction :output
+					     :element-type lisp-type
+					     :if-does-not-exist :create
+					     :if-exists :supersede)
+			      (write-byte 0 f))
+			    (with-open-file (f fname
+					     :direction :input
+					     :element-type '(unsigned-byte 8)
+					     :if-does-not-exist :error)
+			      (file-length f)))))))
+    (warn "code ~A = type ~A = ~A bytes per item" type-code lisp-type item-size)
+    (flet ((create-array (&optional (size 0))
+	     (make-instance 'py-array 
+	       :kind type-code
+	       :array (make-array size :element-type lisp-type :adjustable t :fill-pointer 0)
+	       :elmtype lisp-type
+	       :elmsize item-size)))
+      (if initializer
+	  (typecase initializer
+	    ;; XXX how about user-defined subclasses?
+	    ((string vector)
+	     (let ((arr (create-array (length initializer))))
+	       (funcall (if (stringp initializer) #'py-array.fromstring #'py-array.fromlist)
+			arr initializer)
+	       arr))
+	    (t
+	     (py-array.extend (create-array) initializer))) ;; XXX could take __len__
+	(create-array)))))
+
+(def-py-method py-array.__repr__ (x)
+  (with-output-to-string (s)
+    (print-unreadable-object (x s :type t :identity t)
+      (format s "typecode '~A', elm-type ~A, elm-size ~A bytes, ~A items~@[~A~]"
+	      (py-array-kind x)
+	      (py-array-elmtype x)
+	      (py-array-elmsize x)
+	      (length (py-array-array x))
+	      (when (< (length (py-array-array x)) 10)
+		(format nil " [~{~A~^ ~}]" (loop for i across (py-array-array x) collect i)))))))
+
+
+(def-py-method py-array.fromstring (py-arr string)
+  (loop with vec = (py-array-array py-arr)
+      for ch across (py-val->string string)
+      do (vector-push-extend (string ch) vec))
+  *the-none*)
+
+(def-py-method py-array.fromlist (py-arr list)
+  (py-array.fromstring py-arr list))
+
+(def-py-method py-array.extend (py-arr iterable)
+  (loop with vec = (py-array-array py-arr)
+      for item in (py-iterate->lisp-list iterable)
+      do (vector-push-extend item vec))
+  *the-none*)
+
 (with-builtin-module ("array")
-  (labels ((array (typecode &optional initializer)
-	     
-  (reg-func array 
-||#	    
+  (reg-var |array| (find-class 'py-array)))
