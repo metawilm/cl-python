@@ -49,7 +49,9 @@
 		 (:file "lexer"        :depends-on ("parser" ))
 		 (:file "run"          :depends-on ("lexer" "parser"))
 		 (:file "compiler"     :depends-on ("builtins" "walk" "run"))
-		 (:file "repl"         :depends-on ("package" "compiler" "run" "classes"))))
+		 (:file "modules"      )
+		 (:file "repl"         :depends-on ("package" "compiler" "run"
+							      "classes" "modules"))))
 
 ;; ASDF by default only looks for ".lisp" source files, but we use ".cl".
 (defmethod asdf:source-file-type :around 
