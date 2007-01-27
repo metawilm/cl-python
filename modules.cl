@@ -33,9 +33,6 @@
 				(.register ',fname (function ,dotted-fname))))))
 	   ,@body)))))
 
-;;(with-builtin-module ("aap")
-;;  (reg-func |foo| (x) (+ x 1)))
-
 (with-builtin-module ("sys")
 
   ;; Comand line args passed to script; argv[0] is script name (rel or abs)
