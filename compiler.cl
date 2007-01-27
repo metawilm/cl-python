@@ -1307,13 +1307,10 @@ XXX Currently there is not way to set *__debug__* to False.")
   (when (eq allowed-stmts t)
     (return-from ast-contains-stmt-p nil))
   (labels ((is-stmt-sym (s)
-	     (loop with s.name = (symbol-name s)
-		 when (<= (length s.name) 5) return nil
-		 with test = "-stmt" 
-		 for s.i from (- (length s.name) (length test))
-		 for j across test
-		 when (char= j (aref s.name s.i)) return t
-		 finally (return nil)))
+	     (let ((s.name (symbol-name s)))
+	       (cond ((<= (length s.name) 5) nil)
+		     ((string-equal (subseq s.name (- (length s.name) 5)) "-stmt") t)
+		     (t nil))))
 	   
 	   (test (ast)
 	     (typecase ast
