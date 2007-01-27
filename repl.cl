@@ -37,9 +37,9 @@
 
 (defvar *repl-mod*)
 
-(defvar _   nil) ;; the last value evaluated by REPL
-(defvar __  nil) ;; second-last
-(defvar ___ nil) ;; third-last
+(defvar _   *the-none*) ;; the last value evaluated by REPL
+(defvar __  *the-none*) ;; second-last
+(defvar ___ *the-none*) ;; third-last
 
 (defvar *repl-prof* nil)
 
@@ -231,19 +231,3 @@ Relevant Lisp variables:
 					      (write r)
 					      (write-char #\Newline))
 					    (setf acc nil))))))))))))))))))
-
-(defun prof (f kind)
-  (ecase kind
-    (:t (prof:with-profiling (:type :time :count t) (funcall f))
-	   (terpri)
-	   (prof:show-flat-profile))
-    (:tg (prof:with-profiling (:type :time) (funcall f))
-	 (terpri)
-	 (prof:show-call-graph))
-    (:s (prof:with-profiling (:type :space) (funcall f))
-	(terpri)
-	(prof:show-flat-profile))
-    (:sg (prof:with-profiling (:type :space) (funcall f))
-	 (terpri)
-	 (prof:show-call-graph))
-    (:time (time (funcall f)))))
