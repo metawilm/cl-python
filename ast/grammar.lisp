@@ -5,25 +5,13 @@
 ;; (http://opensource.franz.com/preamble.html),
 ;; known as the LLGPL.
 
-(in-package :python)
+;;; Python grammar
 
-;;; Python Parser
+(in-package :clpython.parser)
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (require :yacc)
   (use-package :yacc))
-
-
-(defparameter *reserved-words*
-    ;; A few of these are not actually reserved words in CPython yet,
-    ;; because of backward compatilibity reasons, but they will be in
-    ;; the future (`as' is an example).
-    '(|def| |class| |return| |yield| |lambda|
-      |and| |or| |not| |for| |in| |is|
-      |print| |import| |from| |as| |assert| |break| |continue|
-      |global| |del| |exec| |pass|
-      |try| |except| |finally| |raise| 
-      |if| |elif| |else| |while|))
 
 (defgrammar python-grammar (grammar)
   ()
@@ -127,9 +115,9 @@
 				      (push (cdr p) kw)
 				      (setf seen-kwarg (cdr p)))
 				     (seen-kwarg
-				      (py-raise '|SyntaxError|
-						"Positional arguments should precede keyword arguments ~
-                                                 (found pos arg `~A' after kw arg `~A')" seen-kwarg p))
+				      (raise-syntax-error
+				       "Positional arguments should precede keyword arguments ~
+                                        (found pos arg `~A' after kw arg `~A')" seen-kwarg p))
 				     (t (push p pos)))
 			    finally (return `(,(nreverse pos)
 					      ,(nreverse kw)
@@ -481,7 +469,6 @@
 
 
 (build-grammar python-grammar t t)
-
 
 
 (defun parse-trailers (ast)

@@ -5,7 +5,7 @@
 ;; (http://opensource.franz.com/preamble.html),
 ;; known as the LLGPL.
 
-(in-package :python)
+(in-package :clpython)
 
 (declaim (optimize (debug 3)))
 
@@ -17,8 +17,8 @@
 ;; parse-python-{file,string} corresponds to a macro defined below
 ;; that generates the corresponding Lisp code.
 ;; 
-;; Each such AST node has a name ending in "-expr" or "-stmt"; there
-;; no is separate package for those symbols.
+;; Each such AST node has a name ending in "-expr" or "-stmt", they are
+;; in the :clpython.ast.node package.
 ;; 
 ;; In the macro expansions, lexical variables that keep context state
 ;; have a name like +NAME+.
@@ -962,7 +962,7 @@ XXX Currently there is not way to set *__debug__* to False.")
   ;;(check-type dyn-glob hash-table)
   (assert (or create-mod existing-mod))
   (assert (not (and create-mod existing-mod)))
-  `(progn (in-package :python)
+  `(progn (in-package :clpython)
 	  
 	  (let* ((+mod-static-globals-names+  ,glob-names)
 		 (+mod-static-globals-values+ ,glob-values)
@@ -1345,21 +1345,14 @@ XXX Currently there is not way to set *__debug__* to False.")
 ;;; Detecting names and values of built-ins
 
 (defun builtin-name-p (x)
-  (or (find-symbol (string x) (load-time-value (find-package :python-builtin-functions)))
-      (find-symbol (string x) (load-time-value (find-package :python-builtin-types)))
-      (find-symbol (string x) (load-time-value (find-package :python-builtin-values)))))
+  (find-symbol (string x) (load-time-value (find-package :clpython.builtin))))
 
 (defun builtin-value (x)
   (let ((sym (builtin-name-p x)))
     (when sym
-      (let ((pkg (symbol-package sym)))
-	(cond ((eq pkg (load-time-value (find-package :python-builtin-functions)))
-	       (symbol-function sym))
-	      ((eq pkg (load-time-value (find-package :python-builtin-types)))
-	       (symbol-value sym))
-	      ((eq pkg (load-time-value (find-package :python-builtin-values)))
-	       (symbol-value sym)))))))
-
+      (if (boundp sym)
+	  (symbol-value sym)
+	(symbol-function sym)))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;

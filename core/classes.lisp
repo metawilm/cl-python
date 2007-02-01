@@ -5,7 +5,7 @@
 ;; (http://opensource.franz.com/preamble.html),
 ;; known as the LLGPL.
 
-(in-package :python)
+(in-package :clpython)
 
 ;;;; Python classes and metaclasses; the built-in classes including
 ;;;; their methods.
@@ -2666,7 +2666,7 @@ Creates a function for doing fast lookup, using jump table"
     (cond ((< x.len y.len) -1)
 	  ((> x.len y.len) 1)
 	  (t (loop for xi across x and yi across y
-		 do (ecase (pybf:|cmp| xi yi)
+		 do (ecase (py-cmp xi yi)
 		      (0 ) ;; cont
 		      (-1 (return -1))
 		      (1  (return  1)))
@@ -2819,7 +2819,7 @@ Creates a function for doing fast lookup, using jump table"
 (def-py-method py-list.sort (x^ &optional fn)
   (let* ((sort-fun (if fn
 		       (lambda (x y) (< (signum (deproxy (py-call fn x y))) 0))
-		     (lambda (x y) (< (signum (pybf:|cmp| x y)) 0))))
+		     (lambda (x y) (< (signum (py-cmp x y)) 0))))
 	 (res (sort x sort-fun)))
 
     ;; It's not guaranteed by ANSI that (eq res x).
@@ -3132,7 +3132,7 @@ Creates a function for doing fast lookup, using jump table"
     
     (cond ((= x.len y.len)
 	   (loop for xi in x and yi in y
-	       do (ecase (pybf:|cmp| xi yi)
+	       do (ecase (py-cmp xi yi)
 		    (-1 (return -1))
 		    (1  (return 1))
 		    (0  ))
@@ -3976,19 +3976,164 @@ finished; F will then not be called again."
 		       (load-time-value *the-false*))))
 	  (setf (gethash ',syntax *binary-comparison-funcs-ht*) ',func)))
 	    
-;; pyb:cmp returns -1, 0 or 1 (or TypeError if user-supplied
-;; method returns bogus comparison result; that TypeError is not
-;; catched here but goes to user code.)
+(defun py-id (x)
+  #+allegro
+  (excl:lispval-to-address x)
+  #-allegro
+  (error "TODO: id() not implemented for this Lisp implementation"))
 
-(def-comparison  <  py-<   (=  (the (integer -1 1) (pybf:|cmp| x y)) -1))
-(def-comparison  >  py->   (=  (the (integer -1 1) (pybf:|cmp| x y))  1))
+(defgeneric py-cmp (x y)
+  (:documentation
+   "Compare two objects, of which at least one is a user-defined-object.
+Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
+  
+  (:method ((x t) (y t))
+	   #+(or)(warn "cmp ~S ~S" x y)
+	   ;; This function is used in comparisons like <, <=, ==.
+	   ;; 
+	   ;; The CPython logic is a bit complicated; hopefully the following
+	   ;; is a correct translation.
+	   ;; 
+	   ;; Note: (eq X Y) does not guarantee "X == Y".
+
+	   (flet ((normalize (x)  ;; object.c - adjust_tp_compare(c)
+		    (let ((i (deproxy x)))
+		      (cond ((< i 0) -1)
+			    ((= i 0) 0)
+			    ((> i 0) 1)))))
+
+	     ;; CPython: object.c - do_cmp(v,w)
+	     (let ((x.class (py-class-of x))
+		   (y.class (py-class-of y)))
+      
+	       (let ((pt (ltv-find-class 'py-type)))
+		 (when (or (eq pt x.class) (eq pt y.class))
+		   (return-from py-cmp
+		     (if (eq x y)
+			 0
+		       -1))))
+
+	       ;; If the class is equal and it defines __cmp__, use that.
+      
+	       (when (eq x.class y.class)
+		 (let* ((__cmp__ (recursive-class-dict-lookup x.class '|__cmp__|)) ;; XXX bind
+			(cmp-res (when __cmp__ (py-call __cmp__ x y))))
+		   (when (and cmp-res
+			      (not (eq cmp-res *the-notimplemented*)))
+		     (return-from py-cmp (normalize cmp-res)))))
+
+	       ;; The "rich comparison" operations __lt__, __eq__, __gt__ are
+	       ;; now called before __cmp__ is called.
+	       ;; 
+	       ;; Normally, we take these methods of X.  However, if class(Y)
+	       ;; is a subclass of class(X), the first look at Y's magic
+	       ;; methods.  This allows the subclass to override its parent's
+	       ;; comparison operations.
+	       ;; 
+	       ;; It is assumed that the subclass overrides all of
+	       ;; __{eq,lt,gt}__. For example, if sub.__eq__ is not defined,
+	       ;; first super.__eq__ is called, and after that __sub__.__lt__
+	       ;; (or super.__lt__).
+	       ;; 
+	       ;; object.c - try_rich_compare_bool(v,w,op) / try_rich_compare(v,w,op)
+      
+	       (let ((y-sub-of-x (and (not (eq x.class y.class))
+				      (subtypep y.class x.class))))
+	
+		 ;; Try each `meth'; if the outcome it True, return `res-value'.
+		 (loop for (meth-name res-value) in `((|__eq__|   0)
+						      (|__lt__|  -1)
+						      (|__gt__|   1))
+		     do (let* ((meth (recursive-class-dict-lookup 
+				      (if y-sub-of-x y.class x.class)
+				      meth-name))
+			       (res (when meth
+				      (py-call meth
+					       (if y-sub-of-x y x)
+					       (if y-sub-of-x x y)))))
+		 
+			  (when (and res (not (eq res *the-notimplemented*)))
+			    (let ((true? (py-val->lisp-bool res)))
+			      (when true?
+				(return-from py-cmp
+				  (if y-sub-of-x (- res-value) res-value))))))))
+      
+	       ;; So the rich comparison operations didn't lead to a result.
+	       ;; 
+	       ;; object.c - try_3way_compare(v,w)
+	       ;; 
+	       ;; Now, first try X.__cmp__ (even it y.class is a subclass of
+	       ;; x.class) and Y.__cmp__ after that.
+
+	       (let* ((meth (recursive-class-dict-lookup x.class '|__cmp__|))
+		      (res (when meth
+			     (py-call meth x y))))
+		 (when (and res (not (eq res *the-notimplemented*)))
+		   (let ((norm-res (normalize res)))
+		     (return-from py-cmp norm-res))))
+
+	       (let* ((meth (recursive-class-dict-lookup y.class '|__cmp__|))
+		      (res (when meth
+			     (py-call meth y x))))
+		 (when (and res (not (eq res *the-notimplemented*)))
+		   (let ((norm-res (- (normalize res))))
+		     (return-from py-cmp norm-res))))
+      
+	       ;; CPython now does some number coercion attempts that we don't
+	       ;; have to do because we have first-class numbers. (I think.)
+      
+	       ;; object.c - default_3way_compare(v,w)
+	       ;; 
+	       ;; Two instances of same class without any comparison operator,
+	       ;; are compared by pointer value. Our function `py-id' fakes
+	       ;; that.
+      
+	       (when (eq x.class y.class)
+		 (let ((x.id (py-id x))
+		       (y.id (py-id y)))
+		   (return-from py-cmp
+		     (cond ((< x.id y.id) -1)
+			   ((= x.id y.id) 0)
+			   (t             1)))))
+      
+	       ;; None is smaller than everything (excluding itself, but that
+	       ;; is catched above already, when testing for same class;
+	       ;; NoneType is not subclassable).
+      
+	       (cond ((eq x *the-none*) (return-from py-cmp -1))
+		     ((eq y *the-none*) (return-from py-cmp  1)))
+      
+	       ;; Instances of different class are compared by class name, but
+	       ;; numbers are always smaller.
+      
+	       ;; Probably, when we arrive here, there is a bug in the logic
+	       ;; above. Therefore print a warning.
+      
+	       (warn "[debug] CMP can't properly compare ~A and ~A." x y)
+      
+	       (return-from py-cmp
+		 (if (string< (class-name x.class) (class-name y.class))
+		     -1
+		   1))
+      
+	       ;; Finally, we have either two instances of different non-number
+	       ;; classes, or two instances that are of incomparable numeric
+	       ;; types.
+	       (return-from py-cmp
+		 (cond ((eq x y)                   0)
+		       ((< (py-id x) (py-id y))   -1)
+		       (t                          1)))))))
+
+
+(def-comparison  <  py-<   (=  (the (integer -1 1) (py-cmp x y)) -1))
+(def-comparison  >  py->   (=  (the (integer -1 1) (py-cmp x y))  1))
 (fmakunbound 'py-==)
 (excl:without-redefinition-warnings
  (fmakunbound 'py-==)
- (def-comparison ==  py-==  (=  (the (integer -1 1) (pybf:|cmp| x y))  0)))
-(def-comparison !=  py-!=  (/= (the (integer -1 1) (pybf:|cmp| x y))  0)) ;; parser: <> -> !=
-(def-comparison <=  py-<=  (<= (the (integer -1 1) (pybf:|cmp| x y))  0))
-(def-comparison >=  py->=  (>= (the (integer -1 1) (pybf:|cmp| x y))  0))
+ (def-comparison ==  py-==  (=  (the (integer -1 1) (py-cmp x y))  0)))
+(def-comparison !=  py-!=  (/= (the (integer -1 1) (py-cmp x y))  0)) ;; parser: <> -> !=
+(def-comparison <=  py-<=  (<= (the (integer -1 1) (py-cmp x y))  0))
+(def-comparison >=  py->=  (>= (the (integer -1 1) (py-cmp x y))  0))
 
 ;; Necessary for bootstrapping (py-dict + def-py-method)
 (defmethod py-== ((x symbol) (y symbol))

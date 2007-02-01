@@ -1,7 +1,8 @@
 ;;; Lisp-Python syntax
 
-(in-package :python)
+(in-package :clpython)
 
+#||
 (defparameter *the-lispy-module* (make-module) "Python module")
 
 #||
@@ -213,4 +214,5 @@
 #||
 (defmacro with-py-context ((mod) &body body)
   `(
+    ||#
 ||#

@@ -5,8 +5,8 @@
 ;; (http://opensource.franz.com/preamble.html),
 ;; known as the LLGPL.
 
-(in-package :python)
-
+(in-package :clpython.parser)
+	
 ;; Lexer
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
@@ -201,9 +201,9 @@ READ-CHAR."
 			       (lex-todo dedent 'dedent))
 			
 			(unless (= (car indentation-stack) new-indent)
-			  (py-raise '|SyntaxError|
-				    "Dedent did not arrive at a previous indentation level (line ~A)."
-				    *curr-src-line*))))
+			  (raise-syntax-error 
+			   "Dedent did not arrive at a previous indentation level (line ~A)."
+			   *curr-src-line*))))
 		      
 		      (lex-return newline 'newline)))
 		   
@@ -219,9 +219,9 @@ READ-CHAR."
 			       (unless (char= c3 #\Newline) ;; \r\n
 				 (unread-char c3))))
 			    (t 
-			      (py-raise '|SyntaxError|
-				  "Continuation character '\\' must be followed by Newline, ~
-                                   but got: '~A' (~S) (line ~A)." c2 c2 *curr-src-line*))))
+			     (raise-syntax-error
+			      "Continuation character '\\' must be followed by Newline, ~
+                               but got: '~A' (~S) (line ~A)." c2 c2 *curr-src-line*))))
 		    (incf *curr-src-line*)
 		    (go next-char))
 		   
@@ -234,9 +234,9 @@ READ-CHAR."
 		    
 		   (t (with-simple-restart 
 			  (:continue "Discard the character and continue parsing.")
-			(py-raise '|SyntaxError|
-				  "Nobody expected this character: '~A' (~S) (line ~A)."
-				  c c *curr-src-line*))
+			(raise-syntax-error
+			 "Nobody expected this character: '~A' (~S) (line ~A)."
+			 c c *curr-src-line*))
 		      (go next-char))))))))))))
 
 
@@ -259,7 +259,7 @@ READ-CHAR."
   (declare (special *py-signal-conditions*))
   (when *py-signal-conditions*
     (signal 'py-syntax-eof-condition))
-  (py-raise '|SyntaxError| "Unexpected end of file (line ~A)." *curr-src-line*))
+  (raise-syntax-error "Unexpected end of file (line ~A)." *curr-src-line*))
 
 (define-compiler-macro read-chr-error ()
   `(locally (declare (optimize (speed 3) (safety 1) (debug 0)))
@@ -284,20 +284,8 @@ READ-CHAR."
        (and ,char (member ,char ,list :test #'char=)))))
 
 (defun reserved-word-p (sym)
-  (let ((ht (load-time-value
-	     
-	     #+allegro ;; use a hashtable without values
-	     (let ((ht (make-hash-table :test 'eq :values nil)))
-	       (dolist (w *reserved-words*) (excl:puthash-key w ht))
-	       ht)
-	     
-	     #-allegro ;; use regular hashtable
-	     (let ((ht (make-hash-table :test 'eq)))
-	       (dolist (w *reserved-words*) (setf (gethash w ht) t))
-	       ht))))
-    
-    (gethash (the symbol sym) ht)))
-  
+  (eq (symbol-package sym) 
+      (load-time-value (find-package :clpython.ast.reserved))))
 
 ;; Identifier
 
@@ -340,8 +328,6 @@ C must be either a character or NIL."
 	      (and (< ,code 128)
 		   (= (aref ,arr ,code) 1)))))))
 
-
-#+(or) ;; Equivalent, but a bit slower, original code. Allocates an array for every identifier.
 (defun read-identifier (first-char)
   "Returns the identifier read as string. ~@
    Identifiers start start with an underscore or alphabetic character; ~@
@@ -361,123 +347,19 @@ C must be either a character or NIL."
 	do (vector-push-extend c res)
 	finally (when c (unread-chr c)))
     
-    #+(or)
-    (or (find-symbol res #.*package*)
-	(intern (simple-string-from-vec res) #.*package*))
+    (let ((s (find-symbol res :clpython.ast)))
+      ;; Prevent case mismatches in Allegro ANSI mode
+      (when (and s (string= (symbol-name s) res))
+	(return-from read-identifier s)))
     
-    (let ((sym (find-symbol res #.*package*)))
-      (cond ((and sym (constantp sym))
-	     
-	     ;; Oops... the symbol `nil', `pi' or 't'.
-	     ;; Use our own uninterned symbol, instead.
-	     ;; (Maybe we should have used the package system for this...)
-	     (let* ((ht (load-time-value (make-hash-table :test #'eq)))
-		    (our-sym (gethash sym ht)))
-	       
-	       (or our-sym
-		   (let ((new-sym (make-symbol res)))
-		     (setf (gethash sym ht) new-sym)
-		     new-sym))))
-	    
-	    ((string= (symbol-name sym) res)
-	     ;; Prevent case matches in Allegro ANSI mode
-	     sym)
-	    
-	    (t (intern (simple-string-from-vec res) #.*package*))))))
-
-(defconstant +id-cache-string-size+ 10)
-
-(defun spacy-length (x)
-  (loop with i = 0
-      for xi across x
-      if (char= xi #\Space) return i
-      else do (incf i)
-      finally (return i)))
-
-(defun identifier-ht-test (x y)
-  (let ((x.len (spacy-length x))
-	(y.len (spacy-length y)))
-    
-    (and (= x.len y.len)
-	 (dotimes (i x.len t)
-	   (when (char/= (aref x i) (aref y i))
-	     (return nil))))))
-
-(defun identifier-ht-hash (x)
-  (loop with res = 42
-      for ch across x
-      until (char= ch #\Space)
-      do (setf res (ash (logxor res (sxhash ch)) 4))
-      finally (return (mod res most-positive-fixnum))))
-
-(defparameter *identifier-ht* 
-    (let ((ht (make-hash-table :test 'identifier-ht-test
-			       :hash-function 'identifier-ht-hash)))
-      (loop for s in '("t" "nil" "pi")
-	  for spaced = (format nil "~vA" +id-cache-string-size+ s)
-	  do (setf (gethash spaced ht) (make-symbol s)))
-      ht))
-
-(defun read-identifier (first-char)
-  (declare (optimize (safety 3) (debug 3)))
-  (assert (identifier-char1-p first-char))
-  
-  (let* ((initial-string (make-array +id-cache-string-size+
-				     :element-type 'character
-				     :initial-element #\Space)))
-    (declare (dynamic-extent initial-string))
-    (setf (aref initial-string 0) first-char)
-    (let ((n-filled (loop for i from 1 below +id-cache-string-size+
-			for c = (read-chr-nil)
-			while (identifier-char2-p c)
-			do (setf (aref initial-string i) c)
-			finally (when (and c 
-					   (not (identifier-char2-p c)))
-				  (unread-chr c))
-				(return i))))
-      
-      (assert (<= 1 n-filled +id-cache-string-size+))
-      
-      (cond ((= n-filled +id-cache-string-size+) 
-	     ;; A quite long identifier..
-	     (let* ((more-chars (loop for c = (read-chr-nil)
-				    while (identifier-char2-p c)
-				    collect c into chars
-				    finally (when c (unread-chr c))
-					    (return chars)))
-		    (length-more (length more-chars))
-		    (full-string (make-array (+ length-more +id-cache-string-size+)
-					     :element-type 'character)))
-	       
-	       (loop for i from 0 below +id-cache-string-size+
-		   do (setf (aref full-string i) (aref initial-string i)))
-	       
-	       (loop for i from 0 below length-more
-		   do (setf (aref full-string (+ +id-cache-string-size+ i))
-			(pop more-chars)))
-	       
-	       (or (let ((found (find-symbol full-string #.*package*)))
-		     (when (string= found full-string)
-		       found))
-		   (intern full-string #.*package*))))
-	    
-	    ((< n-filled +id-cache-string-size+)
-	     (or (gethash initial-string *identifier-ht*)
-		   (let* ((trunc-str (make-array n-filled
-						 :element-type 'character
-						 :initial-contents
-						 (subseq initial-string 0 n-filled)))
-			  (sym (intern trunc-str #.*package*)))
-		     (setf (gethash trunc-str *identifier-ht*) sym)
-		     sym)))))))
-
-
-;; String
+    (intern (simple-string-from-vec res) :clpython.ast.user)))
 
 (defun simple-string-from-vec (vec)
   (make-array (length vec)
 	      :element-type 'character
 	      :initial-contents vec))
+
+;; String
 
 (defun read-string (first-char &key unicode raw)
   "Returns string as a string"
@@ -505,9 +387,9 @@ C must be either a character or NIL."
 			   with ch = (read-chr-error)
 			   do (setf code (+ (* code 16)
 					    (or (digit-char-p ch 16)
-						(py-raise '|SyntaxError|
-							  "Non-hex digit in \"\u...\": ~S (line ~A)."
-							  ch *curr-src-line*)))
+						(raise-syntax-error
+						 "Non-hex digit in \"\u...\": ~S (line ~A)."
+						 ch *curr-src-line*)))
 				    ch (read-chr-error))
 			   finally (vector-push-extend (code-char code) res))
 		       
@@ -554,7 +436,7 @@ C must be either a character or NIL."
        
      (t ;; Non-empty string with one starting quote, possibly containing escapes
       (unless third
-	(py-raise '|SyntaxError| "Quoted string not finished (line ~A)." *curr-src-line*))
+	(raise-syntax-error "Quoted string not finished (line ~A)." *curr-src-line*))
       (let ((res (load-time-value
 		  (make-array 30 :element-type 'character :adjustable t :fill-pointer 0)))
 	    (c third)
@@ -583,9 +465,9 @@ C must be either a character or NIL."
 		     
 		   (let ((ch2 (read-chr-error))) 
 		     (unless (char= ch2 #\{)
-		       (py-raise '|SyntaxError|
-				 "In Unicode string: \N{...} expected, but got ~S after \N (line ~A)."
-				 ch2 *curr-src-line*))
+		       (raise-syntax-error
+			"In Unicode string: \N{...} expected, but got ~S after \N (line ~A)."
+			ch2 *curr-src-line*))
 		     (loop with ch = (read-chr-error)
 			 with vec = (make-array 10 :element-type 'character
 						:adjustable t :fill-pointer 0)
@@ -608,8 +490,7 @@ C must be either a character or NIL."
 				 do (setf ch   (read-chr-error)
 					  code (+ (* 16 code) 
 						  (or (digit-char-p ch 16)
-						      (py-raise
-						       '|SyntaxError|
+						      (raise-syntax-error
 						       "Non-hex digit in \"\~A...\": ~S (line ~A)."
 						       c ch *curr-src-line*))))
 				 finally (vector-push-extend (code-char code) res))
@@ -635,8 +516,8 @@ C must be either a character or NIL."
 			  (b (read-chr-error)))
 		     
 		     (cond ((not (digit-char-p a 16))
-			    (py-raise '|SyntaxError| "Non-hex digit found in \x..: ~S (line ~A)."
-				      a *curr-src-line*))
+			    (raise-syntax-error "Non-hex digit found in \x..: ~S (line ~A)."
+						a *curr-src-line*))
 			   
 			   ((digit-char-p b 16)
 			    (vector-push-extend (code-char (+ (* 16 (digit-char-p a 16)) 
@@ -806,17 +687,17 @@ C must be either a character or NIL."
 		     ((char= ch2 #\-)       (setf minus t))
 		     ((digit-char-p ch2 10) (setf exp (digit-char-p ch2 10)
 						  got-num t))
-		     (t (py-raise '|SyntaxError| 
-				  "Exponent for literal number invalid: ~A ~A (line ~A)."
-				  ch ch2 *curr-src-line*)))
+		     (t (raise-syntax-error
+			 "Exponent for literal number invalid: ~A ~A (line ~A)."
+			 ch ch2 *curr-src-line*)))
 		  
 		    (unless got-num
 		      (let ((ch3 (read-chr-error)))
 			(if (digit-char-p ch3 10)
 			    (setf exp (+ (* 10 exp) (digit-char-p ch3 10)))
-			  (py-raise '|SyntaxError|
-				    "Exponent for literal number invalid: ~A ~A ~A (line ~A)."
-				    ch ch2 ch3 *curr-src-line*))))
+			  (raise-syntax-error
+			   "Exponent for literal number invalid: ~A ~A ~A (line ~A)."
+			   ch ch2 ch3 *curr-src-line*))))
 		    
 		    (loop with ch
 			while (and (setf ch (read-chr-nil))
@@ -910,16 +791,16 @@ C must be either a character or NIL."
 	    (if (and c2 (char= #\. c1 c2))
 		(if (char= (read-chr-error) #\.)
 		    '|...|
-		  (py-raise '|SyntaxError|
-			    "Dots `..' may only occur as part of a triple `...' (line ~A)."
-			    *curr-src-line*))
+		  (raise-syntax-error
+		   "Dots `..' may only occur as part of a triple `...' (line ~A)."
+		   *curr-src-line*))
 	      (if (punct-char1-p c1)
 		  (progn (when c2 (unread-chr c2))
 			 (lookup-1char c1))
 		(progn (assert (char= c1 #\!))
-		       (py-raise '|SyntaxError|
-				 "Character `!' may only occur as in `!=', not standalone (line ~A)."
-				 *curr-src-line*))))))))
+		       (raise-syntax-error
+			"Character `!' may only occur as in `!=', not standalone (line ~A)."
+			*curr-src-line*))))))))
 
 (defun punct-char1-p (c)
   (let ((arr (load-time-value

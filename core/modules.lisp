@@ -1,4 +1,4 @@
-(in-package :python)
+(in-package :clpython)
 
 (defparameter *builtin-modules* (make-hash-table :test #'eq) "List of module objects")
 

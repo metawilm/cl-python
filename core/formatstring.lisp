@@ -5,7 +5,7 @@
 ;; (http://opensource.franz.com/preamble.html),
 ;; known as the LLGPL.
 
-(in-package :python)
+(in-package :clpython)
 
 (defstruct (format-string (:conc-name fs-) (:constructor make-fs))
   (string        :type string)

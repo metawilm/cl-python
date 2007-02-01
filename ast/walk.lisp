@@ -5,7 +5,7 @@
 ;; (http://opensource.franz.com/preamble.html),
 ;; known as the LLGPL.
 
-(in-package :python)
+(in-package :clpython)
 
 ;;; Python AST code walker
 ;;; 

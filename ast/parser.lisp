@@ -5,9 +5,10 @@
 ;; (http://opensource.franz.com/preamble.html),
 ;; known as the LLGPL.
 
-(in-package :python)
+(in-package :clpython.parser)
 
-;;; Interface to the parser and lexer.
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (use-package :clpython.ast.all))
 
 (defun parse-python-with-lexer (&rest lex-options)
   (let* ((lexer (apply #'make-py-lexer lex-options))
@@ -32,12 +33,12 @@
 	    (assert (not (typep encl-error '|SyntaxError|)))
 	    (error encl-error))
 	  
-	  (py-raise '|SyntaxError|
-		    (if encl-error
-			(format nil "Parse error at line ~A~@[, at token `~S'~].~%[inner error: ~A]"
-				line token encl-error)
-		      (format nil "At line ~A, parser got unexpected token `~S'."
-			      line token))))))))
+	  (raise-syntax-error
+	   (if encl-error
+	       (format nil "Parse error at line ~A~@[, at token `~S'~].~%[inner error: ~A]"
+		       line token encl-error)
+	     (format nil "At line ~A, parser got unexpected token `~S'."
+		     line token))))))))
 
 (defgeneric parse-python-file (source)
   (:method ((s stream))
@@ -52,7 +53,6 @@
 	   (with-open-file (f (string filename) :direction :input)
 	     (parse-python-file f))))
 
-
 (defmethod parse-python-string ((s string))
   (let ((next-i 0)
 	(max-i (length s)))
@@ -65,3 +65,13 @@
      :unread-chr (lambda (c)
 		    (assert (and c (> next-i 0) (char= c (char s (1- next-i)))))
 		    (decf next-i)))))
+
+(defun raise-syntax-error (formatstring &rest args)
+  ;; Raise Pythonic SyntaxError if available, otherwise regular error.
+  (let* ((p (find-package :clpython))
+	 (r (and p (find-symbol (string '#:py-raise) p)))
+	 (pe (and r (find-package :clpython.builtin.type.exception)))
+	 (et (and pe (find-symbol (string '#:|SyntaxError|) pe))))
+    (if (and (fboundp r) (boundp et))
+	(apply (symbol-function r) et formatstring args)
+      (apply #'error (concatenate 'string "SyntaxError: " formatstring) args))))

@@ -7,8 +7,8 @@
 
 (in-package #:user)
 
-(eval-when (compile)
-  (error "This ASDF file should be run interpreted"))
+(eval-when (:compile-toplevel)
+  (error "This ASDF file should be run interpreted."))
 
 ;; The ASDF version initially supplied with ACL 8.0 (in directory acl80/code/asdf.fasl)
 ;; does not handle (:serial t) correctly (it does not load A before compiling B).
@@ -34,26 +34,55 @@
 	    "CLPython requires a newer version of ASDF. ~
              You can upgrade automatically, using (sys:update-allegro)")))
 
-(asdf:defsystem "clpython"
-    :version "1.0"
-    :serial t
-    :components ((:file "package")
-		 (:file "pyprint"      :depends-on ("package"))
-		 (:file "walk"         :depends-on ("package"))
-		 (:file "formatstring" :depends-on ("package"))
-		 (:file "classes"      :depends-on ("package" "pyprint" "formatstring"))
-		 (:file "exceptions"   :depends-on ("classes"))
-		 (:file "builtins"     :depends-on ("exceptions" "classes"))
-		 (:file "optimize"     :depends-on ("classes" "builtins"))
-		 (:file "parser"       :depends-on ("package"))
-		 (:file "lexer"        :depends-on ("parser" ))
-		 (:file "run"          :depends-on ("lexer" "parser"))
-		 (:file "compiler"     :depends-on ("builtins" "walk" "run"))
-		 (:file "modules"      )
-		 (:file "repl"         :depends-on ("package" "compiler" "run"
-							      "classes" "modules"))))
 
-;; ASDF by default only looks for ".lisp" source files, but we use ".cl".
-(defmethod asdf:source-file-type :around 
-	   ((c asdf:cl-source-file) (s (eql (asdf:find-system "clpython"))))
-  "cl")
+;;; System definitions
+
+(asdf:defsystem :clpython.package
+    :components ((:file "package")))
+
+(asdf:defsystem :clpython.parser
+    :description "Python source code and AST handling"
+    :depends-on (:clpython.package)
+    :components ((:module "ast"
+			  :components ((:file "grammar")
+				       (:file "lexer"  :depends-on ("grammar"))
+				       (:file "parser" :depends-on ("grammar" "lexer"))
+				       (:file "walk")
+				       (:file "astpp")
+				       (:file "lispy")))))
+
+(asdf:defsystem :clpython.core
+    :description "Python objects, semantics, and compiler"
+    :depends-on (:clpython.package :clpython.parser)
+    :components ((:module "core"
+			  :serial t
+			  :components ((:file "formatstring" )
+				       (:file "classes"      )
+				       (:file "exceptions"   )
+				       (:file "builtins"     )
+				       (:file "compiler"     )
+				       (:file "optimize"     )
+				       (:file "modules"      )))))
+
+(asdf:defsystem :clpython.lib
+    :description "Python libraries"
+    :depends-on (:clpython.package :clpython.parser :clpython.core)
+    :components ((:module "lib"
+			  :components ((:file "sys")
+				       (:file "time")
+				       (:file "os")
+				       (:file "array")))))
+
+(asdf:defsystem :clpython
+    :description "CLPython - an implementation of Python in Common Lisp"
+    :depends-on (:clpython.package :clpython.parser :clpython.core :clpython.lib))
+
+
+;;; Applications built on top of CLPython
+
+(asdf:defsystem :clpython.app.repl
+    :description "CLPython read-eval-print loop"
+    :depends-on (:clpython)
+    :components ((:module "app"
+			  :components ((:module "repl"
+						:components ((:file "repl")))))))

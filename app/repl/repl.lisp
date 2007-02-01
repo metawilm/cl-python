@@ -5,7 +5,7 @@
 ;; (http://opensource.franz.com/preamble.html),
 ;; known as the LLGPL.
 
-(in-package :python)
+(in-package :clpython.app.repl)
 
 (defun goto-python-top-level ()
   (let ((r (find-restart 'return-python-toplevel)))
@@ -100,7 +100,7 @@ Relevant Lisp variables:
 				(let ((helper-func
 					 (compile nil `(lambda ()
 							 (declare (optimize (debug 3)))
-							 (with-this-module-context (,*repl-mod*)
+							 (clpython::with-this-module-context (,*repl-mod*)
 							   ,suite)))))
 				    (loop
 				      (with-simple-restart
