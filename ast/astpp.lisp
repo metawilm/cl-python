@@ -183,9 +183,9 @@
     (generator-expr (format stream "(~A" (second x))
 		    (loop for clause in (third x)
 			do (ecase (first clause)
-			      (for-in (format stream " for ~A in ~A"
-						   (second clause) (third clause)))
-			      (if     (format stream " if ~A" (second clause)))))
+			      (:for-in (format stream " for ~A in ~A"
+					       (second clause) (third clause)))
+			      (:if     (format stream " if ~A" (second clause)))))
 		    (format stream ")"))
      
     (global-stmt     (format stream "global ~{~A~^, ~}" (second x)))

@@ -15,10 +15,6 @@
 ;;;  (put 'def-py-method 'fi:common-lisp-indent-hook
 ;;;     (get 'defmethod 'fi:common-lisp-indent-hook))
 
-(defmacro fast (&body body)
-  `(locally (declare (optimize (speed 3) (safety 0) (debug 0)))
-     ,@body))
-
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 ;;; Class frameword:  py-meta-type, py-type, py-dictless-object
@@ -190,7 +186,7 @@
   (:documentation "Base class for proxy classes"))
 
 
-;; Fix py-dict, to have py-core-object as superclass
+;; Fix superclass and metaclass of PY-DICT.
 (mop:ensure-class 'py-dict
 		  :direct-superclasses (list 'py-lisp-object)
 		  :metaclass 'py-core-type)
@@ -238,15 +234,18 @@
 	 (dot-pos (or (position #\. cm)
 		      (error "Need dot in name: (def-py-method classname.methodname ..); got: ~A"
 			     cls.meth)))
-	 (cls  (intern (subseq cm 0 dot-pos) #.*package*))
+	 (cls  (let ((s (subseq cm 0 dot-pos)))
+		 (or (find-symbol s #.*package*)
+		     (intern s :clpython.ast.user))))
 	 (meth (let ((methname (subseq cm (1+ dot-pos))))
 		 (when (not (some #'lower-case-p methname))
 		   ;; Can't use (every #'upper-case-p) because of dashes
 		   (setf methname (nstring-downcase methname)))
-		 (intern methname #.*package*)))
+		 (or (find-symbol methname :clpython.ast)
+		     (intern methname :clpython.ast.user))))
 	 (modifiers (loop while (keywordp (car args)) collect (pop args)))
 	 (func-name (if (eq (car modifiers) :attribute-write)
-			(intern (format nil "~A-writer" cls.meth) #.*package*)
+			(intern (format nil "~A-writer" cls.meth) :clpython.ast.user)
 		      cls.meth)))
     
     (assert (<= (length modifiers) 1) ()
@@ -265,7 +264,7 @@
 		 
 	      else if (char= #\^ (aref sym-name (1- (length sym-name))))
 	      do (let ((real-name (intern (subseq sym-name 0 (1- (length sym-name)))
-					  #.*package*)))
+					  (symbol-package sym))))
 		   (push real-name real-args)
 		   (setf body `(let ((,real-name (deproxy ,real-name)))
 				 ,body)))
@@ -1004,7 +1003,7 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 	     (class (car remaining-mro))
 	     (attr.sym (if (string= (symbol-name *py-attr-sym*) attr)
 			   *py-attr-sym*
-			 (or (find-symbol attr #.*package*)
+			 (or (find-symbol attr :clpython.ast.user)
 			     (intern attr #.*package*))))
 	     (val (recursive-class-dict-lookup class attr.sym remaining-mro)))
 	
@@ -1142,8 +1141,8 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
   
   (let* ((attr.sym (if (string= (symbol-name *py-attr-sym*) attr)
 		       *py-attr-sym*
-		     (or (find-symbol attr #.*package*)
-			 (intern attr #.*package*))))
+		     (or (find-symbol attr :clpython.ast.user)
+			 (intern attr :clpython.ast.user))))
 	 (*py-object.__getattribute__-active*
 	  (cons (cons x attr.sym) *py-object.__getattribute__-active*)))
     (py-attr x attr.sym)))
@@ -1154,11 +1153,11 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 (def-py-method py-object.__setattr__ (x attr^ val)
   (check-type attr (or string symbol))
   (let ((attr.sym (if (stringp attr)
-		      (or (find-symbol attr #.*package*)
-			  (intern attr #.*package*))
+		      (or (find-symbol attr :clpython.ast.user)
+			  (intern attr :clpython.ast.user))
 		    attr)))
   (let ((*py-object.__setattr__-active* (cons (cons x attr) *py-object.__setattr__-active*)))
-    (setf (py-attr x attr.sym) val))))
+    (setf (py-attr x (symbol-name attr.sym)) val))))
 
 
 (defvar *py-object.__delattr__-active* ())
@@ -1244,7 +1243,7 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
   (unless (symbolp name)
     (let ((str (deproxy name)))
       (if (stringp str)
-	  (setf name (intern str #.*package*))
+	  (setf name (intern str :clpython.ast.user))
 	(py-raise '|TypeError| "Invalid class name: ~A" name))))
   
   (let* ((cls-type (if (and (some (lambda (s) (let ((pt (ltv-find-class 'py-type)))
@@ -1455,9 +1454,9 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
       (string (setf x.string x))
       (t      (setf x.string (py-val->string x))))
     
-    (or (find-symbol x.string #.*package*)
+    (or (find-symbol x.string :clpython.ast.user)
 	(when intern
-	  (intern x.string #.*package*)))))
+	  (intern x.string :clpython.ast.user)))))
 
 (def-py-method py-module.__getattribute__ (x^ attr)
   (flet ((raise-attr-error (attr)
@@ -1546,6 +1545,7 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
   (declare (special *builtin-modules*)
 	   (optimize (debug 3)))
   (assert (listp mod-name-as-list))
+  ;;(break "todo import")
   (labels ((builtin-module (name)
 	     (when (listp name)
 	       (setf name (dotted-name name)))
@@ -2336,8 +2336,8 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
       for k.sym = (if (symbolp k)
 		      k 
 		    (progn (assert (stringp k))
-			   (or (find-symbol k #.*package*)
-			       (intern k #.*package*))))
+			   (or (find-symbol k :clpython.ast.user)
+			       (intern k :clpython.ast.user))))
       collect (cons k.sym v) into alist
       finally (let ((f (make-symbol-hash-func alist)))
 		#+(or)(warn "compiling symdict!")
@@ -2482,10 +2482,10 @@ Creates a function for doing fast lookup, using jump table"
   
   (:method ((d py-dict) (k string))
 	   (declare (special *py-attr-sym*))
-	   (let* ((s (fast *py-attr-sym*))
-		  (sn (fast (symbol-name s))))
+	   (let* ((s *py-attr-sym*)
+		  (sn (symbol-name s)))
 	     (if (or (eq k sn)
-		     (fast (string= (the string k) (the string sn))))
+		     (string= (the string k) (the string sn)))
 		 (py-dict-getitem d s)
 	       (call-next-method))))
 
@@ -2520,7 +2520,9 @@ Creates a function for doing fast lookup, using jump table"
 	for k being the hash-key in ht
 	using (hash-value v)
 	for i downfrom (hash-table-count ht)
-	do (repr-fmt s k)
+	do (if (symbolp k)
+	       (write (symbol-name k) :stream s)
+	     (repr-fmt s k))
 	   (format s ": ")
 	   (repr-fmt s v)
 	   (unless (= 1 i)
@@ -3175,8 +3177,8 @@ Creates a function for doing fast lookup, using jump table"
 
 (def-py-method py-tuple.__repr__ (x^)
   (cond ((null x)       "()")
-	((null (cdr x)) (format nil "(~/python:repr-fmt/,)" (car x)))
-	(t              (format nil "(~{~/python:repr-fmt/~^, ~})" x))))
+	((null (cdr x)) (format nil "(~/clpython:repr-fmt/,)" (car x)))
+	(t              (format nil "(~{~/clpython:repr-fmt/~^, ~})" x))))
 
 (def-py-method py-tuple.__str__ (x^)
   (if *py-print-safe*
@@ -3602,7 +3604,7 @@ finished; F will then not be called again."
   f)
 
 (defmethod print-object ((x py-func-iterator) stream)
-  (print-unreadable-object (x stream)
+  (print-unreadable-object (x stream :type t :identity t)
     (with-slots (name func stopped-yet) x
       (format stream ":name ~A  :func ~A  :stopped ~A"
 	      name func stopped-yet))))
@@ -3825,19 +3827,19 @@ finished; F will then not be called again."
 
 ;; /t/ is not Python syntax, but a hack to support __future__ feature
 ;; `true division'
-(def-math-func +   py-+    |__add__|      |__radd__|       +=   py-+=   |__iadd__|      )
-(def-math-func -   py--    |__sub__|      |__rsub__|       -=   py--=   |__isub__|      )
-(def-math-func *   py-*    |__mul__|      |__rmul__|       *=   py-*=   |__imul__|      )
-(def-math-func /t/ py-/t/  |__truediv__|  |__rtruediv__|   /t/  py-/t/= |__itruediv__|  )
-(def-math-func //  py-//   |__floordiv__| |__rfloordiv__|  //=  py-//=  |__ifloordiv__| ) 
-(def-math-func /   py-/    |__div__|      |__rdiv__|       /=   py-/=   |__idiv__|      )
-(def-math-func %   py-%    |__mod__|      |__rmod__|       %=   py-%=   |__imod__|      )
-(def-math-func <<  py-<<   |__lshift__|   |__rlshift__|    <<=  py-<<=  |__ilshift__|   )
-(def-math-func >>  py->>   |__rshift__|   |__rrshift__|    >>=  py->>=  |__irshift__|   )
-(def-math-func &   py-&    |__and__|      |__rand__|       &=   py-&=   |__iand__|      )
-(def-math-func \|  py-\|   |__or__|       |__ror__|        \|=  py-\|=  |__ior__|       )
-(def-math-func ^   py-^    |__xor__|      |__rxor__|       ^=   py-^=   |__ixor__|      )
-(def-math-func <divmod> py-divmod |__divmod__| |__rdivmod__|    nil  nil     nil        )
+(def-math-func py.ast:+   py-+    |__add__|      |__radd__|       py.ast:+=   py-+=   |__iadd__|      )
+(def-math-func py.ast:-   py--    |__sub__|      |__rsub__|       py.ast:-=   py--=   |__isub__|      )
+(def-math-func py.ast:*   py-*    |__mul__|      |__rmul__|       py.ast:*=   py-*=   |__imul__|      )
+(def-math-func py.ast:/t/ py-/t/  |__truediv__|  |__rtruediv__|   py.ast:/t/  py-/t/= |__itruediv__|  )
+(def-math-func py.ast://  py-//   |__floordiv__| |__rfloordiv__|  py.ast://=  py-//=  |__ifloordiv__| ) 
+(def-math-func py.ast:/   py-/    |__div__|      |__rdiv__|       py.ast:/=   py-/=   |__idiv__|      )
+(def-math-func py.ast:%   py-%    |__mod__|      |__rmod__|       py.ast:%=   py-%=   |__imod__|      )
+(def-math-func py.ast:<<  py-<<   |__lshift__|   |__rlshift__|    py.ast:<<=  py-<<=  |__ilshift__|   )
+(def-math-func py.ast:>>  py->>   |__rshift__|   |__rrshift__|    py.ast:>>=  py->>=  |__irshift__|   )
+(def-math-func py.ast:&   py-&    |__and__|      |__rand__|       py.ast:&=   py-&=   |__iand__|      )
+(def-math-func py.ast:\|  py-\|   |__or__|       |__ror__|        py.ast:\|=  py-\|=  |__ior__|       )
+(def-math-func py.ast:^   py-^    |__xor__|      |__rxor__|       py.ast:^=   py-^=   |__ixor__|      )
+(def-math-func py.ast:<divmod> py-divmod |__divmod__| |__rdivmod__|    nil  nil     nil        )
 
 ;; a**b (to-the-power) is a special case:
 ;;   
@@ -3966,7 +3968,9 @@ finished; F will then not be called again."
 ;; (pyeval.cl).
 
 (defvar *binary-comparison-funcs-ht* (make-hash-table :test #'eq))
-(defun get-binary-comparison-func-name (op) (gethash op *binary-comparison-funcs-ht*))
+(defun get-binary-comparison-func-name (op)
+  (or (gethash op *binary-comparison-funcs-ht*)
+      (error "missing comparison func: ~A" op)))
 
 (defmacro def-comparison (syntax func test-x-y)
   `(progn (defgeneric ,func (x y)
@@ -4125,15 +4129,14 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
 		       (t                          1)))))))
 
 
-(def-comparison  <  py-<   (=  (the (integer -1 1) (py-cmp x y)) -1))
-(def-comparison  >  py->   (=  (the (integer -1 1) (py-cmp x y))  1))
-(fmakunbound 'py-==)
+(def-comparison  clpython.ast.operator:<  py-<   (=  (the (integer -1 1) (py-cmp x y)) -1))
+(def-comparison  clpython.ast.operator:>  py->   (=  (the (integer -1 1) (py-cmp x y))  1))
 (excl:without-redefinition-warnings
  (fmakunbound 'py-==)
- (def-comparison ==  py-==  (=  (the (integer -1 1) (py-cmp x y))  0)))
-(def-comparison !=  py-!=  (/= (the (integer -1 1) (py-cmp x y))  0)) ;; parser: <> -> !=
-(def-comparison <=  py-<=  (<= (the (integer -1 1) (py-cmp x y))  0))
-(def-comparison >=  py->=  (>= (the (integer -1 1) (py-cmp x y))  0))
+ (def-comparison clpython.ast.operator:==  py-==  (=  (the (integer -1 1) (py-cmp x y))  0)))
+(def-comparison  clpython.ast.operator:!=  py-!=  (/= (the (integer -1 1) (py-cmp x y))  0)) ;; parser: <> -> !=
+(def-comparison  clpython.ast.operator:<=  py-<=  (<= (the (integer -1 1) (py-cmp x y))  0))
+(def-comparison  clpython.ast.operator:>=  py->=  (>= (the (integer -1 1) (py-cmp x y))  0))
 
 ;; Necessary for bootstrapping (py-dict + def-py-method)
 (defmethod py-== ((x symbol) (y symbol))
@@ -4213,7 +4216,7 @@ integer(defun py-val->number (x)
 (defun py-repr-string (x) (py-val->string (py-repr x)))
 (defun py-str-string  (x) (py-val->string (py-str x)))
 
-(defun py-string->symbol  (x &optional (package #.*package*))
+(defun py-string->symbol  (x &optional (package :clpython.ast.user))
   ;; {symbol,string} -> symbol
   (if (symbolp x) 
       x
@@ -4232,7 +4235,7 @@ integer(defun py-val->number (x)
 
 (defun repr-fmt (stream argument &optional colon-p at-p &rest parameters)
   "Wrapper function for PY-REPR that is usable inside format string, using
-the ~/.../ directive: ~/python:repr-fmt/"
+the ~/.../ directive: ~/clpython:repr-fmt/"
   
   (when (or colon-p at-p parameters)
     (error "Format string function py-repr-fmt does not support colon, ~
@@ -4268,7 +4271,7 @@ next value gotten by iterating over X. Returns NIL, NIL upon exhaustion.")
 			   (iterator.cls (py-class-of iterator))
 			   
 			   (next-meth-unbound
-			    (or (recursive-class-dict-lookup iterator.cls '|next|)
+			    (or (recursive-class-dict-lookup iterator.cls 'clpython.ast.user::|next|)
 				(py-raise
 				 '|TypeError| "The value returned by ~A's `__iter__' method ~
                                  	     is ~A, which is not an iterator (no `next' method)"

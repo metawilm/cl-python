@@ -7,9 +7,6 @@
 
 (in-package :clpython.parser)
 
-(eval-when (:compile-toplevel :load-toplevel :execute)
-  (use-package :clpython.ast.all))
-
 (defun parse-python-with-lexer (&rest lex-options)
   (let* ((lexer (apply #'make-py-lexer lex-options))
 	 (grammar (make-instance 'python-grammar :lexer lexer)))

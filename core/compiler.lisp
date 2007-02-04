@@ -120,6 +120,11 @@ XXX Currently there is not way to set *__debug__* to False.")
 (defvar *current-module-path* ""
   "The path of the Python file being compiled; saved in module's `filepath' slot.")
 
+
+(defmacro fast (&body body)
+  `(locally (declare (optimize (speed 3) (safety 0)))
+     ,@body))
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; 
 ;;;  The macros corresponding to AST nodes
@@ -933,8 +938,8 @@ XXX Currently there is not way to set *__debug__* to False.")
 	    with res = `(push ,item ,list)
 	    for clause in (reverse for-in/if-clauses)
 	    do (setf res (ecase (car clause)
-			   (for-in `(for-in-stmt ,(second clause) ,(third clause) ,res nil))
-			   (if     `(if-stmt (,(second clause) ,res) nil))))
+			   (:for-in `(for-in-stmt ,(second clause) ,(third clause) ,res nil))
+			   (:if     `(if-stmt (,(second clause) ,res) nil))))
 	    finally (return res))
        (make-py-list-from-list (nreverse ,list)))))
 
@@ -2466,15 +2471,15 @@ statements, as then variables can be guaranteed to be bound."
     (let ((first-for (pop for-in/if-clauses))
 	  (first-source (gensym "first-source")))
       
-      (assert (eq (car first-for) 'for-in))
+      (assert (eq (car first-for) :for-in))
       
       (let ((iteration-stuff (loop with res = `(yield-stmt ,item)
 				 for clause in (reverse for-in/if-clauses)
 				 do (setf res
 				      (ecase (car clause)
-					(for-in `(for-in-stmt
-						  ,(second clause) ,(third clause) ,res nil))
-					(if     `(if-stmt ((,(second clause) ,res)) nil))))
+					(:for-in `(for-in-stmt
+						   ,(second clause) ,(third clause) ,res nil))
+					(:if     `(if-stmt ((,(second clause) ,res)) nil))))
 				 finally (return res))))
 	
 	`(call-expr 

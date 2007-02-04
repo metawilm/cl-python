@@ -246,14 +246,14 @@ VALUE and TARGET context."
 	   (let* ((rec-clauses
 		   (loop for for/if in for-in/if-clauses
 		       collect (ecase (car for/if)
-				 (for-in (destructuring-bind (expr iterable) (cdr for/if)
-					   (let* ((rec-iterable
-						   (funcall f iterable :value t))
-						  (rec-expr
-						   (funcall f expr :target t)))
-					     `(for-in ,rec-expr ,rec-iterable))))
-				 (if (let* ((test (second for/if)))
-				       `(if ,(funcall f test :value t)))))))
+				 (:for-in (destructuring-bind (expr iterable) (cdr for/if)
+					    (let* ((rec-iterable
+						    (funcall f iterable :value t))
+						   (rec-expr
+						    (funcall f expr :target t)))
+					      `(:for-in ,rec-expr ,rec-iterable))))
+				 (:if (let* ((test (second for/if)))
+					`(:if ,(funcall f test :value t)))))))
 		  
 		  (rec-item (funcall f item :value t)))
 	     
@@ -261,10 +261,10 @@ VALUE and TARGET context."
 	 
 	 (progn (loop for for/if in for-in/if-clauses
 		    do (ecase (car for/if)
-			 (for-in (destructuring-bind (expr iterable) (cdr for/if)
+			 (:for-in (destructuring-bind (expr iterable) (cdr for/if)
 				   (funcall f iterable :value t)
 				   (funcall f expr     :target t)))
-			 (if (let ((test (second for/if)))
+			 (:if (let ((test (second for/if)))
 			       (funcall f test :value t)))))
 		(funcall f item :value t)))))
     

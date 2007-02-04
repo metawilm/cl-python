@@ -6,8 +6,8 @@
 ;; known as the LLGPL.
 
 (in-package :clpython.parser)
-	
-;; Lexer
+
+;;; Lexer
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (require :yacc)
@@ -768,9 +768,9 @@ C must be either a character or NIL."
 	   (let* ((vec #.(loop with vec = (make-array 128
 						      :element-type 'symbol 
 						      :initial-element nil)
-			     for sym in '(|.| |=| |+| |-| |*| |/| |~| |^| |\||
-					  |&| |%| |[| |]| |(| |)| |<| |>| |{| |}| 
-					  |`| |,| |:| |@| |;| |\\|)
+			     for sym in '(|=| |+| |-| |*| |/| 
+					  |<| |>| |~| |^| |\|| |&| |%|
+					  |(| |)| |.|  |[| |]|  |{| |}| |`| |,| |:| |@| |;| |\\|)
 			     for char = (char (symbol-name sym) 0)
 			     do (setf (svref vec (char-code char)) sym)
 			     finally (return vec)))

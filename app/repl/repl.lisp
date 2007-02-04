@@ -7,6 +7,12 @@
 
 (in-package :clpython.app.repl)
 
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (import '(clpython.ast.user::_ clpython.ast.user::__ clpython.ast.user::___) #.*package*))
+
+
+;;; Restarts
+
 (defun goto-python-top-level ()
   (let ((r (find-restart 'return-python-toplevel)))
     (if r
@@ -15,7 +21,6 @@
 
 (setf (top-level:alias "ptl")
   #'goto-python-top-level)
-
 
 (defun retry-repl-comp ()
   (let ((r (find-restart 'retry-repl-comp)))
@@ -35,7 +40,6 @@
 (setf (top-level:alias "re")
   #'retry-repl-eval)
 
-(defvar *repl-mod*)
 
 (defvar _   *the-none*) ;; the last value evaluated by REPL
 (defvar __  *the-none*) ;; second-last
@@ -43,19 +47,7 @@
 
 (defvar *repl-prof* nil)
 
-(defun repl ()
-  (setf *repl-mod* (make-module))
-  (setf *py-modules* (initial-py-modules))
-  (let* ((dyn-globals (slot-value *repl-mod* 'dyn-globals)))
-    
-    (declare (special *the-none*))
-    (setf (gethash '|_|        dyn-globals) *the-none*
-	  (gethash '|__|       dyn-globals) *the-none*
-	  (gethash '|___|      dyn-globals) *the-none*
-	  (gethash '|__name__| dyn-globals) "__main__")
-    
-    (labels ((print-cmds ()
-	       (format t "
+(defvar *repl-doc* "
 In the Python interpreter:
 
      :help          => print (this) help
@@ -79,7 +71,24 @@ Relevant Lisp variables:
                          :ptime   = time call graph
                          :space   = list of allocations
                          :pspace  = space call graph
-"))
+")
+
+(defvar *repl-mod* nil)
+
+(defun repl ()
+  (let* ((repl-mod (make-module))
+	 (*repl-mod* repl-mod)
+	 (dyn-globals (slot-value repl-mod 'dyn-globals))
+	 (*py-modules* (initial-py-modules)))
+        
+    (setf (gethash '|_|        dyn-globals) *the-none*
+	  (gethash '|__|       dyn-globals) *the-none*
+	  (gethash '|___|      dyn-globals) *the-none*
+	  (gethash '|__name__| dyn-globals) "__main__")
+    
+    (labels ((print-cmds ()
+	       (format t *repl-doc*))
+	     
 	     (remember-value (val)
 	       ;; Make last three return values available as _, __, ___
 	       ;; for both Python (repl module namespace) and Lisp (dynamic vars).
@@ -89,6 +98,13 @@ Relevant Lisp variables:
 		       (gethash '_   dyn-globals)
 		       val))
 
+	     (run-ast-func (suite)
+	       #+(or)(warn "AST: ~S" suite)
+	       (compile nil `(lambda ()
+			       (declare (optimize (debug 3)))
+			       (clpython::with-this-module-context (,repl-mod)
+				 ,suite))))
+	     
 	     (eval-print-ast (ast)
 	       (destructuring-bind (module-stmt suite) ast
 		 (assert (eq module-stmt 'module-stmt))
@@ -97,33 +113,29 @@ Relevant Lisp variables:
 		 (let ((vals (multiple-value-list
 			     (block :val
 			      (loop
-				(let ((helper-func
-					 (compile nil `(lambda ()
-							 (declare (optimize (debug 3)))
-							 (clpython::with-this-module-context (,*repl-mod*)
-							   ,suite)))))
-				    (loop
-				      (with-simple-restart
-					  (retry-repl-eval
-					   "Retry the execution the compiled REPL command. [:re]")
-					(return-from :val
-					  (case *repl-prof*
-					    (:ptime (prof:with-profiling (:type :time)
-						      (funcall helper-func))
-						    (terpri)
-						    (prof:show-call-graph))
-					    (:time (prog1 (time (funcall helper-func))
-						     (terpri)))
-					    (:space (prof:with-profiling
-							(:type :space :count t) (funcall helper-func))
-						    (terpri)
-						    (prof:show-flat-profile))
-					    (:pspace (prof:with-profiling (:type :space)
-						       (funcall helper-func))
-						     (terpri)
-						     (prof:show-call-graph))
-					    (t (funcall helper-func))))))))))))
-		   (when (car vals)
+				(let ((helper-func (run-ast-func suite)))
+				  (loop
+				    (with-simple-restart
+					(retry-repl-eval
+					 "Retry the execution the compiled REPL command. [:re]")
+				      (return-from :val
+					(ecase *repl-prof*
+					  (:ptime  (prof:with-profiling (:type :time)
+						     (funcall helper-func))
+						   (terpri)
+						   (prof:show-call-graph))
+					  (:time  (prog1 (time (funcall helper-func))
+						    (terpri)))
+					  (:space  (prof:with-profiling
+						       (:type :space :count t) (funcall helper-func))
+						   (terpri)
+						   (prof:show-flat-profile))
+					  (:pspace (prof:with-profiling (:type :space)
+						     (funcall helper-func))
+						   (terpri)
+						   (prof:show-call-graph))
+					  ((nil)   (funcall helper-func))))))))))))
+		   (when (car vals) ;; Don't remember NIL
 		     (remember-value (car vals))
 		     (block :repr
 		       (loop
@@ -166,28 +178,20 @@ Relevant Lisp variables:
 			      (setf acc ())
 			      (loop
 				(restart-case
-				    (progn
-				      (let ((ast (parse-python-string total)))
-					(eval-print-ast ast)
-					(return)))
+				    (let ((ast (parse-python-string total)))
+				      (eval-print-ast ast)
+				      (return))
 				  (try-parse-again ()
-				      :report "Parse string again into AST")
-				  (recompile-grammar ()
-				      :report "Recompile grammar"
-				    (compile-file "parser")
-				    (load "parser"))))))
+				      :report "Parse string again into AST")))))
 			 
 			   (t (push (concatenate 'string x (string #\Newline))
 				    acc)
-
 			      ;; Try to parse; if that returns a "simple" AST
 			      ;; (like just inspecting the value of a variable), the
 			      ;; input is complete and there's no need to wait for
 			      ;; an empty line.
-			    
 			      (let* ((total (apply #'concatenate 'string (reverse acc))))
 				(block :try-parse
-
 				  ;; try to parse as Python code first
 				  ;;  but when first char is a space, always treat it as Lisp code
 				  (unless (and (> (length total) 0)
@@ -213,18 +217,19 @@ Relevant Lisp variables:
 					(return-from :try-parse))))
 				
 				  ;; try to parse as Lisp code second
-				  (let ((lisp-form (ignore-errors (with-standard-io-syntax
-								    ;; Bind package, so symbols _, __, ___
-								    ;; are present.
-								    (let ((*package* #.*package*))
-								      (read-from-string total nil nil))))))
+				  (let ((lisp-form (ignore-errors
+						    (with-standard-io-syntax
+						      ;; Bind package, so symbols _, __, ___
+						      ;; are present.
+						      (let ((*package* #.*package*))
+							(read-from-string total nil nil))))))
 				    (when (and lisp-form
 					       (not (member lisp-form '(def class for while if try)))) 
 				      (multiple-value-bind (res err) 
 					  (ignore-errors (multiple-value-list (eval lisp-form)))
 					(if (and (null res)
 						 (typep err 'condition))
-					    (format t ";; Evaluation as Lisp failed: ~A~%" err)
+					    (format t ";; Eval as Lisp failed: ~A~%" err)
 					  (progn
 					    (remember-value (car res))
 					    (dolist (r res)

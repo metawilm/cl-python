@@ -50,14 +50,42 @@
 	   "lambda" "not" "or" "pass" "print" "raise" "return" "try" "while" "yield"))
 
 (defpackage :clpython.ast.operator
+  (:documentation "Unary and binary operators")
   (:use )
-  (:export "<" "<=" ">" ">=" "!=" "<>" "=="
+  (:import-from :common-lisp "<" "<=" ">" ">=" "/=" "/" "//" "+" "-" "*" "**")
+  (:export "<" "<=" ">" ">=" "!=" "=="
 	   "|" "^" "&" "<<" ">>" "+" "-" "*" "/" "%" "//" "~" "**"
-	   "|=" "^=" "&=" "<<=" ">>=" "+=" "-=" "*=" "/=" "*=" "/=" "%=" "//=" "**="))
+	   "|=" "^=" "&=" "<<=" ">>=" "+=" "-=" "*=" "/=" "*=" "/=" "%=" "//=" "**="
+	   ;; not really operators in the grammar, but used internally...
+	   #:/t/ #:<divmod>))
+
+(defpackage :clpython.ast.punctuation
+  (:use )
+  (:import-from :common-lisp "=" #:string #:number)
+  (:export "@" ":" "[" "]" "{" "}" "(" ")" "=" "." "," "`" ";" "..." "<>"
+	   #:newline #:indent #:dedent #:idenfifier #:number #:string))
 
 (defpackage :clpython.ast.user
   (:documentation "Identifiers")
-  (:use ))
+  (:use )
+  (:export "__getitem__" "__delitem__" "__setitem__" "__new__" "__init__"
+	   "__dict__" "__get__" "__del__" "__set__" "__name__" "__all__"
+	   "__getattribute__" "__getattr__" "__class__" "__delattr__"
+	   "__setattr__" "__call__" "__nonzero__" "__hash__" "__iter__"
+	   ;; binary
+	   "__add__" "__radd__" "__iadd__"  "__sub__" "__rsub__" "__isub__"
+	   "__mul__" "__rmul__" "__imul__"  "__truediv__" "__rtruediv__" "__itruediv__"
+	   "__mod__" "__rmod__" "__imod__"  "__floordiv__" "__rfloordiv__" "__ifloordiv__"
+	   "__div__" "__rdiv__" "__idiv__"  "__lshift__" "__rlshift__" "__irshift__"
+	   "__and__" "__rand__" "__iand__"  "__rshift__" "__rrshift__" "__irshift__"
+	   "__or__"  "__ror__"  "__ior__"   "__divmod__" "__rdivmod__"
+	   "__xor__" "__rxor__" "__ixor__"  "__pow__" "__ipow__"
+	   ;; unary
+	   "__invert__" "__pos__" "__neg__" "__contains__" "__cmp__" "__abs__" "__len__"
+	   ;; comparison
+	   "__eq__" "__lt__" "__gt__" "__cmp__" 
+	   ;; representation
+	   "__repr__" "__str__" "__hex__" "__oct__" ))
 
 (defpackage :clpython.ast.node
   (:documentation "Statement and expression nodes")
@@ -80,11 +108,18 @@
 ;; Don't export operators, as 21 of them conflict with symbols in the Common Lisp package.
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (cascade-external-symbols :clpython.ast
-			    (remove (find-package :clpython.ast.operator) (package-use-list :clpython.ast))))
+			    (remove (find-package :clpython.ast.operator)
+				    (remove (find-package :clpython.ast.punctuation)
+					    (package-use-list :clpython.ast)))))
 
 (defpackage :clpython.ast.all
+  (:nicknames :py.ast)
   (:documentation "Python abstract syntax tree representation (All symbols)")
-  (:use :clpython.ast.reserved :clpython.ast.user :clpython.ast.node :clpython.ast.operator))
+  (:use :clpython.ast.reserved :clpython.ast.user :clpython.ast.node
+	:clpython.ast.operator :clpython.ast.punctuation))
+
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (cascade-external-symbols :clpython.ast.all))
 
 ;;; Builtins
 
@@ -138,8 +173,17 @@
 
 (defpackage :clpython.parser
   (:documentation "")
-  (:use :common-lisp :clpython.ast)
+  (:use :common-lisp :clpython.ast.all)
   (:import-from :clpython.builtin.type.exception "SyntaxError")
+  
+  #+(or)
+  (:shadowing-import-from :clpython.ast.operator
+			  "<" "<=" ">" ">=" "!=" "<>" "=="
+			  "|" "^" "&" "<<" ">>" "+" "-" "*" "/" "%" "//" "~" "**"
+			  "|=" "^=" "&=" "<<=" ">>=" "+=" "-=" "*=" "/=" "*=" "/=" "%=" "//=" "**="
+			  ;; not really operators in the grammar, but used internally...
+			  #:/t/ #:<divmod>)
+  
   (:export #:parse-python-file #:parse-python-string ))
 
 

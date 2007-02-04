@@ -20,7 +20,7 @@
        (setf (gethash ',name.sym *builtin-modules*) ,m)
        
        (flet ((.register (name val)
-		(setf (gethash name ,dg) val)))
+		(setf (gethash (intern (string name) :clpython.ast.user) ,dg) val)))
 	 (macrolet ((reg-var (vname value)
 		      `(.register ',vname ,value))
 		    (reg-func (fname args &body body)
