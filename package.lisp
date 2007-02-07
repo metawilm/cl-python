@@ -40,7 +40,7 @@
 
 ;;; Abstract syntax tree
 
-(defpackage  :clpython.ast.reserved
+(defpackage :clpython.ast.reserved
   (:documentation "Reserved words in the grammar")
   ;; A few of these (e.g. `as') are not actually reserved words in CPython yet
   ;; (because of backward compatilibity reasons), but they will be in the future.

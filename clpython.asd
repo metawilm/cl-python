@@ -62,27 +62,19 @@
 				       (:file "builtins"     )
 				       (:file "compiler"     )
 				       (:file "optimize"     )
-				       (:file "modules"      )))))
+				       (:file "modules"      )
+				       (:file "import"       )))))
 
 (asdf:defsystem :clpython.lib
-    :description "Python libraries"
+    :description "Python module library"
     :depends-on (:clpython.package :clpython.parser :clpython.core)
     :components ((:module "lib"
 			  :components ((:file "sys")
 				       (:file "time")
 				       (:file "os")
-				       (:file "array")))))
+				       (:file "array")
+				       (:file "math")))))
 
 (asdf:defsystem :clpython
     :description "CLPython - an implementation of Python in Common Lisp"
     :depends-on (:clpython.package :clpython.parser :clpython.core :clpython.lib))
-
-
-;;; Applications built on top of CLPython
-
-(asdf:defsystem :clpython.app.repl
-    :description "CLPython read-eval-print loop"
-    :depends-on (:clpython)
-    :components ((:module "app"
-			  :components ((:module "repl"
-						:components ((:file "repl")))))))

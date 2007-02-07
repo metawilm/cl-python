@@ -163,7 +163,11 @@ POS-ARGS is any iterable object; KW-DICT must be of type PY-DICT."
 		      (eq c (ltv-find-class 'py-dict-mixin))
 		      (eq c (ltv-find-class 'py-class-mixin))
 		      (eq c (ltv-find-class 'standard-generic-function)))
-	    do (add-dict (dict c)))))
+	    do (add-dict (dict c))))
+      
+      (when (typep x 'py-module)
+	(loop for k in (mapcar #'car (py-module-get-items x))
+	    do (pushnew (if (stringp k) k (py-val->string k)) res))))
     (assert (every #'stringp res))
     (setf res (sort res #'string<))
     res))
