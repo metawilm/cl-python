@@ -468,7 +468,7 @@
  (testlist1 (test |,--test*|) ((if $2 `(tuple-expr (,$1 . ,$2)) $1))))
 
 
-(build-grammar python-grammar t t)
+(build-grammar python-grammar nil nil)
 
 
 (defun parse-trailers (ast)
