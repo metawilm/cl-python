@@ -68,7 +68,7 @@
       (let ((mod (make-module :name name :builtin t)))
 	(do-symbols (sym package mod)
 	  (when (eq (symbol-package sym) (find-package package))
-	    (warn "Symbol ~A: bound: ~A  fbound: ~A" sym (boundp sym) (fboundp sym))
+	    ;; (warn "Symbol ~A: bound: ~A  fbound: ~A" sym (boundp sym) (fboundp sym))
 	    (let ((val (cond ((boundp sym)   (symbol-value sym))
 			     ((fboundp sym)  (symbol-function sym)))))
 	      (when val
