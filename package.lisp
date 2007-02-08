@@ -31,9 +31,10 @@
 ;; Below exported symbols are #:symbols if case is irrelevant, and "strings" if case
 ;; is important.
 
-(warn (eq excl::*current-case-mode* :case-sensitive-lower)
-  (break "CLPython currently does not work correctly in Allegro ANSI mode.
-Please run in Modern mode instead."))
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (when (eq excl::*current-case-mode* :case-sensitive-lower)
+    (break "CLPython currently does not work correctly in Allegro Modern mode.
+Please run in ANSI mode instead.")))
   
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (defun cascade-external-symbols (pkg &optional used-pkg-list)
