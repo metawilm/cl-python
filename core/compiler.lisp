@@ -338,22 +338,6 @@ XXX Currently there is not way to set *__debug__* to False.")
     (py-raise '|TypeError| "Built-in function `globals' does not take args."))
   globals-dict)
 
-(defun call-expr-eval (locals-dict globals-dict pos-args key-args-p)
-  (when (or key-args-p 
-	    (not pos-args)
-	    (> (length pos-args) 3))
-    (py-raise '|TypeError| "Built-in function `eval' takes from 1 to three positional args."))
-  (let* ((string (pop pos-args))
-	 (glob-d (or (pop pos-args) globals-dict))
-	 (loc-d  (or (pop pos-args) locals-dict)))
-    
-    ;; Make it an EXEC stmt, but be sure to save the result.
-    (let* ((res nil)
-	   (*exec-stmt-result-handler* (lambda (val) (setf res val))))
-      (declare (special *exec-stmt-result-handler*))
-      (exec-stmt string glob-d loc-d :allowed-stmts '(module-stmt suite-stmt))
-      res)))
-
 (defmacro call-expr-1 (primary (pos-args kwd-args *-arg **-arg))
   (let ((kw-args (loop for ((i-e key) val) in kwd-args
 		     do (assert (eq i-e 'identifier-expr))
@@ -588,6 +572,23 @@ XXX Currently there is not way to set *__debug__* to False.")
 		       (funcall (compile nil `(lambda ()
 						(locally (declare (optimize (debug 3)))
 						  ,lambda-body))))))))
+
+(defun call-expr-eval (locals-dict globals-dict pos-args key-args-p)
+  ;; Uses exec-stmt, therefore below it.
+  (when (or key-args-p 
+	    (not pos-args)
+	    (> (length pos-args) 3))
+    (py-raise '|TypeError| "Built-in function `eval' takes from 1 to three positional args."))
+  (let* ((string (pop pos-args))
+	 (glob-d (or (pop pos-args) globals-dict))
+	 (loc-d  (or (pop pos-args) locals-dict)))
+    
+    ;; Make it an EXEC stmt, but be sure to save the result.
+    (let* ((res nil)
+	   (*exec-stmt-result-handler* (lambda (val) (setf res val))))
+      (declare (special *exec-stmt-result-handler*))
+      (exec-stmt string glob-d loc-d :allowed-stmts '(module-stmt suite-stmt))
+      res)))
 
 (defmacro for-in-stmt (target source suite else-suite)
   (with-gensyms (f x)
