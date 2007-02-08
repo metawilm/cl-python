@@ -347,7 +347,8 @@ C must be either a character or NIL."
 	do (vector-push-extend c res)
 	finally (when c (unread-chr c)))
     
-    (let ((s (find-symbol res :clpython.ast)))
+    (let ((s (or (find-symbol res :clpython.ast)
+		 (find-symbol res :clpython.builtin))))
       ;; Prevent case mismatches in Allegro ANSI mode
       (when (and s (string= (symbol-name s) res))
 	(return-from read-identifier s)))
