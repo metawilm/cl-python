@@ -3,6 +3,7 @@
 (defparameter *builtin-modules* (make-hash-table :test #'eq) "List of module objects")
 
 (defun initial-py-modules ()
+  (update-loaded-lisp-modules)
   (let ((ht (make-hash-table :test #'eq)))
     (maphash (lambda (k v) (setf (gethash k ht) v)) *builtin-modules*)
     ht))
@@ -33,12 +34,10 @@
 				(.register ',fname (function ,dotted-fname))))))
 	   ,@body)))))
 
-(defmacro in-python-module (name &rest args)
+(defmacro in-python-module (name &key builtin)
   (let ((sname (string name)))
-    `(eval-when (:load-toplevel)
-       (register-loaded-python-module :name ,sname :package (load-time-value *package*) ,@args))))
-
-
+    `(eval-when (:load-toplevel :execute)
+       (push (list ,sname (load-time-value *package*) ',builtin) *modules-to-load*))))
 
 ;;; Array
 (defclass py-array (py-core-object)

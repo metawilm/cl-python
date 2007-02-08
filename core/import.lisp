@@ -26,7 +26,7 @@
 ;; Modules are kept in a dictionary `sys.modules', mapping from string
 ;; to module object.
 
-(defparameter *py-modules* (make-hash-table :test #'eq))
+(defvar *py-modules* (make-hash-table :test #'eq))
 
 (defvar *py-import-force-reload* nil
   "Force recompile of all imported modules (for debugging)")
@@ -60,9 +60,11 @@
 		      :if-newer (not force-reload)
 		      :verbose verbose))))
 
-(defun register-loaded-python-module (&key name package builtin &allow-other-keys)
-  ;; XXX for now only does something if builtin
-  (if (and name package (packagep package) builtin)
+(defvar *modules-to-load* ())
+
+(defun register-loaded-python-module (name package builtinp)
+  ;; XXX for now only does something if builtinp
+  (if (and name package (packagep package) builtinp)
       (let ((mod (make-module :name name :builtin t)))
 	(do-symbols (sym package mod)
 	  (when (eq (symbol-package sym) (find-package package))
@@ -74,6 +76,10 @@
 	(setf (gethash (intern (string name) :clpython) *builtin-modules*) mod))
     (warn "Bogus IN-PYTHON-MODULE form: name or package missing")))
 
+(defun update-loaded-lisp-modules ()
+  (loop for args = (pop *modules-to-load*)
+      while args do (apply #'register-loaded-python-module args)))
+
 (defun py-import (mod-name-as-list &rest options &key (force-reload *py-import-force-reload*)
 						      (verbose t)
 						      src-mod)
@@ -83,6 +89,8 @@
   (declare (special *builtin-modules*)
 	   (optimize (debug 3)))
   (assert (listp mod-name-as-list))
+
+  (update-loaded-lisp-modules)
   
   (labels ((builtin-module (name)
 	     (when (listp name)
