@@ -5,6 +5,8 @@
 
 (clpython::in-python-module "sys" :builtin t)
 
+(warn "sys loaded XXX")
+
 (defvar |argv| (clpython::make-py-list) ;; TODO
   "Comand line args passed to script; argv[0] is script name (rel or abs)")
 
