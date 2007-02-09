@@ -77,4 +77,13 @@
 
 (asdf:defsystem :clpython
     :description "CLPython - an implementation of Python in Common Lisp"
-    :depends-on (:clpython.package :clpython.parser :clpython.core :clpython.lib))
+    :depends-on (:clpython.package :clpython.parser :clpython.core :clpython.lib)
+    
+    :in-order-to ((asdf:test-op (asdf:load-op :clpython-test)))
+    :perform (asdf:test-op :after (op c)
+			   (funcall (find-symbol (string '#:run) :clpython.test))))
+
+(defmethod asdf:operation-done-p ((o asdf:test-op)
+				  (c (eql (asdf:find-system :clpython))))
+  ;; Testing is never finished.
+  (values nil))
