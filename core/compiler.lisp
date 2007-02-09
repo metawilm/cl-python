@@ -1024,13 +1024,6 @@ XXX Currently there is not way to set *__debug__* to False.")
 
 (defun unbound-variable-error (name &optional resumable)
   (declare (special *py-signal-conditions*))
-  
-  (when *py-signal-conditions*
-    (restart-case
-	(signal 'py-unbound-variable :varname name)
-      (use-value (val)
-	(return-from unbound-variable-error val))))
-  
   (if resumable
       (restart-case
 	  (py-raise '|NameError| "Variable '~A' is unbound" name)

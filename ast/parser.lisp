@@ -7,6 +7,12 @@
 
 (in-package :clpython.parser)
 
+(defvar *signal-unexpected-eof* nil
+  "Whether UNEXPECTED-EOF is signalled in case of EOF where token expected")
+
+(define-condition unexpected-eof ()
+  ())
+
 (defun parse-python-with-lexer (&rest lex-options)
   (let* ((lexer (apply #'make-py-lexer lex-options))
 	 (grammar (make-instance 'python-grammar :lexer lexer)))
@@ -26,16 +32,19 @@
 	       (token (excl.yacc:grammar-parse-error-token c))
 	       (encl-error (excl.yacc::grammar-parse-error-enclosed-error c)))
 	  
-	  (when encl-error
-	    (assert (not (typep encl-error '|SyntaxError|)))
-	    (error encl-error))
-	  
-	  (raise-syntax-error
-	   (if encl-error
-	       (format nil "Parse error at line ~A~@[, at token `~S'~].~%[inner error: ~A]"
-		       line token encl-error)
-	     (format nil "At line ~A, parser got unexpected token `~S'."
-		     line token))))))))
+	  (cond (encl-error 
+		 ;; Error while building resulting AST
+		 (assert (not (typep encl-error '|SyntaxError|)))
+		 (raise-syntax-error
+		  (format nil "Parse error at line ~A~@[, at token `~S'~].~%[inner error: ~A]"
+			  line token encl-error)))
+		
+		(t (when (and (eq token 'EXCL.YACC:EOF)
+			      *signal-unexpected-eof*)
+		     (signal 'unexpected-eof))
+		   
+		   (raise-syntax-error (format nil "At line ~A, parser got unexpected token `~S'."
+					       line token)))))))))
 
 (defgeneric parse-python-file (source &key (incl-module t))
   (:method :around (s &key (incl-module t))
