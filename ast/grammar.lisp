@@ -11,7 +11,7 @@
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (require :yacc)
-  (use-package :yacc))
+  (use-package :excl.yacc))
 
 (defgrammar python-grammar (grammar)
   ()

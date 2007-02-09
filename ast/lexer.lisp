@@ -11,7 +11,7 @@
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (require :yacc)
-  (use-package :yacc))
+  (use-package :excl.yacc))
 
 
 (defvar *lex-read-char*)
@@ -328,11 +328,20 @@ C must be either a character or NIL."
 	      (and (< ,code 128)
 		   (= (aref ,arr ,code) 1)))))))
 
+(defun lookup-external-symbol (sym pkg)
+  (check-type sym string)
+  (multiple-value-bind (sym kind)
+      (find-symbol sym pkg)
+    (when sym
+      (assert (eq kind :external) ()
+	"As package ~A does not support (internal) symbol ~S. ~
+         Therefore that symbol should not be in the package at all." pkg sym))
+    sym))
+
 (defun read-identifier (first-char)
   "Returns the identifier read as string. ~@
    Identifiers start start with an underscore or alphabetic character; ~@
    second and further characters must be alphanumeric or underscore."
-
   (assert (identifier-char1-p first-char))
   (let ((res (load-time-value
 	      (make-array 6 :element-type 'character
@@ -347,13 +356,15 @@ C must be either a character or NIL."
 	do (vector-push-extend c res)
 	finally (when c (unread-chr c)))
     
-    (let ((s (or (find-symbol res :clpython.ast)
-		 (find-symbol res :clpython.builtin))))
+    (let ((s (or (lookup-external-symbol res :clpython.ast)
+		 (lookup-external-symbol res :clpython.builtin))))
       ;; Prevent case mismatches in Allegro ANSI mode
       (when (and s (string= (symbol-name s) res))
 	(return-from read-identifier s)))
     
-    (intern (simple-string-from-vec res) :clpython.ast.user)))
+    (intern (simple-string-from-vec res) :clpython.ast.user)
+    ;; Maybe make symbol extern?
+    ))
 
 (defun simple-string-from-vec (vec)
   (make-array (length vec)

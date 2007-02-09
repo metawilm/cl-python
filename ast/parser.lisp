@@ -23,8 +23,8 @@
       (grammar-parse-error (c)
 	(let* ((pos (grammar-parse-error-position c))
 	       (line (second (assoc :line-no pos)))
-	       (token (yacc:grammar-parse-error-token c))
-	       (encl-error (yacc::grammar-parse-error-enclosed-error c)))
+	       (token (excl.yacc:grammar-parse-error-token c))
+	       (encl-error (excl.yacc::grammar-parse-error-enclosed-error c)))
 	  
 	  (when encl-error
 	    (assert (not (typep encl-error '|SyntaxError|)))
@@ -37,8 +37,15 @@
 	     (format nil "At line ~A, parser got unexpected token `~S'."
 		     line token))))))))
 
-(defgeneric parse-python-file (source)
-  (:method ((s stream))
+(defgeneric parse-python-file (source &key (incl-module t))
+  (:method :around (s &key (incl-module t))
+	   (declare (ignore s))
+	   (let ((ast (call-next-method)))
+	     (if incl-module
+		 ast
+	       (unwrap-module ast))))
+  (:method ((s stream) &key incl-module)
+	   (declare (ignore incl-module))
 	   (parse-python-with-lexer
 	    :read-chr   (lambda ()
 			  (declare (optimize (speed 3) (safety 1) (debug 0)))
@@ -46,22 +53,38 @@
 	    :unread-chr (lambda (c)
 			  (declare (optimize (speed 3) (safety 1) (debug 0)))
 			  (unread-char c s))))
-  (:method ((filename t))
+  (:method ((filename t) &key incl-module)
+	   (declare (ignore incl-module))
 	   (with-open-file (f (string filename) :direction :input)
 	     (parse-python-file f))))
 
-(defmethod parse-python-string ((s string))
-  (let ((next-i 0)
-	(max-i (length s)))
-    
-    (parse-python-with-lexer
-     :read-chr (lambda ()
-		  (when (< next-i max-i)
-		    (prog1 (char s next-i) (incf next-i))))
-     
-     :unread-chr (lambda (c)
-		    (assert (and c (> next-i 0) (char= c (char s (1- next-i)))))
-		    (decf next-i)))))
+(defgeneric parse-python-string (s &key (incl-module t))
+  (:method :around (s &key (incl-module t))
+	   (declare (ignore s))
+	   (let ((ast (call-next-method)))
+	     (if incl-module
+		 ast
+	       (unwrap-module ast))))
+  (:method ((s string) &key incl-module)
+	   (declare (ignore incl-module))
+	   (let ((next-i 0)
+		 (max-i (length s)))
+	     
+	     (parse-python-with-lexer
+	      :read-chr (lambda ()
+			  (when (< next-i max-i)
+			    (prog1 (char s next-i) (incf next-i))))
+	      
+	      :unread-chr (lambda (c)
+			    (assert (and c (> next-i 0) (char= c (char s (1- next-i)))))
+			    (decf next-i))))))
+
+(defun unwrap-module (ast)
+  "(MODULE-STMT (SUITE-STMT ...)) -> ..."
+  (destructuring-bind (module-stmt (suite-stmt beef)) ast
+    (assert (eq module-stmt 'module-stmt))
+    (assert (eq suite-stmt 'suite-stmt))
+    beef))
 
 (defun raise-syntax-error (formatstring &rest args)
   ;; Raise Pythonic SyntaxError if available, otherwise regular error.
