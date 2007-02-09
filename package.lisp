@@ -7,27 +7,6 @@
 
 (in-package :user)
 
-;; CLPython package structure:
-;;
-;;  :clpython                      -- aggrgation of other packages
-;;
-;;    :clpython.builtin            -- built-ins
-;;      :clpython.builtin.function   -- functions like `len', `repr'
-;;      :clpython.builtin.type       -- types like `int', `function'
-;;        :clpython.builtin.type.exception  -- exceptions, like `IndexError'
-;;      :clpython.builtin.value      -- values like `True', `None'
-;;      :clpython.builtin.module     -- modules like `sys', `time'
-;;
-;;    :clpython.ast                -- symbols for representing source code
-;;      :clpython.ast.node           -- AST nodes like `funcdef-stmt', `call-expr'
-;;      :clpython.ast.reserved       -- reserved words like `def', `if'
-;;      :clpython.ast.user           -- variables like `foo', `fact'
-;;
-;;    :clpython.parser             -- parsing Python source code into AST
-;;
-;;    :clpython.app                -- applications build on CLPython
-;;    :clpython.app.repl            -- read-eval-print loop
-;;
 ;; Below exported symbols are #:symbols if case is irrelevant, and "strings" if case
 ;; is important.
 
@@ -189,7 +168,8 @@ Please run in ANSI mode instead.")))
 			  ;; not really operators in the grammar, but used internally...
 			  #:/t/ #:<divmod>)
   
-  (:export #:parse-python-file #:parse-python-string ))
+  (:export #:parse-python-file #:parse-python-string
+	   #:unexpected-eof #:*signal-unexpected-eof*))
 
 
 ;;; Main package
