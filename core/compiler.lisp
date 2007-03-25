@@ -6,6 +6,7 @@
 ;; known as the LLGPL.
 
 (in-package :clpython)
+(in-syntax *ast-user-readtable*)
 
 (declaim (optimize (debug 3)))
 
@@ -22,7 +23,6 @@
 ;; 
 ;; In the macro expansions, lexical variables that keep context state
 ;; have a name like +NAME+.
- 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;
@@ -38,7 +38,8 @@
 ;;  :mod-futures                : the features imported from the __future__ module
 ;;
 ;;  :context                    : innermost context, one of (:class :module :function)
-;;  :context-stack              : list of class and function names, innermost first
+;;  :context-stack              : list of class and function names, innermost first;
+;;                                starts with :lambda if in anonymous function
 ;;  
 ;;  :lexically-declared-globals : list of variable names declared global in an outer scope
 ;;                                (which makes them also global in inner scopes)
@@ -46,7 +47,6 @@
 ;; 
 ;;  :inside-loop-p              : T iff inside WHILE of FOR  (to check BREAK, CONTINUE)
 ;;  :inside-function-p          : T iff inside FUNCDEF       (to check RETURN)
-;;  :inside-class-p             : T iff inside CLASSDEF      (for name mangling private variables)
 ;;
 ;;  :safe-lex-visible-vars      : list of all variables guaranteed to be lexically visible and bound;
 ;;                                subset of :LEXICALLY-VISIBLE-VARS.
@@ -73,20 +73,17 @@
   `(locally (declare (pydecl ,@pairs))
      ,@body))
 
-
 ;; Allegro CL 8.0, during file compilation, sometimes calls CONSTANTP without
 ;; environment. However, in case of operations on Python variables, the
 ;; environment is needed to look up what kind of variable we're dealing with.
 ;; 
-;; As a workaround, those variable operations macroexpand into a
+;; As a workaround, in those situations the variable macroexpands into a
 ;; reference to *the-great-unknown*, about which nothing is known --
 ;; least of all, whether it is a constant...
 
 (defvar *the-great-unknown*)
 
 (defmacro with-gensyms (list &body body)
-  ;; Actually, the new symbols are uninterned fresh symbols with
-  ;; the same name, not gensyms.
   `(let ,(loop for x in list
 	     collect `(,x (gensym ,(symbol-name x))))
      ,@body))
@@ -98,8 +95,11 @@
   "Whether `eval', `locals' and `globals' can be called indirectly, like `x = locals; x()'
 When true, call expressions result in more code. It is rare for Python code to require this.")
 
-(defvar *mangle-private-variables* t ;; XXX not used yet
-  "In class definitions, replace __foo by _C__foo, like CPython does")
+(defvar *mangle-private-variables-in-class* nil
+  "In class definitions, replace __foo by _CLASSNAME__foo, like CPython does")
+
+(defvar *warn-unused-function-vars* t
+  "Controls insertion of IGNORABLE declaration around function variables.")
 
 (defmacro with-complete-python-semantics (&body body)
   `(let ((*allow-indirect-special-call* t)
@@ -125,6 +125,9 @@ XXX Currently there is not way to set *__debug__* to False.")
   `(locally (declare (optimize (speed 3) (safety 0)))
      ,@body))
 
+(defconstant +standard-module-globals+ '({__name__} {__debug__})
+  "Names of global variables automatically created for every module")
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; 
 ;;;  The macros corresponding to AST nodes
@@ -132,19 +135,19 @@ XXX Currently there is not way to set *__debug__* to False.")
 (defun assert-stmt-1 (test test-ast raise-arg)
   (with-simple-restart (:continue "Ignore the assertion failure")
     (unless (py-val->lisp-bool test)
-      (py-raise '|AssertionError| (or raise-arg 
+      (py-raise '{AssertionError} (or raise-arg 
 				    (format nil "Failing test: ~A"
 					    (with-output-to-string (s)
 					      (py-pprint s test-ast))))))))
   
-(defmacro assert-stmt (test raise-arg)
+(defmacro [assert-stmt] (test raise-arg)
   (when *__debug__*
     `(assert-stmt-1 ,test ',test ,raise-arg)))
 
 (defun assign-stmt-list-vals (iterable num-targets)
   (let ((val-list (py-iterate->lisp-list iterable)))
     (unless (= (length val-list) num-targets)
-      (py-raise '|ValueError|
+      (py-raise '{ValueError}
 		"Assignment to several vars: wanted ~A values, but got ~A"
 		num-targets (length val-list)))
     val-list))
@@ -152,27 +155,27 @@ XXX Currently there is not way to set *__debug__* to False.")
 (defun assign-stmt-get-bound-vars (ass-stmt)
   (destructuring-bind (assign-statement value targets) ass-stmt
     (declare (ignore value))
-    (assert (eq assign-statement 'assign-stmt))
+    (assert (eq assign-statement '[assign-stmt]))
     (let* ((todo targets)
 	   (res  ()))
       (loop for x = (pop todo)
 	  while x do
 	    (ecase (first x)
-	      (attributeref-expr )
-	      (subscription-expr )
-	      (identifier-expr        (push (second x) res))
-	      ((list-expr tuple-expr) (setf todo (append todo (second x))))))
+	      ([attributeref-expr] )
+	      ([subscription-expr] )
+	      ([identifier-expr]          (push (second x) res))
+	      (([list-expr] [tuple-expr]) (setf todo (append todo (second x))))))
       res)))
 
-(defmacro assign-stmt (value targets)
+(defmacro [assign-stmt] (value targets)
   (with-gensyms (assign-val)
     `(let ((,assign-val ,value))
        ,@(loop for tg in targets collect `(setf ,tg ,assign-val)))))
 
-(define-compiler-macro assign-stmt (&whole whole value targets &environment e)
+(define-compiler-macro [assign-stmt] (&whole whole value targets &environment e)
   (declare (ignore e))
-  (if (and (listp value) (member (car value) '(tuple-expr list-expr))
-	   (= (length targets) 1) (member (caar targets) '(tuple-expr list-expr))
+  (if (and (listp value) (member (car value) '([tuple-expr] [list-expr]))
+	   (= (length targets) 1) (member (caar targets) '([tuple-expr] [list-expr]))
 	   (= (length (second value)) (length (second (car targets)))))
       
       ;; Shortcut the case "a,b,.. = 1,2,.." where left and right same
@@ -183,12 +186,12 @@ XXX Currently there is not way to set *__debug__* to False.")
       `(psetf ,@(mapcan #'list (second (car targets)) (second value)))
     whole))
 
-(defmacro attributeref-expr (item attr)
-  (assert (eq (car attr) 'identifier-expr))
+(defmacro [attributeref-expr] (item attr)
+  (assert (eq (car attr) '[identifier-expr]))
   `(py-attr ,item ',(second attr)))
 
-(define-setf-expander attributeref-expr (item attr)
-  (assert (eq (car attr) 'identifier-expr))
+(define-setf-expander [attributeref-expr] (item attr)
+  (assert (eq (car attr) '[identifier-expr]))
   (with-gensyms (prim store)
     (values `(,prim) ;; temps
 	    (list item) ;; values
@@ -200,10 +203,10 @@ XXX Currently there is not way to set *__debug__* to False.")
 	       (setf (py-attr ,prim ',(second attr)) nil)))))
     
 
-(defmacro augassign-stmt (&whole whole op place val &environment env)
+(defmacro [augassign-stmt] (&whole whole op place val &environment env)
   (case (car place)
     
-    ((attributeref-expr subscription-expr identifier-expr)
+    (([attributeref-expr] [subscription-expr] [identifier-expr])
      
      (let ((py-@= (get-binary-iop-func-name op))
 	   (py-@  (get-binary-op-func-name-from-iop op)))
@@ -223,18 +226,18 @@ XXX Currently there is not way to set *__debug__* to False.")
 		  (let ((,(car stores) (,py-@ ,place-val-now ,op-val)))
 		    ,writer)))))))
 
-    (t (py-raise '|SyntaxError| "Invalid augmented assignment: ~A"
-		 (ast->python-code whole)))))
+    (t (py-raise '{SyntaxError} "Invalid augmented assignment: ~A"
+		 (py-pprint whole nil)))))
 
-(defmacro backticks-expr (item)
+(defmacro [backticks-expr] (item)
   `(py-repr ,item))
 
-(defmacro binary-expr (op left right)
+(defmacro [binary-expr] (op left right)
   `(,(get-binary-op-func-name op) ,left ,right))
 
-(defmacro binary-lazy-expr (op left right)
+(defmacro [binary-lazy-expr] (op left right)
   (ecase op
-    (|or| `(let ((.left ,left))
+    ({or} `(let ((.left ,left))
 	     (if (py-val->lisp-bool .left)
 		 .left
 	       (let ((.right ,right))
@@ -242,22 +245,22 @@ XXX Currently there is not way to set *__debug__* to False.")
 		     .right
 		   *the-false*)))))
     
-    (|and| `(let ((.left ,left))
+    ({and} `(let ((.left ,left))
 	      (if (py-val->lisp-bool .left)
 		  ,right
 		.left)))))
 
-(defmacro break-stmt (&environment e)
+(defmacro [break-stmt] (&environment e)
   (if (get-pydecl :inside-loop-p e)
       `(go :break)
-    (py-raise '|SyntaxError| "BREAK was found outside loop")))
+    (py-raise '{SyntaxError} "BREAK was found outside loop")))
 
 (defparameter *special-calls*
-    (list (cons '|locals|  #'pybf:|locals|  )
-	  (cons '|globals| #'pybf:|globals| )
-	  (cons '|eval|    #'pybf:|eval|    )))
+    (list (cons '{locals}  (symbol-function '{locals})  )
+	  (cons '{globals} (symbol-function '{globals}) )
+	  (cons '{eval}    (symbol-function '{eval})    )))
 
-(defmacro call-expr (&whole whole primary all-args &environment e)
+(defmacro [call-expr] (&whole whole primary all-args &environment e)
   ;; For complete Python semantics, we should check for every call if
   ;; the function being called is one of the built-in functions EVAL,
   ;; LOCALS or GLOBALS, because they access the variable scope of the
@@ -299,9 +302,9 @@ XXX Currently there is not way to set *__debug__* to False.")
 	     
 	     (%special-call (kind)
 	       (ecase kind
-		 ( |locals|  `(call-expr-locals  ,(%locals-dict)  ,(%there-are-args)))
-		 ( |globals| `(call-expr-globals ,(%globals-dict) ,(%there-are-args)))
-		 ( |eval|    `(call-expr-eval    ,(%locals-dict)  ,(%globals-dict)
+		 ( {locals}  `(call-expr-locals  ,(%locals-dict)  ,(%there-are-args)))
+		 ( {globals} `(call-expr-globals ,(%globals-dict) ,(%there-are-args)))
+		 ( {eval}    `(call-expr-eval    ,(%locals-dict)  ,(%globals-dict)
 						 ,(%pos-args) ,(%there-are-key-args))))))
       
       (cond (*allow-indirect-special-call*
@@ -315,7 +318,7 @@ XXX Currently there is not way to set *__debug__* to False.")
 			collect `(,name ,(%special-call name))))))
 	    
 	    ((and (listp primary)
-		  (eq (car primary) 'identifier-expr))
+		  (eq (car primary) '[identifier-expr]))
 	     ;; Support calling special functions by proper name.
 	     (let ((spec (find (second primary) *special-calls* :key #'car)))
 	       (if spec
@@ -330,21 +333,23 @@ XXX Currently there is not way to set *__debug__* to False.")
 
 (defun call-expr-locals (locals-dict args-p)
   (when args-p
-    (py-raise '|TypeError| "Built-in function `locals' does not take args."))
+    (py-raise '{TypeError} "Built-in function `locals' does not take args."))
   locals-dict)
 
 (defun call-expr-globals (globals-dict args-p)
   (when args-p
-    (py-raise '|TypeError| "Built-in function `globals' does not take args."))
+    (py-raise '{TypeError} "Built-in function `globals' does not take args."))
   globals-dict)
 
 (defmacro call-expr-1 (primary (pos-args kwd-args *-arg **-arg))
   (let ((kw-args (loop for ((i-e key) val) in kwd-args
-		     do (assert (eq i-e 'identifier-expr))
+		     do (assert (eq i-e '[identifier-expr]))
 		     collect (intern (symbol-name key) :keyword)
 		     collect val)))
     (cond
-     ((or kw-args **-arg)  `(call-expr-pos+*+kw+** ,primary (list ,@pos-args) ,*-arg (list ,@kw-args) ,**-arg))
+     ((or kw-args **-arg)  `(call-expr-pos+*+kw+** ,primary 
+						   (list ,@pos-args) ,*-arg
+						   (list ,@kw-args) ,**-arg))
      ((and pos-args *-arg) `(call-expr-pos+* ,primary (list ,@pos-args) ,*-arg))
      (*-arg                `(call-expr-* ,primary ,*-arg))
      (t                    `(py-call ,primary ,@pos-args)))))
@@ -364,54 +369,46 @@ XXX Currently there is not way to set *__debug__* to False.")
 (defun call-expr-* (prim *-args)
   (apply #'py-call prim (py-iterate->lisp-list *-args)))
 
-(define-compiler-macro call-expr (&whole whole primary (pos-args kwd-args *-arg **-arg))
+(define-compiler-macro [call-expr] (&whole whole primary (pos-args kwd-args *-arg **-arg))
   (cond ((and (listp primary) 
-	      (eq (car primary) 'attributeref-expr)
+	      (eq (car primary) '[attributeref-expr])
 	      (null (or kwd-args *-arg **-arg)))
-
 	 ;; Optimize x.y( ...), saving allocation of bound method
-	 
 	 (destructuring-bind (obj (identifier-expr attr)) (cdr primary)
-	   (assert (eq identifier-expr 'identifier-expr))
+	   (assert (eq identifier-expr '[identifier-expr]))
 	   `(py-attr-call ,obj ,attr ,@pos-args)))
 	
-
 	((and (listp primary)
-	      (eq (first primary) 'call-expr)
-	      (equal (second primary) '(identifier-expr getattr))
+	      (eq (first primary) '[call-expr])
+	      (equal (second primary) '([identifier-expr] {getattr}))
 	      (not (or kwd-args *-arg **-arg))
 	      (destructuring-bind (p k s ss)
 		  (third primary)
 		(and (= 2 (length p))
 		     (not (or k s ss)))))
-
 	 ;; Optimize "getattr(x,y)(...)" where getattr(x,y) is a function.
 	 ;; This saves allocation of bound method
 	 
 	 ;; As primary is IDENTIFIER-EXPR, accessing it is side effect-free.
-	 `(if (eq ,(second primary) (symbol-function 'pybf:|getattr|))
+	 `(if (eq ,(second primary) (symbol-function '{getattr}))
 	      
 	      ,(destructuring-bind ((obj attr) k s ss)
 		   (third primary)
 		 (declare (ignore k s ss))
 		 `(multiple-value-bind (.a .b .c)
-		      (pybf::getattr-nobind ,obj ,attr nil)
+		      (getattr-nobind ,obj ,attr nil)
 		    (if (eq .a :class-attr)
 			(funcall .b .c ,@pos-args)
 		      (py-call .a ,@pos-args))))
 
 	    (py-call ,primary ,@pos-args)))
 	
-	
 	;; XXX todo: Optimize obj.__get__(...)
-	
 	(t whole)))
 
 (defmacro py-attr-call (prim attr &rest args)
   ;; A method call with only positional args: <prim>.<attr>(p1, p2, .., pi)
-  
   (if (inlineable-method-p attr args)
-      
       (let ((prim-var (if (multi-eval-safe prim)
 			  prim
 			(with-gensyms (evaled-prim)
@@ -428,20 +425,19 @@ XXX Currently there is not way to set *__debug__* to False.")
     `(py-call (py-attr ,prim ',attr) ,@args)))
 	    
 
-(defmacro classdef-stmt (name inheritance suite &environment e)
+(defmacro [classdef-stmt] (name inheritance suite &environment e)
   ;; todo: define .locals. containing class vars
-  (assert (eq (car name) 'identifier-expr))
-  (assert (eq (car inheritance) 'tuple-expr))
+  (assert (eq (car name) '[identifier-expr]))
+  (assert (eq (car inheritance) '[tuple-expr]))
   
-  (multiple-value-bind (globals locals) (classdef-stmt-suite-globals-locals
-					 suite
-					 (get-pydecl :lexically-declared-globals e))
-    (declare (ignore locals))
+  (multiple-value-bind (all-class-locals new-locals class-cumul-declared-globals)
+      (classdef-stmt-suite-globals-locals suite (get-pydecl :lexically-declared-globals e))
+    (assert (equal new-locals all-class-locals))
     (let* ((cname             (second name))
 	   (new-context-stack (cons cname (get-pydecl :context-stack e)))
-	   (context-cname     (intern (format nil "~{~A~^.~}" (reverse new-context-stack))
-				      #.*package*)))
-      
+	   (context-cname     (ensure-user-symbol 
+			       (format nil "~{~A~^.~}" (reverse new-context-stack)))))
+
       (with-gensyms (cls)
 	`(let ((new-cls-dict 
 		
@@ -456,13 +452,14 @@ XXX Currently there is not way to set *__debug__* to False.")
 		  (with-pydecl ((:context :class)
 				(:context-stack ,new-context-stack)
 				(:lexically-declared-globals
-				 ,(append 
-				   (get-pydecl :lexically-declared-globals e)
-				   globals)))
+				 ,class-cumul-declared-globals))
 		    
 		    ;; Note that the local class variables are not locally visible
 		    ;; i.e. they don't extend ":lexically-visible-vars"
-		    ,suite)
+		    
+		    ,(if *mangle-private-variables-in-class*
+			(mangle-suite-private-variables cname suite)
+		       suite))
 		  
 		  +cls-namespace+)))
 	   
@@ -474,29 +471,34 @@ XXX Currently there is not way to set *__debug__* to False.")
 				      :supers (list ,@(second inheritance))
 				      :cls-metaclass (py-dict-getitem new-cls-dict "__metaclass__")
 				      :mod-metaclass
-				      ,(let ((ix (position '|__metaclass__|
+				      ,(let ((ix (position '{__metaclass__}
 							   (get-pydecl :mod-globals-names e))))
 					 (if ix
 					     `(svref +mod-static-globals-values+ ,ix)
-					   `(gethash '|__metaclass__| +mod-dyn-globals+))))))
+					   `(gethash '{__metaclass__} +mod-dyn-globals+))))))
 
 	     ;; See comment for record-source-file at funcdef-stmt
 	     (excl:record-source-file ',context-cname :type :type)
-	     ,(let ((upcase-sym (intern (string-upcase context-cname) #.*package*)))
+	     ,(let ((upcase-sym (ensure-user-symbol (string-upcase context-cname))))
 		`(excl:record-source-file ',upcase-sym :type :type))
 	     
-	     (assign-stmt ,cls (,name))))))))
+	     ([assign-stmt] ,cls (,name))))))))
 
-(defmacro comparison-expr (cmp left right)
+(defun mangle-suite-private-variables (cname suite)
+  "Rename all attributes `__foo' to `_CNAME__foo'."
+  (declare (ignore cname suite))
+  (error "todo"))
+
+(defmacro [comparison-expr] (cmp left right)
   (let ((py-@ (get-binary-comparison-func-name cmp)))
     `(funcall (function ,py-@) ,left ,right)))
 
-(defmacro continue-stmt (&environment e)
+(defmacro [continue-stmt] (&environment e)
   (if (get-pydecl :inside-loop-p e)
       `(go :continue)
-    (py-raise '|SyntaxError| "CONTINUE was found outside loop")))
+    (py-raise '{SyntaxError} "CONTINUE was found outside loop")))
 
-(defmacro del-stmt (item &environment e)
+(defmacro [del-stmt] (item &environment e)
   (multiple-value-bind (temps values stores store-form read-form del-form)
       (get-setf-expansion item e)
     (declare (ignore stores store-form read-form))
@@ -504,12 +506,12 @@ XXX Currently there is not way to set *__debug__* to False.")
     `(let ,(mapcar #'list temps values)
        ,del-form)))
 
-(defmacro dict-expr (alist)
+(defmacro [dict-expr] (alist)
   `(make-dict-unevaled-list ,alist))
 
 (defvar *exec-stmt-result-handler* nil)
 
-(defmacro exec-stmt (code globals locals &key (allowed-stmts t) &environment e)
+(defmacro [exec-stmt] (code globals locals &key (allowed-stmts t) &environment e)
   ;; TODO:
   ;;   - allow code object etc as CODE
   ;;   - when code is a constant string, parse it already at compile time etc
@@ -528,12 +530,12 @@ XXX Currently there is not way to set *__debug__* to False.")
     
     `(let ((ast (parse-python-string ,code)))
        (when (ast-contains-stmt-p ast :allowed-stmts ,allowed-stmts)
-	 (py-raise '|TypeError|
+	 (py-raise '{TypeError}
 		   "No statements allowed in Python code string (got: ~S)" ,code))
     
        (let* ((ast-suite (destructuring-bind (module-stmt suite) ast
-			   (assert (eq module-stmt 'module-stmt))
-			   (assert (eq (car suite) 'suite-stmt))
+			   (assert (eq module-stmt '[module-stmt]))
+			   (assert (eq (car suite) '[suite-stmt]))
 			   suite))
 	      (locals-ht  (convert-to-namespace-ht 
 			   ,(or locals
@@ -544,19 +546,19 @@ XXX Currently there is not way to set *__debug__* to False.")
 				for k-sym = (py-string->symbol k)
 				collect (list k-sym val)))
 	      (lambda-body `(with-module-context (#() #() (py-dict-hash-table ,globals-ht) :create-mod t)
-			      (suite-stmt
+			      ([suite-stmt]
 
 			       ;; Create helper function
-			       ((funcdef-stmt  
-				 nil (identifier-expr exec-stmt-helper-func)
+			       (([funcdef-stmt]
+				 nil ([identifier-expr] exec-stmt-helper-func)
 				 (nil nil nil nil)
-				 (suite-stmt
+				 ([suite-stmt]
 				  ((block :foobar
-				     (suite-stmt 
+				     ([suite-stmt]
 				      
 				      ;; set local variables
 				      (,@(loop for (k v) in loc-kv-pairs
-					     collect `(assign-stmt ,v ((identifier-expr ,k))))
+					     collect `([assign-stmt] ,v (([identifier-expr] ,k))))
 					 
 					 ;; execute suite
 					 (let ((res ,ast-suite))
@@ -565,8 +567,8 @@ XXX Currently there is not way to set *__debug__* to False.")
 					   (return-from :foobar res))))))))
 				
 				;; Call helper function
-				(call-expr (identifier-expr exec-stmt-helper-func)
-					   (nil nil nil nil)))))))
+				([call-expr] ([identifier-expr] exec-stmt-helper-func)
+					     (nil nil nil nil)))))))
 		       
 		       #+(or)(warn "EXEC-STMT: lambda-body: ~A" lambda-body)
 		       (funcall (compile nil `(lambda ()
@@ -578,7 +580,7 @@ XXX Currently there is not way to set *__debug__* to False.")
   (when (or key-args-p 
 	    (not pos-args)
 	    (> (length pos-args) 3))
-    (py-raise '|TypeError| "Built-in function `eval' takes from 1 to three positional args."))
+    (py-raise '{TypeError} "Built-in function `eval' takes from 1 to three positional args."))
   (let* ((string (pop pos-args))
 	 (glob-d (or (pop pos-args) globals-dict))
 	 (loc-d  (or (pop pos-args) locals-dict)))
@@ -587,14 +589,14 @@ XXX Currently there is not way to set *__debug__* to False.")
     (let* ((res nil)
 	   (*exec-stmt-result-handler* (lambda (val) (setf res val))))
       (declare (special *exec-stmt-result-handler*))
-      (exec-stmt string glob-d loc-d :allowed-stmts '(module-stmt suite-stmt))
+      ([exec-stmt] string glob-d loc-d :allowed-stmts '([module-stmt] [suite-stmt]))
       res)))
 
-(defmacro for-in-stmt (target source suite else-suite)
+(defmacro [for-in-stmt] (target source suite else-suite)
   (with-gensyms (f x)
     `(tagbody
        (let* ((,f (lambda (,x)
-		    (assign-stmt ,x (,target))
+		    ([assign-stmt] ,x (,target))
 		    (tagbody 
 		      (with-pydecl ((:inside-loop-p t))
 			,suite)
@@ -607,11 +609,94 @@ XXX Currently there is not way to set *__debug__* to False.")
        (go :break) ;; prevent warning
       :break)))
 
-(defmacro funcdef-stmt (decorators
-			fname (pos-args key-args *-arg **-arg)
-			suite
-			&environment e)
+(defun lambda-args-and-destruct-form (funcdef-pos-args)
+  ;; Replace "def f( (x,y), z):  .." 
+  ;; by "def f( |(x,y)|, z):  x, y = |(x,y)|; ..".
+  (let (nested-vars)
+    (labels ((sym-tuple-name (tup)
+	       ;; Convert tuple with identifiers to symbol:  (a,(b,c)) -> |(a,(b,c))|
+	       ;; Returns the symbol and a list with the "included" symbols (here: a, b and c)
+	       (assert (and (listp tup) (eq (first tup) '[tuple-expr])))
+	       (labels ((rec (x)
+			  (ecase (car x)
+			    ([tuple-expr] (format nil "(~{~A~^, ~})"
+						  (loop for v in (second x) collect (rec v))))
+			    ([identifier-expr] (push (second x) nested-vars)
+					       (symbol-name (second x))))))
+		 (ensure-user-symbol (rec tup)))))
+      (let (lambda-pos-args destructs normal-pos-args)
+	(dolist (pa funcdef-pos-args)
+	  (ecase (car pa)
+	    ([identifier-expr] (let ((name (second pa)))
+				 (push name lambda-pos-args)
+				 (push name normal-pos-args)))
+	    ([tuple-expr] (let ((tuple-var (sym-tuple-name pa)))
+			    (push tuple-var lambda-pos-args)
+			    (push `([assign-stmt] ,tuple-var (,pa)) destructs)))))
+	(values (nreverse lambda-pos-args)
+		(when destructs
+		  `(progn ,@(nreverse destructs)))
+		normal-pos-args
+		(nreverse nested-vars))))))
 
+(defun funcdef-globals-locals (suite locals globals)
+  "Returns two lists, containing LOCALS and GLOBALS of function. Locals are the
+variables assigned to within the function body. Both share tail structure with
+input arguments."
+  (declare (optimize (debug 3)))
+  (assert (eq (car suite) '[suite-stmt]))
+  (let (new-locals)
+    (with-py-ast ((form &key value target) suite :value t)
+      ;; Use :VALUE T, so the one expression for lambda suites is handled correctly.
+      (declare (ignore value))
+      (case (car form)
+
+	(([classdef-stmt] [funcdef-stmt])
+	 (multiple-value-bind (name kind)
+	     (ecase (pop form)
+	       ([classdef-stmt] (destructuring-bind ((identifier cname) inheritance csuite)
+				    form
+				  (declare (ignore inheritance csuite))
+				  (assert (eq identifier '[identifier-expr]))
+				  (values cname "class")))
+	       ([funcdef-stmt]  (destructuring-bind (decorators (identifier-expr fname) args suite)
+				    form
+				  (declare (ignore decorators suite args))
+				  (assert (eq identifier-expr '[identifier-expr]))
+				  (values fname "function"))))
+	   (when (member name globals)
+	     (py-raise '{SyntaxError}
+		       "The ~A name `~A' may not be declared `global'." kind name)))
+	 (values nil t))
+	
+	([identifier-expr]
+	 (let ((name (second form)))
+	   (when (and target 
+		      (not (member name locals))
+		      (not (member name new-locals)))
+	     (push name locals)
+	     (push name new-locals)))
+	 (values nil t))
+	
+	([global-stmt]
+	 (let ((erroneous (intersection (second form) locals :test 'eq)))
+	   (when erroneous
+	     ;; CPython gives SyntaxWarning, and seems to internally move the `global'
+	     ;; declaration before the first use. Let us signal an error; it's easy
+	     ;; for the user to fix this.
+	     (py-raise '{SyntaxError}
+		       "Variable(s) ~{`~A'~^, ~} may not be declared `global'." erroneous)))
+	 (setf globals (nconc (second form) globals))
+	 (values nil t))
+	
+	(t form)))
+  
+    (values locals new-locals globals)))
+
+(defmacro [funcdef-stmt] (decorators
+			  fname (pos-args key-args *-arg **-arg)
+			  suite
+			  &environment e)
   ;; The resulting function is returned.
   ;; 
   ;; If FNAME is a keyword symbol (like :lambda), then an anonymous
@@ -623,183 +708,125 @@ XXX Currently there is not way to set *__debug__* to False.")
   
   (cond ((keywordp fname)
 	 (assert (null decorators)))
-	
-	((and (listp fname) (eq (car fname) 'identifier-expr))
+	((and (listp fname) (eq (car fname) '[identifier-expr]))
 	 (setf fname (second fname)))
-	
-	(t (break :unexpected)))
+	((break :unexpected) ))
   
-  (labels
-      ((sym-tuple-name (tup)
-	 ;; Convert tuple with identifiers to symbol:  (a,(b,c)) -> |(a,(b,c))|
-	 ;; Returns the symbol and a list with the "included" symbols (here: a, b and c)
-	 (assert (and (listp tup) (eq (first tup) 'tuple-expr)))
-	 (let ((eaten-vars ()))
-	   (labels ((rec (x)
-		      (ecase (car x)
-			(tuple-expr (format nil "(~{~A~^, ~})"
-					    (loop for v in (second x) collect (rec v))))
-			(identifier-expr (push (second x) eaten-vars)
-					 (symbol-name (second x))))))
-	     (values (intern (rec tup) #.*package*)
-		     eaten-vars))))
-       
-       (lambda-args-and-destruct-form (funcdef-pos-args)
-	 ;; Replace "def f( (x,y), z):  .." 
-	 ;; by "def f( |(x,y)|, z):  x, y = |(x,y)|; ..".
-	 (loop with lambda-pos-args and destructs and tuple-dummy-vars and tuple-eaten-vars
-	     for pa in funcdef-pos-args
-	     do 
-	       (ecase (car pa)
-		 (tuple-expr      (multiple-value-bind (tuple-var eaten-vars)
-				      (sym-tuple-name pa)
-				    (push tuple-var lambda-pos-args)
-				    (push tuple-var tuple-dummy-vars)
-				    (setf tuple-eaten-vars (nconc tuple-eaten-vars eaten-vars))
-				    (push `(assign-stmt ,tuple-var (,pa))
-					  destructs)))
-		 (identifier-expr (push (second pa) lambda-pos-args)))
-	     finally
-	       (return (values (nreverse lambda-pos-args)
-			       (when destructs
-				 `(progn ,@(nreverse destructs)))
-			       tuple-dummy-vars
-			       tuple-eaten-vars)))))
-    
-    (multiple-value-bind (lambda-pos-args pos-arg-destruct-form tuple-vars tuple-eaten-vars)
-	(lambda-args-and-destruct-form pos-args)
-      
-      (let ((all-arg-names (funcdef-list-all-arg-names (loop for p in lambda-pos-args
-							   collect `(identifier-expr ,p))
-						       key-args *-arg **-arg)))
-	(multiple-value-bind
-	    (func-explicit-globals func-locals) (funcdef-stmt-suite-globals-locals
-						 suite
-						 all-arg-names
-						 (get-pydecl :lexically-declared-globals e))
-	  
-	  (setf func-locals (union func-locals tuple-eaten-vars :test #'eq))
-	  
-	  (let* ((all-locals-and-arg-names (append all-arg-names func-locals))
-		 (new-context-stack        (cons fname (get-pydecl :context-stack e)))
-		 (context-fname            (intern (format nil "~{~A~^.~}" (reverse new-context-stack))
-						   #.*package*))
-		 (locals-and-args-but-not-tuplevars (set-difference all-locals-and-arg-names
-								    tuple-vars))
-		 
-		 (func-lambda
-		  `(py-arg-function
-		    ,context-fname
-		    (,lambda-pos-args
-		     ,(loop for ((nil name) val) in key-args collect `(,name ,val))
-		     ,(when *-arg  (second *-arg))
-		     ,(when **-arg (second **-arg)))
-		    
-		    (let ,func-locals
-		      
-		      (block :function-body
-			
-			(flet
-			    (,@(when (funcdef-should-save-locals-p suite)
-				 `((.locals. () ;; lambdas and gen-exprs have 'locals()' too
-					     (make-locals-dict 
-					      ',locals-and-args-but-not-tuplevars
-					      (list ,@all-locals-and-arg-names))))))
-			  
-			  (with-pydecl ((:lexically-declared-globals  ;; funcdef globals are also valid
-					 ,(append func-explicit-globals  ;; for inner functions
-						  (get-pydecl :lexically-declared-globals e)))
-					
-					(:context :function)
-					(:inside-function-p t)
-					
-					(:lexically-visible-vars
-					 ,(append locals-and-args-but-not-tuplevars
-						  (get-pydecl :lexically-visible-vars e)))
-					
-					(:safe-lex-visible-vars
-					 ,(unless (ast-contains-DEL-p suite)
-					    `,(append all-arg-names
-						      (get-pydecl :safe-lex-visible-vars e))))
+  (multiple-value-bind (lambda-pos-args tuples-destruct-form normal-pos-args destruct-nested-vars)
+      (lambda-args-and-destruct-form pos-args)
+        
+    (let ((nontuple-arg-names (append normal-pos-args destruct-nested-vars)))
+      (loop for ((identifier-expr name) nil) in key-args
+	  do (assert (eq identifier-expr '[identifier-expr]))
+	     (push name nontuple-arg-names))
+      (when *-arg (push (second *-arg) nontuple-arg-names))
+      (when **-arg (push (second **-arg) nontuple-arg-names))
 
-					(:context-stack ,new-context-stack))
-
-			    ,@(when pos-arg-destruct-form
-				`(,pos-arg-destruct-form))
-			    
-			    ,(if (generator-ast-p suite)
-				 
-				 `(return-stmt
-				   ,(rewrite-generator-funcdef-suite context-fname suite))
-			       
-			       `(progn ,suite
-				       *the-none*)))))))))
-	    
-	    (if (keywordp fname)
-		
-		func-lambda
-	      
-	      (with-gensyms (undecorated-func)
-		(let ((art-deco (loop with res = undecorated-func
-				    for deco in (reverse decorators)
-				    do (setf res `(call-expr ,deco ((,res) () nil nil)))
-				    finally (return res))))
+      (multiple-value-bind (all-nontuple-func-locals new-locals func-cumul-declared-globals)
+	  (funcdef-globals-locals suite
+				  nontuple-arg-names
+				  (get-pydecl :lexically-declared-globals e))
+	
+	(let* ((new-context-stack (cons fname (get-pydecl :context-stack e))) ;; fname can be :lambda
+	       (context-fname     (ensure-user-symbol
+				   (format nil "~{~A~^.~}" (reverse new-context-stack))))
+	       (body-decls       `((:lexically-declared-globals ,func-cumul-declared-globals)
+				   (:context :function)
+				   (:context-stack ,new-context-stack)
+				   (:inside-function-p t)
+				   (:lexically-visible-vars
+				    ,(append all-nontuple-func-locals
+					     (get-pydecl :lexically-visible-vars e)))
+				   (:safe-lex-visible-vars
+				    (nset-difference
+				     (append nontuple-arg-names
+					     (get-pydecl :safe-lex-visible-vars e))
+				     (ast-deleted-variables suite)))))
+	       (func-lambda
+		`(py-arg-function
+		  ,context-fname
+		  (,lambda-pos-args ;; list of symbols
+		   ,(loop for ((nil name) val) in key-args collect `(,name ,val))
+		   ,(when *-arg  (second *-arg))
+		   ,(when **-arg (second **-arg)))
 		  
-		  `(let ((,undecorated-func (make-py-function :name ',fname
-							      :context-name ',context-fname
-							      :lambda ,func-lambda)))
-		     
-		     (assign-stmt ,art-deco ((identifier-expr ,fname)))
-		     
-		     ;;;;;;;;;
-		     ;; 
-		     ;; Ugly special-casing:
-		     ;;  class C:
-		     ;;   def __new__(..):    <-- the __new__ method inside a class
-		     ;;      ...                  automatically becomes a 'static-method'
-		     ;; 
-		     ;; as if this were followed by:
-		     ;; 
-		     ;;   __new__ = staticmethod(__new__)
-		     ;; 
-		     ;; XXX check whether this works correctly when user does same explicitly
-		     ;; 
-		     ,@(when (and (eq (get-pydecl :context e) :class)
-				  (eq fname '|__new__|))
-			 
-			 `((assign-stmt (call-expr pybt:|staticmethod|
-						   (((identifier-expr ,fname)) nil nil nil))
-					((identifier-expr ,fname)))))
-		     ;;
-		     ;;;;;;;;;
-		     
-		     ;; Make source location known to Allegro, using "fi:lisp-find-definition".
-		     ;; Also record upper case version, apparently otherwise lower
-		     ;; case names must be |escaped|.
-		     (excl:record-source-file ',context-fname :type :operator)
-		     ,(let ((upcase-sym (intern (string-upcase context-fname) #.*package*)))
-			`(excl:record-source-file ',upcase-sym :type :operator))
-		     
-		     (identifier-expr ,fname)))))))))))
+		  (let (,@destruct-nested-vars
+			,@new-locals)
+		    
+		    ,@(unless *warn-unused-function-vars*
+			`((declare (ignorable ,@nontuple-arg-names ,@new-locals))))
+		    
+		    (block :function-body
+		      (flet
+			  (,@(when (funcdef-should-save-locals-p suite)
+			       `((.locals. () 
+					   ;; lambdas and gen-exprs have 'locals()' too
+					   (make-locals-dict 
+					    ',all-nontuple-func-locals
+					    (list ,@all-nontuple-func-locals))))))
+			
+			(with-pydecl ,body-decls
+			  ,tuples-destruct-form
+			  ,(if (generator-ast-p suite)
+			       `([return-stmt] ,(rewrite-generator-funcdef-suite
+						 context-fname suite))
+			     `(progn ,suite
+				     *the-none*)))))))))
+	  
+	  (when (keywordp fname)
+	    (return-from [funcdef-stmt] func-lambda))
+	  
+	  (with-gensyms (undecorated-func)
+	    (let ((art-deco undecorated-func))
+	      (dolist (x (reverse decorators))
+		(setf art-deco `([call-expr] ,x ((,art-deco) () nil nil))))
+	      
+	      `(let ((,undecorated-func (make-py-function :name ',fname
+							  :context-name ',context-fname
+							  :lambda ,func-lambda)))
+		 
+		 ([assign-stmt] ,art-deco (([identifier-expr] ,fname)))
+		 
+		 ;; Ugly special case:
+		 ;;  class C:
+		 ;;   def __new__(..):    <-- the __new__ method inside a class
+		 ;;      ...                  automatically becomes a 'static-method'
+		 ;; XXX check whether this works correctly when user does same explicitly
+		 ,@(when (and (eq (get-pydecl :context e) :class)
+			      (eq fname '{__new__}))
+		     `(([assign-stmt] 
+			([call-expr] {staticmethod}
+				     ((([identifier-expr] ,fname)) nil nil nil))
+			(([identifier-expr] ,fname)))))
+		 
+		 ;; Make source location known to Allegro, using "fi:lisp-find-definition".
+		 ;; Also record upper case version, apparently otherwise lower
+		 ;; case names must be |escaped|.
+		 (excl:record-source-file ',context-fname :type :operator)
+		 ,(let ((upcase-sym (ensure-user-symbol (string-upcase context-fname))))
+		    `(excl:record-source-file ',upcase-sym :type :operator))
+		 
+		 ;; return the function
+		 ([identifier-expr] ,fname)))))))))
 
 
-(defmacro generator-expr (&whole whole item for-in/if-clauses)
+(defmacro [generator-expr] (&whole whole item for-in/if-clauses)
   (declare (ignore item for-in/if-clauses))
   (rewrite-generator-expr-ast whole))
        
-(defmacro global-stmt (names &environment e)
+(defmacro [global-stmt] (names &environment e)
   ;; GLOBAL statements are already determined and used at the moment a
   ;; FUNCDEF-STMT is handled.
   (declare (ignore names))
   (unless (get-pydecl :inside-function-p e)
     (warn "Bogus `global' statement found at top-level.")))
 
-(define-setf-expander identifier-expr (name &environment e)
+(define-setf-expander [identifier-expr] (name &environment e)
   ;; As looking up identifiers is side-effect free, the valuable
   ;; functionality here is the "store form" (fourth value).
   ;; As a bonus the "delete form" is given (sixth value). 
   (let ((glob-ix (position name (get-pydecl :mod-globals-names e))))
-    (assert (not (eq name '|...|)))
+    (assert (not (eq name '{...})))
     (with-gensyms (val)
 
       ;; 1) Store form
@@ -852,13 +879,13 @@ XXX Currently there is not way to set *__debug__* to False.")
 	       () ;; values
 	       (list val) ;; stores
 	       store-form
-	       `(identifier-expr ,name) ;; name is literal symbol, thus no side-effect
+	       `([identifier-expr] ,name) ;; name is literal symbol, thus no side-effect
 	       del-form)))))))) ;; bonus
 
-(defmacro identifier-expr (name &environment e)
+(defmacro [identifier-expr] (name &environment e)
   ;; The identifier is used for its value; it is not an assignent
   ;; target (as the latter case is handled by ASSIGN-STMT).
-  (assert (symbolp name))
+  (assert (symbolp name) () "Identifier name should be a symbol: ~S" name)
   
   (flet ((module-lookup ()
 	   (let ((ix (position name (get-pydecl :mod-globals-names e))))
@@ -891,63 +918,63 @@ XXX Currently there is not way to set *__debug__* to False.")
       ((nil)     (break)
 		 `*the-great-unknown*))))
 
-(defmacro if-stmt (if-clauses else-clause)
+(defmacro [if-stmt] (if-clauses else-clause)
   `(cond ,@(loop for (cond body) in if-clauses
 	       collect `((py-val->lisp-bool ,cond) ,body))
 	 ,@(when else-clause
 	     `((t ,else-clause)))))
 
-(defmacro import-stmt (items)
-  `(values ,@(loop for (mod-name-as-list bind-name) in items
-		 append (loop for m in mod-name-as-list
-				  for res = (list m) then (append res (list m))
-				  collect `(let ((module-obj (py-import ',res :src-mod +mod+)))
-					     (declare (ignorable module-obj))
-					     ,(cond ((= (length res) 1)
-						     (if (= 1 (length mod-name-as-list))
-							 `(assign-stmt module-obj
-								       ((identifier-expr ,(or bind-name
-											      (car mod-name-as-list)))))
-						       `(assign-stmt module-obj ((identifier-expr ,(car mod-name-as-list))))))
-						    ((and bind-name (= (length res) (length mod-name-as-list)))
-						     `(assign-stmt module-obj ((identifier-expr ,bind-name)))))
-					     ,(when (equalp res mod-name-as-list)
-						`module-obj))))))
+(defmacro [import-stmt] (items)
+  `(values ,@(loop for (mod-name-as-list bind-name) in items append
+		   (loop for m in mod-name-as-list
+		       for res = (list m) then (append res (list m)) collect
+			 `(let ((module-obj (py-import ',res)))
+			    (declare (ignorable module-obj))
+			    ,(cond ((= (length res) 1)
+				    (if (= 1 (length mod-name-as-list))
+					`([assign-stmt] module-obj
+							(([identifier-expr] ,(or bind-name
+										 (car mod-name-as-list)))))
+				      `([assign-stmt] module-obj (([identifier-expr] ,(car mod-name-as-list))))))
+				   ((and bind-name (= (length res) (length mod-name-as-list)))
+				    `([assign-stmt] module-obj (([identifier-expr] ,bind-name)))))
+			    ,(when (equalp res mod-name-as-list)
+			       `module-obj))))))
 
-(defmacro import-from-stmt (mod-name-as-list items)
-  `(let ((mod-obj (py-import ',mod-name-as-list :src-mod +mod+)))
-     ,@(if (eq items '|*|)
+(defmacro [import-from-stmt] (mod-name-as-list items)
+  `(let ((mod-obj (py-import ',mod-name-as-list +mod+)))
+     ,@(if (eq items '[*])
 
 	  `((let ((src-items (py-module-get-items mod-obj :import-* t)))
 	     (loop for (k . v) in src-items
 		 do (py-module-set-kv +mod+ k v))))
 	
 	 (loop for (item bind-name) in items
-	     collect `(assign-stmt (attributeref-expr mod-obj (identifier-expr ,item))
-				   ((identifier-expr ,(or bind-name item))))))))
+	     collect `([assign-stmt] ([attributeref-expr] mod-obj ([identifier-expr] ,item))
+				     (([identifier-expr] ,(or bind-name item))))))))
        
-(defmacro lambda-expr (args expr)
+(defmacro [lambda-expr] (args expr)
   ;; XXX Maybe treating lambda as a funcdef-stmt results in way more
   ;; code than necessary for the just one expression it contains.
   
-  `(funcdef-stmt nil :lambda ,args (suite-stmt ((return-stmt ,expr)))))
+  `([funcdef-stmt] nil :lambda ,args ([suite-stmt] (([return-stmt] ,expr)))))
   
-(defmacro listcompr-expr (item for-in/if-clauses)
+(defmacro [listcompr-expr] (item for-in/if-clauses)
   (with-gensyms (list)
     `(let ((,list ()))
        ,(loop
 	    with res = `(push ,item ,list)
 	    for clause in (reverse for-in/if-clauses)
 	    do (setf res (ecase (car clause)
-			   (:for-in `(for-in-stmt ,(second clause) ,(third clause) ,res nil))
-			   (:if     `(if-stmt (,(second clause) ,res) nil))))
+			   ([for-in-clause] `([for-in-stmt] ,(second clause) ,(third clause) ,res nil))
+			   ([if-clause]     `([if-stmt] (,(second clause) ,res) nil))))
 	    finally (return res))
        (make-py-list-from-list (nreverse ,list)))))
 
-(defmacro list-expr (items)
+(defmacro [list-expr] (items)
   `(make-py-list-unevaled-list ,items))
 
-(define-setf-expander list-expr (items &environment e)
+(define-setf-expander [list-expr] (items &environment e)
   (get-setf-expansion `(list/tuple-expr ,items) e))
 
 (defmacro with-this-module-context ((module) &body body)
@@ -994,8 +1021,8 @@ XXX Currently there is not way to set *__debug__* to False.")
 	    ,@(when set-builtins
 		`((map-into +mod-static-globals-values+ #'identity +mod-static-globals-builtin-values+)))
 
-	    (loop for (k v) in '((|__name__|  ,(or module-name "__main__"))
-				 (|__debug__|  1))
+	    (loop for (k v) in '(({__name__}  ,(or module-name "__main__"))
+				 ({__debug__}  1))
 		do (let ((ix (position k +mod-static-globals-names+)))
 		     (when (and ix
 				(null (svref +mod-static-globals-values+ ix)))
@@ -1026,7 +1053,7 @@ XXX Currently there is not way to set *__debug__* to False.")
   (declare (special *py-signal-conditions*))
   (if resumable
       (restart-case
-	  (py-raise '|NameError| "Variable '~A' is unbound" name)
+	  (py-raise '{NameError} "Variable '~A' is unbound" name)
 	(cl:use-value (val)
 	    :report (lambda (stream)
 		      (format stream "Enter a value to use for '~A'" name))
@@ -1034,7 +1061,7 @@ XXX Currently there is not way to set *__debug__* to False.")
 			   (format t "Enter new value for '~A': " name)
 			   (multiple-value-list (eval (read))))
 	  (return-from unbound-variable-error val)))
-    (py-raise '|NameError| "Variable '~A' is unbound" name)))
+    (py-raise '{NameError} "Variable '~A' is unbound" name)))
 
 (defun identifier-expr-module-lookup-dyn (name +mod-dyn-globals+)
   (or (gethash name +mod-dyn-globals+)
@@ -1054,7 +1081,7 @@ XXX Currently there is not way to set *__debug__* to False.")
 	    (biv (setf (gethash name dyn-globals) biv))
 	    (t   (remhash name dyn-globals))))))
 
-(defmacro module-stmt (suite) ;; &environment e)
+(defmacro [module-stmt] (suite) ;; &environment e)
   ;; A module is translated into a lambda that creates and returns a
   ;; module object. Executing the lambda will create a module object
   ;; and register it, after which other modules can access it.
@@ -1074,29 +1101,29 @@ XXX Currently there is not way to set *__debug__* to False.")
 			   :set-builtins t
 			   :create-mod t
 			   :call-hook t
-			   :module-name ,*current-module-name*
-			   :module-path ,*current-module-path*)
+			   :module-name *current-module-name* ;; load time
+			   :module-path ,*current-module-path*) ;; compile time
        ,suite)))
 
-(defmacro pass-stmt ()
+(defmacro [pass-stmt] ()
   nil)
 
-(defmacro print-stmt (dest items comma?)
+(defmacro [print-stmt] (dest items comma?)
   ;; XXX todo: use methods `write' of `dest' etc
   `(py-print ,dest (list ,@items) ,comma?))
 
-(defmacro return-stmt (val &environment e)
+(defmacro [return-stmt] (val &environment e)
   (if (get-pydecl :inside-function-p e)
       `(return-from :function-body ,(or val `(load-time-value *the-none*)))
-    (py-raise '|SyntaxError| "RETURN found outside function")))
+    (py-raise '{SyntaxError} "RETURN found outside function")))
 
-(defmacro slice-expr (start stop step)
+(defmacro [slice-expr] (start stop step)
   `(make-slice ,start ,stop ,step))
 
-(defmacro subscription-expr (item subs)
+(defmacro [subscription-expr] (item subs)
   `(py-subs ,item ,subs))
 
-(define-setf-expander subscription-expr (item subs &environment e)
+(define-setf-expander [subscription-expr] (item subs &environment e)
   (declare (ignore e))
   (with-gensyms (it su store)
     (values `(,it ,su) ;; temps
@@ -1106,12 +1133,12 @@ XXX Currently there is not way to set *__debug__* to False.")
 	    `(py-subs ,it ,su) ;; read-form
 	    `(setf (py-subs ,it ,su) nil)))) ;; del-form
 
-(defmacro suite-stmt (stmts)
+(defmacro [suite-stmt] (stmts)
   (if (null (cdr stmts))
       (car stmts)
     `(progn ,@stmts)))
 
-(define-compiler-macro suite-stmt (&whole whole stmts &environment e)
+(define-compiler-macro [suite-stmt] (&whole whole stmts &environment e)
   ;; Insert declarations in the suite body indicating the lexical variables that
   ;; are certainly bound. The compiler will skip checks for bound-ness.
   ;; 
@@ -1119,22 +1146,22 @@ XXX Currently there is not way to set *__debug__* to False.")
   ;; This should be more nuanced.
   
   (cond ((and (some (lambda (s)
-		      (and (listp s) (eq (car s) 'assign-stmt)))
+		      (and (listp s) (eq (car s) '[assign-stmt])))
 		    (butlast stmts))
-	      (not (ast-contains-DEL-p whole)))
+	      (not (ast-deleted-variables whole)))
 	 
 	 ;; Collect the stmts before the assignment, and those after
 	 
 	 (multiple-value-bind (before-stmts ass-stmt after-stmts)
 	     (loop for sublist on stmts
 		 for s = (car sublist)
-		 until (and (listp s) (eq (car s) 'assign-stmt))
+		 until (and (listp s) (eq (car s) '[assign-stmt]))
 		 collect s into before
 		 finally (return (values before s (cdr sublist))))
 	   #+(or)(warn "bef: ~A  ass: ~A  after: ~A" before-stmts ass-stmt after-stmts)
 	   (assert ass-stmt)
 	   `(progn ,@(when before-stmts
-		       `((suite-stmt ,before-stmts))) ;; recursive, but doesn't contain assign-stmt
+		       `(([suite-stmt] ,before-stmts))) ;; recursive, but doesn't contain assign-stmt
 		   ,ass-stmt
 		   ,@(when after-stmts
 		       (let ((bound-vars (assign-stmt-get-bound-vars ass-stmt)))
@@ -1143,7 +1170,7 @@ XXX Currently there is not way to set *__debug__* to False.")
 						   bound-vars
 						   (get-pydecl :lexically-declared-globals e))
 						  (get-pydecl :safe-lex-visible-vars e))))
-			     (suite-stmt ,after-stmts)))))))) ;; recursive, but 1 assign-stmt less
+			     ([suite-stmt] ,after-stmts)))))))) ;; recursive, but 1 assign-stmt less
 	
 	(t whole)))
 
@@ -1160,7 +1187,7 @@ XXX Currently there is not way to set *__debug__* to False.")
     
     (cond ((stringp (deproxy exc))
 	   (break "String exceptions are not supported (got: ~S)" (deproxy exc))
-	   (py-raise '|TypeError|
+	   (py-raise '{TypeError}
 		     "String exceptions are not supported (got: ~S)" (deproxy exc)))
 	    
 	  ((and exc var)
@@ -1176,16 +1203,16 @@ XXX Currently there is not way to set *__debug__* to False.")
 	  (t
 	   (if *last-raised-exception*
 	       (error *last-raised-exception*)
-	     (py-raise '|ValueError| "There is not exception to re-raise (got bare `raise')."))))))
+	     (py-raise '{ValueError} "There is not exception to re-raise (got bare `raise')."))))))
 
-(defmacro raise-stmt (exc var tb)
+(defmacro [raise-stmt] (exc var tb)
   (when (stringp exc)
     (warn "Raising string exceptions not supported (got: 'raise ~S')" exc))
   `(raise-stmt-1 ,exc ,var ,tb))
 
 (defparameter *try-except-current-handled-exception* nil)
 
-(defmacro try-except-stmt (suite except-clauses else-suite)
+(defmacro [try-except-stmt] (suite except-clauses else-suite)
   ;; The Exception class in a clause is evaluated only after an
   ;; exception is thrown.
   (with-gensyms (the-exc)
@@ -1203,10 +1230,10 @@ XXX Currently there is not way to set *__debug__* to False.")
 		      `(t (progn ,handler-suite
 				 (return-from :try-except-stmt nil))))
 		   
-		     ((eq (car exc) 'tuple-expr)
+		     ((eq (car exc) '[tuple-expr])
 		      `((some ,@(loop for cls in (second exc)
 				    collect `(typep ,the-exc ,cls)))
-			(progn ,@(when var `((assign-stmt ,the-exc (,var))))
+			(progn ,@(when var `(([assign-stmt] ,the-exc (,var))))
 			       ,handler-suite
 			       (return-from :try-except-stmt nil))))
 				
@@ -1215,7 +1242,7 @@ XXX Currently there is not way to set *__debug__* to False.")
 				 "try/except: except clause should select a class (got: ~A)"
 				 ,exc)
 			       (typep ,the-exc ,exc))
-			(progn ,@(when var `((assign-stmt ,the-exc (,var))))
+			(progn ,@(when var `(([assign-stmt] ,the-exc (,var))))
 			       ,handler-suite
 			       (return-from :try-except-stmt nil))))))))
     
@@ -1225,7 +1252,7 @@ XXX Currently there is not way to set *__debug__* to False.")
       
 	`(block :try-except-stmt
 	   (tagbody
-	     (handler-bind ((|Exception| ,handler-form))
+	     (handler-bind (({Exception} ,handler-form))
 	       
 	       (progn (with-py-errors ,suite)
 		      ,@(when else-suite `((go :else)))))
@@ -1234,15 +1261,15 @@ XXX Currently there is not way to set *__debug__* to False.")
 		 `(:else ,else-suite))))))))
 
 
-(defmacro try-finally-stmt (try-suite finally-suite)
+(defmacro [try-finally-stmt] (try-suite finally-suite)
   `(unwind-protect
        ,try-suite
      ,finally-suite))
 
-(defmacro tuple-expr (items)
+(defmacro [tuple-expr] (items)
   `(make-tuple-unevaled-list ,items))
 
-(define-setf-expander tuple-expr (items &environment e)
+(define-setf-expander [tuple-expr] (items &environment e)
   (get-setf-expansion `(list/tuple-expr ,items) e))
 
 (define-setf-expander list/tuple-expr (items &environment e)
@@ -1263,14 +1290,14 @@ XXX Currently there is not way to set *__debug__* to False.")
 	       ,store)
 	    
 	    'setf-tuple-read-form-unused
-	    `(progn ,@(loop for it in items collect `(del-stmt ,it))))))
+	    `(progn ,@(loop for it in items collect `([del-stmt] ,it))))))
   
-(defmacro unary-expr (op item)
+(defmacro [unary-expr] (op item)
   (let ((py-op-func (get-unary-op-func-name op)))
     (assert py-op-func)
     `(funcall (function ,py-op-func) ,item)))
 
-(defmacro while-stmt (test suite else-suite)
+(defmacro [while-stmt] (test suite else-suite)
   (with-gensyms (take-else)
     `(tagbody
        (loop
@@ -1290,7 +1317,7 @@ XXX Currently there is not way to set *__debug__* to False.")
        (go :break) ;; prevent warning
       :break)))
 
-(defmacro yield-stmt (val)
+(defmacro [yield-stmt] (val)
   (declare (ignore val))
   (error "YIELD found outside function"))
 
@@ -1331,7 +1358,7 @@ XXX Currently there is not way to set *__debug__* to False.")
   ;; Only variable lookup is considered safe.
   (cond ((and (listp form)
 	      (= (length form) 2)
-	      (eq (car form) 'identifier-expr))
+	      (eq (car form) '[identifier-expr]))
 	 t)
 	
 	((listp form)
@@ -1344,7 +1371,7 @@ XXX Currently there is not way to set *__debug__* to False.")
 ;;; Detecting names and values of built-ins
 
 (defun builtin-name-p (x)
-  (find-symbol (string x) (load-time-value (find-package :clpython.builtin))))
+  (find-symbol (string x) (load-time-value (find-package :clpython.user.builtin))))
 
 (defun builtin-value (x)
   (let ((sym (builtin-name-p x)))
@@ -1362,31 +1389,31 @@ XXX Currently there is not way to set *__debug__* to False.")
 (defun register-inlineable-methods ()
   (clrhash *inlineable-methods*)
   (loop for item in
-	'((|isalpha| 0 stringp      py-string.isalpha)
-	  (|isalnum| 0 stringp      py-string.isalnum)
-	  (|isdigit| 0 stringp      py-string.isdigit)
-	  (|islower| 0 stringp      py-string.islower)
-	  (|isspace| 0 stringp      py-string.isspace)
-	  (|join|    0 stringp      py-string.join   )
-	  (|lower|   0 stringp      py-string.lower  )
-	  (|strip|   0 stringp      py-string.strip  )
-	  (|upper|   0 stringp      py-string.upper  )
+	'(({isalpha} 0 stringp      py-string.isalpha)
+	  ({isalnum} 0 stringp      py-string.isalnum)
+	  ({isdigit} 0 stringp      py-string.isdigit)
+	  ({islower} 0 stringp      py-string.islower)
+	  ({isspace} 0 stringp      py-string.isspace)
+	  ({join}    0 stringp      py-string.join   )
+	  ({lower}   0 stringp      py-string.lower  )
+	  ({strip}   0 stringp      py-string.strip  )
+	  ({upper}   0 stringp      py-string.upper  )
 	  	  
-	  (|keys|    0 py-dict-p    py-dict.keys     )
-	  (|items|   0 py-dict-p    py-dict.items    )
-	  (|values|  0 py-dict-p    py-dict.values   )
+	  ({keys}    0 py-dict-p    py-dict.keys     )
+	  ({items}   0 py-dict-p    py-dict.items    )
+	  ({values}  0 py-dict-p    py-dict.values   )
 	  	  
-	  (|next|    0 py-func-iterator-p py-func-iterator.next)
+	  ({next}    0 py-func-iterator-p py-func-iterator.next)
 	  
-	  (|read|       (0 . 1) filep    py-file.read      )
-	  (|readline|   (0 . 1) filep    py-file.readline  )
-	  (|readlines|  (0 . 1) filep    py-file.readlines )
-	  (|xreadlines|  0      filep    py-file.xreadlines)
-	  (|write|       1      filep    py-file.write  )
+	  ({read}       (0 . 1) filep    py-file.read      )
+	  ({readline}   (0 . 1) filep    py-file.readline  )
+	  ({readlines}  (0 . 1) filep    py-file.readlines )
+	  ({xreadlines}  0      filep    py-file.xreadlines)
+	  ({write}       1      filep    py-file.write  )
 	  
-	  (|append|      1      vectorp  py-list.append )
-	  (|sort|        0      vectorp  py-list.sort   )
-	  (|pop|        (0 . 1) vectorp  py-list.pop    ))
+	  ({append}      1      vectorp  py-list.append )
+	  ({sort}        0      vectorp  py-list.sort   )
+	  ({pop}        (0 . 1) vectorp  py-list.pop    ))
 	
       do (when (gethash (car item) *inlineable-methods*)
 	   (warn "Replacing existing entry in *inlineable-methods* for attr ~A:~% ~A => ~A"
@@ -1458,7 +1485,7 @@ XXX Currently there is not way to set *__debug__* to False.")
 		 if (typep k '(or string symbol))
 		 do (py-dict-setitem new k v)
 		 else do (py-raise
-			  '|TypeError|
+			  '{TypeError}
 			  "Cannot use ~A as namespace dict, because non-string key present: ~A"
 			  x k)
 		 finally (return new)))))
@@ -1468,8 +1495,8 @@ XXX Currently there is not way to set *__debug__* to False.")
   ;; 
   ;; XXX CPython checks that ** args are unique (also w.r.t. k=v args supplied before it).
   ;;     We catch errors while the called function parses its args.
-  (let* ((items-meth (or (recursive-class-lookup-and-bind **-arg '|items|)
-			 (py-raise '|TypeError|
+  (let* ((items-meth (or (recursive-class-lookup-and-bind **-arg '{items})
+			 (py-raise '{TypeError}
 				   "The ** arg in call must be mapping, ~
                                    supporting 'items' (got: ~S)" **-arg)))
 	 (items-list (py-iterate->lisp-list (py-call items-meth))))
@@ -1478,12 +1505,12 @@ XXX Currently there is not way to set *__debug__* to False.")
 	for k-v in items-list
 	do (let ((k-and-v (py-iterate->lisp-list k-v)))
 	     (unless (= (length k-and-v) 2)
-	       (py-raise '|TypeError|
+	       (py-raise '{TypeError}
 			 "The ** arg must be list of 2-element tuples (got: ~S)"
 			 k-v))
 	     (destructuring-bind (k v) k-and-v
 	       (push v res)
-	       (push (intern (py-val->string k) (load-time-value (find-package :keyword)))
+	       (push (intern (py-val->string k) :keyword)
 		     res)))
 	finally (return res))))
 
@@ -1508,35 +1535,35 @@ XXX Currently there is not way to set *__debug__* to False.")
   ;; and also by code in an "exec" stmt in this module.
   
   (declare (optimize (debug 3)))
-  (assert (eq (car suite) 'suite-stmt))
+  (assert (eq (car suite) '[suite-stmt]))
   
   (let ((globals ()))
     
     ;; Variables assigned/looked up at module level
     
-    (with-py-ast  (form suite)
+    (with-py-ast (form suite)
       (case (car form)
 
-	((classdef-stmt) 
+	(([classdef-stmt]) 
 	 ;; name of this class, but don't recurse
 	 (destructuring-bind
 	     ((identifier-expr cname) inheritance csuite)  (cdr form)
 	   (declare (ignore inheritance csuite))
-	   (assert (eq identifier-expr 'identifier-expr))
+	   (assert (eq identifier-expr '[identifier-expr]))
 	   (pushnew cname globals))
 	 (values nil t))
 
-	(funcdef-stmt
+	([funcdef-stmt]
 	 ;; name of this function, but don't recurse
 	 (destructuring-bind (decorators (identifier-expr fname) args fsuite) (cdr form)
 	   (declare (ignore decorators fsuite args))
-	   (assert (eq identifier-expr 'identifier-expr))
+	   (assert (eq identifier-expr '[identifier-expr]))
 	   (pushnew fname globals))
 	 (values nil t))
 	
-	(identifier-expr (let ((name (second form)))
-			   (pushnew name globals))
-			 (values nil t))
+	([identifier-expr] (let ((name (second form)))
+			     (pushnew name globals))
+			   (values nil t))
 	
 	(t form)))
     
@@ -1545,122 +1572,29 @@ XXX Currently there is not way to set *__debug__* to False.")
     (with-py-ast (form suite)
       (case (car form)
 
-	(global-stmt (dolist (name (second form))
-		       (pushnew name globals))
-		     (values nil t))
+	([global-stmt] (dolist (name (second form))
+			 (pushnew name globals))
+		       (values nil t))
 	
 	(t form)))
     
     ;; Every module has some special names predefined
-    (dolist (n '(|__name__| |__debug__|))
+    (dolist (n '({__name__} {__debug__}))
       (pushnew n globals))
     
     globals))
 
-(defun funcdef-stmt-suite-globals-locals (suite params enclosing-declared-globals)
-  "Lists with the locals and globals of the function."
-  
-  ;; The local variables of a function are those variables that are
-  ;; set inside the function.
-  
-  (declare (optimize (debug 3)))
-  (assert (eq (car suite) 'suite-stmt))
-  
-  (let ((locals ())
-	(declared-globals ()))
-    
-    (with-py-ast ((form &key value target) suite :value t)
-
-      ;; :value, to be sure that is suite contains one expr
-      ;; (LAMBDA-EXPR) it is regarded as value
-            
-      (declare (ignore value))
-      
-      (case (car form)
-
-	((classdef-stmt funcdef-stmt)  (check-class/func-not-global
-					form
-					declared-globals enclosing-declared-globals)
-				       (values nil t))
-	
-	(identifier-expr (let ((name (second form)))
-			   (when (and target
-				      (not (member* name params declared-globals)))
-			     (pushnew name locals)))
-			 (values nil t))
-	
-	(global-stmt     (dolist (name (second form))
-			   (cond ((member name params)
-				  (py-raise '|SyntaxError|
-					    "Function param `~A' may not be declared ~
-                                             `global'" name))
-			       
-				 ((member name locals)
-				  (py-raise '|SyntaxError|
-					    "The `global' declaration of variable ~
-                                             `~A' must be lexically before it is ~
-                                             first used." name))
-				 
-				 (t (pushnew name declared-globals))))
-			 (values nil t))
-	(t form)))
-    
-    (values declared-globals locals)))
-
 (defun classdef-stmt-suite-globals-locals (suite enclosing-declared-globals)
   "Lists with the locals and globals of the class."
-  
   ;; The local variables of a class are those variables that are set
   ;; inside the class' suite.
-  
-  (funcdef-stmt-suite-globals-locals suite () enclosing-declared-globals))
-
-(defun check-class/func-not-global (ast &rest globals-lists)
-  (ecase (car ast)
-    
-    (classdef-stmt
-     (destructuring-bind
-	 ((identifier cname) inheritance csuite)  (cdr ast)
-       (declare (ignore inheritance csuite))
-       (assert (eq identifier 'identifier-expr))
-       (when (apply #'member* cname globals-lists)
-	 (py-raise '|SyntaxError|
-		   "A class name may not be declared `global' (class: '~A')." cname))))
-    
-    (funcdef-stmt
-     (destructuring-bind (decorators (identifier-expr fname) args suite) (cdr ast)
-       (declare (ignore decorators suite args))
-       (assert (eq identifier-expr 'identifier-expr))
-       (when (apply #'member* fname globals-lists)
-	 (py-raise '|SyntaxError|
-		   "Inner function name may not be declared global ~
-                    (function: '~A', at ~A)." fname))))))
+  (funcdef-globals-locals suite () enclosing-declared-globals))
 
 (defun member* (item &rest lists)
   (dolist (list lists)
     (when (member item list)
       (return-from member* t)))
   nil)
-
-(defun funcdef-list-all-arg-names (pos-args key-args *-arg **-arg)
-  (let ((pos-arg-names (loop with todo = pos-args and res = ()
-			   while todo
-			   do (let ((x (pop todo)))
-				(ecase (first x)
-				  (identifier-expr (push (second x) res))
-				  (tuple-expr      (setf todo (nconc todo (second x))))))
-			   finally (return res)))
-	 
-	(key-arg-names (loop for ((identifier-expr name) nil) in key-args
-			   do (assert (eq identifier-expr 'identifier-expr))
-			   collect name)))
-    
-    (nconc pos-arg-names
-	   key-arg-names
-	   (when *-arg  (list (second *-arg)))
-	   (when **-arg (list (second **-arg))))))
-
-
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;
@@ -1677,20 +1611,20 @@ Non-negative integer denoting the number of args otherwise."
 
 
 (defun raise-invalid-key-arg-error (key allowed-keys)
-  (py-raise '|TypeError| "Invalid key argument supplied to function: ~S (allowed keys: ~S)"
+  (py-raise '{TypeError} "Invalid key argument supplied to function: ~S (allowed keys: ~S)"
 	    key allowed-keys))
 
 (defun raise-double-arg-supplied-error (key)
-  (py-raise '|TypeError| "Duplicate value for function argument named ~A" key))
+  (py-raise '{TypeError} "Duplicate value for function argument named ~A" key))
 
 (defun raise-too-many-pos-args-error ()
-  (py-raise '|TypeError| "Too many positional arguments supplied to function"))
+  (py-raise '{TypeError} "Too many positional arguments supplied to function"))
 
 (defun raise-too-few-args-error ()
-  (py-raise '|TypeError| "Too few arguments supplied to function"))
+  (py-raise '{TypeError} "Too few arguments supplied to function"))
 
 (defun raise-invalid-func-args-error ()
-  (py-raise '|TypeError|
+  (py-raise '{TypeError}
 	    "Function got incorrect number of arguments, or unknown keyword arguments"))
 
 (defmacro py-arg-function (name (pos-args key-args *-arg **-arg) &body body)
@@ -1719,7 +1653,7 @@ Non-negative integer denoting the number of args otherwise."
 	 (arg-kwname-vec (make-array
 			  num-pos-key-args
 			  :initial-contents (loop for x across arg-name-vec
-						collect (intern x #.(find-package :keyword)))))
+						collect (intern x :keyword))))
     
 	 (fa (make-fa :func-name        name
 		      :num-pos-args     num-pos-args
@@ -1923,7 +1857,7 @@ Non-negative integer denoting the number of args otherwise."
 		  ;; Reconsing because %args might be dynamic-extent.
 		  (loop until (symbolp (car %args)) collect (fast (pop %args))))
 
-	      (py-raise '|TypeError|
+	      (py-raise '{TypeError}
 			"Function ~A got too many positional args (got ~A, wanted at most ~A)"
 			(fa-func-name fa) (length orig-%args) (fa-num-pos-args fa)))))
     
@@ -1996,7 +1930,7 @@ Non-negative integer denoting the number of args otherwise."
 (defun check-max-with-py-error-level ()
   (fast
    (when (> (the fixnum *with-py-error-level*) (the fixnum *max-py-error-level*))
-     (py-raise '|RuntimeError| "Stack overflow (~A)" *max-py-error-level*))))
+     (py-raise '{RuntimeError} "Stack overflow (~A)" *max-py-error-level*))))
 
 (defmacro with-py-errors (&body body)
   `(let ((*with-py-error-level* (fast (1+ (the fixnum *with-py-error-level*)))))
@@ -2009,7 +1943,7 @@ Non-negative integer denoting the number of args otherwise."
 	 
 	 ((division-by-zero (lambda (c) 
 			      (declare (ignore c))
-			      (py-raise '|ZeroDivisionError|
+			      (py-raise '{ZeroDivisionError}
 					"Division or modulo by zero")))
 	  
 	  (storage-condition (lambda (c)
@@ -2020,14 +1954,14 @@ Non-negative integer denoting the number of args otherwise."
 	   (lambda (c)
 	     (if (string= (simple-condition-format-control c)
 			  "~1@<Stack overflow (signal 1000)~:@>")
-		 (py-raise '|RuntimeError| "Stack overflow")
-	       (py-raise '|RuntimeError| "Synchronous OS signal: ~A" c))))
+		 (py-raise '{RuntimeError} "Stack overflow")
+	       (py-raise '{RuntimeError} "Synchronous OS signal: ~A" c))))
 	  
 	  (excl:interrupt-signal
 	   (lambda (c)
 	     (let ((args (simple-condition-format-arguments c)))
 	       (when (string= (cadr args) "Keyboard interrupt")
-		 (py-raise '|KeyboardInterrupt| "Keyboard interrupt")))))
+		 (py-raise '{KeyboardInterrupt} "Keyboard interrupt")))))
        
 	  #+(or)
 	  (error (lambda (c)
@@ -2044,31 +1978,31 @@ Non-negative integer denoting the number of args otherwise."
   
   ;; Note that LAMBDA-EXPR can't contain (yield) statements
   
-  (assert (not (eq (car ast) 'module-stmt)) ()
+  (assert (not (eq (car ast) '[module-stmt])) ()
     "GENERATOR-AST-P called with a MODULE ast.")
   
   (with-py-ast (form ast)
     (case (car form)
-      (yield-stmt                   (return-from generator-ast-p t))
-      ((classdef-stmt funcdef-stmt) (values nil t))
-      (t                            form)))
+      ([yield-stmt]                     (return-from generator-ast-p t))
+      (([classdef-stmt] [funcdef-stmt]) (values nil t))
+      (t                                form)))
   
   nil)
 
- sueprfluous.(defun ast-contains-DEL-p (ast)
-  "Is there a DEL statement in the AST?
-For now, it takes inner functions and classes into account too.
-XXX determine when those can be skipped
-
-Some compiler optimizations are possible in the absence of DEL
-statements, as then variables can be guaranteed to be bound."
-  
-  (with-py-ast (form ast)
-    (case (car form)
-      (del-stmt  (return-from ast-contains-DEL-p t))
-      (t         form)))
-  
-  nil)
+(defun ast-deleted-variables (ast)
+  "Is there a DEL statement in the AST? If so, returns a list of all
+symbol names which are deleted. (Some compiler optimizations are possible
+in the absence of DEL statements, as then variables can be guaranteed to
+be bound."
+  (let (deleted-names)
+    (with-py-ast ((form &key value target) ast)
+      (case (car form)
+	([identifier-expr] (when (eq target +delete-target+)
+			     (assert (not value))
+			     (push (second form) deleted-names))
+			   form)
+	(t form)))
+    deleted-names))
   
 
 (defun funcdef-should-save-locals-p (ast)
@@ -2079,17 +2013,17 @@ statements, as then variables can be guaranteed to be bound."
 (defun func-ast-contains-locals-call (ast)
   (with-py-ast (form ast)
     (case (car form)
-      (call-expr 
+      ([call-expr] 
        (destructuring-bind (primary (pos-args kwd-args *-arg **-arg))
 	   (cdr form)
 	 (when (and (listp primary)
-		    (eq (first primary) 'identifier-expr)
-		    (eq (second primary) '|locals|)
+		    (eq (first primary) '[identifier-expr])
+		    (eq (second primary) '{locals})
 		    (null (or pos-args kwd-args *-arg **-arg)))
 	   (return-from func-ast-contains-locals-call t)))
        form)
       
-      ((classdef-stmt funcdef-stmt lambda-expr)
+      (([classdef-stmt] [funcdef-stmt] [lambda-expr])
        (values nil t))
       
       (t
@@ -2099,17 +2033,17 @@ statements, as then variables can be guaranteed to be bound."
 (defun func-ast-contains-globals-call (ast)
   (with-py-ast (form ast)
     (case (car form)
-      (call-expr 
+      ([call-expr] 
        (destructuring-bind (primary (pos-args kwd-args *-arg **-arg))
 	   (cdr form)
 	 (when (and (listp primary)
-		    (eq (first primary) 'identifier-expr)
-		    (eq (second primary) '|globals|)
+		    (eq (first primary) '[identifier-expr])
+		    (eq (second primary) '{globals})
 		    (null (or pos-args kwd-args *-arg **-arg)))
 	   (return-from func-ast-contains-globals-call t)))
        form)
       
-      ((classdef-stmt funcdef-stmt lambda-expr)
+      (([classdef-stmt] [funcdef-stmt] [lambda-expr])
        (values nil t))
       
       (t
@@ -2119,10 +2053,10 @@ statements, as then variables can be guaranteed to be bound."
 (defun func-ast-contains-exec (ast)
   (with-py-ast (form ast)
     (case (car form)
-      (exec-stmt
+      ([exec-stmt]
        (return-from func-ast-contains-exec t))
       
-      ((classdef-stmt funcdef-stmt lambda-expr)
+      (([classdef-stmt] [funcdef-stmt] [lambda-expr])
        (values nil t))
       
       (t
@@ -2132,7 +2066,7 @@ statements, as then variables can be guaranteed to be bound."
 (defun rewrite-generator-funcdef-suite (fname suite)
   ;; Returns the function body
   (assert (symbolp fname))
-  (assert (eq (car suite) 'suite-stmt) ()
+  (assert (eq (car suite) '[suite-stmt]) ()
     "CAR of SUITE must be SUITE-STMT, but got: ~S" (car suite))
   (assert (generator-ast-p suite))
 
@@ -2153,12 +2087,12 @@ statements, as then variables can be guaranteed to be bound."
 		     (push x non-tags)
 		   (progn
 		     (when non-tags
-		       (push `(suite-stmt ,(nreverse non-tags)) res)
+		       (push `([suite-stmt] ,(nreverse non-tags)) res)
 		       (setf non-tags nil))
 		     (push x res))))
 	       
 	       (when non-tags
-		 (push `(suite-stmt ,(nreverse non-tags)) res))
+		 (push `([suite-stmt] ,(nreverse non-tags)) res))
 	       
 	       (nreverse res))))
       
@@ -2170,17 +2104,17 @@ statements, as then variables can be guaranteed to be bound."
 		(declare (ignore context))
 		(case (first form)
 		  
-		  (break-stmt
+		  ([break-stmt]
 		   (unless stack (break "BREAK outside loop"))
 		   (values `(go ,(cdr (car stack)))
 			   t))
 		    
-		  (continue-stmt
+		  ([continue-stmt]
 		   (unless stack (break "CONTINUE outside loop"))
 		   (values `(go ,(car (car stack)))
 			   t))
 		  
-		  (for-in-stmt
+		  ([for-in-stmt]
 		   (destructuring-bind (target source suite else-suite) (cdr form)
 		     (let* ((repeat-tag (new-tag :repeat))
 			    (else-tag   (new-tag :else))
@@ -2201,7 +2135,7 @@ statements, as then variables can be guaranteed to be bound."
 			  (unless ,loop-var (go ,else-tag))
 			  
 			  ,repeat-tag
-			  (assign-stmt ,loop-var (,target))
+			  ([assign-stmt] ,loop-var (,target))
 			  (:split ,(walk suite stack2))
 			  
 			  (go ,continue-tag) ;; prevent warnings
@@ -2218,7 +2152,7 @@ statements, as then variables can be guaranteed to be bound."
 				,generator nil))
 			t))))
 		  
-		  (if-stmt
+		  ([if-stmt]
 		   
 		   ;; Rewriting of the IF-STMT used to be conditional on:
 		   ;; 
@@ -2258,9 +2192,9 @@ statements, as then variables can be guaranteed to be bound."
 					      ,after-tag)
 				     t)))))
 		    
-		  (return-stmt
+		  ([return-stmt]
 		   (when (second form)
-		     (py-raise '|SyntaxError|
+		     (py-raise '{SyntaxError}
 			       "Inside generator, RETURN statement may not have ~
                                 an argument (got: ~S)" form))
 		    
@@ -2268,13 +2202,13 @@ statements, as then variables can be guaranteed to be bound."
 		   (values `(generator-finished)
 			   t))
 
-		  (suite-stmt
+		  ([suite-stmt]
 		   (values `(:split ,@(loop for stmt in (second form)
 					  collect (walk stmt stack)))
 			   t))
 
 		  
-		  (try-except-stmt
+		  ([try-except-stmt]
 
 		   ;; Three possibilities:
 		   ;;  1. YIELD-STMT or RETURN-STMT in TRY-SUITE 
@@ -2311,7 +2245,7 @@ statements, as then variables can be guaranteed to be bound."
 				
 				;; yield all values returned by helper function .gen.
 				,try-tag
-				(try-except-stmt
+				([try-except-stmt]
 				 
 				 (let ((val (funcall ,gen))) ;; try-suite
 				   (case val
@@ -2333,10 +2267,10 @@ statements, as then variables can be guaranteed to be bound."
 				(setf ,gen nil))
 			      t)))))
 		  
-		  (try-finally
+		  ([try-finally-stmt]
 		   (destructuring-bind (try-suite finally-suite) (cdr form)
 		     (when (generator-ast-p try-suite)
-		       (py-raise '|SyntaxError|
+		       (py-raise '{SyntaxError}
 				 "YIELD is not allowed in the TRY suite of ~
                                   a TRY/FINALLY statement (got: ~S)" form))
 		     
@@ -2357,7 +2291,7 @@ statements, as then variables can be guaranteed to be bound."
 			
 			t))))
 		  
-		  (while-stmt
+		  ([while-stmt]
 		   (destructuring-bind (test suite else-suite) (cdr form)
 		     (let ((repeat-tag (new-tag :repeat))
 			   (else-tag   (new-tag :else))
@@ -2382,7 +2316,7 @@ statements, as then variables can be guaranteed to be bound."
 				 ,after-tag)
 			       t))))
 		  
-		  (yield-stmt
+		  ([yield-stmt]
 		   (let ((tag (new-tag :yield)))
 		     (values `(:split (setf .state. ,tag)
 				      (return-from :function-body ,(second form)) 
@@ -2435,10 +2369,10 @@ statements, as then variables can be guaranteed to be bound."
 	   (declare (ignore context))
 	   (case (car form)
 	     
-	     ((funcdef-stmt classdef-stmt) (values form t))
+	     (([funcdef-stmt] [classdef-stmt]) (values form t))
 	     
-	     (return-stmt (when (second form)
-			    (py-raise '|SyntaxError|
+	     ([return-stmt] (when (second form)
+			    (py-raise '{SyntaxError}
 				      "Inside generator, RETURN statement may ~
 				       not have an argument (got: ~S)" form))
 			  
@@ -2451,37 +2385,37 @@ statements, as then variables can be guaranteed to be bound."
        (lambda ()
 	 ,(rewrite-generator-funcdef-suite
 	   fname
-	   `(suite-stmt (,(walk-py-ast suite #'suite-walker :build-result t)
-			 (return-from :function-body :implicit-return))))))))
+	   `([suite-stmt] (,(walk-py-ast suite #'suite-walker :build-result t)
+			   (return-from :function-body :implicit-return))))))))
 
 (defun rewrite-generator-expr-ast (ast)
   ;; rewrite:  (x*y for x in bar if y)
   ;; into:     def f(src):  for x in src:  if y:  yield x*y
   ;;           f(bar)
   ;; values: (FUNCDEF ...)  bar
-  (assert (eq (car ast) 'generator-expr))
+  (assert (eq (car ast) '[generator-expr]))
   (destructuring-bind (item for-in/if-clauses) (cdr ast)
 
     (let ((first-for (pop for-in/if-clauses))
 	  (first-source (gensym "first-source")))
       
-      (assert (eq (car first-for) :for-in))
+      (assert (eq (car first-for) '[for-in-clause]))
       
-      (let ((iteration-stuff (loop with res = `(yield-stmt ,item)
+      (let ((iteration-stuff (loop with res = `([yield-stmt] ,item)
 				 for clause in (reverse for-in/if-clauses)
 				 do (setf res
 				      (ecase (car clause)
-					(:for-in `(for-in-stmt
-						   ,(second clause) ,(third clause) ,res nil))
-					(:if     `(if-stmt ((,(second clause) ,res)) nil))))
+					([for-in-clause] `([for-in-stmt]
+							   ,(second clause) ,(third clause) ,res nil))
+					([if-clause]     `([if-stmt] ((,(second clause) ,res)) nil))))
 				 finally (return res))))
 	
-	`(call-expr 
-	  (funcdef-stmt nil (identifier-expr :generator-expr-helper-func)
-			(((identifier-expr ,first-source)) nil nil nil)
-			(suite-stmt
-			 ((for-in-stmt ,(second first-for) (identifier-expr ,first-source)
-				       ,iteration-stuff nil))))
+	`([call-expr] 
+	  ([funcdef-stmt] nil ([identifier-expr] :generator-expr-helper-func)
+			  ((([identifier-expr] ,first-source)) nil nil nil)
+			  ([suite-stmt]
+			   (([for-in-stmt] ,(second first-for) ([identifier-expr] ,first-source)
+					   ,iteration-stuff nil))))
 	  
 	  ((,(third first-for)) nil nil nil))))))
 
