@@ -3,8 +3,6 @@
 
 (in-package :clpython.module.sys)
 
-(clpython::in-python-module "sys" :builtin t)
-
 (defvar |argv| (clpython::make-py-list) ;; TODO
   "Comand line args passed to script; argv[0] is script name (rel or abs)")
 
@@ -31,9 +29,10 @@
 
 (defvar |copyright| "Copyright (c) Franz Inc. and Willem Broekema.")
 
-(defvar |builtin_module_names| (clpython::make-tuple-from-list
-				(loop for hk being the hash-value in clpython::*builtin-modules*
-				    collect (string (clpython::py-module-name hk)))))
+(defvar |builtin_module_names| "todo"
+  #+(or)(clpython::make-tuple-from-list
+	 (loop for hk being the hash-value in clpython::*builtin-modules*
+	     collect (string (clpython::py-module-name hk)))))
 
 (defvar |displayhook| *the-none*
   "Func of one arg, called by REPL to print val") ;; XXX not called by repl yet
@@ -81,7 +80,7 @@
 
 (defvar |maxunicode| "todo" "Largest supported unicode code point")
 
-(defvar |modules| *py-modules* "Mapping from module names to modules")
+(defvar |modules| "todo" "Mapping from module names to modules")
 ;; XXX string->module, not symbol->module
   
 ;; List of search paths

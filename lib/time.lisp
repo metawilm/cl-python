@@ -1,9 +1,8 @@
 (defpackage :clpython.module.time
-  (:use :clpython :common-lisp))
+  (:use :clpython :common-lisp)
+  (:shadow #:sleep #:time))
 
 (in-package :clpython.module.time)
-
-(clpython::in-python-module "time" :builtin t)
 
 (defun |clock| ()
   "Current processor time, in seconds, floating point"

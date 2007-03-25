@@ -5,8 +5,6 @@
 		#:py-iterate->lisp-list #:py-raise ))
 
 (in-package :clpython.module.array)
-(clpython::in-python-module "array" :builtin t)
-
 
 #+(or) ;; This module does not work yet, due to package handling in DEF-PY-METHOD.
 (progn
