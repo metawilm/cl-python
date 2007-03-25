@@ -5,10 +5,15 @@
 ;; (http://opensource.franz.com/preamble.html),
 ;; known as the LLGPL.
 
-(in-package :clpython.app.repl)
+;;;; Read-Eval-Print loop 
 
-(eval-when (:compile-toplevel :load-toplevel :execute)
-  (import '(clpython.ast.user::_ clpython.ast.user::__ clpython.ast.user::___) #.*package*))
+(defpackage :clpython.app.repl
+  (:documentation "Python read-eval-print loop")
+  (:use :common-lisp :clpython :clpython.parser )
+  (:export #:repl #:*repl-prof* ))
+
+(in-package :clpython.app.repl)
+(in-syntax *ast-user-readtable*)
 
 
 ;;; Restarts
@@ -45,7 +50,9 @@
 (defvar __  *the-none*) ;; second-last
 (defvar ___ *the-none*) ;; third-last
 
-(defvar *repl-prof* nil)
+(defvar *repl-prof* nil
+  "Execution of each expression is profiled according to this setting.
+Possible values: :time :ptime :space :pspace nil")
 
 (defvar *repl-doc* "
 In the Python interpreter:
@@ -71,6 +78,7 @@ Relevant Lisp variables:
                          :ptime   = time call graph
                          :space   = list of allocations
                          :pspace  = space call graph
+                         nil      = no profiling
 ")
 
 (defvar *repl-mod* nil)
@@ -79,12 +87,13 @@ Relevant Lisp variables:
   (let* ((repl-mod (make-module))
 	 (*repl-mod* repl-mod)
 	 (dyn-globals (slot-value repl-mod 'dyn-globals))
-	 (*py-modules* (initial-py-modules)))
-        
-    (setf (gethash '|_|        dyn-globals) *the-none*
-	  (gethash '|__|       dyn-globals) *the-none*
-	  (gethash '|___|      dyn-globals) *the-none*
-	  (gethash '|__name__| dyn-globals) "__main__")
+	 (clpython::*habitat* (clpython::make-habitat))
+	 acc)
+    
+    (setf (gethash '{_}        dyn-globals) *the-none*
+	  (gethash '{__}       dyn-globals) *the-none*
+	  (gethash '{___}      dyn-globals) *the-none*
+	  (gethash '{__name__} dyn-globals) "__main__")
     
     (labels ((print-cmds ()
 	       (format t *repl-doc*))
@@ -107,8 +116,8 @@ Relevant Lisp variables:
 	     
 	     (eval-print-ast (ast)
 	       (destructuring-bind (module-stmt suite) ast
-		 (assert (eq module-stmt 'module-stmt))
-		 (assert (eq (car suite) 'suite-stmt))
+		 (assert (eq module-stmt '[module-stmt]))
+		 (assert (eq (car suite) '[suite-stmt]))
 
 		 (let ((vals (multiple-value-list
 			     (block :val
@@ -149,90 +158,102 @@ Relevant Lisp variables:
 				    (let ((str-val (py-str-string val)))
 				      (write-string (py-val->string str-val)))) 
 				  (write-char #\Newline)))
-			 (return-from :repr))))))))
-    
+			 (return-from :repr)))))))
+	     
+	     (handle-as-python-code (total)
+	       ;; Return T if this \"succeeded\" somehow, i.e. parsing as Lisp
+	       ;; should not be attempted.
+	       ;; When first char is a space, always treat it as Lisp code
+	       (unless (and (> (length total) 0)
+			    (char= (char total 0) #\Space))
+		 
+		 (let ((ast (handler-case (parse-python-string total)
+			      ({UnexpectedEofError} () (return-from handle-as-python-code t))
+			      ({SyntaxError} () nil))))
+		   
+		   (when ast
+		     (destructuring-bind (module-stmt (suite-stmt items)) ast
+		       (assert (eq module-stmt '[module-stmt]))
+		       (assert (eq suite-stmt '[suite-stmt]))
+		       (when (and (= (length items) 1)
+				  (or (not (listp (car items)))
+				      (not 
+				       (member (caar items)
+					       '([classdef-stmt] ;; Wait for empty line
+						 [for-in-stmt]   ;; for perhaps multi-line
+						 [funcdef-stmt]  ;; statements
+						 [if-stmt]
+						 [try-except-stmt]
+						 [try-finally-stmt]
+						 [while-stmt] )))))
+			 (eval-print-ast ast)
+			 (setf acc nil)))
+		     (return-from handle-as-python-code t)))))
+	     
+	     (handle-as-lisp-code (total)
+	       (let ((lisp-form
+		      (ignore-errors (with-standard-io-syntax
+				       ;; Bind package, so symbols _, __, ___ are present.
+				       (let ((*package* #.*package*))
+					 (read-from-string total nil nil))))))
+		 
+		 (cond ((null lisp-form) ) ;; could not parse as lisp
+		       
+		       ((member lisp-form '(nil def class for while if try)) )
+		       ;; ignore, it's a multiline python code
+					  
+		       ((and (symbolp lisp-form)
+			     (> (length (symbol-name lisp-form)) 1)
+			     (char= (aref (symbol-name lisp-form) 0) #\@)) )
+		       ;; Reading function decorator
+		       
+		       (t (multiple-value-bind (res err) 
+			      (ignore-errors (multiple-value-list (eval lisp-form)))
+			    (if (and (null res)
+				     (typep err 'condition))
+				(format t ";; Eval as Lisp failed: ~A~%" err)
+			      (progn
+				(remember-value (car res))
+				(dolist (r res)
+				  (write r)
+				  (write-char #\Newline))
+				(setf acc nil)))))))))
+      
       (loop
 	  initially (format t "[CLPython -- type `:q' to quit, `:help' for help]~%")
 	  do (loop 
 	       (with-simple-restart (return-python-toplevel "Return to Python top level [:ptl]")
-		 (loop with acc = ()
-		     do #+(or)(format t "acc: ~S~%" acc)
-			(locally (declare (special *stdout-softspace*))
-			  (setf *stdout-softspace* (py-bool nil)))
-			(format t (if acc "... " ">>> "))
-			(let ((x (read-line)))
-			  (cond
-			   
-			   ((and (> (length x) 0)
-				 (char= (aref x 0) #\:))
-			    (multiple-value-bind (cmd ix)
-				(read-from-string x)
-			      (declare (ignore ix))
-			      (case cmd
-				(:help  (print-cmds))
-				(:q     (return-from repl 'Bye))
-				(t      (warn "Unknown command: ~S" cmd)))))
-			   
-			   ((string= x "")
-			    (let ((total (apply #'concatenate 'string (nreverse acc))))
-			      (setf acc ())
-			      (loop
-				(restart-case
-				    (let ((ast (parse-python-string total)))
-				      (eval-print-ast ast)
-				      (return))
-				  (try-parse-again ()
-				      :report "Parse string again into AST")))))
-			 
-			   (t (push (concatenate 'string x (string #\Newline))
-				    acc)
-			      ;; Try to parse; if that returns a "simple" AST
-			      ;; (like just inspecting the value of a variable), the
-			      ;; input is complete and there's no need to wait for
-			      ;; an empty line.
-			      (let* ((total (apply #'concatenate 'string (reverse acc))))
-				(block :try-parse
-				  ;; try to parse as Python code first
-				  ;;  but when first char is a space, always treat it as Lisp code
-				  (unless (and (> (length total) 0)
-					       (char= (char total 0) #\Space))
-				    (let ((ast (ignore-errors (parse-python-string total))))
-				      (when ast
-					(destructuring-bind (module-stmt (suite-stmt items)) ast
-					  (assert (eq module-stmt 'module-stmt))
-					  (assert (eq suite-stmt 'suite-stmt))
-					  (when (and (= (length items) 1)
-						     (or (not (listp (car items)))
-							 (not 
-							  (member (caar items)
-								  '(classdef-stmt ;; Wait for empty line
-								    for-in-stmt   ;; for perhaps multi-line
-								    funcdef-stmt  ;; statements
-								    if-stmt
-								    try-except-stmt
-								    try-finally-stmt
-								    while-stmt)))))
-					    (eval-print-ast ast)
-					    (setf acc nil)))
-					(return-from :try-parse))))
-				
-				  ;; try to parse as Lisp code second
-				  (let ((lisp-form (ignore-errors
-						    (with-standard-io-syntax
-						      ;; Bind package, so symbols _, __, ___
-						      ;; are present.
-						      (let ((*package* #.*package*))
-							(read-from-string total nil nil))))))
-				    (when (and lisp-form
-					       (not (member lisp-form '(def class for while if try)))) 
-				      (multiple-value-bind (res err) 
-					  (ignore-errors (multiple-value-list (eval lisp-form)))
-					(if (and (null res)
-						 (typep err 'condition))
-					    (format t ";; Eval as Lisp failed: ~A~%" err)
-					  (progn
-					    (remember-value (car res))
-					    (dolist (r res)
-					      (write r)
-					      (write-char #\Newline))
-					    (setf acc nil))))))))))))))))))
+		 (setf acc ())
+		 (loop 
+		   (locally (declare (special *stdout-softspace*))
+		     (setf *stdout-softspace* (py-bool nil)))
+		   (format t (if acc "... " ">>> "))
+		   (let ((x (read-line)))
+		     (cond
+		      
+		      ((and (> (length x) 0)
+			    (char= (aref x 0) #\:))
+		       (multiple-value-bind (cmd ix)
+			   (read-from-string x)
+			 (declare (ignore ix))
+			 (case cmd
+			   (:help  (print-cmds))
+			   (:q     (return-from repl 'Bye))
+			   (t      (warn "Unknown command: ~S" cmd)))))
+		      
+		      ((string= x "")
+		       (let ((total (apply #'concatenate 'string (nreverse acc))))
+			 (setf acc ())
+			 (loop
+			   (restart-case
+			       (let ((ast (parse-python-string total)))
+				 (eval-print-ast ast)
+				 (return))
+			     (try-parse-again ()
+				 :report "Parse string again into AST")))))
+		      
+		      (t (push (concatenate 'string x (string #\Newline)) acc)
+			 (let* ((total (apply #'concatenate 'string (reverse acc))))
+			   (or (handle-as-python-code total)
+			       (handle-as-lisp-code total)))))))))))))
+  

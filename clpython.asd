@@ -5,10 +5,15 @@
 ;; (http://opensource.franz.com/preamble.html),
 ;; known as the LLGPL.
 
+;;;; ASDF System Definitions
+
 (in-package #:user)
 
 (eval-when (:compile-toplevel)
   (error "This ASDF file should be run interpreted."))
+
+
+;;; Check ASDF version
 
 ;; The ASDF version initially supplied with ACL 8.0 (in directory acl80/code/asdf.fasl)
 ;; does not handle (:serial t) correctly (it does not load A before compiling B).
@@ -35,34 +40,40 @@
              You can upgrade automatically, using (sys:update-allegro)")))
 
 
-;;; System definitions
+;;; Systems
 
 (asdf:defsystem :clpython.package
-    :components ((:file "package")))
+    :description "CLPython package and readtables"
+    :components ((:module "package"
+			  :components ((:file "package")
+				       (:file "utils" :depends-on ("package"))
+				       (:file "readtable" :depends-on ("package"))))))
 
 (asdf:defsystem :clpython.parser
-    :description "Python source code and AST handling"
+    :description "Python parser, code walker, and pretty printer"
     :depends-on (:clpython.package)
-    :components ((:module "ast"
-			  :components ((:file "grammar")
-				       (:file "lexer"  :depends-on ("grammar"))
-				       (:file "parser" :depends-on ("grammar" "lexer"))
-				       (:file "walk")
-				       (:file "astpp")
-				       (:file "lispy")))))
+    :components ((:module "parser"
+			  :components ((:file "psetup"  )
+				       (:file "grammar" :depends-on ("psetup"))
+				       (:file "lexer"   :depends-on ("grammar"))
+				       (:file "parser"  :depends-on ("grammar" "lexer"))
+				       (:file "walk"    )
+				       (:file "pprint"  )))))
 
 (asdf:defsystem :clpython.core
-    :description "Python objects, semantics, and compiler"
+    :description "Python builtin classes, exceptions, functions, and compiler"
     :depends-on (:clpython.package :clpython.parser)
     :components ((:module "core"
 			  :serial t
-			  :components ((:file "formatstring" )
+			  :components ((:file "csetup"       )
+				       (:file "formatstring" )
 				       (:file "classes"      )
 				       (:file "exceptions"   )
 				       (:file "builtins"     )
 				       (:file "compiler"     )
 				       (:file "optimize"     )
-				       (:file "modules"      )
+				       #+(or)(:file "modules"      )
+				       (:file "habitat")
 				       (:file "import"       )))))
 
 (asdf:defsystem :clpython.lib
@@ -78,7 +89,6 @@
 (asdf:defsystem :clpython
     :description "CLPython - an implementation of Python in Common Lisp"
     :depends-on (:clpython.package :clpython.parser :clpython.core :clpython.lib)
-    
     :in-order-to ((asdf:test-op (asdf:load-op :clpython-test)))
     :perform (asdf:test-op :after (op c)
 			   (funcall (find-symbol (string '#:run) :clpython.test))))

@@ -6,101 +6,109 @@
 ;; known as the LLGPL.
 
 (in-package :clpython.parser)
+(in-syntax *ast-user-readtable*)
 
-(defvar *signal-unexpected-eof* nil
-  "Whether UNEXPECTED-EOF is signalled in case of EOF where token expected")
+;;;; Parser for Python code
 
-(define-condition unexpected-eof ()
-  ())
+(defun handle-parser-condition (c)
+  ;; When a SyntaxError is thrown by us in the lexer, the parser
+  ;; first signals the SyntaxError, then it raises a GRAMMAR-PARSE-ERROR.
+  (declare (special clpython:*exceptions-loaded*))
+  (cond ((and clpython:*exceptions-loaded* (typep c '{SyntaxError}))
+	 (error c)) ;; Converting SIGNAL to ERROR
+	
+	((typep c 'excl.yacc:grammar-parse-error)
+	 (let* ((pos (excl.yacc:grammar-parse-error-position c))
+		(line (second (assoc :line-no pos)))
+		(token (excl.yacc:grammar-parse-error-token c))
+		(encl-error (excl.yacc::grammar-parse-error-enclosed-error c)))
+	   
+	   (cond (encl-error ;; Error in one of our grammar rules
+		  (when clpython:*exceptions-loaded*
+		    (assert (not (typep encl-error '{SyntaxError}))
+			() "CLPython: Strange: Parser raises EXCL.YACC:GRAMMAR-PARSE-ERROR ~
+                              with a SyntaxError enclosed, without first signalling that ~
+                              SyntaxError (~A)." c))
+		  (raise-syntax-error
+		   (format nil "Parse error at line ~A~@[, at token `~S'~].~%[inner error: ~A]"
+			   line token encl-error)))
+		 
+		 ((eq token 'excl.yacc:eof)
+		  (raise-unexpected-eof)
+		  (assert nil () "unreachable"))
+		 
+		 (t (raise-syntax-error
+		     (format nil "At line ~A, parser got unexpected token: `~A'."
+			     line token))
+		    (assert nil () "unreachable")))))))
 
 (defun parse-python-with-lexer (&rest lex-options)
   (let* ((lexer (apply #'make-py-lexer lex-options))
 	 (grammar (make-instance 'python-grammar :lexer lexer)))
     
-    (handler-case 
-	(parse grammar)
-      
-      ;; When a SyntaxError S is thrown by us in the lexer, the parser
-      ;; first signals S, then it raises a GRAMMAR-PARSE-ERROR.
-      
-      (|SyntaxError| (e) ;; signaled
-	(error e))
-      
-      (grammar-parse-error (c)
-	(let* ((pos (grammar-parse-error-position c))
-	       (line (second (assoc :line-no pos)))
-	       (token (excl.yacc:grammar-parse-error-token c))
-	       (encl-error (excl.yacc::grammar-parse-error-enclosed-error c)))
-	  
-	  (cond (encl-error 
-		 ;; Error while building resulting AST
-		 (assert (not (typep encl-error '|SyntaxError|)))
-		 (raise-syntax-error
-		  (format nil "Parse error at line ~A~@[, at token `~S'~].~%[inner error: ~A]"
-			  line token encl-error)))
-		
-		(t (when (and (eq token 'EXCL.YACC:EOF)
-			      *signal-unexpected-eof*)
-		     (signal 'unexpected-eof))
-		   
-		   (raise-syntax-error (format nil "At line ~A, parser got unexpected token `~S'."
-					       line token)))))))))
+    (handler-bind 
+	((condition #'handle-parser-condition))
+      (excl.yacc:parse grammar))))
 
-(defgeneric parse-python-file (source &key (incl-module t))
-  (:method :around (s &key (incl-module t))
-	   (declare (ignore s))
-	   (let ((ast (call-next-method)))
-	     (if incl-module
-		 ast
-	       (unwrap-module ast))))
-  (:method ((s stream) &key incl-module)
-	   (declare (ignore incl-module))
-	   (parse-python-with-lexer
-	    :read-chr   (lambda ()
-			  (declare (optimize (speed 3) (safety 1) (debug 0)))
-			  (read-char s nil nil))
-	    :unread-chr (lambda (c)
-			  (declare (optimize (speed 3) (safety 1) (debug 0)))
-			  (unread-char c s))))
-  (:method ((filename t) &key incl-module)
-	   (declare (ignore incl-module))
+(defgeneric parse-python-file (file &rest options)
+  (:documentation "Parse given file (either path or stream), return AST.")
+  
+  (:method ((s stream) &rest options)
+	   (let ((str (make-array (or (file-length s) 1000) 
+				  :element-type 'character
+				  :adjustable t
+				  :fill-pointer 0)))
+	     (loop for ch = (read-char s nil nil)
+		 while ch do (vector-push-extend ch str))
+	     ;(setf (fill-pointer str) (read-sequence str s))
+	     ;; Note that the actual length of STR may be less than what FILE-SIZE
+	     ;; returned, due to end-of-line normalization.
+	     (apply #'parse-python-string str options))) 
+
+  (:method ((filename t) &rest options)
 	   (with-open-file (f (string filename) :direction :input)
-	     (parse-python-file f))))
+	     (apply #'parse-python-file f options))))
 
-(defgeneric parse-python-string (s &key (incl-module t))
-  (:method :around (s &key (incl-module t))
-	   (declare (ignore s))
-	   (let ((ast (call-next-method)))
+(defun parse-python-one-expr (string)
+  (check-type string string)
+  (let ((res (parse-python-string string :incl-module nil)))
+    (case (length res)
+      (0 (error "String ~S cannot be parsed into a value" string))
+      (1 (car res))
+      (t (error "String ~S parses into multiple (~A) expressions: ~{~A~^, ~}."
+		string (length res) res)))))
+    
+(defgeneric parse-python-string (string &rest options)
+  (:documentation "Parse given string, return AST.")
+  
+  (:method :around ((s string) &rest options &key (incl-module t))
+	   (let ((res (apply #'call-next-method s (sans options :incl-module))))
 	     (if incl-module
-		 ast
-	       (unwrap-module ast))))
-  (:method ((s string) &key incl-module)
+		 res
+	       (destructuring-bind (module-stmt (suite-stmt rest)) res
+		 (assert (eq module-stmt '[module-stmt]))
+		 (assert (eq suite-stmt '[suite-stmt]))
+		 rest))))
+	   
+  (:method ((s string) &rest options)
 	   (declare (ignore incl-module))
 	   (let ((next-i 0)
 		 (max-i (length s)))
 	     
-	     (parse-python-with-lexer
-	      :read-chr (lambda ()
-			  (when (< next-i max-i)
-			    (prog1 (char s next-i) (incf next-i))))
-	      
-	      :unread-chr (lambda (c)
-			    (assert (and c (> next-i 0) (char= c (char s (1- next-i)))))
-			    (decf next-i))))))
+	     (apply #'parse-python-with-lexer
+		    :read-chr (lambda ()
+				(when (< next-i max-i)
+				  (prog1 (char s next-i) (incf next-i))))
+		    
+		    :unread-chr (lambda (c)
+				  (assert (and c (> next-i 0) (char= c (char s (1- next-i)))))
+				  (decf next-i))
+		    
+		    options))))
 
-(defun unwrap-module (ast)
-  "(MODULE-STMT (SUITE-STMT ...)) -> ..."
-  (destructuring-bind (module-stmt (suite-stmt beef)) ast
-    (assert (eq module-stmt 'module-stmt))
-    (assert (eq suite-stmt 'suite-stmt))
-    beef))
-
-(defun raise-syntax-error (formatstring &rest args)
-  ;; Raise Pythonic SyntaxError if available, otherwise regular error.
-  (let* ((p (find-package :clpython))
-	 (r (and p (find-symbol (string '#:py-raise) p)))
-	 (pe (and r (find-package :clpython.builtin.type.exception)))
-	 (et (and pe (find-symbol (string '#:|SyntaxError|) pe))))
-    (if (and (fboundp r) (boundp et))
-	(apply (symbol-function r) et formatstring args)
-      (apply #'error (concatenate 'string "SyntaxError: " formatstring) args))))
+(defmacro with-python-code-reader (var &body body)
+  ;; The Python parser handles all reading.
+  (assert (null var))
+  `(let ((*readtable* (setup-omnivore-readmacro #'parse-python-file
+						(copy-readtable nil))))
+     ,@body))
