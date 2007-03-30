@@ -421,23 +421,27 @@
  
  (arglist () (`(nil nil nil nil)))
  (arglist (argument--comma* arglist-2)
-	  ((loop with key-args
-	       for sublist on $1
-	       for item = (car sublist)
-	       while (eq (car item) :pos)
-	       collect (second item) into pos-args
-	       finally (setf key-args (mapcar #'cdr sublist))
-		       (destructuring-bind (a *-a **-a) $2
-			 (when a
-			   (ecase (car a)
-			     (:pos (setf pos-args
-				     (nconc pos-args
-					    (list (second a)))))
-			     (:key (setf key-args
-				     (nconc key-args
-					    (list (cdr a)))))))
-			 (return (list pos-args key-args
-				       *-a **-a))))))
+	  ((destructuring-bind (a *-a **-a) $2
+	     (when a (if $1
+			 (setf (cdr (last $1)) (list a))
+		       (setf $1 (list a))))
+	     (let ((key-start (position :key $1 :key #'car))
+		   (pos-end   (position :pos $1 :key #'car :from-end t)))
+	       (multiple-value-bind (pos key)
+		   (cond ((and key-start pos-end)
+			  (when (< key-start pos-end)
+			    (raise-syntax-error "Postional argument `~A' found after keyword argument `~A'."
+						(cadadr (nth pos-end $1)) (cadadr (nth key-start $1))))
+			  (let ((pos-args $1)
+				(key-args (nthcdr key-start $1)))
+			    (setf (cdr (nthcdr pos-end $1)) nil)
+			    (values pos-args key-args)))
+			 (key-start (values () $1))
+			 (pos-end   (values $1 ()))
+			 (t         (values () ())))
+		 (map-into pos #'second pos)
+		 (map-into key #'cdr key)
+		 (list pos key *-a **-a))))))
  (arglist-2 :or
 	    ((argument comma?)            . ((list  $1 nil nil)))
 	    (([*]  test comma--**--test?) . ((list nil  $2  $3)))

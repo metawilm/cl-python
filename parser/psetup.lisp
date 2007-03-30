@@ -20,7 +20,7 @@
   "Raise SyntaxError, or (if that condition is unavailable) a regular error."
   (declare (special clpython:*exceptions-loaded*))
   (if clpython:*exceptions-loaded*
-      (funcall 'clpython:py-raise '{SyntaxError} formatstring args)
+      (apply 'clpython:py-raise '{SyntaxError} formatstring args)
     (apply #'error (concatenate 'string "SyntaxError: " formatstring) args)))
 
 (defun raise-unexpected-eof (&optional line-no)

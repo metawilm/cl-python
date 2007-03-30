@@ -68,20 +68,14 @@
 
     ;; order of args: pos, key, *, **
     (test-error (ps "f(a=1,b)" nil)
-		:condition-type '{SyntaxError}
-		:known-failure t
-		:fail-info "Parser does not yet check order of args")
+		:condition-type '{SyntaxError})
     
     (test-error (ps "f(*a,1)" nil)
-		:condition-type '{SyntaxError}
-		:known-failure t
-		:fail-info "Parser does not yet check order of args")
+		:condition-type '{SyntaxError})
     
     (test-error (ps "f(**a,*b)" nil)
-		:condition-type '{SyntaxError}
-		:known-failure t
-		:fail-info "Parser does not yet check order of args")
-
+		:condition-type '{SyntaxError})
+    
     (test-no-error (ps "f(x,y,z=3,*a,**b)" nil))
     
     ;; function decorators
