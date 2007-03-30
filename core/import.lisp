@@ -50,12 +50,12 @@ The returned pathnames lead tot <modname>/__init__.{py/lisp/..}"
 			    :case      :common)))
 	  *py-source-file-types*))
 
-(defun py-compiled-file-name (pkgname filepath)
+(defun py-compiled-file-name (modname filepath)
   "Get file name for compiled source file"
-  (check-type pkgname string)
+  (check-type modname string)
   (make-pathname :type      *py-compiled-file-type*
 		 :version   nil
-		 :name      *package-indicator-filename*
+		 :name      (pathname-name modname :case :common)
 		 :host      (pathname-host      filepath :case :common)
 		 :device    (pathname-device    filepath :case :common)
 		 :directory (pathname-directory filepath :case :common)
@@ -216,8 +216,8 @@ Returns the loaded module, or NIL on error."
   (check-type habitat habitat)
   
   (unless search-paths
-    (warn "No search paths specified for import of ~A; current directory will be used."
-	  mod-name-as-list)
+    #+(or)(warn "No search paths specified for import of ~A; current directory will be used."
+		mod-name-as-list)
     (setf search-paths '(".")))
   
   (let* ((just-mod-name (string (car (last mod-name-as-list))))

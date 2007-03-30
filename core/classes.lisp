@@ -1411,7 +1411,10 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 (defun copy-module-contents (&key from to)
   (check-type from py-module)
   (check-type to py-module)
-  (error "todo"))
+  (dolist (s (mapcar #'mop:slot-definition-name
+		     (mop:class-slots (find-class 'py-module))))
+    (setf (slot-value to s) (slot-value from s)))
+  t)
 
 (defmethod print-object ((x py-module) stream)
   (write-string (py-module.__repr__ x) stream))
