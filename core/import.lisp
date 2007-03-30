@@ -75,6 +75,13 @@ The returned pathnames lead tot <modname>/__init__.{py/lisp/..}"
 		  :directory (pathname-directory filepath :case :common)
 		  :case      :common)))
 
+(defun lisp-package-as-py-module (modname)
+  "Return Lisp package with given name, that is a package-child of :clpython.module
+This function build on Allegro's 'relative package names'."
+  (check-type modname symbol)
+  (let ((*package* :clpython.module))
+    (excl::relative-package-name-to-package (concatenate 'string "." (symbol-name modname)))))
+  
 (defun find-py-file (name search-paths)
   "Returns pathnames of SRC and/or BINARY file found earliest.
 Returns (values KIND SRC-PATH BIN-PATH), where KIND one of :module, :package.
@@ -214,6 +221,11 @@ Returns the loaded module, or NIL on error."
 	   (optimize (debug 3)))
   (check-type mod-name-as-list list)
   (check-type habitat habitat)
+  
+  ;; Todo: set up precendence rules. 
+  (when (= (length mod-name-as-list) 1)
+    (whereas ((pkg (lisp-package-as-py-module (car mod-name-as-list))))
+      (return-from py-import pkg)))
   
   (unless search-paths
     #+(or)(warn "No search paths specified for import of ~A; current directory will be used."
