@@ -66,6 +66,24 @@
 		   ([identifier-expr] {kw})))
 		(ps "f(1,2, y=3, *args, **kw)" nil))
 
+    ;; order of args: pos, key, *, **
+    (test-error (ps "f(a=1,b)" nil)
+		:condition-type '{SyntaxError}
+		:known-failure t
+		:fail-info "Parser does not yet check order of args")
+    
+    (test-error (ps "f(*a,1)" nil)
+		:condition-type '{SyntaxError}
+		:known-failure t
+		:fail-info "Parser does not yet check order of args")
+    
+    (test-error (ps "f(**a,*b)" nil)
+		:condition-type '{SyntaxError}
+		:known-failure t
+		:fail-info "Parser does not yet check order of args")
+
+    (test-no-error (ps "f(x,y,z=3,*a,**b)" nil))
+    
     ;; function decorators
     (test-equal '([funcdef-stmt]
 		  ;; list of decorators: first foo(bar)
