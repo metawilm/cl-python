@@ -61,7 +61,7 @@
 				       (:file "pprint"  )))))
 
 (asdf:defsystem :clpython.core
-    :description "Python builtin classes, exceptions, functions, and compiler"
+    :description "Python semantics and compiler"
     :depends-on (:clpython.package :clpython.parser)
     :components ((:module "core"
 			  :serial t
@@ -69,10 +69,8 @@
 				       (:file "formatstring" )
 				       (:file "classes"      )
 				       (:file "exceptions"   )
-				       (:file "builtins"     )
 				       (:file "compiler"     )
 				       (:file "optimize"     )
-				       #+(or)(:file "modules"      )
 				       (:file "habitat")
 				       (:file "import"       )))))
 
@@ -80,7 +78,8 @@
     :description "Python module library"
     :depends-on (:clpython.package :clpython.parser :clpython.core)
     :components ((:module "lib"
-			  :components ((:file "sys")
+			  :components ((:file "builtins")
+				       (:file "sys")
 				       (:file "time")
 				       (:file "os")
 				       (:file "array")
