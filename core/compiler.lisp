@@ -1,4 +1,4 @@
-;; This software is Copyright (c) Franz Inc. and Willem Broekema.
+o;; This software is Copyright (c) Franz Inc. and Willem Broekema.
 ;; Franz Inc. and Willem Broekema grant you the rights to
 ;; distribute and use this software as governed by the terms
 ;; of the Lisp Lesser GNU Public License
@@ -237,7 +237,7 @@ XXX Currently there is not way to set *__debug__* to False.")
 
 (defmacro [binary-lazy-expr] (op left right)
   (ecase op
-    ({or} `(let ((.left ,left))
+    ([or] `(let ((.left ,left))
 	     (if (py-val->lisp-bool .left)
 		 .left
 	       (let ((.right ,right))
@@ -245,7 +245,7 @@ XXX Currently there is not way to set *__debug__* to False.")
 		     .right
 		   *the-false*)))))
     
-    ({and} `(let ((.left ,left))
+    ([and] `(let ((.left ,left))
 	      (if (py-val->lisp-bool .left)
 		  ,right
 		.left)))))
@@ -942,7 +942,7 @@ input arguments."
 			       `module-obj))))))
 
 (defmacro [import-from-stmt] (mod-name-as-list items)
-  `(let ((mod-obj (py-import ',mod-name-as-list +mod+)))
+  `(let ((mod-obj (py-import ',mod-name-as-list)))
      ,@(if (eq items '[*])
 
 	  `((let ((src-items (py-module-get-items mod-obj :import-* t)))
