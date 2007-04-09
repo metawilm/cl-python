@@ -1531,15 +1531,15 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
   (multiple-value-bind (sym kind)
       (find-symbol name pkg)
     (cond ((not sym)
-	   (py-raise '{AttributeError} "Package ~A has no symbol named ~A" pkg name))
+	   (py-raise '{AttributeError} "Package ~A has no symbol named `~A'" pkg name))
 	  ((member kind '(:inherited :internal))
 	   (cerror "Return the symbol's value anyway"
-		   "The symbol ~A is not external in the ~A package" name pkg)))
+		   "The symbol `~A' is not external in the ~A package" name pkg)))
     (cond ((boundp sym)
 	   (symbol-value sym))
 	  ((fboundp sym)
 	   (symbol-function sym))
-	  (t (py-raise '{AttributeError} "The symbol ~A in package ~A is unbound (though it exists)"
+	  (t (py-raise '{AttributeError} "The symbol `~A' in package ~A is unbound (though it exists)"
 		       name pkg)))))
 
 ;; File (User object)
