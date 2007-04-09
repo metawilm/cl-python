@@ -1520,10 +1520,27 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
   *the-none*)
 
 
-;;; Lisp Packages are a special kind of Python modules
-;; XX proxy class
-;; (def-py-method package.__name__ (x)
-;;   (package-name x))
+;; Lisp Packages can be used like Python modules
+
+(defclass lisp-package (py-core-object)
+  ()
+  (:metaclass py-core-type))
+
+(def-py-method lisp-package.__getattribute__ (pkg name)
+  (assert (stringp name))
+  (multiple-value-bind (sym kind)
+      (find-symbol name pkg)
+    (cond ((not sym)
+	   (py-raise '{AttributeError} "Package ~A has no symbol named ~A" pkg name))
+	  ((member kind '(:inherited :internal))
+	   (cerror "Return the symbol's value anyway"
+		   "The symbol ~A is not external in the ~A package" name pkg)))
+    (cond ((boundp sym)
+	   (symbol-value sym))
+	  ((fboundp sym)
+	   (symbol-function sym))
+	  (t (py-raise '{AttributeError} "The symbol ~A in package ~A is unbound (though it exists)"
+		       name pkg)))))
 
 ;; File (User object)
 
@@ -2848,7 +2865,7 @@ Creates a function for doing fast lookup, using jump table"
       res))))
 
 (def-py-method py-string.__nonzero__ (x^) (py-bool (> (length x) 0)))
-(def-py-method py-string.__repr__ (x^) (clpython.parser:py-pprint nil x))
+(def-py-method py-string.__repr__ (x^) (py-string.strip (clpython.parser:py-pprint x nil)))
 
 (def-py-method py-string.__str__  (x^)  x)
 
@@ -3036,7 +3053,9 @@ Creates a function for doing fast lookup, using jump table"
   (:method ((x py-lisp-type)) (ltv-find-class 'py-type))
   (:method ((x py-core-type)) (ltv-find-class 'py-type))
   (:method ((x py-user-type)) (ltv-find-class 'py-type))
-    
+
+  (:method ((x package)) (ltv-find-class 'lisp-package))
+  
   (:method ((x class))   (cond
 			  ((eq x (ltv-find-class 'py-type))
 			   x)  ;; py-type is its own class

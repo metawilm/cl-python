@@ -180,6 +180,12 @@
 	   ;; pretty printer:
 	   #:py-pprint #:*py-pprint-dispatch* ))
 
+;;; CLPYTHON.MODULE - Modules
+
+(defpackage :clpython.module
+  (:documentation "Aggregation package for Python modules")
+  (:use ))
+
 ;;; CLPYTHON - The main package
 ;;;
 ;;; This package does not :use other packages, because many symbols conflict
