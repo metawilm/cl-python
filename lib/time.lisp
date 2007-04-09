@@ -1,6 +1,7 @@
 (defpackage :clpython.module.time
   (:use :clpython :common-lisp)
-  (:shadow #:sleep #:time))
+  (:shadow #:|sleep| #:|time|)
+  (:export #:|clock| #:|sleep| #:|time|))
 
 (in-package :clpython.module.time)
 
@@ -11,7 +12,7 @@
 	  'float))
 
 (defun |sleep| (n)
-  (sleep (clpython::py-val->number n)))
+  (common-lisp:sleep (clpython::py-val->number n)))
 
 (defun |time| ()  
   (excl.osi:universal-to-unix-time (get-universal-time)))
