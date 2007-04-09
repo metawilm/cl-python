@@ -255,10 +255,7 @@ XXX Currently there is not way to set *__debug__* to False.")
       `(go :break)
     (py-raise '{SyntaxError} "BREAK was found outside loop")))
 
-(defparameter *special-calls*
-    (list (cons '{locals}  (symbol-function '{locals})  )
-	  (cons '{globals} (symbol-function '{globals}) )
-	  (cons '{eval}    (symbol-function '{eval})    )))
+(defvar *special-calls* '({locals} {globals} {eval}))
 
 (defmacro [call-expr] (&whole whole primary all-args &environment e)
   ;; For complete Python semantics, we should check for every call if
@@ -272,7 +269,6 @@ XXX Currently there is not way to set *__debug__* to False.")
   ;;
   ;; But when *allow-indirect-special-call* is true, all calls
   ;; are checked regardless the primitive's name
-  
   (destructuring-bind (pos-args kwd-args *-arg **-arg)
       all-args
     
@@ -283,53 +279,38 @@ XXX Currently there is not way to set *__debug__* to False.")
 		     (*-arg                  `(py-iterate->lisp-list ,*-arg))
 		     (**-arg                 `(py-iterate->lisp-list ,**-arg))
 		     (t                      `nil)))
-	     
 	     (%pos-args ()
 	       `(nconc (list ,@pos-args) ,(when *-arg `(py-iterate->lisp-list ,*-arg))))
-	     
 	     (%there-are-key-args ()
 	       (cond (kwd-args  `t)
 		     (**-arg    `(py-iterate->lisp-list ,**-arg))
 		     (t         `nil)))
-	     
 	     (%locals-dict ()
 	       (if (get-pydecl :inside-function-p e)
 		   `(.locals.)
 		  `(create-module-globals-dict)))
-	     
 	     (%globals-dict ()
 	       `(create-module-globals-dict))
-	     
-	     (%special-call (kind)
-	       (ecase kind
-		 ( {locals}  `(call-expr-locals  ,(%locals-dict)  ,(%there-are-args)))
-		 ( {globals} `(call-expr-globals ,(%globals-dict) ,(%there-are-args)))
-		 ( {eval}    `(call-expr-eval    ,(%locals-dict)  ,(%globals-dict)
-						 ,(%pos-args) ,(%there-are-key-args))))))
+	     (%do-maybe-special-call (prim which)
+	       `(cond ,@(when (member '{locals} which)
+			  `(((eq ,prim (function {locals}))
+			     (call-expr-locals ,(%locals-dict) ,(%there-are-args)))))
+		      ,@(when (member '{globals} which)
+			  `(((eq ,prim (function {globals}))
+			     (call-expr-globals ,(%globals-dict) ,(%there-are-args)))))
+		      ,@(when (member '{eval} which)
+			  `(((eq ,prim (function {eval}))
+			     (call-expr-eval ,(%locals-dict) ,(%globals-dict)
+					     ,(%pos-args) ,(%there-are-key-args)))))
+		      (t (call-expr-1 ,prim ,@(cddr whole))))))
       
-      (cond (*allow-indirect-special-call*
-	     ;; This could be refactored, by declaring one inner function in every funcdef,
-	     ;; handling the special calls.
-	     `(let* ((.prim ,primary)
-		     (.special-f (find .prim *special-calls* :key #'cdr)))
-		(ecase (car .special-f)
-		  ((nil)   (call-expr-1 .prim ,@(cddr whole)))
-		  ,@(loop for (name . nil) in *special-calls*
-			collect `(,name ,(%special-call name))))))
-	    
-	    ((and (listp primary)
-		  (eq (car primary) '[identifier-expr]))
-	     ;; Support calling special functions by proper name.
-	     (let ((spec (find (second primary) *special-calls* :key #'car)))
-	       (if spec
-		   `(let* ((.prim ,primary))
-		      (if (eq .prim ,(cdr spec))
-			  ,(%special-call (car spec))
-			(call-expr-1 .prim ,@(cddr whole))))
-		 `(call-expr-1 ,@(cdr whole)))))
-	      
-	    (t     
-	     `(call-expr-1 ,@(cdr whole)))))))
+      (if (or *allow-indirect-special-call*
+	      (and (listp primary)
+		   (eq (first primary) '[identifier-expr])
+		   (member (second primary) *special-calls*)))
+	  `(let* ((.prim ,primary))
+	     ,(%do-maybe-special-call '.prim *special-calls*))
+	`(call-expr-1 ,@(cdr whole))))))
 
 (defun call-expr-locals (locals-dict args-p)
   (when args-p
