@@ -136,6 +136,7 @@ POS-ARGS is any iterable object; KW-DICT must be of type PY-DICT."
 	(when d
 	  (add-dict (dict x))
 	  (pushnew "__dict__" res :test #'string=)))
+      
       (let ((x.class (py-class-of x)))
         (loop for c in (mop:class-precedence-list x.class)
 	    until (or (eq c (ltv-find-class 'standard-class))
@@ -146,7 +147,12 @@ POS-ARGS is any iterable object; KW-DICT must be of type PY-DICT."
       
       (when (typep x 'py-module)
 	(loop for k in (mapcar #'car (py-module-get-items x))
-	    do (pushnew (if (stringp k) k (py-val->string k)) res))))
+	    do (pushnew (if (stringp k) k (py-val->string k)) res)))
+
+      (when (packagep x)
+	(do-external-symbols (s x)
+	  (pushnew (symbol-name s) res))))
+    
     (assert (every #'stringp res))
     (setf res (sort res #'string<))
     res))
