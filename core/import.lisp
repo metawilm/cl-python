@@ -230,7 +230,11 @@ Returns the loaded module, or NIL on error."
   (unless search-paths
     #+(or)(warn "No search paths specified for import of ~A; current directory will be used."
 		mod-name-as-list)
-    (setf search-paths '(".")))
+    (setf search-paths '("."))
+    
+    ;; XXX sys.path is now shared between all habitats; should perhaps be habitat-specific
+    (dolist (p (reverse (py-iterate->lisp-list clpython.module.sys:path)))
+      (pushnew p search-paths)))
   
   (let* ((just-mod-name (string (car (last mod-name-as-list))))
 	 (dotted-name (module-dotted-name mod-name-as-list)))
