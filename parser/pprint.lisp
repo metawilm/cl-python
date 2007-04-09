@@ -33,7 +33,6 @@
 
 (set-pprint-dispatch t #'py-pprint-1 0 *py-pprint-dispatch*)
 
-
 (defmethod py-pprint-1 (stream object)
   ;; Everything not explicitly overridden gets default behaviour
   (with-standard-io-syntax
@@ -305,8 +304,9 @@
     
     ([yield-stmt] (format stream "yield ~A" (second x)))
     
-    (t (with-standard-io-syntax (warn "uncatched in py-pprint-1: ~A" x)
-				(format stream "#<pyprint uncatched: ~A >" x)))))
+    (t (with-standard-io-syntax
+	 #+(or)(warn "uncatched in py-pprint-1: ~A" x)
+	 (format stream "~A" x)))))
 
   
 (defun print-arg-list (stream pos-args key-args *-arg **-arg)
