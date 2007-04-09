@@ -1,5 +1,17 @@
 (defpackage :clpython.module.sys
-  (:use :clpython :common-lisp))
+  (:use :clpython :common-lisp)
+  (:export #:|argv| #:|byteorder| #:|ecv_info| #:|copyright|
+	   #:|builtin_module_names| #:|displayhook| #:|excepthook|
+	   #:|__displayhook__| #:|__excepthook__| #:|exit| #:|exitfunc|
+	   #:|setcheckinterval| #:|getcheckinterval|
+	   #:|getdefaultencoding| #:|setdefaultencoding|
+	   #:|getfilesystemencoding|
+	   #:|getrecursionlimit| #:|setrecursionlimit|
+	   #:|hexversion| #:|maxint|
+	   #:|maxunicode| #:|modules| #:|path| #:|platform|
+	   #:|prefix| #:|ps1| #:|ps2| #:|stdin| #:|stdout| #:|stderr|
+	   #:|__stdin__| #:|__stdout__| #:|__stderr__|
+	   #:|api_version| #:|version_info| #:|version| ))
 
 (in-package :clpython.module.sys)
 
