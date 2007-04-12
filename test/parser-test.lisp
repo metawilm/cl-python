@@ -141,7 +141,3 @@ def f(): pass" nil))
 (defun run-pretty-printer-test ()
   (with-subtest (:name "CLPython-PrettyPrinter")
     ))
-
-(defun run-lispy-test ()
-  (with-subtest (:name "CLPython-Lispy")
-    ))
