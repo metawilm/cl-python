@@ -1,3 +1,5 @@
+;; -*- package: util.test -*-
+;;
 ;; tester.cl
 ;; A test harness for Allegro CL.
 ;;
@@ -26,7 +28,7 @@
 ;;;; from the original ACL 6.1 sources:
 ;; Id: tester.cl,v 2.2.12.1 2001/06/05 18:45:10 layer Exp
 
-;; $Id: tester.lisp,v 1.1 2007/03/25 21:25:01 willem Exp $
+;; $Id: tester.lisp,v 1.2 2007/04/12 06:02:32 willem Exp $
 
 (defpackage :util.test
   (:use :common-lisp :excl)

@@ -5,11 +5,10 @@
 ;; (http://opensource.franz.com/preamble.html),
 ;; known as the LLGPL.
 
-;;;; Readtables that easy working with CLPython's AST and USER packages
+;;;; These readtables ease working with Abstract Syntax Trees
+;;;; and Python variable names.
 
 (in-package :clpython.package)
-
-;;; Readtable in which to write CL code
 
 ;; The readtable setup is as suggested by Kent Pitman in
 ;;  http://groups.google.nl/group/comp.lang.lisp/msg/d97a08bd49db2b82?dmode=source
@@ -69,15 +68,24 @@ it will be interned if INTERN, otherwise an error is raised."
     (set-macro-character #\{ read-{-func t readtable))
   readtable)
 
-(defvar *ast-readtable* (setup-ast-readmacro (copy-readtable nil))
+(defvar *ast-readtable* 
+    (setup-ast-readmacro (copy-readtable nil))
   "Readtable where [NAME] refers to clpython.ast::NAME")
 
-(defvar *user-readtable* (setup-user-readmacro (copy-readtable nil))
+(defvar *user-readtable*
+    (setup-user-readmacro (copy-readtable nil))
   "Readtable where {NAME} refers to clpython.user::NAME")
 
-(defvar *ast-user-readtable* (setup-user-readmacro (setup-ast-readmacro (copy-readtable nil)))
+(defvar *ast-user-readtable*
+    (setup-user-readmacro (setup-ast-readmacro (copy-readtable nil)))
   "Readtable where [NAME] refers to clpython.ast::NAME and {NAME} to clpython.user::NAME")
 
+;; To be able to mention these readtables in mode lines, they have to
+;; be named.
+#+allegro
+(progn (setf (excl:named-readtable :py-ast-readtable) *ast-readtable*)
+       (setf (excl:named-readtable :py-user-readtable) *user-readtable*)
+       (setf (excl:named-readtable :py-ast-user-readtable) *ast-user-readtable*))
 
 ;;; Readtable that takes in everything available
 

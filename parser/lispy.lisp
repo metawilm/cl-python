@@ -1,4 +1,6 @@
-;;; Lisp-Python syntax
+;; -*- package: clpython -*-
+;;
+;; Lisp-Python syntax
 
 (in-package :clpython)
 

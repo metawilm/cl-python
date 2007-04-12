@@ -1,3 +1,5 @@
+;; -*- package: clpython.parser; readtable: py-ast-readtable -*-
+;; 
 ;; This software is Copyright (c) Franz Inc. and Willem Broekema.
 ;; Franz Inc. and Willem Broekema grant you the rights to
 ;; distribute and use this software as governed by the terms
@@ -9,11 +11,10 @@
 ;;; Defines grammar rules, and conversion from parse tree into abstract syntax tree.
 
 (in-package :clpython.parser)
+(in-syntax *ast-readtable*)
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (import 'excl.yacc:(defgrammar grammar defproduction build-grammar)))
-
-(in-syntax *ast-readtable*)
 
 (defgrammar python-grammar (grammar)
   ()
