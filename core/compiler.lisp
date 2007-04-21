@@ -994,9 +994,8 @@ input arguments."
 		 (+mod-static-globals-names+  ,glob-names)
 		 (+mod-static-globals-values+ ,glob-values)
 		 (+mod-static-globals-builtin-values+
-		  (coerce (loop for n across +mod-static-globals-names+
-			      collect (builtin-value n))
-			  'vector))
+		  (make-array ,(length glob-names)
+			      :initial-contents (mapcar 'builtin-value ',(coerce glob-names 'list))))
 		 (+mod-dyn-globals+ ,dyn-glob)
 		 (+mod+ ,(if create-mod
 			     
@@ -1012,21 +1011,25 @@ input arguments."
 				+mod-static-globals-builtin-values+
 				+mod-dyn-globals+
 				+mod+))
-	    ,@(when set-builtins
-		`((map-into +mod-static-globals-values+ #'identity +mod-static-globals-builtin-values+)))
-
-	    (loop for (k v) in '(({__name__}  ,(or module-name "__main__"))
-				 ({__debug__}  1))
-		do (let ((ix (position k +mod-static-globals-names+)))
-		     (when (and ix
-				(null (svref +mod-static-globals-values+ ix)))
-		       (setf (svref +mod-static-globals-values+ ix) v))))
 	    
-	    #+(or) ;; debug
-	    (loop for n across +mod-static-globals-names+
-		for v across +mod-static-globals-values+
-		do (format t "~A: ~A~%" n v))
-	    
+	    (progn ;; Initialize global value arrays
+	      ,@(when set-builtins
+		  `((replace +mod-static-globals-values+ +mod-static-globals-builtin-values+)))
+	      
+	      ,@(loop with res
+		    for (k v) in `(({__name__}  ,(or module-name "__main__"))
+				   ({__debug__}  1))
+		    unless (and set-builtins (builtin-value k))
+		    do (let ((ix (position k glob-names)))
+			 (when ix
+			   (push `(setf (svref +mod-static-globals-values+ ,ix) ,v) res)))
+		    finally (return res))
+	      
+	      #+(or) ;; debug
+	      (loop for n across +mod-static-globals-names+
+		  for v across +mod-static-globals-values+
+		  do (format t "~A: ~A~%" n v)))
+	      
 	    ,@(when call-hook
 		`((when *module-hook*
 		    (funcall *module-hook* +mod+))))
