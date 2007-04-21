@@ -17,7 +17,8 @@
 (eval-when (:compile-toplevel :load-toplevel :execute)
   
 (defclass {Exception} (py-object error)
-  ((args :initarg :args :initform nil :documentation "Arguments as Lisp list"))
+  ((args :initarg :args :initform nil :documentation "Arguments as Lisp list"
+	 :accessor exception-args))
   (:metaclass py-type))
 
 (def-py-method {Exception.__new__} :static (cls &rest args)

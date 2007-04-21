@@ -98,20 +98,9 @@
 	    :test #'string= :key #'module-name)))
 
 
-
-#+(or)
-(defun run-python-file (filename &rest options)
-  "Run Python file in fresh habitat (__name__ == '__main__')"
-  (multiple-value-bind (source-file bin-file)
-      (find-py-file filename)
-    
-      (let ((type (pathname-type filename :case :common)))
-	(cond ((string-equal type *py-compiled-file-type*)
-	       (values nil 
-	   source-file-types*
-  (compile-py-file filename)
-  (with-habitat (make-habitat)
-    (run-file-in-habitat filename h))))))))
-
-
-
+(defun run-python-string (string &key habitat)
+  "Run Python file in fresh habitat"
+  (let* ((*habitat* habitat)
+	 (ast (parse-python-string string))
+	 (f   (compile nil `(lambda () ,ast))))
+    (funcall f)))

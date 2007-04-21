@@ -20,4 +20,5 @@
 			  :components ((:file "tester")
 				       (:file "tsetup")
 				       (:file "parser-test")
-				       (:file "compiler-test")))))
+				       (:file "compiler-test")
+				       (:file "lang-test")))))

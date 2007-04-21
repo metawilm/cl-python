@@ -70,4 +70,5 @@
     (run-parser-test)
     (run-compiler-test)
     (run-code-walker-test)
-    (run-pretty-printer-test)))
+    (run-pretty-printer-test)
+    (run-lang-test)))

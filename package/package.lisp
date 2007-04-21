@@ -194,9 +194,10 @@
 (defpackage :clpython
   (:documentation "CLPython: An implementation of Python in Common Lisp.")
   (:use :common-lisp :clpython.package :clpython.parser)
-  (:export #:py-val->string #:py-str-string #:py-repr #:py-bool #:initial-py-modules #:make-module
+  (:export #:py-val->string #:py-str-string #:py-repr #:py-bool #:make-module
 	   #:*the-none* #:*the-true* #:*the-false* #:*the-ellipsis* #:*the-notimplemented*
 	   #:*py-modules* #:dyn-globals #:py-call #:py-class-of #:py-raise #:bind-val #:py-repr-string
+	   #:run-python-string #:exception-args
 	   ;; more to come...
 	   #:*exceptions-loaded*
 

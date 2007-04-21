@@ -140,7 +140,7 @@ XXX Currently there is not way to set *__debug__* to False.")
       (py-raise '{AssertionError} (or raise-arg 
 				    (format nil "Failing test: ~A"
 					    (with-output-to-string (s)
-					      (py-pprint s test-ast))))))))
+					      (py-pprint test-ast s))))))))
   
 (defmacro [assert-stmt] (test raise-arg)
   (when *__debug__*
@@ -961,10 +961,9 @@ input arguments."
   (get-setf-expansion `(list/tuple-expr ,items) e))
 
 (defmacro with-this-module-context ((module) &body body)
-  ;; Used by expansions of `module-stmt' and by function `eval'.
+  ;; Used by REPL
   (check-type module py-module)
   (with-slots (globals-names globals-values dyn-globals) module
-    
     `(with-module-context (,globals-names ,globals-values ,dyn-globals :existing-mod ,module)
        ,@body)))
 
@@ -980,7 +979,8 @@ input arguments."
   (assert (not (and create-mod existing-mod)))
   `(progn (in-package :clpython)
 	  
-	  (let* ((+mod-static-globals-names+  ,glob-names)
+	  (let* ((*habitat* (or *habitat* (make-habitat :search-paths '("."))))
+		 (+mod-static-globals-names+  ,glob-names)
 		 (+mod-static-globals-values+ ,glob-values)
 		 (+mod-static-globals-builtin-values+
 		  (coerce (loop for n across +mod-static-globals-names+

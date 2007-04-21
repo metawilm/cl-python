@@ -210,7 +210,8 @@ Returns the loaded module, or NIL on error."
 (defun py-import (mod-name-as-list 
 		  &rest options
 		  &key (habitat (or *habitat*
-				    (make-habitat :search-paths '("."))))
+				    (progn (warn "PY-IMPORT creating habitat; should be done before")
+					   (make-habitat :search-paths '(".")))))
 		       force-reload
 		       (verbose t)
 		       within-mod

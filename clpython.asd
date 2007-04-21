@@ -73,7 +73,7 @@
 				       (:file "exceptions"   )
 				       (:file "compiler"     )
 				       (:file "optimize"     )
-				       (:file "habitat")
+				       (:file "habitat"      )
 				       (:file "import"       )))))
 
 (asdf:defsystem :clpython.lib
