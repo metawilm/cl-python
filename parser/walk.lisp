@@ -91,7 +91,7 @@ CLASSDEF, FUNCDEF or LAMBDA."
 	       
 	       (assert ret-ast ()
 		 "User AST func returned NIL (for AST: ~S); that is only allowed ~
-                when second value is NIL, but second value was ~S" ast final-p)
+                when second value (final-p) is True, but second value was: ~S" ast final-p)
 	       
 	       (when (or (consp ret-ast) (not lists-only))
 		 (return-from walk-py-ast-1
