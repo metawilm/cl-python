@@ -515,7 +515,7 @@ XXX Currently there is not way to set *__debug__* to False.")
        (when (ast-contains-stmt-p ast :allowed-stmts ,allowed-stmts)
 	 (py-raise '{TypeError}
 		   "No statements allowed in Python code string (got: ~S)" ,code))
-    
+
        (let* ((ast-suite (destructuring-bind (module-stmt suite) ast
 			   (assert (eq module-stmt '[module-stmt]))
 			   (assert (eq (car suite) '[suite-stmt]))
@@ -536,7 +536,7 @@ XXX Currently there is not way to set *__debug__* to False.")
 				 nil ([identifier-expr] exec-stmt-helper-func)
 				 (nil nil nil nil)
 				 ([suite-stmt]
-				  ((block :foobar
+				  ((block helper
 				     ([suite-stmt]
 				      
 				      ;; set local variables
@@ -547,16 +547,18 @@ XXX Currently there is not way to set *__debug__* to False.")
 					 (let ((res ,ast-suite))
 					   (when *exec-stmt-result-handler*
 					     (funcall *exec-stmt-result-handler* res))
-					   (return-from :foobar res))))))))
+					   (return-from helper res))))))))
 				
 				;; Call helper function
 				([call-expr] ([identifier-expr] exec-stmt-helper-func)
 					     (nil nil nil nil)))))))
 		       
-		       #+(or)(warn "EXEC-STMT: lambda-body: ~A" lambda-body)
-		       (funcall (compile nil `(lambda ()
-						(locally (declare (optimize (debug 3)))
-						  ,lambda-body))))))))
+	 #+(or)(warn "EXEC-STMT: lambda-body: ~A" lambda-body)
+	 (let ((func (let ((.parser::*walk-warn-unknown-form* nil))
+		       (compile nil `(lambda ()
+				       (locally (declare (optimize (debug 3)))
+					 ,lambda-body))))))
+	   (funcall func))))))
 
 (defun call-expr-eval (locals-dict globals-dict pos-args key-args-p)
   ;; Uses exec-stmt, therefore below it.
@@ -687,7 +689,7 @@ input arguments."
   ;; not bound to a name. Decorators are not allowed then.
   ;;
   ;; You can rely on the whole function body being included in
-  ;;  (block :function-body ...).
+  ;;  (block function-body ...).
   
   (cond ((keywordp fname)
 	 (assert (null decorators)))
@@ -739,7 +741,7 @@ input arguments."
 		    ,@(unless *warn-unused-function-vars*
 			`((declare (ignorable ,@nontuple-arg-names ,@new-locals))))
 		    
-		    (block :function-body
+		    (block function-body
 		      (flet
 			  (,@(when (funcdef-should-save-locals-p suite)
 			       `((.locals. () 
@@ -1097,7 +1099,7 @@ input arguments."
 
 (defmacro [return-stmt] (val &environment e)
   (if (get-pydecl :inside-function-p e)
-      `(return-from :function-body ,(or val `(load-time-value *the-none*)))
+      `(return-from function-body ,(or val `(load-time-value *the-none*)))
     (py-raise '{SyntaxError} "RETURN found outside function")))
 
 (defmacro [slice-expr] (start stop step)
@@ -1211,14 +1213,14 @@ input arguments."
 	       
 	       (cond ((null exc)
 		      `(t (progn ,handler-suite
-				 (return-from :try-except-stmt nil))))
+				 (return-from try-except-stmt nil))))
 		   
 		     ((eq (car exc) '[tuple-expr])
 		      `((some ,@(loop for cls in (second exc)
 				    collect `(typep ,the-exc ,cls)))
 			(progn ,@(when var `(([assign-stmt] ,the-exc (,var))))
 			       ,handler-suite
-			       (return-from :try-except-stmt nil))))
+			       (return-from try-except-stmt nil))))
 				
 		     (t
 		      `((progn (assert (typep ,exc 'class) ()
@@ -1227,13 +1229,13 @@ input arguments."
 			       (typep ,the-exc ,exc))
 			(progn ,@(when var `(([assign-stmt] ,the-exc (,var))))
 			       ,handler-suite
-			       (return-from :try-except-stmt nil))))))))
+			       (return-from try-except-stmt nil))))))))
     
       (let ((handler-form `(lambda (,the-exc)
 			     (declare (ignorable ,the-exc))
 			     (cond ,@(mapcar #'handler->cond-clause except-clauses)))))
       
-	`(block :try-except-stmt
+	`(block try-except-stmt
 	   (tagbody
 	     (handler-bind (({Exception} ,handler-form))
 	       
@@ -2234,7 +2236,7 @@ be bound."
 				   (case val
 				     (:explicit-return (generator-finished))
 				     (:implicit-return (go ,else-tag))
-				     (t (return-from :function-body val))))
+				     (t (return-from function-body val))))
 				 
 				 ,jumps ;; handlers
 				 
@@ -2302,7 +2304,7 @@ be bound."
 		  ([yield-stmt]
 		   (let ((tag (new-tag :yield)))
 		     (values `(:split (setf .state. ,tag)
-				      (return-from :function-body ,(second form)) 
+				      (return-from function-body ,(second form)) 
 				      ,tag)
 			     t)))
 		  
@@ -2332,7 +2334,7 @@ be bound."
 			       '(progn (setf .state. ,final-tag)
 				 (go ,final-tag))))
 		    
-		    (block :function-body
+		    (block function-body
 		      (tagbody
 			(case .state.
 			  ,@(loop for i from -1 to yield-counter
@@ -2343,7 +2345,7 @@ be bound."
 			(generator-finished)
 			
 			,final-tag
-			(return-from :function-body nil)
+			(return-from function-body nil)
 			#+(or)(raise-StopIteration)))))))))))))
 
 
@@ -2359,7 +2361,7 @@ be bound."
 				      "Inside generator, RETURN statement may ~
 				       not have an argument (got: ~S)" form))
 			  
-			  (values `(return-from :function-body :explicit-return)
+			  (values `(return-from function-body :explicit-return)
 				  t))
 	     
 	     (t form))))
@@ -2369,7 +2371,7 @@ be bound."
 	 ,(rewrite-generator-funcdef-suite
 	   fname
 	   `([suite-stmt] (,(walk-py-ast suite #'suite-walker :build-result t)
-			   (return-from :function-body :implicit-return))))))))
+			   (return-from function-body :implicit-return))))))))
 
 (defun rewrite-generator-expr-ast (ast)
   ;; rewrite:  (x*y for x in bar if y)
