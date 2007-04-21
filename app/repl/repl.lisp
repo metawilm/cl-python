@@ -83,7 +83,7 @@ Relevant Lisp variables:
                          nil      = no profiling
 ")
 
-(defvar *repl-mod* nil)
+(defvar *repl-mod* nil "The REPL module (for debugging)")
 
 (defun repl ()
   (let* ((repl-mod (make-module))
