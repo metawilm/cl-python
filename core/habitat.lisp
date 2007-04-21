@@ -98,9 +98,14 @@
 	    :test #'string= :key #'module-name)))
 
 
-(defun run-python-string (string &key habitat)
-  "Run Python file in fresh habitat"
+(defun run-python-ast (ast &key habitat)
+  "Run Python AST in freshly bound habitat"
   (let* ((*habitat* habitat)
-	 (ast (parse-python-string string))
-	 (f   (compile nil `(lambda () ,ast))))
+	 (f (compile nil `(lambda () ,ast))))
     (funcall f)))
+    
+(defun run-python-string (string &rest args)
+  (apply #'run-python-ast (parse-python-string string) args))
+
+(defun run-python-file (fname &rest args)
+  (apply #'run-python-ast (parse-python-file fname) args))

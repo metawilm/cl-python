@@ -197,7 +197,7 @@
   (:export #:py-val->string #:py-str-string #:py-repr #:py-bool #:make-module
 	   #:*the-none* #:*the-true* #:*the-false* #:*the-ellipsis* #:*the-notimplemented*
 	   #:*py-modules* #:dyn-globals #:py-call #:py-class-of #:py-raise #:bind-val #:py-repr-string
-	   #:run-python-string #:exception-args
+	   #:run-python-string #:run-python-file #:exception-args
 	   ;; more to come...
 	   #:*exceptions-loaded*
 
