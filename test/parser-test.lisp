@@ -32,7 +32,7 @@
     
     ;; ast readtable
     (test-true (eq '[>] 'clpython.ast.operator:>))
-    (test-true (eq '[assign-stmt] 'clpython.ast.node:assign-stmt))
+    (test-true (eq '[assign-stmt] 'clpython.ast.node:|assign-stmt|))
     (test-error (let ((*readtable* *ast-user-readtable*))
 		  (read-from-string "'[foo]"))
 		:condition-type 'reader-error) ;; not exist

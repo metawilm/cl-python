@@ -45,7 +45,7 @@
   (:export "<" "<=" ">" ">=" "!=" "=="
 	   "|" "^" "&" "<<" ">>" "+" "-" "*" "/" "%" "//" "~" "**"
 	   "|=" "^=" "&=" "<<=" ">>=" "+=" "-=" "*=" "/=" "*=" "/=" "%=" "//=" "**=")
-  (:intern #:/t/ #:<divmod>)) ;; not really operators in the grammar, but used internally.
+  (:intern "/t/" "<divmod>")) ;; not really operators in the grammar, but used internally.
 
 (defpackage :clpython.ast.punctuation
   (:use )
@@ -53,29 +53,29 @@
 
 (defpackage :clpython.ast.token
   (:use )
-  (:export #:newline #:indent #:dedent #:identifier #:number #:string))
+  (:export "newline" "indent" "dedent" "identifier" "number" "string"))
 
 (defpackage :clpython.ast.node
   (:documentation "Statement and expression nodes")
   (:use )
-  (:export #:assign-stmt #:assert-stmt #:augassign-stmt #:break-stmt #:classdef-stmt
-	   #:continue-stmt #:del-stmt #:exec-stmt #:for-in-stmt #:funcdef-stmt
-	   #:global-stmt #:if-stmt #:import-stmt #:import-from-stmt #:module-stmt
-	   #:pass-stmt #:print-stmt #:return-stmt #:suite-stmt #:raise-stmt
-	   #:try-except-stmt #:try-finally-stmt #:while-stmt #:yield-stmt
+  (:export "assign-stmt" "assert-stmt" "augassign-stmt" "break-stmt" "classdef-stmt"
+	   "continue-stmt" "del-stmt" "exec-stmt" "for-in-stmt" "funcdef-stmt"
+	   "global-stmt" "if-stmt" "import-stmt" "import-from-stmt" "module-stmt"
+	   "pass-stmt" "print-stmt" "return-stmt" "suite-stmt" "raise-stmt"
+	   "try-except-stmt" "try-finally-stmt" "while-stmt" "yield-stmt"
 	   
-	   #:attributeref-expr #:backticks-expr #:binary-expr #:binary-lazy-expr
-	   #:call-expr #:comparison-expr #:dict-expr #:generator-expr
-	   #:identifier-expr #:lambda-expr #:listcompr-expr #:list-expr #:slice-expr
-	   #:subscription-expr #:tuple-expr #:unary-expr
+	   "attributeref-expr" "backticks-expr" "binary-expr" "binary-lazy-expr"
+	   "call-expr" "comparison-expr" "dict-expr" "generator-expr"
+	   "identifier-expr" "lambda-expr" "listcompr-expr" "list-expr" "slice-expr"
+	   "subscription-expr" "tuple-expr" "unary-expr"
 	   
-	   #:for-in-clause #:if-clause)) ;; not really nodes
+	   "for-in-clause" "if-clause")) ;; not really nodes
 
 (defpackage :clpython.ast
   (:documentation "Python abstract syntax tree representation")
   (:use :clpython.ast.reserved :clpython.ast.node :clpython.ast.punctuation
 	:clpython.ast.operator :clpython.ast.token)
-  (:import-from :clpython.ast.operator #:/t/ #:<divmod>))
+  (:import-from :clpython.ast.operator "/t/" "<divmod>"))
 
 ;(eval-when (:compile-toplevel :load-toplevel :execute)
 ;  (cascade-external-symbols :clpython.ast))
