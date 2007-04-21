@@ -512,10 +512,19 @@ XXX Currently there is not way to set *__debug__* to False.")
 		   (get-pydecl :context e))))
     
     `(let ((ast (parse-python-string ,code)))
+
        (when (ast-contains-stmt-p ast :allowed-stmts ,allowed-stmts)
 	 (py-raise '{TypeError}
 		   "No statements allowed in Python code string (got: ~S)" ,code))
 
+       ;; Some statements are valid in a function, but no in an EXEC.
+       ;; We catch those here.
+       (with-py-ast (form ast :into-nested-namespaces nil)
+	 (case (car form)
+	   ([return-stmt] (py-raise '{TypeError}
+				    "RETURN statement found outside function (in EXEC)."))
+	   (t form)))
+       
        (let* ((ast-suite (destructuring-bind (module-stmt suite) ast
 			   (assert (eq module-stmt '[module-stmt]))
 			   (assert (eq (car suite) '[suite-stmt]))
