@@ -103,6 +103,24 @@ When true, call expressions result in more code. It is rare for Python code to r
 (defvar *warn-unused-function-vars* t
   "Controls insertion of IGNORABLE declaration around function variables.")
 
+(defvar *include-line-number-hook-calls* nil
+  "Include calls to *runtime-line-number-hook* in generated code?")
+
+(defvar *runtime-line-number-hook* nil
+  "Function to call at run time, when arrived on new line number")
+
+(defvar *compile-line-number-hook* nil
+  "Function to call at compile time, when a line number token is encountered.
+Only has effect when *include-line-number-hook-calls* is true.")
+
+(defmacro with-line-numbers ((&key compile-hook runtime-hook) &body body)
+  ;; You have to set *runtime-line-number-hook* yourself.
+  `(let ((*include-line-number-hook-calls* t)
+	 (.parser:*include-line-numbers* t)
+	 ,@(when runtime-hook `((*runtime-line-number-hook* ,runtime-hook)))
+	 ,@(when compile-hook `((*compile-line-number-hook* ,compile-hook))))
+     ,@body))
+
 (defmacro with-complete-python-semantics (&body body)
   `(let ((*allow-indirect-special-call* t)
 	 (*mangle-private-variables*    t))
@@ -475,6 +493,14 @@ XXX Currently there is not way to set *__debug__* to False.")
   "Rename all attributes `__foo' to `_CNAME__foo'."
   (declare (ignore cname suite))
   (error "todo"))
+
+(defmacro [clpython-stmt] (&key line-no)
+  ;; XXX The module name should also be a param.
+  (when *include-line-number-hook-calls*
+    (when *compile-line-number-hook*
+      (funcall *compile-line-number-hook* line-no))
+    `(let ((hook *runtime-line-number-hook*))
+       (when hook (funcall hook ,line-no)))))
 
 (defmacro [comparison-expr] (cmp left right)
   (let ((py-@ (get-binary-comparison-func-name cmp)))
@@ -993,7 +1019,10 @@ input arguments."
   ;;(check-type dyn-glob hash-table)
   (assert (or create-mod existing-mod))
   (assert (not (and create-mod existing-mod)))
-  `(progn (in-package :clpython)
+  
+  `(let ((*package* *package*))
+     ;; Otherwise Lisp REPL module will be changed after running this code.
+     (progn (in-package :clpython)
 	  
 	  (let* ((*habitat* (or *habitat* (make-habitat :search-paths '("."))))
 		 (+mod-static-globals-names+  ,glob-names)
@@ -1044,7 +1073,7 @@ input arguments."
 		 (:context            :module)
 		 (:mod-futures        :todo-parse-module-ast-future-imports))
 	      
-	      ,@body))))
+	      ,@body)))))
 
 (defmacro create-module-globals-dict ()
   ;; Updating this dict really modifies the globals.

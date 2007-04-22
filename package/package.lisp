@@ -45,7 +45,8 @@
   (:export "<" "<=" ">" ">=" "!=" "=="
 	   "|" "^" "&" "<<" ">>" "+" "-" "*" "/" "%" "//" "~" "**"
 	   "|=" "^=" "&=" "<<=" ">>=" "+=" "-=" "*=" "/=" "*=" "/=" "%=" "//=" "**=")
-  (:intern "/t/" "<divmod>")) ;; not really operators in the grammar, but used internally.
+  (:intern "/t/" "<divmod>" ;; not really operators in the grammar, but used internally.
+	   ))
 
 (defpackage :clpython.ast.punctuation
   (:use )
@@ -53,9 +54,7 @@
 
 (defpackage :clpython.ast.token
   (:use )
-  (:export "newline" "indent" "dedent" "identifier" "number" "string"
-	   "clpython" ;; internal state
-	   ))
+  (:export "newline" "indent" "dedent" "identifier" "number" "string"))
 
 (defpackage :clpython.ast.node
   (:documentation "Statement and expression nodes")
@@ -71,14 +70,18 @@
 	   "identifier-expr" "lambda-expr" "listcompr-expr" "list-expr" "slice-expr"
 	   "subscription-expr" "tuple-expr" "unary-expr"
 	   
-	   "for-in-clause" "if-clause")) ;; not really nodes
+	   "for-in-clause" "if-clause" ;; not really nodes
+	   )
+  (:intern "clpython-stmt" ;; internal state
+	   ))
 
 (defpackage :clpython.ast
   (:documentation "Python abstract syntax tree representation")
   (:use :clpython.ast.reserved :clpython.ast.node :clpython.ast.punctuation
 	:clpython.ast.operator :clpython.ast.token)
   (:import-from :clpython.ast.operator "/t/" "<divmod>")
-  (:import-from :clpython.ast.reserved "is not" "not in"))
+  (:import-from :clpython.ast.reserved "is not" "not in")
+  (:import-from :clpython.ast.node     "clpython-stmt"))
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (cascade-external-symbols :clpython.ast))
@@ -173,15 +176,16 @@
   (:use :common-lisp :clpython.package)
   (:export #:parse-python-file #:parse-python-string #:parse-python-one-expr
 	   #:with-python-code-reader
-	   *tab-width-spaces*  *wrap-ast-in-module-stmt*
 	   
-	   ;; code walker:
-	   #:walk-py-ast #:with-py-ast
+	   *tab-width-spaces* ;; lexer options
+	   *wrap-ast-in-module-stmt* *include-line-numbers* ;; AST options
+	   
+	   #:walk-py-ast #:with-py-ast ;; code walker
 	   #:+normal-target+ #:+delete-target+ #:+augassign-target+ #:+no-target+
 	   #:+normal-value+ #:+augassign-value+ #:+no-value+
-	   
-	   ;; pretty printer:
-	   #:py-pprint #:*py-pprint-dispatch* ))
+
+	   #:py-pprint #:*py-pprint-dispatch* ;; pretty printer
+	   ))
 
 ;;; CLPYTHON.MODULE - Modules
 
@@ -205,8 +209,10 @@
 	   #:*exceptions-loaded*
 
 	   ;; compiler
-	   +standard-module-globals+
-	   *warn-unused-function-vars*
+	   #:+standard-module-globals+
+	   #:*warn-unused-function-vars* #:with-line-numbers #:*runtime-line-number-hook*
+
+	   ;; utils
 	   ))
 
 (eval-when (:compile-toplevel :load-toplevel :execute)

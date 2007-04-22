@@ -154,7 +154,14 @@
 
  (stmt :or simple-stmt compound-stmt)
  (simple-stmt (small-stmt semi--small-stmt* semi? [newline])
-	      ((if $2 `([suite-stmt] ,(cons $1 $2)) $1)))
+	      ((let ((ss (if $2
+			     `([suite-stmt] ,(cons $1 $2))
+			   $1)))
+		 (declare (special *include-line-numbers*))
+		 (if *include-line-numbers*
+		     `([suite-stmt] (([clpython-stmt] :line-no ,(1- $4))
+				     ,ss))
+		   ss))))
 
  (semi--small-stmt ([\;] small-stmt) ($2))
  (:semi--small-stmt*)
@@ -162,7 +169,7 @@
  (semi ([\;]))
 
  (small-stmt :or expr-stmt print-stmt del-stmt pass-stmt flow-stmt
-	     import-stmt global-stmt exec-stmt assert-stmt )
+	     import-stmt global-stmt exec-stmt assert-stmt)
 
  (expr-stmt (testlist expr-stmt2)
 	    ((cond ((null $2) ;; not an assignment expression

@@ -52,34 +52,10 @@
 	((condition #'handle-parser-condition))
       (excl.yacc:parse grammar))))
 
-(defgeneric parse-python-file (file &rest options)
-  (:documentation "Parse given file (either path or stream), return AST.")
-  
-  (:method ((s stream) &rest options)
-	   (let ((str (make-array (or (file-length s) 1000) 
-				  :element-type 'character
-				  :adjustable t
-				  :fill-pointer 0)))
-	     (loop for ch = (read-char s nil nil)
-		 while ch do (vector-push-extend ch str))
-	     ;(setf (fill-pointer str) (read-sequence str s))
-	     ;; Note that the actual length of STR may be less than what FILE-SIZE
-	     ;; returned, due to end-of-line normalization.
-	     (apply #'parse-python-string str options))) 
+(defun parse-python-file (file &rest options)
+  "Parse given file (either path or stream), return AST."
+  (apply #'parse-python-string (clpython.package::slurp-file file) options))
 
-  (:method ((filename t) &rest options)
-	   (with-open-file (f (string filename) :direction :input)
-	     (apply #'parse-python-file f options))))
-
-(defun parse-python-one-expr (string)
-  (check-type string string)
-  (let ((res (parse-python-string string :incl-module nil)))
-    (case (length res)
-      (0 (error "String ~S cannot be parsed into a value" string))
-      (1 (car res))
-      (t (error "String ~S parses into multiple (~A) expressions: ~{~A~^, ~}."
-		string (length res) res)))))
-    
 (defgeneric parse-python-string (string &rest options)
   (:documentation "Parse given string, return AST.")
   
@@ -107,6 +83,15 @@
 				  (decf next-i))
 		    
 		    options))))
+
+(defun parse-python-one-expr (string)
+  (check-type string string)
+  (let ((res (parse-python-string string :incl-module nil)))
+    (case (length res)
+      (0 (error "String ~S cannot be parsed into a value" string))
+      (1 (car res))
+      (t (error "String ~S parses into multiple (~A) expressions: ~{~A~^, ~}."
+		string (length res) res)))))
 
 (defmacro with-python-code-reader (var &body body)
   ;; The Python parser handles all reading.

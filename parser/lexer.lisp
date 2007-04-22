@@ -14,8 +14,9 @@
 
 (defvar *lex-debug* nil "Print the tokens returned by the lexer")
 
-(defconstant +default-tab-width-spaces+ 8)
-(defvar *tab-width-spaces* +default-tab-width-spaces+
+(defvar *include-line-numbers* nil "Include line number tokens in AST?")
+
+(defvar *tab-width-spaces* 8
   "One tab is equivalent to this many spaces, when it comes to indentation levels.")
 
 (defconstant +whitespace+ '(#\Space #\Tab #\Newline #\Return #\Page))
@@ -25,10 +26,11 @@
 (defvar *lex-read-char*)
 (defvar *lex-unread-char*)
 
-(defun make-py-lexer (&key (read-chr   (lambda () (read-char *standard-input* nil nil t)))
-			   (unread-chr (lambda (c) (unread-char c *standard-input*)))
-			   (tab-width-spaces *tab-width-spaces*)
-			   (debug            *lex-debug*))
+(defun make-py-lexer (&key (read-chr    (lambda () (read-char *standard-input* nil nil t)))
+			   (unread-chr  (lambda (c) (unread-char c *standard-input*)))
+			   (tab-width-spaces     *tab-width-spaces*)
+			   (debug                *lex-debug*)
+			   (include-line-numbers *include-line-numbers*))
   "Return a lexer for the Python grammar.
 READ-CHR is a function that returns either a character or NIL (it should not signal ~
 an error on eof).
@@ -68,7 +70,8 @@ READ-CHR."
 	      
 	      (*curr-src-line*    curr-src-line)
 	      (*tab-width-spaces* tab-width-spaces)
-	      (*lex-debug*        debug))
+	      (*lex-debug*        debug)
+	      (*include-line-numbers* include-line-numbers))
 	  
 	  (when tokens-todo
 	    (let ((item (pop tokens-todo)))
@@ -103,7 +106,7 @@ READ-CHR."
 		    (lex-todo excl.yacc:eof 'excl.yacc:eof)
 		    (loop while (> (pop indentation-stack) 0)
 			do (lex-todo [dedent] '[dedent]))
-		    (lex-return [newline] '[newline]))
+		    (lex-return [newline] *curr-src-line*))
 		   		   
 		   ((digit-char-p c 10)
 		    (lex-return [number] (read-number c)))
@@ -170,11 +173,11 @@ READ-CHR."
 		      
 		      (when (or (not newline) open-brackets)
 			(go next-char))
-		      
+
 		      ;; Return Newline now, but also determine if
 		      ;; there are any indents or dedents to be
 		      ;; returned in next calls.
-		      
+
 		      (cond
 		       ((= (car indentation-stack) new-indent)) ; same level
 
@@ -192,7 +195,7 @@ READ-CHR."
 			   "Dedent did not arrive at a previous indentation level (line ~A)."
 			   *curr-src-line*))))
 		      
-		      (lex-return [newline] '[newline])))
+		      (lex-return [newline] *curr-src-line*)))
 		   
 		   ((char= c #\#)
 		    (read-comment-line c)
