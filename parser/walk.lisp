@@ -179,7 +179,7 @@ VALUE and TARGET context."
 	 (make `([classdef-stmt] ,(funcall f cname :target +normal-target+)
 				 ,(funcall f inheritance :value +normal-value+)
 				 ,(if *walk-into-nested-namespaces*
-					  (funcall f suite)
+				      (funcall f suite)
 				    suite)))))
     
       ([comparison-expr] 
@@ -353,9 +353,9 @@ VALUE and TARGET context."
        (make `([yield-stmt] ,(funcall f (second form) :value +normal-value+))))
     
       (t
-       (when *walk-warn-unknown-form*
+       (when (and (not (fboundp (car form)))
+		  *walk-warn-unknown-form*)
 	 (warn "WALK: assuming ~S is a Lisp form: not walked into." form))
-       #+(or)(break)
        form))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
