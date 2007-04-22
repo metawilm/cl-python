@@ -15,7 +15,7 @@
   (:documentation "Python code profiler")
   (:use :common-lisp :clpython)
   (:import-from :clpython.package #:slurp-file)
-  (:export #:profile-source-file #:profile-source-string))
+  (:export #:profile-source-file #:profile-source-string #:profile-test))
 
 (in-package :clpython.app.profiler)
 

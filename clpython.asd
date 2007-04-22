@@ -91,8 +91,21 @@
     :description "CLPython - an implementation of Python in Common Lisp"
     :depends-on (:clpython.package :clpython.parser :clpython.core :clpython.lib)
     :in-order-to ((asdf:test-op (asdf:load-op :clpython-test)))
-    :perform (asdf:test-op :after (op c)
-			   (funcall (find-symbol (string '#:run) :clpython.test))))
+    #+(or) 
+    :perform
+    #+(or) (asdf:test-op :after (op c)
+			 (funcall (find-symbol (string '#:run) :clpython.test))))
+
+(defmethod asdf:perform :after ((op asdf:test-op) (c (eql (asdf:find-system :clpython))))
+  (funcall (find-symbol (string '#:run) :clpython.test)))
+
+(defmethod asdf:perform :after ((op asdf:load-op) (c (eql (asdf:find-system :clpython))))
+  (terpri)
+  (format t "CLPython quick start:~%")
+  (format t "  Run a Python file: (clpython:run-python-file \"~~/example/foo.py\").~%")
+  (format t "After loading ASDF system :CLPYTHON-APP you can:~%")
+  (format t "  Start the Python read-eval-print loop: (clpython.app.repl:repl)~%")
+  (format t "  See the call count profiler: (clpython.app.profiler:profile-test).~%~%"))
 
 (defmethod asdf:operation-done-p ((o asdf:test-op)
 				  (c (eql (asdf:find-system :clpython))))

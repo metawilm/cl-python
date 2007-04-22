@@ -12,9 +12,21 @@
 (eval-when (:compile-toplevel)
   (error "This ASDF file should be run interpreted."))
 
+(asdf:defsystem :clpython-app
+    :description "CLPython applications"
+    :depends-on (:clpython-repl
+		 :clpython-profiler))
+
 (asdf:defsystem :clpython-repl
     :description "CLPython read-eval-print loop"
     :depends-on (:clpython)
     :components ((:module "app"
 			  :components ((:module "repl"
 						:components ((:file "repl")))))))
+
+(asdf:defsystem :clpython-profiler
+    :description "CLPython call count profiler"
+    :depends-on (:clpython)
+    :components ((:module "app"
+			  :components ((:module "profiler"
+						:components ((:file "profiler")))))))
