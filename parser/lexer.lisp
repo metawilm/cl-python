@@ -12,11 +12,13 @@
 (in-package :clpython.parser)
 (in-syntax *ast-readtable*)
 
+(defvar *lex-debug* nil "Print the tokens returned by the lexer")
+
 (defconstant +default-tab-width-spaces+ 8)
 (defvar *tab-width-spaces* +default-tab-width-spaces+
   "One tab is equivalent to this many spaces, when it comes to indentation levels.")
 
-(defvar *lex-debug* nil "Print the tokens returned by the lexer")
+(defconstant +whitespace+ '(#\Space #\Tab #\Newline #\Return #\Page))
 
 ;; internal state
 (defvar *curr-src-line*)
@@ -161,7 +163,7 @@ READ-CHR."
 		      (return-from lexer 
 			(values (find-token-code token) token))))
 
-		   ((char-member c '(#\Space #\Tab #\Newline #\Return))
+		   ((char-member c +whitespace+)
 		    (unread-chr c)
 		    (multiple-value-bind (newline new-indent)
 			(read-whitespace)
@@ -851,7 +853,7 @@ is encountered, NIL is returned."
 	   ((#\Newline #\Return)   (setf found-newline t
 					 n 0))
 	   
-	   (#\Space                (incf n))
+	   ((#\Space #\Page)       (incf n))
 	   
 	   (#\Tab                  (incf n *tab-width-spaces*))
 	   
