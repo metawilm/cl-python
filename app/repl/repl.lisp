@@ -104,9 +104,9 @@ Relevant Lisp variables:
 	       ;; Make last three return values available as _, __, ___
 	       ;; for both Python (repl module namespace) and Lisp (dynamic vars).
 	       (shiftf ___ __ _ val)
-	       (shiftf (gethash '___ dyn-globals)
-		       (gethash '__  dyn-globals)
-		       (gethash '_   dyn-globals)
+	       (shiftf (gethash '{___} dyn-globals)
+		       (gethash '{__}  dyn-globals)
+		       (gethash '{_}   dyn-globals)
 		       val))
 
 	     (run-ast-func (suite)
