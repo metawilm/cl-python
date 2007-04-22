@@ -23,11 +23,11 @@
     ;; packages
     (test-true (find-package :clpython.parser))
     (test-true (find-package :clpython.user))
-    (test '(clpython.ast.reserved:|def| :inherited)
+    (test '(clpython.ast.reserved:|def| :external)
 	  (find-symbol "def" :clpython.ast) :multiple-values t)
-    (test '(clpython.ast.operator:|<=| :inherited)
+    (test '(clpython.ast.operator:|<=| :external)
 	  (find-symbol "<="  :clpython.ast) :multiple-values t)
-    (test '(clpython.ast.node:funcdef-stmt :inherited) 
+    (test '(clpython.ast.node:funcdef-stmt :external) 
 	  (find-symbol (symbol-name :funcdef-stmt) :clpython.ast) :multiple-values t)
     
     ;; ast readtable
