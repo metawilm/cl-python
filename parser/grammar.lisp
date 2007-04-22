@@ -35,26 +35,14 @@
   (:right-associative [**] )
   (:non-associative high-prec)
   #.`(:lexemes ,@(let (res)
-		   (do-external-symbols (s :clpython.ast)
-		     (push s res))))
-	  
-  (:lexemes [identifier] [number] [string] 
-	    [newline] [indent] [dedent]
-	    ;; punctuation:
-	    [=] [[] [\]] [(] [)] [<] [>] [{] [}] [.] [,] [:] [\|]
-	    [^] [%] [+] [-] [*] [/] [~] [&] [`]
-            [&=] [//] [<<] [>>] [!=] [+=] [-=] [*=] [/=] [//=]
-	    [%=] [**] [<=] [>=] [^=] [==] [\|=]
-	    [**=] [<<=] [>>=] [...]
-	    [\;]   ;; multiple statements same line
-	    [@]   ;; decorator
-	    ;; reserved words:
-	    [def] [class] [lambda] [return] [yield]
-	    [and] [or] [not] [for] [in] [is]
-	    [print] [from] [import] [as] [assert] [break] [continue]
-	    [global] [del] [exec] [pass]
-	    [if] [elif] [else] [while] [try] [except] [finally] [raise]
-	    ))
+		   (dolist (pkg '(:clpython.ast.reserved
+				  :clpython.ast.operator
+				  :clpython.ast.punctuation
+				  :clpython.ast.token))
+		     (do-external-symbols (s (find-package pkg))
+		       (push s res)))
+		   (setf res (sort res #'string<))
+		   res)))
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (defun generate-python-rules (name)

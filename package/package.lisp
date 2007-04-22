@@ -36,8 +36,8 @@
   (:use )
   (:export "and" "as" "assert" "break" "class" "continue" "def" "del" "elif" "else"
 	   "except" "exec" "finally" "for" "from" "global" "if" "import" "in" "is"
-	   "is not" "lambda" "not" "not in" "or" "pass" "print" "raise" "return"
-	   "try" "while" "yield"))
+	   "lambda" "not" "or" "pass" "print" "raise" "return" "try" "while" "yield")
+  (:intern "is not" "not in"))
 
 (defpackage :clpython.ast.operator
   (:documentation "Unary and binary operators")
@@ -53,7 +53,9 @@
 
 (defpackage :clpython.ast.token
   (:use )
-  (:export "newline" "indent" "dedent" "identifier" "number" "string"))
+  (:export "newline" "indent" "dedent" "identifier" "number" "string"
+	   "clpython" ;; internal state
+	   ))
 
 (defpackage :clpython.ast.node
   (:documentation "Statement and expression nodes")
@@ -75,10 +77,11 @@
   (:documentation "Python abstract syntax tree representation")
   (:use :clpython.ast.reserved :clpython.ast.node :clpython.ast.punctuation
 	:clpython.ast.operator :clpython.ast.token)
-  (:import-from :clpython.ast.operator "/t/" "<divmod>"))
+  (:import-from :clpython.ast.operator "/t/" "<divmod>")
+  (:import-from :clpython.ast.reserved "is not" "not in"))
 
-;(eval-when (:compile-toplevel :load-toplevel :execute)
-;  (cascade-external-symbols :clpython.ast))
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (cascade-external-symbols :clpython.ast))
 
 
 ;;; CLPYTHON.USER - Identifiers
