@@ -289,8 +289,8 @@ XXX Currently there is not way to set *__debug__* to False.")
 		     (t         `nil)))
 	     (%locals-dict ()
 	       (if (get-pydecl :inside-function-p e)
-		   `(.locals.)
-		  `(create-module-globals-dict)))
+		   (progn `(.locals.))
+		 `(create-module-globals-dict)))
 	     (%globals-dict ()
 	       `(create-module-globals-dict))
 	     (%do-maybe-special-call (prim which)
@@ -306,13 +306,16 @@ XXX Currently there is not way to set *__debug__* to False.")
 					     ,(%pos-args) ,(%there-are-key-args)))))
 		      (t (call-expr-1 ,prim ,@(cddr whole))))))
       
-      (if (or *allow-indirect-special-call*
-	      (and (listp primary)
-		   (eq (first primary) '[identifier-expr])
-		   (member (second primary) *special-calls*)))
-	  `(let* ((.prim ,primary))
-	     ,(%do-maybe-special-call '.prim *special-calls*))
-	`(call-expr-1 ,@(cdr whole))))))
+      (let ((specials-to-check (cond (*allow-indirect-special-call*
+				      *special-calls*)
+				     ((and (listp primary)
+					   (eq (first primary) '[identifier-expr])
+					   (member (second primary) *special-calls*))
+				      (list (second primary))))))
+	(if specials-to-check
+	    `(let* ((.prim ,primary))
+	       ,(%do-maybe-special-call '.prim specials-to-check))
+	  `(call-expr-1 ,@(cdr whole)))))))
 
 (defun call-expr-locals (locals-dict args-p)
   (when args-p
@@ -2000,63 +2003,25 @@ be bound."
 	(t form)))
     deleted-names))
   
-
 (defun funcdef-should-save-locals-p (ast)
-  (or (func-ast-contains-locals-call ast)
-      (func-ast-contains-globals-call ast)
-      (func-ast-contains-exec ast)))
-       
-(defun func-ast-contains-locals-call (ast)
+  (when *allow-indirect-special-call*
+    (return-from funcdef-should-save-locals-p t))
+  
   (with-py-ast (form ast)
     (case (car form)
-      ([call-expr] 
-       (destructuring-bind (primary (pos-args kwd-args *-arg **-arg))
-	   (cdr form)
-	 (when (and (listp primary)
-		    (eq (first primary) '[identifier-expr])
-		    (eq (second primary) '{locals})
-		    (null (or pos-args kwd-args *-arg **-arg)))
-	   (return-from func-ast-contains-locals-call t)))
-       form)
-      
-      (([classdef-stmt] [funcdef-stmt] [lambda-expr])
-       (values nil t))
-      
-      (t
-       form)))
-  nil)
-
-(defun func-ast-contains-globals-call (ast)
-  (with-py-ast (form ast)
-    (case (car form)
-      ([call-expr] 
-       (destructuring-bind (primary (pos-args kwd-args *-arg **-arg))
-	   (cdr form)
-	 (when (and (listp primary)
-		    (eq (first primary) '[identifier-expr])
-		    (eq (second primary) '{globals})
-		    (null (or pos-args kwd-args *-arg **-arg)))
-	   (return-from func-ast-contains-globals-call t)))
-       form)
-      
-      (([classdef-stmt] [funcdef-stmt] [lambda-expr])
-       (values nil t))
-      
-      (t
-       form)))
-  nil)
-
-(defun func-ast-contains-exec (ast)
-  (with-py-ast (form ast)
-    (case (car form)
-      ([exec-stmt]
-       (return-from func-ast-contains-exec t))
-      
-      (([classdef-stmt] [funcdef-stmt] [lambda-expr])
-       (values nil t))
-      
-      (t
-       form)))
+      ([call-expr] (destructuring-bind (primary args)
+		       (cdr form)
+		     (declare (ignore args))
+		     ;; `locals()' or `globals()'
+		     (when (and (listp primary)
+				(eq (first primary) '[identifier-expr])
+				(member (second primary) '({locals} {globals} {eval})))
+		       ;; We could check for num args here already, but that is a bit hairy,
+		       ;; e.g. locals(*arg) is allowed if arg == [].
+		       (return-from funcdef-should-save-locals-p t))
+		     form))
+      ([exec-stmt] (return-from funcdef-should-save-locals-p t))
+      (t form)))
   nil)
 
 (defun rewrite-generator-funcdef-suite (fname suite)

@@ -224,16 +224,15 @@
 (defparameter *writable-attribute-methods* (make-hash-table :test #'eq))
 
 (eval-when (compile load eval)
+
 (defun ensure-pkg-symbol (str pkg)
   (check-type str string)
   (or (find-symbol str pkg)
       (intern str pkg)))
 
 (defun ensure-user-symbol (str)
-  (ensure-pkg-symbol str (load-time-value (find-package :clpython.user))))
+  (ensure-pkg-symbol str #.(find-package :clpython.user)))
 
-(defun ensure-python-symbol (str)
-  (ensure-pkg-symbol str (load-time-value (find-package :clpython))))
 ) ;; eval-when
 
 (defmacro def-py-method (cls.meth &rest args)
@@ -275,7 +274,8 @@
 		do (push sym real-args)
 		   
 		else if (char= #\^ (aref sym-name (1- (length sym-name))))
-		do (let ((real-name (intern (subseq sym-name 0 (1- (length sym-name))) #.*package*)))
+		do (let ((real-name (intern (subseq sym-name 0 (1- (length sym-name)))
+					    #.*package*)))
 		     (push real-name real-args)
 		     (setf body `(let ((,real-name (deproxy ,real-name)))
 				   ,body)))
@@ -4048,7 +4048,8 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
  (def-py-shortcut-func py-hash {__hash__}))
 
 (defmethod py-hash ((x symbol))
-  (py-hash (symbol-name x)))
+  ;; Returning (py-hash (symbol-name x)) leads to infinite recursion.
+  (py-string.__hash__ (symbol-name x)))
 
 (defun py-val->string (x)
   (if (symbolp x) ;; Symbols don't represent Python values, but this is just handy for ourselves
@@ -4074,7 +4075,7 @@ integer(defun py-val->number (x)
 (defun py-repr-string (x) (py-val->string (py-repr x)))
 (defun py-str-string  (x) (py-val->string (py-str x)))
 
-(defun py-string->symbol  (x &optional (package :clpython.user))
+(defun py-string->symbol  (x &optional (package #.(find-package :clpython.user)))
   ;; {symbol,string} -> symbol
   (if (symbolp x) 
       x
@@ -4366,6 +4367,6 @@ the lisp list will be returned).")
       (string (setf x.string x))
       (t      (setf x.string (py-val->string x))))
     
-    (or (find-symbol x.string :clpython.user)
+    (or (find-symbol x.string #.(find-package :clpython.user))
 	(when intern
-	  (intern x.string :clpython.user)))))
+	  (intern x.string #.(find-package :clpython.user))))))

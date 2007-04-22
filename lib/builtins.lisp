@@ -1,3 +1,5 @@
+;; -*- package: clpython; readtable: py-user-readtable -*-
+;;
 ;; This software is Copyright (c) Franz Inc. and Willem Broekema.
 ;; Franz Inc. and Willem Broekema grant you the rights to
 ;; distribute and use this software as governed by the terms
@@ -118,8 +120,7 @@ POS-ARGS is any iterable object; KW-DICT must be of type PY-DICT."
   (assert (stringp attr))
   (let ((attr.sym (if (string= (symbol-name *py-attr-sym*) attr)
 		      *py-attr-sym*
-		    (or (find-symbol attr #.*package*)
-			(intern attr #.*package*)))))
+		    (ensure-user-symbol attr))))
     (setf (py-attr x attr.sym) nil)))
 
 (defun {dir} (&optional x)
@@ -193,16 +194,15 @@ POS-ARGS is any iterable object; KW-DICT must be of type PY-DICT."
   (assert (stringp attr))
   (let* ((attr.sym (if (string= (symbol-name *py-attr-sym*) attr)
 		       *py-attr-sym*
-		     (or (find-symbol attr #.*package*)
-			 (intern attr #.*package*))))
+		     (ensure-user-symbol attr)))
 	 (val (catch :getattr-block
-	       (handler-case
-		   (py-attr x attr.sym :via-getattr t)
-		 ({AttributeError} () :py-attr-not-found)))))
+		(handler-case
+		    (py-attr x attr.sym :via-getattr t)
+		  ({AttributeError} () :py-attr-not-found)))))
     
     (if (eq val :py-attr-not-found)
 	(or default
-	    (py-raise '{AttributeError} "[getattr:] ~A has no attr `~A'" x attr))
+	    (py-raise '{AttributeError} "Object `~A' has no attribute `~A'." x attr))
       val)))
 
 (defun getattr-nobind (x attr &optional default)
@@ -211,8 +211,7 @@ POS-ARGS is any iterable object; KW-DICT must be of type PY-DICT."
   ;;      or <value>
   (let ((attr.sym (if (string= (symbol-name *py-attr-sym*) attr)
 		      *py-attr-sym*
-		    (or (find-symbol attr #.*package*)
-			(intern attr #.*package*)))))
+		    (ensure-user-symbol attr))))
     (multiple-value-bind (a b c)
 	(catch :getattr-block
 	  (handler-case
@@ -220,10 +219,10 @@ POS-ARGS is any iterable object; KW-DICT must be of type PY-DICT."
 	    ({AttributeError} () nil)))
       (case a
 	(:class-attr (values a b c))
-	((nil)       (or default
-			 (py-raise '{AttributeError}
-				   "[getattr:] ~A has no attr `~A'" x attr)))
-	(t           a)))))
+	((nil :py-attr-not-found) (or default
+				      (py-raise '{AttributeError}
+						"Object `~A' has no attribute `~A'." x attr)))
+	(t a)))))
 
 (defun {globals} ()
   "Return a dictionary (namespace) representing the current global symbol table. ~@
@@ -234,7 +233,7 @@ POS-ARGS is any iterable object; KW-DICT must be of type PY-DICT."
   "Returns True is X has attribute NAME, False if not. ~@
    (Uses `getattr'; catches _all_ exceptions.)"
   (check-type name string)
-  (py-bool (ignore-errors (py-attr x (intern name #.*package*)))))
+  (py-bool (ignore-errors (py-attr x (ensure-user-symbol name)))))
 
 (defun {hash} (x)
   (py-hash x))
@@ -459,8 +458,7 @@ None, use identity function (multiple sequences -> list of tuples)."
   (assert (stringp attr))
   (let ((attr.sym (if (string= (symbol-name *py-attr-sym*) attr)
 		      *py-attr-sym*
-		    (or (find-symbol attr #.*package*)
-			(intern attr #.*package*)))))
+		    (ensure-user-symbol attr))))
     (setf (py-attr x attr.sym) val)))
 
 (defun {sorted} (x)
