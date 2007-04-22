@@ -33,6 +33,18 @@
   (defun py-==->lisp-val (x y)
     (/= (py-== x y) 0))
   
+  (define-compiler-macro py-==->lisp-val (x y)
+    ;; A user can define a class whose instances are not equal to themselves.
+    ;; Because that leads to problems in hashtable lookup, and this function
+    ;; is used a lot for hash tables, we assume EQ => py-==.
+    ;; 
+    ;; This compiler macro speeds up the Pystone benchmark, from 8.7 to 8.2 sec.
+    `(let ((.x ,x)
+	   (.y ,y))
+       (if (eq .x .y)
+	   t
+	 (/= (py-== .x .y) 0))))
+	 
   ;; The functions PY-HASH and PY-== are needed for bootstrapping, but
   ;; the definition below is only temporary; below redefinition occurs.
 
