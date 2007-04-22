@@ -1,4 +1,3 @@
-import b5 # wb
 from b5 import check
 
 def main():

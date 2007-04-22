@@ -811,12 +811,14 @@ def checkoutput(n=0):
     #except NameError:
     #  pass
     outputtext = output.getvalue()
-    #print "outputtext: "
-    #print outputtext
     h = strhash(outputtext)
     print "checkoutput: strhash=", h, "n=", n
+    if (h != n):
+       print "-=- outputtext (h=%d, should be %d) -=-" % (h, n)
+       print outputtext
+       print "-=- end (h=%d, should be %d) -=- "
     check(h, n)
-
+    
 strhash = myhash
 
 indent = ""
