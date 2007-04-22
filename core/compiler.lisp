@@ -789,7 +789,7 @@ input arguments."
 		 ,@(when (and (eq (get-pydecl :context e) :class)
 			      (eq fname '{__new__}))
 		     `(([assign-stmt] 
-			([call-expr] {staticmethod}
+			([call-expr] ([identifier-expr] {staticmethod})
 				     ((([identifier-expr] ,fname)) nil nil nil))
 			(([identifier-expr] ,fname)))))
 		 
@@ -1372,10 +1372,9 @@ input arguments."
 
 (defun builtin-value (x)
   (let ((sym (builtin-name-p x)))
-    (when sym
-      (if (boundp sym)
-	  (symbol-value sym)
-	(symbol-function sym)))))
+    (or (and (boundp sym) (symbol-value sym))
+	(and (fboundp sym) (symbol-function sym))
+	(find-class sym nil))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;

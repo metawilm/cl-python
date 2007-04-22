@@ -1,4 +1,4 @@
-;; -*- package: clpython -*-
+;; -*- package: clpython; readtable: py-user-readtable -*-
 ;; 
 ;; This software is Copyright (c) Franz Inc. and Willem Broekema.
 ;; Franz Inc. and Willem Broekema grant you the rights to
@@ -8,6 +8,7 @@
 ;; known as the LLGPL.
 
 (in-package :clpython)
+(in-syntax *user-readtable*)
 
 ;;; Optimizations:
 ;;; 
@@ -33,7 +34,7 @@
 	(multiple-value-bind (val err)
 	    (ignore-errors (values (funcall func)))
 	  (cond ((and err (not val))
-		 (if (typep err '|StopIteration|)
+		 (if (typep err '{StopIteration})
 		     (return-from map-over-py-object)
 		   (progn
 		     #+(or)(warn "MAP-OVER-PY-OBJECT error (func ~S, py-func-iterator ~S): ~S" f fi err)

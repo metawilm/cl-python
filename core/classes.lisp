@@ -560,7 +560,7 @@
 (def-py-method py-attribute-method.__get__ (x inst class)
   #+(or)(break "pam.get ~A ~A ~A" x inst class)
   (declare (ignore class))
-  (if inst
+  (if (and inst (not (eq inst *the-none*)))
       (py-call (slot-value x 'func) inst)
     nil))
 
@@ -590,7 +590,7 @@
 
 (def-py-method py-writable-attribute-method.__get__ (x inst class)
   (declare (ignore class))
-  (if inst
+  (if (and inst (not (eq inst *the-none*)))
       (py-call (slot-value x 'func) inst)
     nil))
 
@@ -1161,19 +1161,18 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 
 (def-py-method py-object.__setattr__ (x attr^ val)
   (check-type attr (or string symbol))
-  (let ((attr.sym (if (stringp attr)
-		      (ensure-user-symbol attr)
-		    attr)))
-  (let ((*py-object.__setattr__-active* (cons (cons x attr) *py-object.__setattr__-active*)))
-    (setf (py-attr x (symbol-name attr.sym)) val))))
+  (let ((attr.sym (if (stringp attr) (ensure-user-symbol attr) attr))
+       (*py-object.__setattr__-active* (cons (cons x attr) *py-object.__setattr__-active*)))
+    (setf (py-attr x attr.sym) val)))
 
 
 (defvar *py-object.__delattr__-active* ())
 
 (def-py-method py-object.__delattr__ (x attr)
   (check-type attr (or string symbol))
-  (let ((*py-object.__delattr__-active* (cons (cons x attr) *py-object.__delattr__-active*)))
-    (setf (py-attr x attr) nil)))
+  (let ((attr.sym (if (stringp attr) (ensure-user-symbol attr) attr))
+	(*py-object.__delattr__-active* (cons (cons x attr) *py-object.__delattr__-active*)))
+    (setf (py-attr x attr.sym) nil)))
 
 (def-py-method py-object.__new__ :static (cls &rest attr)
   (declare (ignore attr))
@@ -1300,8 +1299,10 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
   (signal-class-dict-replacement cls (dict cls) new-dict))
 
 (def-py-method py-type.__bases__ :attribute-read (cls)
-  (make-tuple-from-list
-   (remove (ltv-find-class 'py-user-object) (mop:class-direct-superclasses cls) :test #'eq)))
+  (assert (excl::classp cls))
+  (let* ((supers (mop:class-direct-superclasses cls)))
+    (assert supers () "Class ~A has no direct superclasses?!" cls)
+    (make-tuple-from-list (remove (ltv-find-class 'py-user-object) supers))))
 
 (def-py-method py-type.__bases__ :attribute-write (cls bases^)
   (assert (excl::classp cls))
@@ -3011,7 +3012,9 @@ Creates a function for doing fast lookup, using jump table"
 		    (nth item x))
 		   ((<= 0 (+ (length x) item) (1- (length x)))
 		    (nth (+ (length x) item) x))
-		   (t (error "unexpected"))))
+		   (t (py-raise '{IndexError}
+				"Attempt to retrieve element ~A from tuple of size ~A: ~:A."
+				item (length x) x))))
     (py-slice (error :todo-tuple-getitem-slice))))
 
 (def-py-method py-tuple.__iter__ (x^)
@@ -3122,7 +3125,8 @@ Creates a function for doing fast lookup, using jump table"
 	  (if (and (not bind-class-attr)
 		   (functionp class-attr-val))
 	      (values :class-attr class-attr-val x)
-	    (if (excl::classp x)
+	    (bind-val class-attr-val x x.class)
+	    #+(or)(if (excl::classp x)
 		(bind-val class-attr-val nil x)
 	      (bind-val class-attr-val x x.class)))))
 
@@ -3717,7 +3721,7 @@ finished; F will then not be called again."
 	res
       (raise-invalid-operands '** x y))))
 
-(setf (gethash '** *binary-op-funcs-ht*) 'py-**)
+(setf (gethash '[**] *binary-op-funcs-ht*) 'py-**)
 
 ;; **= has similar ugliness
 
@@ -3751,9 +3755,9 @@ finished; F will then not be called again."
 			 res))))
 	  (setf (gethash ',syntax *unary-op-funcs-ht*) ',fname)))
 
-(def-unary-op-func ~  py-unary-~  {__invert__} )
-(def-unary-op-func +  py-unary-+  {__pos__}    )
-(def-unary-op-func -  py-unary--  {__neg__}    )
+(def-unary-op-func [~]  py-unary-~  {__invert__} )
+(def-unary-op-func [+]  py-unary-+  {__pos__}    )
+(def-unary-op-func [-]  py-unary--  {__neg__}    )
 
 (defgeneric py-not (x)
   (:method ((x t))
