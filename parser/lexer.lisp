@@ -758,7 +758,7 @@ C must be either a character or NIL."
 					(#\* '[**])))))
 	 (lookup-1char (c)
 	   (let* ((vec #.(loop with vec = (make-array 128
-						      :element-type 'symbol 
+						      :element-type t 
 						      :initial-element nil)
 			     for sym in '([=] [+] [-] [*] [/] [<] [>] [~] [^] [\|] [&] [%]
 					  [(] [)] [.] [[] [\]] [{] [}] [`] [,] [:] [@] [\|] [\;] )
