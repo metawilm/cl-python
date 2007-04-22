@@ -290,7 +290,7 @@ C must be either a character or NIL."
 	(arr #.(loop with arr = (make-array 128 :element-type 'bit :initial-element 0)
 		   for ch-code from 0 below 128
 		   for ch = (code-char ch-code)
-		   do (setf (aref arr ch-code) (if (or (alphanumericp ch)
+		   do (setf (sbit arr ch-code) (if (or (alphanumericp ch)
 						       (char= ch #\_))
 						   1 0))
 		   finally (return arr))))
@@ -298,7 +298,7 @@ C must be either a character or NIL."
        (and ,ch
 	    (let ((,code (char-code ,ch)))
 	      (and (< ,code 128)
-		   (= (aref ,arr ,code) 1)))))))
+		   (= (sbit ,arr ,code) 1)))))))
 
 (defun lookup-external-symbol (sym pkg)
   (check-type sym string)
@@ -797,11 +797,11 @@ C must be either a character or NIL."
 	      (loop
 		  with arr = (make-array 128 :element-type 'bit :initial-element 0)
 		  for ch across "`=[]()<>{}.,:|^&%+-*/~;@"
-		  do (setf (aref arr (char-code ch)) 1)
+		  do (setf (sbit arr (char-code ch)) 1)
 		  finally (return arr)))))
     (let ((cc (char-code c)))
       (and (< cc 128) 
-	   (= (aref arr cc) 1)))))
+	   (= (sbit arr cc) 1)))))
 
 (defun punct-char-not-punct-char1-p (c)
   "Punctuation  !  may only occur in the form  !=  "
