@@ -464,9 +464,10 @@ XXX Currently there is not way to set *__debug__* to False.")
 					   `(gethash '{__metaclass__} +mod-dyn-globals+))))))
 
 	     ;; See comment for record-source-file at funcdef-stmt
-	     (excl:record-source-file ',context-cname :type :type)
-	     ,(let ((upcase-sym (ensure-user-symbol (string-upcase context-cname))))
-		`(excl:record-source-file ',upcase-sym :type :type))
+	     (excl:without-redefinition-warnings
+	      (excl:record-source-file ',context-cname :type :type)
+	      ,(let ((upcase-sym (ensure-user-symbol (string-upcase context-cname))))
+		 `(excl:record-source-file ',upcase-sym :type :type)))
 	     
 	     ([assign-stmt] ,cls (,name))))))))
 
@@ -799,9 +800,10 @@ input arguments."
 		 ;; Make source location known to Allegro, using "fi:lisp-find-definition".
 		 ;; Also record upper case version, apparently otherwise lower
 		 ;; case names must be |escaped|.
-		 (excl:record-source-file ',context-fname :type :operator)
-		 ,(let ((upcase-sym (ensure-user-symbol (string-upcase context-fname))))
-		    `(excl:record-source-file ',upcase-sym :type :operator))
+		 (excl:without-redefinition-warnings
+		  (excl:record-source-file ',context-fname :type :operator)
+		  ,(let ((upcase-sym (ensure-user-symbol (string-upcase context-fname))))
+		     `(excl:record-source-file ',upcase-sym :type :operator)))
 		 
 		 ;; return the function
 		 ([identifier-expr] ,fname)))))))))
