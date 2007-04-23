@@ -27,8 +27,8 @@
 	  (find-symbol "def" :clpython.ast) :multiple-values t)
     (test '(clpython.ast.operator:|<=| :external)
 	  (find-symbol "<="  :clpython.ast) :multiple-values t)
-    (test '(clpython.ast.node:funcdef-stmt :external) 
-	  (find-symbol (symbol-name :funcdef-stmt) :clpython.ast) :multiple-values t)
+    (test '(clpython.ast.node:|funcdef-stmt| :external) 
+	  (find-symbol (symbol-name :|funcdef-stmt|) :clpython.ast) :multiple-values t)
     
     ;; ast readtable
     (test-true (eq '[>] 'clpython.ast.operator:>))
