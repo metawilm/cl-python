@@ -106,7 +106,8 @@ READ-CHR."
 		    (lex-todo excl.yacc:eof 'excl.yacc:eof)
 		    (loop while (> (pop indentation-stack) 0)
 			do (lex-todo [dedent] '[dedent]))
-		    (lex-return [newline] *curr-src-line*))
+		    (lex-return [newline] 
+				(if *include-line-numbers* *curr-src-line* '[newline])))
 		   		   
 		   ((digit-char-p c 10)
 		    (lex-return [number] (read-number c)))
@@ -195,7 +196,8 @@ READ-CHR."
 			   "Dedent did not arrive at a previous indentation level (line ~A)."
 			   *curr-src-line*))))
 		      
-		      (lex-return [newline] *curr-src-line*)))
+		      (lex-return [newline] 
+				  (if *include-line-numbers* *curr-src-line* '[newline]))))
 		   
 		   ((char= c #\#)
 		    (read-comment-line c)

@@ -24,6 +24,10 @@
 		(line (second (assoc :line-no pos)))
 		(token (excl.yacc:grammar-parse-error-token c))
 		(encl-error (excl.yacc::grammar-parse-error-enclosed-error c)))
+
+	   (when (and (integerp token)
+		      *include-line-numbers*)
+	     (setf token '[newline]))
 	   
 	   (cond (encl-error ;; Error in one of our grammar rules
 		  (when clpython:*exceptions-loaded*
