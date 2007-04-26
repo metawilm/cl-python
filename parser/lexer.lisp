@@ -655,7 +655,8 @@ C must be either a character or NIL."
 				    (setf lst (nreverse lst))
 				    (push #\. lst)
 				    (push #\0 lst)
-				    (unread-chr ch)
+				    (when ch
+				      (unread-chr ch))
 				    (return (with-standard-io-syntax
 					      (read-from-string 
 					       (coerce lst 'string)))))))

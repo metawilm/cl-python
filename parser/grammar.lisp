@@ -176,8 +176,10 @@
 		   $1)
 		  
 		  ((and $2 (eq (car $2) '[=]))
-		   (let ((items (nreverse `(,$1 ,@(second $2)))))
-		     `([assign-stmt] ,(car items) ,(cdr items))))
+		   (setf $2 (second $2))
+		   (let* ((val (car (last $2)))
+			  (targets (cons $1 (nbutlast $2))))
+		     `([assign-stmt] ,val ,targets)))
 		  
 		  ($2
 		   `([augassign-stmt] ,(car $2) ,$1 ,(cdr $2)))

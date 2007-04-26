@@ -132,11 +132,12 @@
 (defmethod py-pprint-1 (stream (x list))
   (case (car x)
 
-    ([assert-stmt]       (format stream "assert ~A~@[, ~A~]" (second x) (third x)))
+    ([assert-stmt]       (let ((*tuple-must-have-brackets* t))
+			   (format stream "assert ~A~@[, ~A~]" (second x) (third x))))
     ([assign-stmt]       (format stream "~{~A = ~^~}~A" (third x) (second x)))
     ([attributeref-expr] (format stream "~A.~A"         (second x) (third x)))
     ([augassign-stmt]    (format stream "~A ~A ~A"      (third x) (second x) (fourth x)))
-    ([backticks-expr]    (format stream "`~{~A~^, ~}`"  (second x)))
+    ([backticks-expr]    (format stream "`~A`"  (second x)))
     
     (([binary-expr] [binary-lazy-expr])
      (let* ((lev (cdr (assoc (second x) *binary-op-precedence*)))
@@ -156,13 +157,17 @@
 		 (format stream ")")))
 
     ([classdef-stmt] (destructuring-bind (name supers suite) (cdr x)
-		     (format stream "~&class ~A ~A: ~A" name supers suite)))
+		     (format stream "~&class ~A~A: ~A" name supers suite)))
     
     ([comparison-expr] (format stream "~A ~A ~A" (third x) (second x) (fourth x)))
     ([continue-stmt]   (format stream "continue"))
     ([del-stmt]        (format stream "del ~A" (second x)))
+    
     ([dict-expr]       (format stream "{~{~A: ~A~^, ~}}"
 			     (loop for (k . v) in (second x) collect k collect v)))
+    
+    ([exec-stmt]   (let ((*tuple-must-have-brackets* t))
+		     (format stream "exec ~{~A~^, ~}" (cdr x))))
     
     ([for-in-stmt] (destructuring-bind (targets source suite else-suite)
 		     (cdr x)
