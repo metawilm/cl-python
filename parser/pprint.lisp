@@ -127,6 +127,8 @@
 
 (defvar *suite-no-newline* nil)
 
+(defvar *tuple-must-have-brackets* nil)
+
 (defmethod py-pprint-1 (stream (x list))
   (case (car x)
 
@@ -197,28 +199,31 @@
 			 (car clauses) (cdr clauses) else-suite))))
     
     
-    ([import-stmt] (format stream "import ~{~:[~A~*~;~*~{~A~^.~}~]~:[~*~; as ~A~]~^, ~}"
-			 (loop for m in (second x)
-			     append (list (eq (caadr m) 'dotted)
-					  (second m)
-					  (cdadr m)
-					  (eq (car m) 'as)
-					  (third m)))))
-    
-    ([import-from-stmt] (format stream "from ~A import ~{~A~:[~*~; as ~A~]~^, ~}"
-			      (second x)
-			      (loop for i in (third x)
-				  append (list (second i)
-					       (eq (first i) 'as)
-					       (third i)))))
-		      
+    ([import-stmt] (format stream "import ")
+		   (with-standard-io-syntax
+		     (format stream "~{~A~^, ~A~}"
+			     (loop for (mod-name as-name) in (second x)
+				 collect (format nil "~{~A~^.~}~@[ as ~A~]"
+						 mod-name as-name)))))
+
+    ([import-from-stmt] (destructuring-bind (dotted-name items)
+			    (cdr x)
+			  (format stream "from ~{~A~^.~} import " dotted-name)
+			  (if (eq items '[*])
+			      (format stream "*")
+			    (with-standard-io-syntax
+			      (format stream "~{~A~^, ~A~}"
+				      (loop for (item bind-name) in items
+					  collect (format nil "~A~@[ as ~A~]" item bind-name)))))))
     
     ([lambda-expr] (destructuring-bind (args expr) (cdr x)
 		   (format stream "lambda~:[~; ~]" (some #'identity args))
 		   (apply #'print-arg-list stream args)
 		   (format stream ": ~A" expr)))
 
-    ([list-expr]  (format stream "[~{~A~^, ~}]" (second x)))
+    ([list-expr]   (let ((*tuple-must-have-brackets* t))
+		     (format stream "[~{~A~^, ~}]" (second x))))
+    
     ([listcompr-expr] (format stream "[~A" (second x))
 		    (loop for clause in (third x)
 			do (ecase (first clause)
@@ -278,10 +283,12 @@
 	   
     ([tuple-expr] (let* ((items (second x)))
 		  (if items
-		      (let ((brackets? t #+(or)(/= *precedence-level* -1))
+		      (let ((brackets? (or (/= *precedence-level* -1)
+					   *tuple-must-have-brackets*))
 			    (post-comma? (not (cdr items))))
-			(format stream "~@[(~*~]~{~A~^, ~}~@[,~*~]~@[)~*~]"
-				brackets? items post-comma? brackets?))
+			(let ((*tuple-must-have-brackets* t))
+			  (format stream "~@[(~*~]~{~A~^, ~}~@[,~*~]~@[)~*~]"
+				  brackets? items post-comma? brackets?)))
 		    (format stream "()"))))
     
     ([try-except-stmt] (destructuring-bind (try-suite except-suites else-suite)
@@ -312,15 +319,17 @@
 
   
 (defun print-arg-list (stream pos-args key-args *-arg **-arg)
-  (format stream "~@[~{~A~^, ~}~:[~;, ~]~]"
-	  pos-args (or key-args *-arg **-arg))
+  (let ((*precedence-level* -1)
+	(*tuple-must-have-brackets* t))
+    (format stream "~@[~{~A~^, ~}~:[~;, ~]~]"
+	    pos-args (or key-args *-arg **-arg))
   
-  (format stream "~@[~{~A=~A~^, ~}~:[~;, ~]~]"
-	  (loop for (k v) in key-args collect k collect v)
-	  (or *-arg **-arg))
-  
-  (format stream "~@[*~A~:[~;, ~]~]" *-arg **-arg)
-  (format stream "~@[**~A~]"         **-arg))
+    (format stream "~@[~{~A=~A~^, ~}~:[~;, ~]~]"
+	    (loop for (k v) in key-args collect k collect v)
+	    (or *-arg **-arg))
+    
+    (format stream "~@[*~A~:[~;, ~]~]" *-arg **-arg)
+    (format stream "~@[**~A~]"         **-arg)))
 
 
 ;; Utils
