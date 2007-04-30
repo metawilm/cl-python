@@ -1,4 +1,4 @@
-;; -*- package: clpython.parser; readtable: py-ast-readtable -*-
+;; -*- package: clpython.parser; readtable: py-ast-user-readtable -*-
 ;;
 ;; This software is Copyright (c) Franz Inc. and Willem Broekema.
 ;; Franz Inc. and Willem Broekema grant you the rights to
@@ -16,7 +16,7 @@
 ;;  - insert line breaks for too long lines
 
 (in-package :clpython.parser)
-(in-syntax *ast-readtable*)
+(in-syntax *ast-user-readtable*)
 
 (defvar *py-pprint-dispatch* (copy-pprint-dispatch nil))
 
@@ -140,14 +140,12 @@
     ([backticks-expr]    (format stream "`~A`"  (second x)))
     
     (([binary-expr] [binary-lazy-expr])
-     (let* ((lev (cdr (assoc (second x) *binary-op-precedence*)))
-	    (brackets? (< lev *precedence-level*)))
-       
-       (let ((*precedence-level* lev))
-	 (format stream "~:[~;(~]~A ~A ~A~:[~;)~]"
-		 brackets?
-		 (third x) (second x) (fourth x)
-		 brackets?))))
+     (destructuring-bind (op left right)
+         (cdr x)
+       (let* ((lev (cdr (assoc op *binary-op-precedence*)))
+              (brackets? (< lev *precedence-level*)))
+         (let ((*precedence-level* lev))
+           (format stream "~@[(~*~]~A ~A ~A~@[)~*~]" brackets? left op right brackets?)))))
     
     ([break-stmt] (format stream "break"))
     
@@ -157,24 +155,38 @@
 		 (format stream ")")))
 
     ([classdef-stmt] (destructuring-bind (name supers suite) (cdr x)
-		     (format stream "~&class ~A~A: ~A" name supers suite)))
+                       (destructuring-bind (tuple-expr super-items)
+                           supers
+                         (assert (eq tuple-expr '[tuple-expr]))
+                         (format stream "~&class ~A" name)
+                         (when super-items
+                           (let ((*tuple-must-have-brackets* t))
+                             (format stream "~A" supers)))
+                         (format stream ":~A" suite))))
     
     ([comparison-expr] (format stream "~A ~A ~A" (third x) (second x) (fourth x)))
     ([continue-stmt]   (format stream "continue"))
     ([del-stmt]        (format stream "del ~A" (second x)))
     
-    ([dict-expr]       (format stream "{~{~A: ~A~^, ~}}"
-			     (loop for (k . v) in (second x) collect k collect v)))
-    
-    ([exec-stmt]   (let ((*tuple-must-have-brackets* t))
-		     (format stream "exec ~{~A~^, ~}" (cdr x))))
+    ([dict-expr]      (let ((*tuple-must-have-brackets* t))
+			(format stream "{~{~A: ~A~}}"
+				(loop for (k . v) in (second x)
+				    collect k
+				    collect v))))
+		      
+    ([exec-stmt]   (destructuring-bind (code globals locals)
+                       (cdr x)
+                     (let ((*tuple-must-have-brackets* t))
+                       (format stream "exec ~A" code)
+                       (when globals
+                         (format stream " in ~A" globals)
+                         (when locals
+                           (format stream ", ~A" locals))))))
     
     ([for-in-stmt] (destructuring-bind (targets source suite else-suite)
 		     (cdr x)
-		   #+(or)(format stream "for ~A in ~A: ~A~@[else: ~A~]"
-				 targets source suite else-suite)
 		   (let ((*suite-no-newline* t))
-		     (format stream "for ~A in ~A: ~A~@[~&else: ~A~]"
+		     (format stream "for ~A in ~A:~A~@[~&else:~A~]"
 			     targets source suite else-suite))))
 
     ([funcdef-stmt] (destructuring-bind (decorators fname args suite)
@@ -182,7 +194,7 @@
 		    (declare (ignore decorators))
 		    (format stream "def ~A(" fname)
 		    (apply #'print-arg-list stream args)
-		    (format stream "): ~A" suite)))
+		    (format stream "):~A" suite)))
 
     ([generator-expr] (format stream "(~A" (second x))
 		    (loop for clause in (third x)
@@ -193,20 +205,20 @@
 		    (format stream ")"))
      
     ([global-stmt]     (format stream "global ~{~A~^, ~}" (second x)))
-    ([identifier-expr] (format stream "~A" (second x)))
+    ([identifier-expr] (let ((name (second x)))
+                         (if (eq name '{Ellipsis})
+                             (format stream "...")
+                           (format stream "~A" name))))
     
     ([if-stmt] (destructuring-bind (clauses else-suite) (cdr x)
-	       #+(or)(format stream "if ~{~A: ~A~}~@[~:{elif ~A: ~A~}~]~@[else: ~A~]"
-			     (car clauses) (cdr clauses) else-suite)
-	       
  	       (let ((*suite-no-newline* t))
-		 (format stream "if ~{~A: ~A~}~@[~:{~&elif ~A: ~A~}~]~@[~&else: ~A~]"
+		 (format stream "if ~{~A:~A~}~@[~:{~&elif ~A:~A~}~]~@[~&else:~A~]"
 			 (car clauses) (cdr clauses) else-suite))))
     
     
     ([import-stmt] (format stream "import ")
 		   (with-standard-io-syntax
-		     (format stream "~{~A~^, ~A~}"
+		     (format stream "~{~A~^, ~}"
 			     (loop for (mod-name as-name) in (second x)
 				 collect (format nil "~{~A~^.~}~@[ as ~A~]"
 						 mod-name as-name)))))
@@ -217,7 +229,7 @@
 			  (if (eq items '[*])
 			      (format stream "*")
 			    (with-standard-io-syntax
-			      (format stream "~{~A~^, ~A~}"
+			      (format stream "~{~A~^, ~}"
 				      (loop for (item bind-name) in items
 					  collect (format nil "~A~@[ as ~A~]" item bind-name)))))))
     
@@ -229,13 +241,15 @@
     ([list-expr]   (let ((*tuple-must-have-brackets* t))
 		     (format stream "[~{~A~^, ~}]" (second x))))
     
-    ([listcompr-expr] (format stream "[~A" (second x))
-		    (loop for clause in (third x)
-			do (ecase (first clause)
-			      ([for-in-clause] (format stream " for ~A in ~A"
-						       (second clause) (third clause)))
-			      ([if-clause]     (format stream " if ~A" (second clause)))))
-		    (format stream "]"))
+    ([listcompr-expr] (format stream "[")
+                      (let ((*tuple-must-have-brackets* t))
+                        (format stream "~A" (second x)))
+                      (loop for clause in (third x)
+                          do (ecase (first clause)
+                               ([for-in-clause] (format stream " for ~A in ~A"
+                                                        (second clause) (third clause)))
+                               ([if-clause]     (format stream " if ~A" (second clause)))))
+                      (format stream "]"))
     
     ([module-stmt]  (let ((suite (cadr x)))
 		    (assert (eq (first suite) '[suite-stmt]))
@@ -299,24 +313,29 @@
     ([try-except-stmt] (destructuring-bind (try-suite except-suites else-suite)
 			       (cdr x)
 		       (let ((*suite-no-newline* t))
-			 (format stream "try: ~A~:{~&except~@[ ~A~@[, ~A~]~]: ~2@*~A~}~@[~&else: ~A~]"
+			 (format stream "try:~A~:{~&except~@[ ~A~@[, ~A~]~]:~2@*~A~}~@[~&else:~A~]"
 				     try-suite except-suites else-suite))))
     
     ([try-finally-stmt] (let ((*suite-no-newline* nil))
-			(format stream "try: ~Afinally: ~A" (second x) (third x))))
+			(format stream "try:~Afinally:~A" (second x) (third x))))
     
-    ([unary-expr] (let* ((lev (cdr (assoc (second x) *unary-op-precedence*)))
-		       (brackets? (< lev *precedence-level*)))
-		  
-		  (let ((*precedence-level* lev))
-		    (format stream "~@[(~]~A ~A~@[)~]"
-			    brackets? (second x) (third x) brackets?))))
+    ([unary-expr] (destructuring-bind (op arg)
+                      (cdr x)
+                    (let* ((lev (cdr (assoc op *unary-op-precedence*)))
+                           (brackets? (< lev *precedence-level*)))
+                      
+                      (let ((*precedence-level* lev))
+                        (format stream "~@[(~*~]" brackets?)
+			(format stream "~A" op)
+			(when (eq op '[not])
+			  (format stream " "))
+			(format stream "~A~@[)~*~]" arg brackets?)))))
     
     ([while-stmt] (destructuring-bind (test suite else-suite) (cdr x)
 		  (let ((*suite-no-newline* t))
-		    (format stream "while ~A: ~A~@[else: ~A~]" test suite else-suite))))
+		    (format stream "while ~A:~A~@[else: ~A~]" test suite else-suite))))
     
-    ([yield-stmt] (format stream "yield ~A" (second x)))
+    ([yield-stmt] (format stream "yield~@[ ~A~]" (second x)))
     
     (t (with-standard-io-syntax
 	 #+(or)(warn "uncatched in py-pprint-1: ~A" x)

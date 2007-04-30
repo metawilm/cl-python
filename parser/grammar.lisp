@@ -374,7 +374,7 @@
  (:comma--subscript*)
  (comma--subscript ([,] subscript) ($2))
  (subscript :or
-	    (([...])            . (`([identifier-expr] 'clpython.user.builtin.value:|Ellipsis|))) ;; Ugly rule
+	    (([...])            . (`([identifier-expr] clpython.user.builtin.value:|Ellipsis|))) ;; Ugly rule
 	    test
 	    ((test? [:] test? sliceop?) . (`([slice-expr] ,$1 ,$3 ,$4))))
  (:sliceop?)
@@ -399,11 +399,23 @@
  (testlist2 :or
 	    (()                   . (nil))
 	    (([,])                . ((list :dummy)))
-	    (([,] test testlist2) . ((cons $2 $3))))
+	    (([,] test testlist2) . ((if (eq (car $3) :dummy)
+					 $2
+				       (cons $2 $3)))))
 
- (testlist-safe :or
-		((test)                     . ($1))
-		((test comma--test+ comma?) . ((list $1 $2))))
+ (testlist-safe (test testlist-safe2)
+		((if $2
+		     `([tuple-expr] ,(cons $1 (if (eq (car (last $2)) :dummy)
+						  (butlast $2)
+						$2)))
+		   $1)))
+ (testlist-safe2 :or
+		(()                         . (nil))
+		(([,])                      . ((list :dummy)))
+		(([,] test testlist-safe2)  . ((if (eq (car $3) :dummy)
+						   $2
+						 (cons $2 $3)))))
+
  (:comma--test+)
 
  (dictmaker (test [:] test comma--test--\:--test* comma?) ((cons (cons $1 $3) $4)))

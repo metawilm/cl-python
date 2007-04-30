@@ -205,8 +205,9 @@ def f(): pass" nil))
       (p "x is y")
       (p "x is not x")
       (p "not x is not x")
-      (p "not (x is (not x))" :known-failure t :fail-info "Something going wrong in parser.")
-      (p "x in not y")
+      (p "not x is (not x)")
+      (p "(not x) is (not x)")
+      (p "x in (not y)") ;; brackets not necessary
       ;; binary-lazy-expr
       (p "a or b")
       (p "a and b or c")
@@ -222,51 +223,53 @@ def f(): pass" nil))
       (p "f((1, 2), x=(3, (4, 5)))")
       ;; classdef-stmt (more indenting and layout tests -> suite-stmt)
       (p "class C:
-  pass")
-      (p "class C(D,E):
-  pass")
-      (p "class C:
-  def m():
     pass")
+      (p "class C(D, E):
+    pass")
+      (p "class C:
+    def m():
+        pass")
       ;; comparison-expr
       (p "x < y")
       (p "x <= y <= z")
       (p "a < b > c == d != e <= f >= g != h")
-      (test "x != y" (py-pprint (parse-python-string "x <> y")) :test 'string=)
+      (test "x != y" (clpython::py-string.strip (py-pprint (parse-python-string "x <> y"))) :test 'string=)
       ;; continue-stmt
       (p "continue")
       ;; del-stmt
       (p "del x")
-      (p "del x,y")
+      (p "del x, y")
       (p "del x[0]")
       (p "del x.a")
       ;; dict-expr
       (p "{}")
       (p "{1: 2}")
       (p "{a: b}")
-      (p "{(1,2): (3,4)}")
-      (p "{[1,2,3]: f.g[0](1,2,3)}")
+      (p "{(1, 2): (3, 4)}")
+      (p "{[1, 2, 3]: f.g[0](1, 2, 3)}")
       ;; exec-stmt
       (p "exec foo")
-      (p "exec foo, glob")
-      (p "exec foo, glob, loc")
-      (p "exec foo, (a,b,c), (1,2,3)")
+      (p "exec foo in glob")
+      (p "exec foo in glob, loc")
+      (p "exec foo in (a, b, c), (1, 2, 3)")
       ;; for-in-stmt
       (p "for x in y:
-  pass")
-      (p "for x,y in zut:
-  pass")
-      (p "for [x,(y,z)] in grub:
-  pass")
+    pass")
+      (p "for x, y in zut:
+    pass")
+      (p "for [x, (y, z)] in grub:
+    pass")
+      (p "for x in a, b, c:
+    pass")
       ;; funcdef-stmt
       (p "def foo():
-  pass")
-      (p "def foo(x,y):
-  pass")
-      (p "def foo(x,y,z=3,*loc,**kw):
-  pass")
+    pass")
+      (p "def foo(x, y):
+    pass")
+      (p "def foo(x, y, z=3, *loc, **kw):
+    pass")
       ;; generator-expr
-      (test-false :todo :known-failure t :fail-info "Todo: write test for GENERATOR-EXPR.")
+      (p "(x for x in y)")
       ;; global-stmt
       (p "global x")
       (p "global x, y")
@@ -276,27 +279,27 @@ def f(): pass" nil))
       (p "FooBar")
       ;; if-stmt
       (p "if a > 3:
-  pass")
+    pass")
       (p "if not a or b:
-  pass")
+    pass")
       (p
        "if a > 3:
-  x
+    x
 elif a > 4:
-  y
+    y
 elif a > 5:
-  z
+    z
 else:
-  qq")
+    qq")
       (p
        "if a:
-  if b1:
-    if c1:
-      a
-    elif c2:
-      b
+    if b1:
+        if c1:
+            a
+        elif c2:
+            b
 else:
-  r")
+    r")
       ;; import-stmt
       (p "import foo")
       (p "import foo, bar")
@@ -311,17 +314,19 @@ else:
       (p "lambda x: 42")
       (p "lambda x, y=3: x + y")
       (p "lambda *args: args[0]")
-      (p "lambda x, y=(lambda y: 42): 3")
-      (p "lambda (x,y): x,y")
+      (p "lambda x, y=lambda y: 42: 3")
+      (p "lambda (x, y): x, y")
       ;; listcompr-expr
-      (p "[x + y for x,y in a,b() if x > 3]")
+      (p "[x for y in z]")
+      (p "[x + y for x, y in a, b() if x > 3]")
+      (p "[x for x in a, b, c]")
       ;; list-expr
       (p "[]")
       (p "[x]")
-      (p "[1,2,3]")
-      (p "[1,2,(3,4),(5,(6,7,[8]))]")
+      (p "[1, 2, 3]")
+      (p "[1, 2, (3, 4), (5, (6, 7, [8]))]")
       (p "[x] = [3]")
-      (p "[x,y] = []")
+      (p "[x, y] = []")
       ;; pass-stmt
       (p "pass")
       ;; print-stmt
@@ -334,7 +339,7 @@ else:
       (p "return")
       (p "return x")
       (p "return x, y")
-      (p "return x+y")
+      (p "return x + y")
       ;; slice-expr
       (p "x[:]")
       (p "x[1:]")
@@ -342,13 +347,13 @@ else:
       (p "x[1:3]")
       (p "x[1:2:3]")
       (p "x[::3]")
-      (p "x[:3:]")
+      (p "x[:3]")
       (p "x[::1]")
       ;; subscription-expr
       (p "x[0]")
       (p "x[...]")
-      (p "x[a,b,(c,d)]")
-      (p "x[a,...,b]")
+      (p "x[a, b, (c, d)]")
+      (p "x[a, ..., b]")
       (p "x[y[0]]")
       ;; suite-stmt
       ;; raise-stmt
@@ -358,28 +363,28 @@ else:
       (p "raise x, y, z")
       ;; try-except-stmt
       (p "try:
-  x
+    x
 except:
-  y
+    y
 else:
-  z
+    z
 ")
       ;; try-finally-stmt
       (p "try:
-  x
+    x
 finally:
-  y
+    y
 ")
       ;; tuple-expr
-      (p "(1, 2)")
-      (p "(x,y) = (1,2)")
+      (p "1, 2")
+      (p "x, y = 1, 2")
       ;; unary-expr
       (p "+x")
       (p "-x")
       (p "~x")
       ;; while-stmt
       (p "while x:
-  y")
+    y")
       ;; yield-stmt
       (p "yield")
       (p "yield x")
