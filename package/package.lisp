@@ -203,7 +203,9 @@
   (:use :common-lisp :clpython.package :clpython.parser)
   (:export #:py-val->string #:py-str-string #:py-repr #:py-bool #:make-module
 	   #:*the-none* #:*the-true* #:*the-false* #:*the-ellipsis* #:*the-notimplemented*
-	   #:*py-modules* #:dyn-globals #:py-call #:py-class-of #:py-raise #:bind-val #:py-repr-string
+	   #:*the-empty-tuple*
+	   #:*py-modules* #:dyn-globals #:py-call #:py-class-of #:py-raise #:bind-val
+	   #:py-repr-string
 	   #:run-python-string #:run-python-file #:exception-args
 	   ;; more to come...
 	   #:*exceptions-loaded*
@@ -212,6 +214,9 @@
 	   #:+standard-module-globals+
 	   #:*warn-unused-function-vars* #:with-line-numbers #:*runtime-line-number-hook*
 
+	   ;; module status
+	   #:impl-status #:set-impl-status
+	   
 	   ;; utils
 	   ))
 
