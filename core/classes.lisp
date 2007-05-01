@@ -1542,26 +1542,136 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 
 
 ;; Lisp Packages can be used like Python modules
+;;
+;; The rule regarding their attributes exposed to the Python world:
+;;  a Lisp package has an attribute `x' <-> the package has external symbol `x'.
+;; 
+;; We supply a few modules that resemble the ones in CPython. But because
+;; our implementation may still be incomplete, we have the following rule
+;; regarding unfinished functions and variables:
+;;
+;;  - If the value of an attribute is `:todo', it is not implemented at all.
+;;    An error of type {NotImplementedError} is signalled.
+;;
+;;  - if the value is a list of two items, with `:todo' as first value,
+;;    as string as second value, and something non-nil as third value, this
+;;    communicates that the attribute is available, but not implemented 100%
+;;    yet. A warning is signalled.
+;;
+;; If we encounter a value :todo upon retrieving an attribute, 
+
+(defconstant +impl-status-prop+         'clpython::.impl-status.)
+(defconstant +impl-status-comment-prop+ 'clpython::.impl-status-comment.)
+(defconstant +impl-warned-prop+         'clpython::.impl-warned.)
+
+(defconstant +impl-statuses+ '((nil   . "unknown")
+			       (:todo . "todo")
+			       (:n/a  . "not applicable")
+			       (t     . "complete")
+			       (:incomplete . "incomplete")))
+
+(defun impl-status (symbol &optional want-comment)
+  "Returns impl status of symbol, and optionally the corresponding comment."
+  (check-type symbol symbol)
+  (let ((status (get symbol +impl-status-prop+)))
+    (unless (member status +impl-statuses+ :key #'car)
+      (warn "Retrieved implementation status ~S, which is an ~
+invalid status; must be one of ~S"
+      status (mapcar #'car +impl-statuses+)))
+    (if want-comment
+	(values status (get symbol +impl-status-comment-prop+))
+      status)))
+
+(defun set-impl-status (symbol new-status &optional comment)
+  "Sets implementation status of attribute, and optionally records comment."
+  (assert (member new-status +impl-statuses+ :key #'car)
+      (new-status) "~S is an invalid implementation status; must be one of ~S"
+      new-status (mapcar #'car +impl-statuses+))
+  (flet ((set-one-sym (sym)
+	   (multiple-value-bind (sym kind)
+	       (find-symbol (symbol-name sym) (symbol-package sym))
+	     (unless (eq kind :external)
+	       (error "Cannot set impl status: symbol `~S' is not external in ~
+ package ~S (status: ~A)." sym (symbol-package sym) kind)))
+	   (setf (get sym +impl-status-prop+) new-status)
+	   (when comment
+	     (setf (get sym +impl-status-comment-prop+) comment))))
+    (if (listp symbol)
+	(dolist (x symbol)
+	  (set-one-sym x))
+      (set-one-sym symbol)))
+  new-status)
 
 (defclass lisp-package (py-core-object)
   ()
   (:metaclass py-core-type))
 
+(defun relative-package-name (pkg)
+  "Returns part of package name after last dot."
+  (let* ((name (package-name pkg))
+	 (dot-ix (position #\. name :from-end t)))
+    (if dot-ix
+	(subseq name (1+ dot-ix))
+      name)))
+
 (def-py-method lisp-package.__getattribute__ (pkg name)
+  (declare (optimize (speed 3) (safety 0) (debug 0)))
   (assert (stringp name))
-  (multiple-value-bind (sym kind)
-      (find-symbol name pkg)
-    (cond ((not sym)
-	   (py-raise '{AttributeError} "Package ~A has no symbol named `~A'" pkg name))
-	  ((member kind '(:inherited :internal))
-	   (cerror "Return the symbol's value anyway"
-		   "The symbol `~A' is not external in the ~A package" name pkg)))
-    (cond ((boundp sym)
-	   (symbol-value sym))
-	  ((fboundp sym)
-	   (symbol-function sym))
-	  (t (py-raise '{AttributeError} "The symbol `~A' in package ~A is unbound (though it exists)"
-		       name pkg)))))
+  (flet ((todo-error ()
+	       (py-raise '{NotImplementedError} 
+			  "Attribute `~A' of module `~A' is not implemented yet."
+			  name (relative-package-name pkg)))
+	     
+	     (n/a-error ()
+	       (py-raise '{NotImplementedError}
+			  "Attribute `~A' of module `~A' is not applicable for this ~
+ implementation, therefore it is not implemented."
+			  name (relative-package-name pkg)))
+	     
+	     (unbound-error ()
+	       (py-raise '{AttributeError}
+			  "Attribute `~A' of module `~A' is unbound."
+			  name (relative-package-name pkg)))
+	     
+	     (no-attr-error ()
+	       (py-raise '{AttributeError}
+			  "Module `~A' has no attribute named `~A'."
+			  (relative-package-name pkg) name))
+
+	     (incomplete-warning ()
+	       (warn "Attribute `~A' of module `~A' was accessed. ~
+ The implementation of this attribute is still incomplete, therefore ~
+ unexpected results may occur."
+		     name (relative-package-name pkg))))
+    
+    ;(declare (dynamic-extent todo-error n/a-error unbound-error no-attr-error))
+    
+    (multiple-value-bind (sym kind)
+	(find-symbol name pkg)
+
+      (unless sym
+	(no-attr-error))
+
+      (when (member kind '(:inherited :internal))
+	(cerror "Use the internal symbol as if it were a public module attribute."
+		"Module `~A' has no public attribute `~A', as that symbol ~x
+ is not external in Lisp package `~A'."
+		(relative-package-name pkg) name (package-name pkg)))
+
+      (ecase (impl-status sym)
+	((nil t) )
+	((:todo)       (todo-error))
+	((:n/a)        (n/a-error))
+	((:incomplete) (unless (get sym +impl-warned-prop+)
+			 (setf (get sym +impl-warned-prop+) t)
+			 (incomplete-warning))))
+      
+      (let ((val (cond ((boundp sym)
+			(symbol-value sym))
+		       ((fboundp sym)
+			(symbol-function sym))
+		       (t (unbound-error)))))
+	val))))
 
 ;; File (User object)
 
