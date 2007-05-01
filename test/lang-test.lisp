@@ -17,10 +17,13 @@
 
 (defun run-lang-test ()
   (with-subtest (:name "CLPython-Lang")
-    (test-lang :assert-stmt)
-    (test-lang :assign-stmt)
-    ;; ...
-    ))
+    (dolist (node '(:assert-stmt :assign-stmt :attributeref-expr :augassign-stmt
+		    :backticks-expr :binary-expr :binary-lazy-expr :break-stmt
+		    :call-expr :classdef-stmt :comparison-expr :continue-stmt
+		    :del-stmt :dict-expr :exec-stmt :for-in-stmt :funcdef-stmt
+		    :generator-expr :global-stmt :identifier-expr :if-stmt
+		    :import-stmt :import-from-stmt :lambda-expr))
+      (test-lang node))))
 
 (defmacro run-error (string condtype &rest options)
   `(test-error (run-python-string ,string) :condition-type ',condtype ,@options))
@@ -110,15 +113,22 @@
   )
 
 (defmethod test-lang ((kind (eql :funcdef-stmt)))
-  )
+  ;; *-arg, **-arg
+  (run-no-error "
+def f(a, b, c=13, d=14, *e, **f): return [a,b,c,d,e,f]
+x = f(1,2,3,4,5,6)
+assert x == [1,2,3,4,(5,6),{}], 'x = %s' % x"
+)
+  (run-no-error "
+def f(a, b, c=13, d=14, *e, **f): return [a,b,c,d,e,f]
+x = f(a=1,b=2,c=3,d=4,e=5,f=6)
+assert x == [1,2,3,4,(),{'e': 5, 'f': 6}], 'x = %s' % x"
+))
 
 (defmethod test-lang ((kind (eql :generator-expr)))
   )
 
 (defmethod test-lang ((kind (eql :global-stmt)))
-  )
-
-(defmethod test-lang ((kind (eql :identifier-expr)))
   )
 
 (defmethod test-lang ((kind (eql :identifier-expr)))
