@@ -637,7 +637,7 @@ XXX Currently there is not way to set *__debug__* to False.")
        ,@(when else-suite `(,else-suite))
        
        (go :break) ;; prevent warning
-      :break))))
+      :break)))
 
 (defun lambda-args-and-destruct-form (funcdef-pos-args)
   ;; Replace "def f( (x,y), z):  .." 
@@ -774,7 +774,7 @@ input arguments."
 				      (ast-deleted-variables suite)))))
 	       (func-lambda
 		`(py-arg-function
-		  ,(generator-ast-p suite)
+		  t ;;,(generator-ast-p suite) TODO
 		  ,context-fname
 		  (,lambda-pos-args ;; list of symbols
 		   ,(loop for ((nil name) val) in key-args collect `(,name ,val))
