@@ -2,7 +2,7 @@
   (:use :clpython :common-lisp)
   (:export #:|argv| #:|byteorder| #:|ecv_info| #:|copyright|
 	   #:|builtin_module_names| #:|displayhook| #:|excepthook|
-	   #:|__displayhook__| #:|__excepthook__| #:|exit| #:|exitfunc|
+	   #:|__displayhook__| #:|exc_info| #:|__excepthook__| #:|exit| #:|exitfunc|
 	   #:|setcheckinterval| #:|getcheckinterval|
 	   #:|getdefaultencoding| #:|setdefaultencoding|
 	   #:|getfilesystemencoding|
@@ -15,11 +15,11 @@
 
 (in-package :clpython.module.sys)
 
-(defvar |argv| (clpython::make-py-list) ;; TODO
-  "Comand line args passed to script; argv[0] is script name (rel or abs)")
+(defvar |argv| :todo "Comand line args passed to script; argv[0] is script name (rel or abs)")
+(set-impl-status '|argv| :todo)
 
-(defvar |byteorder| "(Byteorder: N/A)"
-  "Byte order of implementation: 'big' or 'little'")
+(defvar |byteorder| :n/a "Byte order of implementation: 'big' or 'little'")
+(set-impl-status '|argv| :n/a "Byte order is hidden in Lisp implementation.")
 
 ;; Not implemented, and no intention to: 
 ;;  subversion, _current_frames, dllhandle, exc_type, exc_value, exc_traceback,
@@ -36,91 +36,132 @@
    (if *try-except-current-handled-exception*
        (list (clpython::py-class-of *try-except-current-handled-exception*)
 	     *try-except-current-handled-exception*
-	     *the-none*) ;; we don't have traceback objects (yet)
+	     *the-none*) ;; traceback object
      (list *the-none* *the-none* *the-none*))))
+(set-impl-status '|exc_info| :incomplete "No traceback objects (yet).")
 
 (defvar |copyright| "Copyright (c) Franz Inc. and Willem Broekema.")
+(set-impl-status '|copyright| t)
 
-(defvar |builtin_module_names| "todo"
+(defvar |builtin_module_names| *the-empty-tuple*
   #+(or)(clpython::make-tuple-from-list
 	 (loop for hk being the hash-value in clpython::*builtin-modules*
 	     collect (string (clpython::py-module-name hk)))))
+(set-impl-status '|builtin_module_names| :incomplete "Currently always return empty list.")
 
 (defvar |displayhook| *the-none*
-  "Func of one arg, called by REPL to print val") ;; XXX not called by repl yet
+  "Func of one arg, called by REPL to print val")
+(set-impl-status '|displayhook| :todo "Currently not called by REPL.")
 
 (defvar |excepthook| *the-none*
-  "Function to be called on uncatched exception, to print stack trace (at least in CPython..)")
-  
-(defvar |__displayhook__| *the-none* "Original value of displayhook")
-(defvar |__excepthook__| *the-none* "Original value of excepthook")
+  "Function to be called on uncatched exception, e.g.to print stack trace")
+(set-impl-status '|excepthook| :todo "Currently never called.")
+
+(defvar |__displayhook__| *the-none*
+  "Original value of displayhook")
+(set-impl-status '|__displayhook__| t)
+
+(defvar |__excepthook__| *the-none*
+  "Original value of excepthook")
+(set-impl-status '|__excepthook__| t)
 
 (defun |exit| (&optional arg)
-  (error "sys.exit(~@[~A~]) called" arg))
+  (py-raise '{SystemExit} "sys.exit(~@[~A~]) called" arg))
+(set-impl-status '|exit| t)
 
-(defvar |exitfunc| *the-none* "Function to be called upon exit")
+(defvar |exitfunc| *the-none*
+  "Function to be called upon exit")
+(set-impl-status '|exit| :todo "Currently never called.")
 
-;; No-ops
-(defun |setcheckinterval| (arg) 
+
+(defun |setcheckinterval| (arg)
+  "How often to check for thread switches and signal handlers"
   (declare (ignore arg))
-  (warn "Function sys.setcheckinterval() not implemented."))
+  :n/a)
+(set-impl-status '|setcheckinterval| :n/a "Based on byte code implementation.")
 
 (defun |getcheckinterval| ()
-  (warn "Function sys.getcheckinterval() not implemented."))
+  "How often to check for thread switches and signal handlers"
+  :n/a)
+(set-impl-status '|getcheckinterval| :n/a "Based on byte code implementation.")
 
-;; Default string encoding of Unicode strings
 (defun |getdefaultencoding| ()
-  "todo")
+  :todo)
+(set-impl-status '|getdefaultencoding| :todo)
 
 (defun |setdefaultencoding| (val)
   (declare (ignore val)) 
-  "todo")
+  :todo)
+(set-impl-status '|setdefaultencoding| :todo)
 
 (defun |getfilesystemencoding| () 
-  "todo")
+  :todo)
+(set-impl-status '|getfilesystemencoding| :todo)
 
-(defun |getrecursionlimit| ()
-  "todo")
+(let ((rec-limit 42))
+  (defun |getrecursionlimit| ()    rec-limit)
+  (defun |setrecursionlimit| (val) (setf rec-limit val))
+  
+  (set-impl-status '(|getrecursionlimit| |setrecursionlimit|)
+		   :todo "Currently not taken into account."))
 
-(defun |setrecursionlimit| (val)
-  (declare (ignore val))
-  "todo")
+(defvar |hexversion| :todo)
+(set-impl-status '|hexversion| :todo)
 
-(defvar |hexversion| "todo")
-(defvar |maxint| #.(expt 2 100)
-	"At least 2**31 - 1; makes not really sense for us but oh well.")
+(defvar |maxint| most-positive-fixnum
+	"Largest positive integer represented by regular integer type")
+(set-impl-status '|maxint| t "Set to `most-positive-fixnum'.")
 
-(defvar |maxunicode| "todo" "Largest supported unicode code point")
+(defvar |maxunicode| char-code-limit
+  "Largest supported unicode code point")
+(set-impl-status '|maxunicode| t "Set to `char-code-limit'.")
 
-(defvar |modules| "todo" "Mapping from module names to modules")
-;; XXX string->module, not symbol->module
+(defvar |modules| "todo"
+  "Mapping from module names (strings) to modules")
+(set-impl-status '|modules| :todo)
   
 ;; List of search paths
-(defvar |path| (clpython::make-py-list-from-list (list ".")))
+(defvar |path| (clpython::make-py-list-from-list (list "."))
+  "List of directories to search for module to import")
+(set-impl-status '|path| t "only directories supported (not zip files etc).")
 
 (defvar |platform| "Common Lisp")
+(set-impl-status '|platform| t "Set to `Common Lisp'.")
 
-(defvar |prefix| *the-none*  ;; xxx
+(defvar |prefix| *the-none*
   "Site-specific directory prefix for installing platform independent Python files")
+(set-impl-status '|prefix| :todo "Automatically installing modules is not supported yet.")
 
 ;; REPL input prefixes
-(defvar |ps1| ">>> ")
-(defvar |ps2| "... ")
+;; XXX do str() on non-string value! http://effbot.org/pyref/sys.ps1.htm
+(defvar |ps1| ">>> " "First interpreter prompt")
+(defvar |ps2| "... " "Second interpreter prompt")
 
-(defvar |stdin| "todo")
-(defvar |stdout| "todo")
-(defvar |stderr| "todo")
-(defvar |__stdin__| "todo")
-(defvar |__stdout__| "todo")
-(defvar |__stderr__| "todo")
+(set-impl-status '(|ps1| |ps2|) :todo "Not consulted by REPL yet.")
 
-(defvar |api_version| "todo" "The Lisp API version")
+(defvar |stdin|  :todo "Standard input")
+(defvar |stdout| :todo "Standard output")
+(defvar |stderr| :todo "Standard error output")
 
-(defvar |version_info|)
-(defvar |version|)
+(set-impl-status '(|stdin| |stdout| |stderr|) :todo "Not consulted yet.")
+
+(defvar |__stdin__|  :todo "Initial stdin")
+(defvar |__stdout__| :todo "Initial stdout")
+(defvar |__stderr__| :todo "Initial stderr")
+
+(set-impl-status '(|__stdin__| |__stdout__| |__stderr__|) :todo "Not set yet.")
+
+(defvar |api_version| :todo "The (Lisp) API version")
+(set-impl-status |api_version| :todo "The CLPython Lisp API has no version number yet.")
+
+(defvar |version_info| :filled-later "Tuple like (2, 0, 0, 'final', 0)")
+(defvar |version|      :filled-later "String like '1.5.2 (#0 Apr 13 1999, 10:51:12) [MSC 32 bit (Intel)]'")
 
 (let ((py-version (clpython::make-tuple-from-list '(2 5 0 "alpha" 0)))) 
   ;; XXX figure out which we resemble
   (setf |version_info| py-version)
   (setf |version|      (format nil "CLPython 2.5.0 alpha (~A ~A)"
-				 (lisp-implementation-type) (lisp-implementation-version))))
+				 (lisp-implementation-type) (lisp-implementation-version)))
+
+  (set-impl-status '|version_info| t (format nil "Set to `~A'" |version_info|))
+  (set-impl-status '|version_info| t (format nil "Set to `~A'" |version|)))
