@@ -165,21 +165,25 @@
 
 ;;; Comparison: ==
 
-(define-compiler-macro py-== (x y)
-  `(let ((.x ,x)
-	 (.y ,y))
-     (if (and (integerp .x) (integerp .y))
-	 (py-bool (= .x .y))
-       (locally (declare (notinline py-==))
-	 (py-== .x .y)))))
+(define-compiler-macro py-== (&whole whole x y)
+  (if *inline-fixnum-arithmetic*
+      `(let ((.x ,x)
+	     (.y ,y))
+	 (if (and (integerp .x) (integerp .y))
+	     (py-bool (= .x .y))
+	   (locally (declare (notinline py-==))
+	     (py-== .x .y))))
+    whole))
 
-(define-compiler-macro py-!= (x y)
-  `(let ((.x ,x)
-	 (.y ,y))
-     (if (and (integerp .x) (integerp .y))
-	 (py-bool (/= .x .y))
-       (locally (declare (notinline py-!=))
-	 (py-!= .x .y)))))
+(define-compiler-macro py-!= (&whole whole x y)
+  (if *inline-fixnum-arithmetic*
+      `(let ((.x ,x)
+	     (.y ,y))
+	 (if (and (integerp .x) (integerp .y))
+	     (py-bool (/= .x .y))
+	   (locally (declare (notinline py-!=))
+	     (py-!= .x .y))))
+    whole))
 
 (defmethod py-== ((x fixnum) (y fixnum)) (py-bool (= x y)))
 (defmethod py-== ((x string) (y string)) (py-bool (string= x y)))
