@@ -113,6 +113,9 @@ When true, call expressions result in more code. It is rare for Python code to r
   "Function to call at compile time, when a line number token is encountered.
 Only has effect when *include-line-number-hook-calls* is true.")
 
+(defvar *inline-fixnum-arithmetic* t
+  "For common arithmetic operations (+,-,*,/) the (often common) two-fixnum case is inlined")
+
 (defmacro with-line-numbers ((&key compile-hook runtime-hook) &body body)
   ;; You have to set *runtime-line-number-hook* yourself.
   `(let ((*include-line-number-hook-calls* t)
@@ -147,6 +150,9 @@ XXX Currently there is not way to set *__debug__* to False.")
 
 (defconstant +standard-module-globals+ '({__name__} {__debug__})
   "Names of global variables automatically created for every module")
+
+(defconstant +std-optimize-decl+ '(optimize (speed 3) (safety 1) (debug 1))
+  "Default optimization settings in generated code.")
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; 
@@ -631,7 +637,7 @@ XXX Currently there is not way to set *__debug__* to False.")
        ,@(when else-suite `(,else-suite))
        
        (go :break) ;; prevent warning
-      :break)))
+      :break))))
 
 (defun lambda-args-and-destruct-form (funcdef-pos-args)
   ;; Replace "def f( (x,y), z):  .." 
@@ -762,12 +768,13 @@ input arguments."
 				    ,(append all-nontuple-func-locals
 					     (get-pydecl :lexically-visible-vars e)))
 				   (:safe-lex-visible-vars
-				    (nset-difference
-				     (append nontuple-arg-names
-					     (get-pydecl :safe-lex-visible-vars e))
-				     (ast-deleted-variables suite)))))
+				    ,(nset-difference
+				      (append nontuple-arg-names
+					      (get-pydecl :safe-lex-visible-vars e))
+				      (ast-deleted-variables suite)))))
 	       (func-lambda
 		`(py-arg-function
+		  ,(generator-ast-p suite)
 		  ,context-fname
 		  (,lambda-pos-args ;; list of symbols
 		   ,(loop for ((nil name) val) in key-args collect `(,name ,val))
@@ -1639,25 +1646,18 @@ Non-negative integer denoting the number of args otherwise."
       else do (incf num)   ;; so a symbol indicates a key-value, * or ** argument 
       finally (return num)))
 
+(defun raise-wrong-args-error ()
+  (py-raise '{TypeError} "Wrong number of arguments, or wrong keyword, supplied to function."))
 
-(defun raise-invalid-key-arg-error (key allowed-keys)
-  (py-raise '{TypeError} "Invalid key argument supplied to function: ~S (allowed keys: ~S)"
-	    key allowed-keys))
-
-(defun raise-double-arg-supplied-error (key)
-  (py-raise '{TypeError} "Duplicate value for function argument named ~A" key))
-
-(defun raise-too-many-pos-args-error ()
-  (py-raise '{TypeError} "Too many positional arguments supplied to function"))
-
-(defun raise-too-few-args-error ()
-  (py-raise '{TypeError} "Too few arguments supplied to function"))
-
-(defun raise-invalid-func-args-error ()
+(defun raise-invalid-keyarg-error (kw)
   (py-raise '{TypeError}
-	    "Function got incorrect number of arguments, or unknown keyword arguments"))
+	    "Function got unsupported keyword argument `~A'." kw))
 
-(defmacro py-arg-function (name (pos-args key-args *-arg **-arg) &body body)
+(defun raise-double-keyarg-error (kw)
+  (py-raise '{TypeError}
+	    "Function got multiple values for keyword argument `~A'." kw))
+
+(defmacro py-arg-function (generator-p name (pos-args key-args *-arg **-arg) &body body)
   ;; Non-consing argument parsing! (except when *-arg or **-arg
   ;; present)
   ;; 
@@ -1667,11 +1667,8 @@ Non-negative integer denoting the number of args otherwise."
   ;; 
   ;; XXX todo: the generated code can be cleaned up a bit when there
   ;; are no arguments (currently zero-length vectors are created).
-  
-  #+(or)(break "py-arg-function: args=~A ~A ~A ~A" pos-args key-args *-arg **-arg)
-  
+  (declare (ignore generator-p))
   (assert (symbolp name))
-  
   (let* ((num-pos-args (length pos-args))
 	 (num-key-args (length key-args))
 	 (num-pos-key-args  (+ num-pos-args num-key-args))
@@ -1691,20 +1688,21 @@ Non-negative integer denoting the number of args otherwise."
 		      :num-pos-key-args num-pos-key-args
 		      :pos-key-arg-names (make-array (length pos-key-arg-names)
 						     :initial-contents pos-key-arg-names)
-		      :key-arg-default-vals :py-will-be-filled-at-load-time
+		      :key-arg-default-vals nil ;; If there are any key args, this will be filled at load time.
 		      :arg-name-vec     arg-name-vec
 		      :arg-kwname-vec   arg-kwname-vec
 		      :*-arg            *-arg
 		      :**-arg           **-arg)))
     
     `(progn
-       (setf (fa-key-arg-default-vals ,fa)
-	 (make-array ,num-key-args :initial-contents (list ,@key-arg-default-asts)))
+       ,@(when (> num-key-args 0)
+	   `((setf (fa-key-arg-default-vals ,fa)
+	       (make-array ,num-key-args :initial-contents (list ,@key-arg-default-asts)))))
        
        (excl:named-function ,name
 	 (lambda (&rest %args)
 	   (declare (dynamic-extent %args)
-		    (optimize (safety 3) (debug 3)))
+		    (optimize (speed 3) (safety 0) (debug 0)))
 	   
 	   (let (,@pos-key-arg-names ,@(when *-arg `(,*-arg)) ,@(when **-arg `(,**-arg))
 		 ,@(when (and some-args-p (not *-arg) (not **-arg))
@@ -1731,7 +1729,6 @@ Non-negative integer denoting the number of args otherwise."
 			
 			,@(loop for p in pos-key-arg-names and i from 0
 			      collect `(setf ,p (svref arg-val-vec ,i)))
-			
 			,@(when  *-arg
 			    `((setf  ,*-arg (svref arg-val-vec ,num-pos-key-args))))
 			    
@@ -1746,20 +1743,34 @@ Non-negative integer denoting the number of args otherwise."
 						   (/= only-pos-args ,num-pos-key-args))
 					       ,the-array-way
 					     ,the-pop-way))
-		      (t `(when %args (error "too many args")))))
+		      (t `(when %args (raise-wrong-args-error)))))
 	     
 	     (locally #+(or)(declare (optimize (safety 3) (debug 3)))
 	       ,@body)))))))
 
 
-(defun py-arg-function-1-kw-test (got-kw want-kw)
-  (declare (optimize (speed 3) (safety 0) (debug 0)))
-  (cond ((eq got-kw want-kw))
-	((keywordp got-kw)   (raise-invalid-key-arg-error got-kw want-kw))
-	(t                   (raise-too-many-pos-args-error))))
+(defun py-arg-function-1-kw-test (nargs got-kw want-kw)
+  (declare (optimize (speed 3) (safety 1) (debug 1))
+	   (fixnum nargs))
+  (unless (and (= nargs 2) (eq got-kw want-kw))
+    (raise-wrong-args-error)))
 
-(defun py-arg-function-2-kw-test (a1 a2 a3 a4 kw1 kw2)
-  (declare (optimize (speed 3) (safety 0) (debug 3)))
+(defun py-arg-function-2-kw-test (nargs a1 a2 a3 a4 kw1 kw2)
+  (declare (optimize (speed 3) (safety 1) (debug 1))
+	   (fixnum nargs))
+  (cond ((and (= nargs 3) (eq a2 kw2))
+	 (return-from py-arg-function-2-kw-test (values a1 a3)))
+	((= nargs 4)
+	 (cond ((and (eq a1 kw1)
+		     (eq a3 kw2))
+		(return-from py-arg-function-2-kw-test (values a2 a4)))
+	       ((and (eq a1 kw2)
+		     (eq a3 kw1))
+		(return-from py-arg-function-2-kw-test (values a4 a2))))))
+  (raise-wrong-args-error))
+
+#+(or) ;; Equivalent, but ignoring NARGS and using fact that args not provided are NULL.
+(defun py-arg-function-2-kw-test (nargs a1 a2 a3 a4 kw1 kw2)
   ;; A3 is not NIL, or A1 is a symbol
   (cond (a4
 	 ;; either:  (a1=kw1) = a2, (a3=kw2) = a4
@@ -1770,65 +1781,79 @@ Non-negative integer denoting the number of args otherwise."
 	       ((and (eq a1 kw2) (eq a3 kw1))
 		(values a4 a2))
 		  
-	       (t (raise-invalid-func-args-error))))
+	       (t (raise-wrong-args-error))))
 	
 	(a3 ;; must be  a1, (a2=kw2) = a3
 	 (cond ((eq a2 kw2)
 		(values a1 a3))
 	       
-	       (t (raise-invalid-func-args-error))))
+	       (t (raise-wrong-args-error))))
 	
 	;; a1 is a symbol
-	(t (raise-too-few-args-error))))
+	(t (raise-wrong-args-error))))
 		  
 
-(define-compiler-macro py-arg-function (&whole whole name (pos-args key-args *-arg **-arg) &body body)
-  ;; Special code for "simple" cases, where function only has a few positional args
+(define-compiler-macro py-arg-function (&whole whole
+					       generator-p
+					       name (pos-args key-args *-arg **-arg) &body body)
   
-  (or (when (not (or key-args *-arg **-arg))
-	(case (length pos-args)
-	  
-	  (0 ;; No args
-	   `(excl:named-function ,name
-	      (lambda ()
-		,@body)))
-      
-	  (1 ;; One pos arg
-	   (let* ((pa (car pos-args))
-		  (ka (intern (symbol-name pa) :keyword))
-		  (e  (gensym "e")))
-	     
-	     `(excl:named-function ,name
-		(lambda (,pa &optional ,e)
-		  (declare (optimize (speed 3) (safety 1) (debug 0)))
-		  (when ,e
-		    (py-arg-function-1-kw-test ,pa ,ka)
-		    (setf ,pa ,e))
-		  
-		  ,@body))))
-	  
-	  (2 ;; Two pos args
-	   (destructuring-bind (pa pb)
-	       pos-args
-	     (let ((ka (intern (symbol-name pa) :keyword))
-		   (kb (intern (symbol-name pb) :keyword))
-		   (e1 (gensym "e1"))
-		   (e2 (gensym "e2")))
-	       
-	       `(excl:named-function ,name
-		  (lambda (,pa ,pb &optional ,e1 ,e2)
-		    
-		    (when (or ,e1
-			      (symbolp ,pa))
-		      (multiple-value-setq 
-			  (,pa ,pb) 
-			(py-arg-function-2-kw-test ,pa ,pb ,e1 ,e2 ,ka ,kb)))
-		    
-		    ,@body)))))))
-      
-      ;; Not only pos args, or more than two pos args
-      (return-from py-arg-function whole)))
+  ;; Special code for functions that take only a few positional arguments.
+  (when (or (>= (length pos-args) 3)
+	    key-args
+	    *-arg
+	    **-arg)
+    (return-from py-arg-function whole))
+  
+  (ecase (length pos-args)
+    
+    (0 ;; No args
+     `(excl:named-function ,name
+	(lambda ()
+	  ,@body)))
+    
+    (1 ;; One pos arg
+     (let* ((pa (car pos-args))
+	    (ka (intern (symbol-name pa) :keyword))
+	    (e  (gensym "e")))
 
+       `(excl:named-function ,name
+	  (lambda (,pa &optional ,e)
+	    (declare (optimize (speed 3) (safety 0) (debug 0)))
+	    (let ((nargs ,(if generator-p
+			      `(if ,e 2 1)
+			    `(excl::ll :mi-to-fixnum (excl::ll :register :nargs)))))
+	      (declare (fixnum nargs))
+	      (when (/= nargs 1)
+		(py-arg-function-1-kw-test nargs ,pa ,ka)
+		(setf ,pa ,e)))
+	    
+	    (locally (declare ,+std-optimize-decl+)
+	      ,@body)))))
+    
+    (2 ;; Two pos args
+     (destructuring-bind (pa pb)
+	 pos-args
+       (let ((ka (intern (symbol-name pa) :keyword))
+	     (kb (intern (symbol-name pb) :keyword))
+	     (e1 (gensym "e1"))
+	     (e2 (gensym "e2")))
+	 
+	 `(excl:named-function ,name
+	    (lambda (,pa ,pb &optional ,e1 ,e2)
+	      (declare (optimize (speed 3) (safety 1) (debug 0)))
+	      
+	      (let ((nargs ,(if generator-p
+				`(cond (,e2 4)
+				       (,e1 3)
+				       (t   2))
+			      `(excl::ll :mi-to-fixnum (excl::ll :register :nargs)))))
+		(unless (and (= nargs 2)
+			     (not (symbolp ,pa)))
+		  (multiple-value-setq (,pa ,pb) 
+		    (py-arg-function-2-kw-test nargs ,pa ,pb ,e1 ,e2 ,ka ,kb))))
+	      
+	      (locally (declare ,+std-optimize-decl+)
+		,@body))))))))
 
 
 (defstruct (func-args (:type vector) (:conc-name fa-) (:constructor make-fa))
@@ -1845,9 +1870,6 @@ Non-negative integer denoting the number of args otherwise."
   
 
 (defun parse-py-func-args (%args arg-val-vec fa)
-  (declare (dynamic-extent %args)
-	   (optimize (speed 3) (safety 1) (debug 0)))
-
   ;; %ARGS: the (&rest) list containing pos and ":key val" arguments
   ;; ARG-VAL-VEC: (dynamic extent) vector to store final argument values in
   ;;              => the penultimate item will get *-arg value (if any)
@@ -1855,24 +1877,16 @@ Non-negative integer denoting the number of args otherwise."
   ;;                 so ARG-VAL-VEC must be larger than just num-pos-and-key-args! 
   ;; FA: func-args struct
   ;; Returns nothing
-  ;; 
-  ;; XXX make it raise Python exceptions on errors
-  
   (declare (optimize (safety 3) (debug 3))
+	   (dynamic-extent %args)
 	   (type list %args))
   
-  (let ((num-filled-by-pos-args 0)
-	(for-*     ())
-	(for-**    ())
-	(orig-%args %args))
-    
+  (let ((num-filled-by-pos-args 0) for-* for-**)
     (declare (type (integer 0 #.most-positive-fixnum) num-filled-by-pos-args))
     
     ;; Match standard pos-args and *-arg
-    
     (loop
-	with max-to-fill-with-pos =
-	  (the fixnum (if (fa-*-arg fa) (fa-num-pos-args fa) (fa-num-pos-key-args fa)))
+	with max-to-fill-with-pos = (the fixnum (fa-num-pos-key-args fa))
 	until (or (= num-filled-by-pos-args max-to-fill-with-pos)
 		  (symbolp (car %args))) ;; the empty list NIL is a symbol, too
 	      
@@ -1881,15 +1895,11 @@ Non-negative integer denoting the number of args otherwise."
 	   
 	finally
 	  (unless (symbolp (car %args))
-	    (if (fa-*-arg fa)
-		
-		(setf for-*
-		  ;; Reconsing because %args might be dynamic-extent.
-		  (loop until (symbolp (car %args)) collect (fast (pop %args))))
-
-	      (py-raise '{TypeError}
-			"Function ~A got too many positional args (got ~A, wanted at most ~A)"
-			(fa-func-name fa) (length orig-%args) (fa-num-pos-args fa)))))
+	    (cond ((fa-*-arg fa)
+		   (setf for-*
+		     ;; Reconsing because %args might be dynamic-extent.
+		     (loop until (symbolp (car %args)) collect (fast (pop %args)))))
+		  (t (raise-wrong-args-error)))))
     
     ;; All remaining arguments are keyword arguments;
     ;; they have to be matched to the remaining pos and
@@ -1898,52 +1908,43 @@ Non-negative integer denoting the number of args otherwise."
     (loop
 	for key = (fast (pop %args)) and val = (fast (pop %args))
 	while key do
+	  ;; `key' is a keyword symbol
+	  (or (block find-key-index
+		(when (> (the fixnum (fa-num-pos-key-args fa)) 0)
+		  (loop with name-vec = (fa-arg-name-vec fa)
+		      with kwname-vec = (fa-arg-kwname-vec fa)
+		      for i fixnum from num-filled-by-pos-args below
+			(the fixnum (fa-num-pos-key-args fa))
+		      when (eq (svref kwname-vec i) key)
+		      do (when (svref arg-val-vec i)
+			   (raise-double-keyarg-error (svref name-vec i)))
+			 (setf (svref arg-val-vec i) val)
+			 (return-from find-key-index t))))
+	      
+	      (when (fa-**-arg fa)
+		(push (cons key val) for-**)
+		t)
 
-	  ;; key is either a symbol |foo| or keyword symbol |:foo|
-	  
-	  (cond ((> (the fixnum (fa-num-pos-key-args fa)) 0)
-		 (loop 
-		     with name-vec = (fa-arg-name-vec fa)
-		     with kwname-vec = (fa-arg-kwname-vec fa)
-				       
-		     for i fixnum from num-filled-by-pos-args below 
-		       (the fixnum (fa-num-pos-key-args fa))
-		       
-		     when (or (eq (svref kwname-vec i) key))
-			  
-		     do (when (svref arg-val-vec i)
-			  (error "Got multiple values (at least once via `key=arg' ~%
-                                  for parameter `~A'" (svref name-vec i)))
-			(setf (svref arg-val-vec i) val)
-			(return)
-			
-		     finally 
-		       (if (fa-**-arg fa)
-			   (push (cons key val) for-**)
-			 (error "Got unknown keyword arg and no **-arg: ~A ~A"
-				key val))))
-		
-		((fa-**-arg fa)
-		 (push (cons key val) for-**))
-		
-		(t (error "Got unknown keyword arg and no **-arg: ~A ~A" key val))))
+	      (raise-invalid-keyarg-error key)))
     
     ;; Ensure all positional arguments covered
     (loop for i fixnum from num-filled-by-pos-args below (the fixnum (fa-num-pos-args fa))
 	unless (svref arg-val-vec i)
-	do (error "Positional arg ~A has no value" (svref (fa-arg-name-vec fa) i)))
+	do (raise-wrong-args-error))
     
     ;; Use default values for missing keyword arguments
-    (loop for i fixnum from (fa-num-pos-args fa) below (the fixnum
-							 (fa-num-pos-key-args fa))
+    (loop for i fixnum from (fa-num-pos-args fa) below (the fixnum (fa-num-pos-key-args fa))
 	unless (svref arg-val-vec i)
 	do (setf (svref arg-val-vec i)
-	     (svref (fa-key-arg-default-vals fa) (the fixnum (- i (the fixnum (fa-num-pos-args fa)))))))
+	     (svref (fa-key-arg-default-vals fa)
+		    (the fixnum (- i (the fixnum (fa-num-pos-args fa)))))))
 
+    ;; Create * arg
     (when (fa-*-arg fa)
       (setf (svref arg-val-vec (fa-num-pos-key-args fa))
 	(make-tuple-from-list for-*)))
 
+    ;; Create ** arg
     (when (fa-**-arg fa)
       (setf (svref arg-val-vec (1+ (the fixnum (fa-num-pos-key-args fa))))
 	(make-dict-from-symbol-alist for-**))))
