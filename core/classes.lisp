@@ -611,15 +611,16 @@
   (:metaclass py-core-type))
 
 (defmethod print-object ((x py-bound-method) stream)
-  (print-unreadable-object (x stream :identity t :type t)
+  (print-unreadable-object (x stream :identity t :type nil)
     (with-slots (instance func) x
-      (format stream "~A.~A" instance func))))
+      (format stream "bound-method ~A on the ~A ~A"
+	      (py-function-name func)
+	      (class-name (py-class-of instance))
+	      instance))))
 	
 (def-py-method py-bound-method.__repr__ (x)
   (with-output-to-string (s)
-    (print-unreadable-object (x s :identity t :type t)
-      (with-slots (instance func) x
-	(format s "~A.~A" instance func)))))
+    (print-object x s)))
 
 (def-py-method py-bound-method.__call__ (x &rest args)
   (when (and (null (cdr args))
@@ -662,9 +663,14 @@
 
 (def-py-method py-unbound-method.__repr__ (x)
   (with-output-to-string (s)
-    (print-unreadable-object (x s :identity t :type t)
-      (with-slots (class func) x
-	(format s "~A::~A" (class-name class) (py-function-name func))))))
+    (print-object x s)))
+
+(defmethod print-object ((x py-unbound-method) stream)
+  (print-unreadable-object (x stream :identity t :type nil)
+    (with-slots (class func) x
+      (format stream "unbound-method ~A on class ~A"
+	      (py-function-name func)
+	      (class-name class)))))
 
 (def-py-method py-unbound-method.__call__ (x &rest args)
   (with-slots (class func) x
