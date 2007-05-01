@@ -104,10 +104,10 @@
   (format stream "~A" (class-name (class-of x)))
   (when (and (slot-boundp x 'args)
 	     (slot-value x 'args))
-    (format stream "~@[: ~@{~A~^, ~}~]"
-	    (destructuring-bind (string . format-args)
-		(slot-value x 'args)
-	      (apply #'format nil string format-args)))))
+    (destructuring-bind (string . format-args)
+        (slot-value x 'args)
+      (format stream ": ")
+      (apply #'format stream string format-args))))
 
 (def-py-method {Exception.__repr__} (x)
   (with-output-to-string (s)
@@ -119,7 +119,6 @@
   "Shared instance of this commonly used exception")
 
 (defun raise-StopIteration ()
-  (assert *cached-StopIteration*)
   (error *cached-StopIteration*))
 
 (setf *exceptions-loaded* t)
