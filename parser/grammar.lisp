@@ -416,8 +416,6 @@
 						   $2
 						 (cons $2 $3)))))
 
- (:comma--test+)
-
  (dictmaker (test [:] test comma--test--\:--test* comma?) ((cons (cons $1 $3) $4)))
  (:comma--test--\:--test*)
  (comma--test--\:--test ([,] test [:] test) ((cons $2 $4)))
