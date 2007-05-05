@@ -122,45 +122,44 @@ Relevant Lisp variables:
 		 (assert (eq (car suite) '[suite-stmt]))
 
 		 (let ((vals (multiple-value-list
-			     (block :val
-			      (loop
-				(let ((helper-func (run-ast-func suite)))
-				  (loop
-				    (with-simple-restart
-					(retry-repl-eval
-					 "Retry the execution the compiled REPL command. [:re]")
-				      (return-from :val
-					(ecase *repl-prof*
-					  (:ptime  (prof:with-profiling (:type :time)
-						     (funcall helper-func))
-						   (terpri)
-						   (prof:show-call-graph))
-					  (:time  (prog1 (time (funcall helper-func))
-						    (terpri)))
-					  (:space  (prof:with-profiling
-						       (:type :space :count t) (funcall helper-func))
-						   (terpri)
-						   (prof:show-flat-profile))
-					  (:pspace (prof:with-profiling (:type :space)
-						     (funcall helper-func))
-						   (terpri)
-						   (prof:show-call-graph))
-					  ((nil)   (funcall helper-func))))))))))))
-		   (when (car vals) ;; Don't remember NIL
-		     (remember-value (car vals))
-		     (block :repr
-		       (loop
-			 (with-simple-restart
-			     (:continue "Retry printing the object.")
-			   ;; Write string with quotes around it; convert other objects
-			   ;; using __str__ and print without quotes.
-			   (loop for val in vals
-			       do (if (stringp val)
-				      (write-string (py-repr val)) 
-				    (let ((str-val (py-str-string val)))
-				      (write-string (py-val->string str-val)))) 
-				  (write-char #\Newline)))
-			 (return-from :repr)))))))
+                              (block :val
+                                (loop
+                                  (let ((helper-func (run-ast-func suite)))
+                                    (loop
+                                      (with-simple-restart
+                                          (retry-repl-eval
+                                           "Retry the execution the compiled REPL command. [:re]")
+                                        (return-from :val
+                                          (ecase *repl-prof*
+                                            (:ptime  (prof:with-profiling (:type :time)
+                                                       (funcall helper-func))
+                                                     (terpri)
+                                                     (prof:show-call-graph))
+                                            (:time  (prog1 (time (funcall helper-func))
+                                                      (terpri)))
+                                            (:space  (prof:with-profiling
+                                                         (:type :space :count t) (funcall helper-func))
+                                                     (terpri)
+                                                     (prof:show-flat-profile))
+                                            (:pspace (prof:with-profiling (:type :space)
+                                                       (funcall helper-func))
+                                                     (terpri)
+                                                     (prof:show-call-graph))
+                                            ((nil)   (funcall helper-func))))))))))))
+                   (remember-value (car vals))
+                   (block :repr
+                     (loop
+                       (with-simple-restart
+                           (:continue "Retry printing the object.")
+                         ;; Write string with quotes around it; convert other objects
+                         ;; using __str__ and print without quotes.
+                         (loop for val in vals
+                             do (if (stringp val)
+                                    (write-string (py-repr val)) 
+                                  (let ((str-val (py-str-string val)))
+                                    (write-string (py-val->string str-val)))) 
+                                (write-char #\Newline)))
+                       (return-from :repr))))))
 	     
 	     (handle-as-python-code (total)
 	       ;; Return T if this \"succeeded\" somehow, i.e. parsing as Lisp
