@@ -53,7 +53,7 @@
   (check-type habitat habitat)
   (find name (habitat-known-mods habitat)
 	:key #'module-name
-	:test #'string=))
+	:test #'string-equal))
 
 (defun add-known-module (module habitat)
   (check-type module py-module)
@@ -66,10 +66,10 @@
   (check-type habitat habitat)
   (when must-exist
     (assert (member name (habitat-known-mods habitat)
-		    :key #'module-name :test #'string=)))
+		    :key #'module-name :test #'string-equal)))
   (setf (habitat-known-mods habitat)
     (remove name (habitat-known-mods habitat)
-	    :test #'string= :key #'module-name))
+	    :test #'string-equal :key #'module-name))
   (when also-remove-from-loaded
     (remove-loaded-module name habitat)))
 
@@ -79,7 +79,7 @@
   (check-type habitat habitat)
   (find name (habitat-loaded-mods habitat)
 	:key #'module-name
-	:test #'string=))
+	:test #'string-equal))
 
 (defun add-loaded-module (module habitat)
   (check-type module py-module)
@@ -92,10 +92,10 @@
   (check-type habitat habitat)
   (when must-exist
     (assert (member name (habitat-loaded-mods habitat)
-		    :key #'module-name :test #'string=)))
+		    :key #'module-name :test #'string-equal)))
   (setf (habitat-loaded-mods habitat)
     (remove name (habitat-loaded-mods habitat)
-	    :test #'string= :key #'module-name)))
+	    :test #'string-equal :key #'module-name)))
 
 
 (defun run-python-ast (ast &key habitat)

@@ -82,7 +82,9 @@ The returned pathnames lead tot <modname>/__init__.{py/lisp/..}"
 This function build on Allegro's 'relative package names'."
   (check-type modname symbol)
   (let ((*package* :clpython.module))
-    (excl::relative-package-name-to-package (concatenate 'string "." (symbol-name modname)))))
+    (or (excl::relative-package-name-to-package (concatenate 'string "." (symbol-name modname)))
+        ;; for ANSI:
+        (excl::relative-package-name-to-package (concatenate 'string "." (string-upcase (symbol-name modname)))))))
   
 (defun find-py-file (name search-paths)
   "Returns pathnames of SRC and/or BINARY file found earliest.
@@ -244,6 +246,8 @@ Returns the loaded module, or NIL on error."
 	 (dotted-name (module-dotted-name mod-name-as-list)))
 
     ;; Try builtin loaded module first XXX
+    (warn "W: ~S ~S" (excl:package-children :clpython.module)
+          (mapcar #'package-name (excl:package-children :clpython.module)))
     (loop for p in (excl:package-children :clpython.module)
 	when (string-equal (package-name p) dotted-name)
 	do (return-from py-import p)) 
