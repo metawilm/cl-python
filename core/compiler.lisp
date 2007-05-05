@@ -709,15 +709,21 @@ input arguments."
 	 (values nil t))
 	
 	([global-stmt]
-	 (let ((erroneous (intersection (second form) locals :test 'eq)))
-	   (when erroneous
-	     ;; CPython gives SyntaxWarning, and seems to internally move the `global'
-	     ;; declaration before the first use. Let us signal an error; it's easy
-	     ;; for the user to fix this.
-	     (py-raise '{SyntaxError}
-		       "Variable(s) ~{`~A'~^, ~} may not be declared `global'." erroneous)))
-	 (setf globals (nconc (second form) globals))
-	 (values nil t))
+         (destructuring-bind (tuple-expr (&rest identifiers))
+             (second form)
+           (assert (eq tuple-expr '[tuple-expr]))
+           (assert (listp identifiers))
+           (assert (every (lambda (x) (eq (car x) '[identifier-expr])) identifiers))
+           (let* ((sym-list (mapcar #'second identifiers))
+                  (erroneous (intersection sym-list locals :test 'eq)))
+             (when erroneous
+               ;; CPython gives SyntaxWarning, and seems to internally move the `global'
+               ;; declaration before the first use. Let us signal an error; it's easy
+               ;; for the user to fix this.
+               (py-raise '{SyntaxError}
+                         "Variable(s) ~{`~A'~^, ~} may not be declared `global'." erroneous))
+             (setf globals (nconc sym-list globals)))
+           (values nil t)))
 	
 	(t form)))
   
@@ -1609,9 +1615,12 @@ input arguments."
     (with-py-ast (form suite)
       (case (car form)
 
-	([global-stmt] (dolist (name (second form))
-			 (pushnew name globals))
-		       (values nil t))
+	([global-stmt] (destructuring-bind (tuple-expr (&rest identifiers))
+                           (second form)
+                         (assert (eq tuple-expr '[tuple-expr]))
+                         (dolist (name (mapcar #'second identifiers))
+                           (pushnew name globals))
+                         (values nil t)))
 	
 	(t form)))
     

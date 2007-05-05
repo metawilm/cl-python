@@ -22,10 +22,11 @@
 ;; is not used in that context, and a "true" value if it is, but these constants
 ;; provide exact information.
 
-(defconstant +normal-target+    t          "A place that is assigned to.")
-(defconstant +delete-target+    :delete    "A place that is a deletion target.")
-(defconstant +augassign-target+ :augassign "A place that is an augmented assignment value and target.")
-(defconstant +no-target+        nil        "Not an assignment or deletion target.")
+(defconstant +normal-target+    t              "A place that is assigned to.")
+(defconstant +delete-target+    :delete        "A place that is a deletion target.")
+(defconstant +augassign-target+ :augassign     "A place that is an augmented assignment value and target.")
+(defconstant +global-decl-target+ :global-decl "A place that is declared global.")
+(defconstant +no-target+        nil            "Not an assignment or deletion target.")
 
 (defconstant +normal-value+    t           "An expression that is used for its value.")
 (defconstant +augassign-value+ :augassign  "A place that is an augmented assignment value and target.")
@@ -135,7 +136,7 @@ VALUE and TARGET context."
       
       ([assert-stmt]
        (make `([assert-stmt] ,(funcall f (second form) :value +normal-value+)
-			     ,(when (third form) (funcall f (third form))))))
+			     ,(when (third form) (funcall f (third form) :value +normal-value+)))))
       
       ([assign-stmt]
        (make `([assign-stmt] ,(funcall f (second form) :value +normal-value+ :target +no-target+)
@@ -144,7 +145,7 @@ VALUE and TARGET context."
       
       ([attributeref-expr]
        ;; Don't recurse on attr name
-       (make `([attributeref-expr] ,(funcall f (second form)) ,(third form))))
+       (make `([attributeref-expr] ,(funcall f (second form) :value +normal-value+) ,(third form))))
     
       ([augassign-stmt]
        (make `(augassign-stmt ,(second form)
@@ -252,7 +253,8 @@ VALUE and TARGET context."
 	     `(,(car form) ,rec-item ,rec-clauses)))))
 
       ([global-stmt]
-       form)
+       (let ((names (second form)))
+         `(,(car form) ,(funcall f names :target +global-decl-target+))))
       
       ([identifier-expr]
        form)
@@ -422,7 +424,7 @@ VALUE and TARGET context."
   (apply #'walk-py-ast
 	 ast
 	 (lambda (ast &key value target)
-	   (format t "> ~A ~@[~*:value~] ~@[~*:target~]~%" ast value target)
+	   (format t "> ~A ~@[:value(~A)~] ~@[:target(~A)~]~%" ast value target)
 	   ast)
 	 walk-options))
 

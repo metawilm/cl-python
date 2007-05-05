@@ -246,7 +246,8 @@
  (dot--name ([.] [identifier]) ($2))
 
  (global-stmt ([global] [identifier] comma--identifier*)
-	      (`([global-stmt] ,(if $3 (cons $2 $3) (list $2)))))
+	      (`([global-stmt] ([tuple-expr] ,(let ((this `([identifier-expr] ,$2)))
+                                                (if $3 (cons this $3) (list this)))))))
  
  (:comma--identifier*)
  (comma--identifier ([,] [identifier]) (`([identifier-expr] ,$2)))
