@@ -126,8 +126,8 @@
     '(([not] . 2) ([+] . 12) ([-] . 12) ([~] . 13)))
 
 (defvar *suite-no-newline* nil)
-
 (defvar *tuple-must-have-brackets* nil)
+(defvar *one-item-tuple-gets-comma* t)
 
 (defmethod py-pprint-1 (stream (x list))
   (case (car x)
@@ -204,7 +204,8 @@
 			      ([if-clause]     (format stream " if ~A" (second clause)))))
 		    (format stream ")"))
      
-    ([global-stmt]     (format stream "global ~{~A~^, ~}" (second x)))
+    ([global-stmt]     (let ((*one-item-tuple-gets-comma* nil))
+                         (format stream "global ~A" (second x))))
     ([identifier-expr] (let ((name (second x)))
                          (if (eq name '{Ellipsis})
                              (format stream "...")
@@ -304,8 +305,10 @@
 		  (if items
 		      (let ((brackets? (or (/= *precedence-level* -1)
 					   *tuple-must-have-brackets*))
-			    (post-comma? (not (cdr items))))
-			(let ((*tuple-must-have-brackets* t))
+			    (post-comma? (and (not (cdr items))
+                                              *one-item-tuple-gets-comma*)))
+			(let ((*tuple-must-have-brackets* t)
+                              (*one-item-tuple-gets-comma* t))
 			  (format stream "~@[(~*~]~{~A~^, ~}~@[,~*~]~@[)~*~]"
 				  brackets? items post-comma? brackets?)))
 		    (format stream "()"))))
