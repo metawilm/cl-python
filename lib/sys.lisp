@@ -1,6 +1,6 @@
 (defpackage :clpython.module.sys
   (:use :clpython :common-lisp)
-  (:export #:|argv| #:|byteorder| #:|ecv_info| #:|copyright|
+  (:export #:|argv| #:|byteorder| #:|exc_info| #:|copyright|
 	   #:|builtin_module_names| #:|displayhook| #:|excepthook|
 	   #:|__displayhook__| #:|exc_info| #:|__excepthook__| #:|exit| #:|exitfunc|
 	   #:|setcheckinterval| #:|getcheckinterval|
@@ -19,7 +19,7 @@
 (set-impl-status '|argv| :todo)
 
 (defvar |byteorder| :n/a "Byte order of implementation: 'big' or 'little'")
-(set-impl-status '|argv| :n/a "Byte order is hidden in Lisp implementation.")
+(set-impl-status '|byteorder| :n/a "Byte order is hidden in Lisp implementation.")
 
 ;; Not implemented, and no intention to: 
 ;;  subversion, _current_frames, dllhandle, exc_type, exc_value, exc_traceback,
@@ -71,7 +71,7 @@
 
 (defvar |exitfunc| *the-none*
   "Function to be called upon exit")
-(set-impl-status '|exit| :todo "Currently never called.")
+(set-impl-status '|exitfunc| :todo "Currently never called.")
 
 
 (defun |setcheckinterval| (arg)
@@ -152,7 +152,7 @@
 (set-impl-status '(|__stdin__| |__stdout__| |__stderr__|) :todo "Not set yet.")
 
 (defvar |api_version| :todo "The (Lisp) API version")
-(set-impl-status |api_version| :todo "The CLPython Lisp API has no version number yet.")
+(set-impl-status '|api_version| :todo "The CLPython Lisp API has no version number yet.")
 
 (defvar |version_info| :filled-later "Tuple like (2, 0, 0, 'final', 0)")
 (defvar |version|      :filled-later "String like '1.5.2 (#0 Apr 13 1999, 10:51:12) [MSC 32 bit (Intel)]'")
@@ -164,4 +164,4 @@
 				 (lisp-implementation-type) (lisp-implementation-version)))
 
   (set-impl-status '|version_info| t (format nil "Set to `~A'" |version_info|))
-  (set-impl-status '|version_info| t (format nil "Set to `~A'" |version|)))
+  (set-impl-status '|version| t (format nil "Set to `~A'" |version|)))

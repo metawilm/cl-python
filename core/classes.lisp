@@ -1564,10 +1564,10 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 (defconstant +impl-status-comment-prop+ 'clpython::.impl-status-comment.)
 (defconstant +impl-warned-prop+         'clpython::.impl-warned.)
 
-(defconstant +impl-statuses+ '((nil   . "unknown")
-			       (:todo . "todo")
-			       (:n/a  . "not applicable")
-			       (t     . "complete")
+(defconstant +impl-statuses+ '((nil         . "unknown")
+			       (:todo       . "todo")
+			       (:n/a        . "not applicable")
+			       (t           . "complete")
 			       (:incomplete . "incomplete")))
 
 (defun impl-status (symbol &optional want-comment)
@@ -1584,6 +1584,7 @@ invalid status; must be one of ~S"
 
 (defun set-impl-status (symbol new-status &optional comment)
   "Sets implementation status of attribute, and optionally records comment."
+  (assert (or (symbolp symbol) (listp symbol)))
   (assert (member new-status +impl-statuses+ :key #'car)
       (new-status) "~S is an invalid implementation status; must be one of ~S"
       new-status (mapcar #'car +impl-statuses+))
@@ -1601,6 +1602,25 @@ invalid status; must be one of ~S"
 	  (set-one-sym x))
       (set-one-sym symbol)))
   new-status)
+
+(defun package-impl-status (pkg)
+  "Returns ALIST, COMPLETENESS
+with ALIST like ((:incomplete . 2) (:todo . 20) (:n/a . 3) (nil . 1) (t . 10))
+and COMPLETENESS denoting roughly the degree of completeness, as ratio between 0 and 1 (or NIL if unknown)"
+  (let ((ht (make-hash-table :test 'eq)))
+    (do-external-symbols (s pkg)
+      (incf (gethash (clpython::impl-status s) ht 0)))
+    (loop for k being the hash-key in ht
+        using (hash-value v)
+        collect (cons k v) into alist
+        when (member k '(t :n/a)) sum v into complete
+        when (member k '(:incomplete)) sum v into half-complete
+        when (member k '(:todo)) sum v into missing
+        finally (if (> (+ complete half-complete missing) 0)
+                    (return (values alist
+                                    (/ (+ complete (* 1/2 half-complete))
+                                       (+ complete half-complete missing))))
+                  (return (values () nil))))))
 
 (defclass lisp-package (py-core-object)
   ()

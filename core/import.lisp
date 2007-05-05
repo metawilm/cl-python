@@ -244,7 +244,7 @@ Returns the loaded module, or NIL on error."
 	 (dotted-name (module-dotted-name mod-name-as-list)))
 
     ;; Try builtin loaded module first XXX
-    (loop for p in (excl:package-children :clpython.modules)
+    (loop for p in (excl:package-children :clpython.module)
 	when (string-equal (package-name p) dotted-name)
 	do (return-from py-import p)) 
     
