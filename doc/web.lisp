@@ -10,9 +10,10 @@
   (create-pages))
 
 (defun create-pages ()
-  (loop for (fname name) in (list (list "index.html" :main)
-                                  (list "status.html" :status)
-                                  (list "dictionary.html" :dictionary))
+  (loop for (fname name) in `(("index.html" :main)
+                              ("manual.html" :manual)
+                              ("dictionary.html" :dictionary)
+                              ("status.html" :status))
       do  (with-open-file (f fname
 			   :direction :output
 			   :if-exists :supersede
@@ -39,7 +40,8 @@
 
 (defmacro with-page-template (options &body body)
   (let ((title (second (find :title options :key #'first)))
-        (backlink (second (find :backlink options :key #'first))))
+        #+(or)(backlink (second (find :backlink options :key #'first)))
+        (page (second (find :page options :key #'first))))
     (check-type title string)
     `(html
       (:html
@@ -47,10 +49,17 @@
               (:princ *style*))
        ((:body style "position: absolute; left: 10%; width: 80%")
         ((:div style "text-align: center; margin-bottom: 35px")
-         ,@(when backlink
-             `(((:div style "text-align: left; font-size: small")
-                ((:a href "./")
-                 "&#171 Back"))))
+
+         ((:div style "text-align: left; font-size: small")
+          ,(if (eq page :main) "Introduction" '((:a href "./index.html") "Introduction"))
+          " | "
+          ,(if (eq page :manual) "Reference Manual" '((:a href "./manual.html") "Reference Manual"))
+          " | "
+          ,(if (eq page :dictionary) "Dictionary" '((:a href "./dictionary.html") "Dictionary"))
+          " | "
+          ,(if (eq page :status) "Status" '((:a href "./status.html") "Status"))
+          )
+         
          (:h1 ,title))
         ,@body
         (:p)
@@ -82,7 +91,8 @@
   `((:h2 id ,(make-anchor-text string)) ,string))
 
 (defmethod fill-page ((page (eql :main)))
-  (with-page-template ((:title "CLPython - an implementation of Python in Common Lisp"))
+  (with-page-template ((:page :main)
+                       (:title "CLPython - an implementation of Python in Common Lisp"))
     
     (make-anchor-links #1="Introduction" #2="Requirements" #3="Download" #4="Running Python Code"
                        #5="Documentation" #6="Mailing Lists")
@@ -142,12 +152,12 @@ asdf system <i>clpython</i>." (:br) "Meanwhile, <i>repl</i> is exported from pac
  part of system <i>clpython-app</i>.")
     (h2-anchor #5#)
     (:p "The following documents are currently available:" (:br)
-        ;; "&#187; " ((:a href "implementation.html") "Implementation")
-        ;; ": a technical overview;" (:br)
+        "&#187; " ((:a href "manual.html") "Reference Manual")
+        ": a complete description of CLPython;" (:br)
         "&#187; " ((:a href "dictionary.html") "Dictionary")
-        ": a description of the external CLPython functions and variables;" (:br)
+        ": the CLPython interface;" (:br)
         "&#187; " ((:a href "status.html") "Status")
-        ": a list of the Python functions and modules that are already implemented.")
+        ": progress report of the implementation of Python functions and modules.")
     (:p)
 
     (h2-anchor #6#)
@@ -164,7 +174,8 @@ asdf system <i>clpython</i>." (:br) "Meanwhile, <i>repl</i> is exported from pac
         ": for announcements of new releases.")))
 
 (defmethod fill-page ((page (eql :status)))
-  (with-page-template ((:title "CLPython - Status")
+  (with-page-template ((:page :status)
+                       (:title "CLPython - Status")
                        (:backlink t))
     (make-anchor-links #1="Language Features" #2="Modules" )
 
@@ -197,11 +208,12 @@ asdf system <i>clpython</i>." (:br) "Meanwhile, <i>repl</i> is exported from pac
                         (when first
                           (html " completed")))))))))
 
-(defmethod fill-page ((page (eql :dictionary)))
-  (with-page-template ((:title "CLPython - Dictionary")
+(defmethod fill-page ((page (eql :manual)))
+  (with-page-template ((:page :manual)
+                       (:title "CLPython Reference Manual")
                        (:backlink t))
-    (make-anchor-links #10="ASDF Systems" #11="Packages" #1="Readtables" #2="Parser" #3="Code Walker"
-                       #4="Compiler" #5="Python Objects")
+    (make-anchor-links #10="ASDF Systems" #11="Packages" #1="Readtables" #2="Parser"
+                       #4="Compiler" #5="Runtime" #6="Test suite")
  
     (h2-anchor #10#)
     (:p "The CLPython source code is divided into three ASDF systems:")
@@ -240,7 +252,7 @@ asdf system <i>clpython</i>." (:br) "Meanwhile, <i>repl</i> is exported from pac
     (:p "There are three such readtables:")
     (:ul (:li "<i>clpython.package:*ast-readtable*,</i> in which the <i>{foo}</i> styntax can be used;")
          (:li "<i>clpython.package:*user-readtable*,</i> in which <i>[if-stmt]</i> can be used;")
-         (:li "<i>clpython.package:*ast-user-readtable*,</i> in which both notations are handled."))
+         (:li "<i>clpython.package:*ast-user-readtable*,</i> in which both notations are supported."))
     (:p "These readtables have been named <i>:py-ast-readtable</i>, <i>:py-user-readtable</i> and <i>:py-ast-user-readtable</i>, respectively. These named readtables are refered to in the mode line at the top of CLPython source files. In <i>compiler.lisp</i> the top of the file looke like:")
     (:pre ";; -*- package: clpython; readtable: py-ast-user-readtable -*-
 \(in-package :clpython)
@@ -250,17 +262,100 @@ asdf system <i>clpython</i>." (:br) "Meanwhile, <i>repl</i> is exported from pac
          "proposed")
         "  by Kent Pitman is available in package <i>clpython</i>).")
 
-    
     (h2-anchor #2#)
-    (:p "asdf")
-    (:p)
-    (h2-anchor #3#)
-    (:p "asldkfj asldkfj")
+    (:p "The parser translates Python source into an abstract syntax tree. The parser consists of two parts: a lexer and a grammar specification.")
+    (:p "The lexer converts a stream of characters (a string or a file) into a stream of <i>tokens</i>. For example, the characters <i>i</i> and <i>f</i> can be combined to form the reserved word <i>if</i>. The characters <i>1</i>, <i>3</i> and <i>5</i> together form the number <i>135</i>. The lexer knows how to properly combine characters into a literal number, literal string, punctuation, or identifier token.")
+    (:p "The grammar specification defines the syntax of Python in terms of what token may occur in what place. For example, the rule for <i>if</i> statements is:")
+    (:pre "[if] test [:] suite elif--test--suite* else--suite?")
+    (:p "which means that it starts with the token \"if\", followed by a <i>test</i> expression, then a colon as punctuation, then any number of \"elif ...\" clauses, and perhaps an \"else: ...\" clause at the end.")
+    (:p "A character input stream is first tokenized by the lexer; then the grammar rules are applied. The result is an abstract syntax tree. For example, the source code:")
+    (:pre "if x > 0:
+  s = 'positive'
+\elif x == 0:
+  s = 'zero'
+\else:
+  s = 'negative'")
+    (:p "is represented by the AST:")
+    (:pre "([if-stmt]
+   ((([>] (clpython.ast.node:identifier-expr {x}) 0)
+      ([suite-stmt]
+         (([assign-stmt] \"positive\" (([identifier-expr] {s}))))))
+     (([==] ([identifier-expr] {x}) 0)
+         ([suite-stmt]
+            (([assign-stmt] \"zero\" (([identifier-expr] {s})))))))
+    ([suite-stmt]
+       (([assign-stmt] \"negative\" (([identifier-expr] {s}))))))")
+    (:p "The AST is thus represented by a nested list containing symbols, numbers and strings. The <i>car</i> of every sublist determines what the other items in the sublist represent. The <i>if-stmt</i> AST list has two items after it: first a list of <i>(condition body)</i> pairs, then (optionally) the body of the <i>else</i> body.")
+    (:p "The compiler is implemented by defining a macro for every possible <i>car</i> value, e.g. there are macros for <i>if-stmt</i>, <i>identifier-expr</i> and <i>assign-stmt</i>.")
+
     (:p)
     (h2-anchor #4#)
-    (:p "asldkfj asldkfj")
+    (:p "todo")
     (:p)
     (h2-anchor #5#)
-    (:p "asldkfj asldkfj")
+    (:p "todo")
+    (:p)
+    (h2-anchor #6#)
+    (:p "todo")
     (:p)
     ))
+
+(defmethod fill-page ((page (eql :dictionary)))
+  (with-page-template ((:page :dictionary)
+                       (:title "CLPython Dictionary"))
+    
+    (make-anchor-links #101="Remarks" #1="Parser" #2="Code walker" #3="Compiler")
+
+    (h2-anchor #101#)
+    (:p "This document lists the most important functions and variables of the CLPython interface. When time allows it, more items will be added here.")
+    (:p)
+    
+    (h2-anchor #1#)
+    (:ul (:li (:p (:b "parse-python-file")
+                  (:i " &nbsp;file ")
+                  "&key "
+                  (:i "tab-width-spaces incl-module include-line-numbers &nbsp;=>&nbsp; ast")
+                  (:br)
+                  (:b "parse-python-string")
+                  (:i " &nbsp;string ")
+                  "&key "
+                  (:i "tab-width-spaces incl-module include-line-numbers &nbsp;=>&nbsp; ast"))
+              ((:p style "position: relative; left: 15px")
+               "<i>file</i> &mdash; a pathname or a stream." (:br)
+               "<i>string</i> &mdash; a string." (:br)
+               "<i>tab-width-spaces</i> &mdash; a non-negative integer. The default is 8." (:br)
+               "<i>include-line-numbers</i> &mdash; a boolean. The default is nil." (:br)
+               "<i>ast</i> &mdash; an abstract syntax tree.")
+              (:p "<i>Parse-python-file</i> and <i>parse-python-string</i> return the result of parsing the given file or string.")
+              (:p "One <i>Tab</i> character will be treated as <i>tab-width-spaces</i> times a <i>Space</i>. This is only relevant if in the source the indentation consists of both spaces and tabs.")
+              (:p "If <i>include-line-numbers</i> is true, then the generated AST will contain tokens representing line numbers in the source. This can be useful for tools doing source code coverage analyses. Note that not every source line number will be included in the AST.")))
+
+    (h2-anchor #2#)
+    (:ul (:li (:p "[Macro] " (:b "with-py-ast")
+                  (:i " &nbsp;(subform ast ")
+                  "&rest "
+                  (:i "&key build-result lists-only into-nested-namespaces) ")
+                  "&body "
+                  (:i "body"))
+              ((:p style "position: relative; left: 15px")
+               "<i>subform</i> &mdash; a symbol <i>sym</i>, or the list <i>(sym &key clpython::value clpython::target)</i> with <i>sym</i> a symbol." (:br)
+               "<i>ast</i> &mdash; an abstract syntax tree." (:br)
+               "<i>build-result</i> &mdash; a boolean. The default is false." (:br)
+               "<i>lists-only</i> &mdash; a boolean. The default is true." (:br)
+               "<i>into-nested-namespaces</i> &mdash; a boolean. The default is false."
+               )
+              (:p "The <i>body</i> will be executed each time the code walker recurses into the <i>ast</i>, which is essentially a tree structure. Each time <i>body</i> is executed, variable <i>sym</i> is bound to the current sub-AST.")
+              (:p "If the list form of <i>subform</i> is used, then <i>value</i> and <i>target</i> are bound to the context in which the sub-AST <i>sym</i> is used:")
+              (:ul (:li "<i>value</i> will be <i>true</i> if the sub-AST is used for its value (e.g. \"y\" in \"x = y\")")
+                   (:li "<i>target</i> will be <i>true</i> if the sub-AST is used to store a value (e.g. \"x\" in \"x = y\")"))
+              (:p "For statements, both <i>value</i> and <i>target</i> are usually false. For some expressions both are true (e.g. \"x\" in \"x += 2\"). There are different <i>true</i> values for both <i>value</i> (e.g. <i>+normal-value+</i>, <i>+augassign-value+</i>) and <i>target</i> (e.g. <i>+normal-target+</i>, <i>+delete-target+</i>).")
+              (:p "The return values of <i>body</i> are used as follows:")
+              (:ul (:li "The first value is the form that the code walker will recurse into next. Typically it is the subform to which <i>sym</i> is bound.")
+                   (:li "The second value indicates whether the code walker should consider this recursion branch finished: if <i>true</i>, then the code walker will not recurse deeper into the form returned as first value; otherwise it will recurse in the first value returned (if possible);"))
+              (:p "If <i>lists-only</i> is true, then the body will only be executed for subforms that are lists; this will skip numbers and strings.")
+              (:p "If <i>into-nested-namespaces</i> is true, then recursion into nested namespaces will take place; otherwise recursion stops just before entering the nested namespace. (A nested namespace is the body of an inner function or inner class.)")
+              (:p "If <i>build-result</i> is true, then on each invocation the (first) return value of <i>body</i> is collected. After walking, walk-py-ast returns the AST that is a copy of the original AST, except that every time when <i>body</i> returned a different subform than the value it got for <i>sym</i>, the form returned by <i>body</i> replaces the form of <i>sym</i> in the returned AST. (Think of it as a \"tree-replace\" function with special knowledge of the AST structure.)")))
+
+    (h2-anchor #3#)
+    (:p "todo")
+    (:p)))
