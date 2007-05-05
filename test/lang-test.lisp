@@ -138,6 +138,8 @@ assert x == [1,2,3,4,(),{'e': 5, 'f': 6}], 'x = %s' % x"
   )
 
 (defmethod test-lang ((kind (eql :import-stmt)))
+  (run-no-error "import sys
+assert sys" :fail-info "Should work in both ANSI and Modern mode.")
   )
 
 (defmethod test-lang ((kind (eql :import-from-stmt)))
