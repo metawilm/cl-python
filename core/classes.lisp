@@ -2073,9 +2073,14 @@ and COMPLETENESS denoting roughly the degree of completeness, as ratio between 0
 
 (defun deproxy (x)
   (typecase x
-    ((or number string list function vector hash-table)  x)
-    (py-lisp-object                                      (proxy-lisp-val x))
-    (t                                                   x)))
+    ((or number string list function vector hash-table)
+     x)
+    (py-dict
+     (py-dict-hash-table x))
+    (py-lisp-object
+     (proxy-lisp-val x))
+    (t
+     x)))
 
 #+(or) ;; original version; a bit slower
 (defgeneric deproxy (x)
@@ -2455,8 +2460,11 @@ Creates a function for doing fast lookup, using jump table"
 	   (remhash k (py-dict-hash-table d))))
 
 (def-py-method py-dict.__eq__ (dict1 dict2)
+  (unless (and (typep dict1 'py-dict)
+               (typep dict2 'py-dict))
+    (return-from py-dict.__eq__ *the-false*))
   (let ((ht1 (py-dict-hash-table dict1))
-	(ht2 (py-dict-hash-table dict2)))
+        (ht2 (py-dict-hash-table dict2)))
     (py-bool (and (= (hash-table-count ht1) (hash-table-count ht2))
 		  (loop for d1.k being the hash-key in ht1 using (hash-value d1.v)
 		      for d2.v = (gethash d1.k ht2)
@@ -2664,6 +2672,8 @@ Creates a function for doing fast lookup, using jump table"
     vec))
 
 (def-py-method py-list.__cmp__ (x^ y^)
+  (unless (and (vectorp x) (vectorp y))
+    (return-from py-list.__cmp__ *the-notimplemented*))
   (let ((x.len (length x))
 	(y.len (length y)))
     
@@ -2693,7 +2703,9 @@ Creates a function for doing fast lookup, using jump table"
 		      (t (break "unexpected")))))))
 
 (def-py-method py-list.__eq__ (x^ y^)
-  (py-bool (and (= (length x) (length y))
+  (py-bool (and (vectorp x)
+                (vectorp y)
+                (= (length x) (length y))
 		(loop for xi across x and yi across y
 		    unless (py-==->lisp-val xi yi)
 		    do (return nil)
@@ -3130,6 +3142,8 @@ Creates a function for doing fast lookup, using jump table"
   (length x))
 
 (def-py-method py-tuple.__cmp__ (x^ y^)
+  (unless (and (listp x) (listp y))
+    (return-from py-tuple.__cmp__ *the-notimplemented*))
   (let ((x.len (length x))
 	(y.len (length y)))
     
@@ -3145,13 +3159,15 @@ Creates a function for doing fast lookup, using jump table"
 	  (t                1))))
 
 (def-py-method py-tuple.__eq__ (x^ y^)
-  (py-bool (loop 
-	       for xi = (pop x)
-	       for yi = (pop y)
-	       do (cond ((null (or xi yi))        (return t))
-			((or (null xi) (null yi)) (return nil))
-			((py-==->lisp-val xi yi))
-			(t (return nil))))))
+  (py-bool (and (listp x)
+                (listp y)
+                (loop 
+                    for xi = (pop x)
+                    for yi = (pop y)
+                    do (cond ((null (or xi yi))        (return t))
+                             ((or (null xi) (null yi)) (return nil))
+                             ((py-==->lisp-val xi yi))
+                             (t (return nil)))))))
 
 (def-py-method py-tuple.__getitem__ (x^ item^)
   ;; XXX item may be a slice
@@ -4067,7 +4083,7 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
 			      (when true?
 				(return-from py-cmp
 				  (if y-sub-of-x (- res-value) res-value))))))))
-      
+
 	       ;; So the rich comparison operations didn't lead to a result.
 	       ;; 
 	       ;; object.c - try_3way_compare(v,w)
@@ -4119,7 +4135,7 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
 	       ;; Probably, when we arrive here, there is a bug in the logic
 	       ;; above. Therefore print a warning.
       
-	       (warn "[debug] CMP can't properly compare ~A and ~A." x y)
+	       #+(or)(warn "[debug] CMP can't properly compare ~A and ~A." x y)
       
 	       (return-from py-cmp
 		 (if (string< (class-name x.class) (class-name y.class))
