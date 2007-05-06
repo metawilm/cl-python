@@ -71,31 +71,70 @@
   (run-error "a,b = [3,4,5]" {ValueError}))
 
 (defmethod test-lang ((kind (eql :attributeref-expr)))
-  )
+  (run-no-error "class C: pass
+x = C()
+C.a = 3
+assert (x.a == 3)
+x.a = 4
+assert (x.a == 4)
+del x.a
+assert (x.a == 3)
+del C.a
+assert not hasattr(C, 'a')"))
 
 (defmethod test-lang ((kind (eql :augassign-stmt)))
-  )
+  (run-no-error "x = 3; x+= 2; assert x == 5")
+  (run-no-error "x = 3; x*= 2; assert x == 6")
+  (run-no-error "x = [1,2]; x[1] -= 2; assert x[1] == 0")
+  (run-error    "x,y += 3" {SyntaxError}))
 
 (defmethod test-lang ((kind (eql :backticks-expr)))
-  )
+  (run-no-error "x = `3`; assert x == '3'")
+  (run-no-error "x = `(1,3)`; assert x == '(1, 3)'")
+  (run-no-error "
+class C:
+  def __repr__(self): return 'r'
+  def __str__(self): return 'str'
+x = C()
+assert `x` == 'r'"))
 
 (defmethod test-lang ((kind (eql :binary-expr)))
-  )
+  (run-no-error "assert 1 + 2 == 3")
+  (run-no-error "assert 1 - 2 * 3 == -5")
+  (run-no-error "assert 1 ^ 3 == 2")
+  (run-no-error "assert 1 | 2 == 3"))
 
 (defmethod test-lang ((kind (eql :binary-lazy-expr)))
-  )
+  (run-no-error "assert not (0 or 0)")
+  (run-no-error "assert not (0 and 0)")
+  (run-no-error "1 or 3 / 0")
+  (run-no-error "0 and 3/0"))
 
 (defmethod test-lang ((kind (eql :break-stmt)))
-  )
+  (run-error "break" {SyntaxError})
+  (run-no-error "
+for i in [1,2]:
+  break
+assert i == 1"))
 
 (defmethod test-lang ((kind (eql :call-expr)))
-  )
+  (run-no-error "def f(x,y,z=3,*arg,**kw): return x,y,z,arg,kw
+assert (1,2,3,(),{}) == f(1,2)"))
 
 (defmethod test-lang ((kind (eql :classdef-stmt)))
   )
 
 (defmethod test-lang ((kind (eql :comparison-expr)))
-  )
+  ;; Ensure py-list.__eq__ can handle non-lists, etc.
+  (run-no-error "assert [] != ()")
+  (run-no-error "assert () != []")
+  (run-no-error "assert [] == []")
+  (run-no-error "assert [] != {}")
+  (run-no-error "assert {} != []")
+  (run-no-error "assert [] != None")
+  (run-no-error "assert '' != None")
+  (run-no-error "assert [] != 3")
+  (run-no-error "assert 3 != None"))
 
 (defmethod test-lang ((kind (eql :continue-stmt)))
   )
@@ -143,7 +182,7 @@ assert sys" :fail-info "Should work in both ANSI and Modern mode.")
   )
 
 (defmethod test-lang ((kind (eql :import-from-stmt)))
-  )
+  (run-no-error "from sys import path"))
 
 (defmethod test-lang ((kind (eql :lambda-expr)))
   )
