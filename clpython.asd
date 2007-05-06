@@ -85,7 +85,8 @@
 				       (:file "time")
 				       (:file "os")
 				       (:file "array")
-				       (:file "math")))))
+				       (:file "math")
+                                       (:file "string")))))
 
 (asdf:defsystem :clpython
     :description "CLPython - an implementation of Python in Common Lisp"
