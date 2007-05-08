@@ -2155,6 +2155,7 @@ and COMPLETENESS denoting roughly the degree of completeness, as ratio between 0
 
 (def-py-method py-number.__neg__ (x^) (- x))
 (def-py-method py-number.__nonzero__ (x^) (py-bool (/= x 0)))
+(def-py-method py-number.__pos__ (x^) x)
 (def-py-method py-number.__pow__ (x^ y^ &optional z^) 
   (if z
       (progn (setf z (py-val->integer z))
