@@ -22,7 +22,11 @@
 		    :call-expr :classdef-stmt :comparison-expr :continue-stmt
 		    :del-stmt :dict-expr :exec-stmt :for-in-stmt :funcdef-stmt
 		    :generator-expr :global-stmt :identifier-expr :if-stmt
-		    :import-stmt :import-from-stmt :lambda-expr))
+		    :import-stmt :import-from-stmt :lambda-expr :listcompr-expr
+                    :list-expr :module-stmt :print-stmt :return-stmt :slice-expr
+                    :subscription-expr :suite-stmt :return-stmt :raise-stmt
+                    :try-except-stmt :try-finally-stmt :tuple-expr :unary-expr
+                    :while-stmt :yield-stmt))
       (test-lang node))))
 
 (defmacro run-error (string condtype &rest options)
@@ -210,6 +214,26 @@ assert x == [1,2,3,4,(),{'e': 5, 'f': 6}], 'x = %s' % x"
   )
 
 (defmethod test-lang ((kind (eql :global-stmt)))
+  (test-warning (run-python-string "global x")) ;; useless at toplevel
+  (run-error "
+def f():
+  x = 3
+  global x" {SyntaxError}) ;; global decl must be before first usage
+  (run-error "def f(x): global x" {SyntaxError})
+  (run-no-error "
+def f(y):
+  global x
+  x = y
+f(3)
+assert x == 3")
+  (run-no-error "
+def f():
+  global x
+  def g(y):
+    x = y
+  return g
+f()(4)
+assert x == 4" :fail-info "Global decl is also valid for nested functions")
   )
 
 (defmethod test-lang ((kind (eql :identifier-expr)))
@@ -227,6 +251,74 @@ assert sys" :fail-info "Should work in both ANSI and Modern mode.")
   (run-no-error "from sys import path"))
 
 (defmethod test-lang ((kind (eql :lambda-expr)))
+  (run-no-error "lambda: None")
+  (run-no-error "lambda: 3*x")
+  (run-error "(lambda: 3*x)()" {NameError})
+  (run-no-error "assert (lambda x: x)(0) == 0")
+  (run-no-error "
+f = lambda x, y=3: x+y
+assert f(1) == 4
+assert f(1,2) == 3")
+  (run-no-error "
+f = lambda x, y=lambda: 42: x + y()
+assert f(1) == 1 + 42")
+  (run-no-error "
+f = lambda x, y=lambda: 42: x + y()
+assert f(1, lambda: 2) == 1 + 2")
+  )
+
+(defmethod test-lang ((kind (eql :listcompr-expr)))
+  )
+
+(defmethod test-lang ((kind (eql :list-expr)))
+  )
+
+(defmethod test-lang ((kind (eql :module-stmt)))
+  )
+
+(defmethod test-lang ((kind (eql :print-stmt)))
+  )
+
+(defmethod test-lang ((kind (eql :return-stmt)))
+  )
+
+(defmethod test-lang ((kind (eql :slice-expr)))
+  )
+
+(defmethod test-lang ((kind (eql :subscription-expr)))
+  )
+
+(defmethod test-lang ((kind (eql :suite-stmt)))
+  )
+
+(defmethod test-lang ((kind (eql :return-stmt)))
+  )
+
+(defmethod test-lang ((kind (eql :raise-stmt)))
+  )
+
+(defmethod test-lang ((kind (eql :try-except-stmt)))
+  )
+
+(defmethod test-lang ((kind (eql :try-finally-stmt)))
+  )
+
+(defmethod test-lang ((kind (eql :tuple-expr)))
+  )
+
+(defmethod test-lang ((kind (eql :unary-expr)))
+  (run-no-error "x = 3; +x; -x")
+  (run-no-error "assert +3 == 3")
+  (run-no-error "x = 3; assert +x == 3")
+  (run-no-error "x = 3; assert -x == -3")
+  (run-no-error "x = 3; assert ++x == 3")
+  (run-no-error "x = 3; assert --x == 3")
+  )
+
+(defmethod test-lang ((kind (eql :while-stmt)))
+  )
+
+(defmethod test-lang ((kind (eql :yield-stmt)))
   )
 
 ;; ...
