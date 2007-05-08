@@ -589,9 +589,10 @@
 ;; py-class-attribute-method
 
 (def-py-method py-class-attribute-method.__get__ (x inst class)
-  (when (or (null inst)
-	    (eq inst *the-none*))
-    (py-call (slot-value x 'func) class)))
+  (unless (excl::classp inst)
+    (break "py-class-attribute-method.__get__ wants class instance as first arg! ~A ~A ~A"
+           x inst class))
+  (py-call (slot-value x 'func) inst))
 
 ;; py-writable-attribute-method
 

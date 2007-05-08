@@ -122,6 +122,15 @@ assert i == 1"))
 assert (1,2,3,(),{}) == f(1,2)"))
 
 (defmethod test-lang ((kind (eql :classdef-stmt)))
+  (run-no-error "
+class C:
+  def m(self): return 'C.m'
+assert C().m() == 'C.m'
+assert C.__mro__ == (C, object)")
+  (run-no-error "
+class C: pass
+class D(C): pass
+assert D.__mro__ == (D, C, object)")
   )
 
 (defmethod test-lang ((kind (eql :comparison-expr)))
