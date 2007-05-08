@@ -72,12 +72,13 @@
          " &mdash"))))))
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
-  (defun make-anchor-text (string)
-    (string-downcase (substitute #\_ #\Space string :test #'char=))))
+(defun make-anchor-text (string)
+  (string-downcase (substitute #\_ #\Space string :test #'char=)))
 
 (defun anchor-link (string)
   `((:a href ,(concatenate 'string "#" (make-anchor-text string)))
     ,string))
+)
 
 (defmacro make-anchor-links (&rest strings)
   (assert strings)
