@@ -146,19 +146,52 @@ assert D.__mro__ == (D, C, object)")
   (run-no-error "assert 3 != None"))
 
 (defmethod test-lang ((kind (eql :continue-stmt)))
-  )
+  (run-error "break" {SyntaxError})
+  (run-no-error "for i in []: continue")
+  (run-no-error "
+for i in [1]: continue
+assert i == 1")
+  (run-no-error "
+for i in [1,2,3]:
+  continue
+  1 / 0")
+  (run-no-error "
+sum = 0
+for i in [0,1,2,3]:
+  if i == 0:
+    continue
+  sum += i
+  continue
+  i / 0
+assert sum == 1 + 2 + 3
+assert i == 3"))
 
 (defmethod test-lang ((kind (eql :del-stmt)))
+  (run-error "del x" {NameError})
+  (run-no-error "x = 3; del x")
+  (run-error "x = 3; del x; x" {NameError})
+  (run-no-error "x,y,z = 3,4,5; del x,y; z")
+  (run-error "x,y,z = 3,4,5; del x,y; y" {NameError})
   )
 
 (defmethod test-lang ((kind (eql :dict-expr)))
+  (run-no-error "{}")
+  (run-no-error "{1: 3}")
+  (run-no-error "{1+2: 3+4}")
+  (run-no-error "assert {1: 3}[1] == 3")
+  (run-no-error "assert {1: 3, 2: 4}[1] == 3")
   )
 
 (defmethod test-lang ((kind (eql :exec-stmt)))
   )
 
 (defmethod test-lang ((kind (eql :for-in-stmt)))
-  )
+  (run-no-error "for i in []: 1/0")
+  (run-no-error "for i in '': 1/0")
+  (run-no-error "
+for k in {1: 3}:
+  x = k
+assert k == 1"))
 
 (defmethod test-lang ((kind (eql :funcdef-stmt)))
   ;; *-arg, **-arg
