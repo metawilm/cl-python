@@ -165,6 +165,9 @@
 
 ;;; Comparison: ==
 
+(defun maybe-number-p (expr)
+  (not (stringp expr)))
+
 (define-compiler-macro py-== (&whole whole x y)
   (if *inline-fixnum-arithmetic*
       `(let ((.x ,x)

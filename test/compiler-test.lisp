@@ -143,7 +143,6 @@ def f():
    global g
    g += 3;
    return g"     (test-true (seq-equal #1# '({f} {g}) :ignore +standard-module-globals+)
-			    :known-failure t
 			    :fail-info "Globals inside functions not added to module globals."))
   ;; in a class
   (run-code-test "
@@ -164,8 +163,7 @@ TEST
 class C:
   global x
   x = 3"    (test-true (seq-equal #1# '({C} {x}) :ignore +standard-module-globals+)
-		       :known-failure t
-		       :fail-info #100="Handling `global' declaration in classdef not correct yet."))
+                       :fail-info #100="Handling `global' declaration in classdef not correct yet."))
 
   ;; nested function/class
   (run-code-test "
@@ -174,7 +172,7 @@ def f():
   def g():
     global x
     x = 3"    (test-true (seq-equal #1# '({f} {x}) :ignore +standard-module-globals+)
-			 :known-failure t :fail-info "Nested `global' not detected."))
+                         :fail-info "Nested `global' not detected."))
   
   (run-code-test "
 TEST
@@ -182,7 +180,7 @@ class C:
   def f():
     global x
     x = 3"    (test-true (seq-equal #1# '({C} {x}) :ignore +standard-module-globals+)
-			 :known-failure t :fail-info #100#))
+                         :fail-info #100#))
 
   (run-code-test "
 TEST
@@ -190,7 +188,7 @@ def f():
   class C:
     global x
     x = 3"    (test-true (seq-equal #1# '({f} {x}) :ignore +standard-module-globals+)
-			 :known-failure t :fail-info #100#)))
+                         :fail-info #100#)))
 
 (defmethod test-comp-decl ((kind (eql :lexically-visible-vars)))
   (run-code-test "TEST"        (test-equal () #1=(pydecl :lexically-visible-vars)))

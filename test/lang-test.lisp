@@ -195,7 +195,38 @@ assert i == 3"))
   (run-no-error "
 for k in {1: 3}:
   x = k
-assert k == 1"))
+assert k == 1")
+  (run-no-error "
+for x in []:
+  pass
+else:
+  x = 3
+assert x == 3")
+  (run-no-error "
+for x in [1]:
+  break
+else:
+  x = 3
+assert x == 1")
+  (run-no-error "
+def f():
+  for x in [1]:
+    break
+  else:
+    x = 3
+  assert x == 1
+  yield x
+g = f()
+assert g.next() == 1")
+  (run-no-error "
+def f():
+  for x in []:
+    pass
+  else:
+    x = 3
+  yield x
+g = f()
+assert g.next() == 3"))
 
 (defmethod test-lang ((kind (eql :funcdef-stmt)))
   ;; *-arg, **-arg
@@ -248,7 +279,7 @@ assert sys" :fail-info "Should work in both ANSI and Modern mode.")
   )
 
 (defmethod test-lang ((kind (eql :import-from-stmt)))
-  (run-no-error "from sys import path"))
+  (run-no-error "from sys import path; path.append('/foo')"))
 
 (defmethod test-lang ((kind (eql :lambda-expr)))
   (run-no-error "lambda: None")
@@ -316,9 +347,55 @@ assert f(1, lambda: 2) == 1 + 2")
   )
 
 (defmethod test-lang ((kind (eql :while-stmt)))
+  (run-no-error "while 0: 1/0")
+  (run-no-error "while 1: break")
+  (run-no-error "
+x = 3
+while x > 0:
+  x -= 1
+  if x == 1:
+    break
+assert x == 1"
   )
+  (run-no-error "
+x = 3
+while x > 0:
+  x -= 1
+  if x == 1:
+    break
+else:
+  x = 42
+assert x == 1"
+  )
+  (run-no-error "
+x = 3
+while x > 0:
+  x -= 1
+else:
+  x = 42
+assert x == 42"
+  )
+  (run-no-error "
+def f():
+  x = 3
+  while x > 0:
+    x -= 1
+  else:
+    x = 42
+  assert x == 42
+f()")
+  (run-no-error "
+def f():
+  x = 3
+  while x > 0:
+    x -= 1
+  else:
+    x = 42
+  assert x == 42
+  yield 42
+g = f()
+assert g.next() == 42"))
 
 (defmethod test-lang ((kind (eql :yield-stmt)))
   )
-
-;; ...
+k

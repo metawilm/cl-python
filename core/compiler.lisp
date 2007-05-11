@@ -278,7 +278,7 @@ XXX Currently there is not way to set *__debug__* to False.")
 
 (defmacro [break-stmt] (&environment e)
   (if (get-pydecl :inside-loop-p e)
-      `(go :break)
+      `(go .break)
     (py-raise '{SyntaxError} "BREAK was found outside loop")))
 
 (defvar *special-calls* '({locals} {globals} {eval}))
@@ -514,7 +514,7 @@ XXX Currently there is not way to set *__debug__* to False.")
 
 (defmacro [continue-stmt] (&environment e)
   (if (get-pydecl :inside-loop-p e)
-      `(go :continue)
+      `(go .continue)
     (py-raise '{SyntaxError} "CONTINUE was found outside loop")))
 
 (defmacro [del-stmt] (item &environment e)
@@ -630,14 +630,14 @@ XXX Currently there is not way to set *__debug__* to False.")
 		    (tagbody 
 		      (with-pydecl ((:inside-loop-p t))
 			,suite)
-		      (go :continue) ;; prevent warning about unused tag
-		     :continue))))
+		      (go .continue) ;; prevent warning about unused tag
+		     .continue))))
 	 (declare (dynamic-extent ,f))
 	 (map-over-py-object ,f ,source))
        ,@(when else-suite `(,else-suite))
        
-       (go :break) ;; prevent warning
-      :break)))
+       (go .break) ;; prevent warning
+      .break)))
 
 (defun lambda-args-and-destruct-form (funcdef-pos-args)
   ;; Replace "def f( (x,y), z):  .." 
@@ -1342,24 +1342,23 @@ input arguments."
     `(funcall (function ,py-op-func) ,item)))
 
 (defmacro [while-stmt] (test suite else-suite)
-  (with-gensyms (take-else)
-    `(tagbody
-       (loop
-	   with ,take-else = t
-	   while (py-val->lisp-bool ,test)
-	   do (when ,take-else
-		(setf ,take-else nil))
-	      (tagbody
-		(with-pydecl ((:inside-loop-p t))
-		  ,suite)
-		
-		(go :continue) ;; prevent warning unused tag
-	       :continue)
-	   finally (when (and ,take-else ,(and else-suite t))
-		     ,else-suite))
-       
-       (go :break) ;; prevent warning
-      :break)))
+  `(tagbody
+    .continue
+     (if (py-val->lisp-bool ,test)
+         (go .body)
+       (go .else))
+     
+    .body
+     (with-pydecl ((:inside-loop-p t))
+       ,suite)
+     (go .continue)
+     
+    .else
+     ,@(when else-suite `(,else-suite))
+
+     (go .break) ;; prevent warning
+    .break
+     ))
 
 (defmacro [yield-stmt] (val)
   (declare (ignore val))
@@ -1610,9 +1609,8 @@ input arguments."
 	
 	(t form)))
     
-    ;; Variables explicitly declared `global'
-
-    (with-py-ast (form suite)
+    ;; Variables explicitly declared `global', somewhere arbitrarily deeply nested.
+    (with-py-ast (form suite :into-nested-namespaces t)
       (case (car form)
 
 	([global-stmt] (destructuring-bind (tuple-expr (&rest identifiers))
@@ -2309,12 +2307,13 @@ be bound."
 					       stack)))
 				 (if (py-val->lisp-bool ,test)
 				     (go ,repeat-tag)
-				   (go ,after-tag))
+				   (go ,else-tag))
 				 
 				 ,else-tag
 				 ,@(when else-suite
 				     `((:split ,(walk else-suite stack))))
 				 
+                                 (go ,after-tag)
 				 ,after-tag)
 			       t))))
 		  
