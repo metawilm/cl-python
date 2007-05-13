@@ -97,9 +97,9 @@
       (t (error "String ~S parses into multiple (~A) expressions: ~{~A~^, ~}."
 		string (length res) res)))))
 
-(defmacro with-python-code-reader (var &body body)
+(defmacro with-python-code-reader (() &body body)
   ;; The Python parser handles all reading.
-  (assert (null var))
-  `(let ((*readtable* (setup-omnivore-readmacro #'parse-python-file
-						(copy-readtable nil))))
+  `(let ((*readtable* (load-time-value
+                       (setup-omnivore-readmacro #'parse-python-file
+                                                 (copy-readtable nil)))))
      ,@body))
