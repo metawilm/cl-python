@@ -21,7 +21,8 @@
 (defvar *py-pprint-dispatch* (copy-pprint-dispatch nil))
 
 (defun py-pprint (ast &optional stream)
-  "Print AST as Python source code to STREAM. STREAM defaults to standard output"
+  "Print AST as Python source code to STREAM.
+If STREAM is not supplied, output goes to a string."
   (flet ((do-print (stream)
 	   (let ((*print-pprint-dispatch* *py-pprint-dispatch*))
 	     (pprint ast stream))))
