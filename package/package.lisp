@@ -174,13 +174,9 @@
 (defpackage :clpython.parser
   (:documentation "Parser and lexer for Python code")
   (:use :common-lisp :clpython.package)
-  (:export #:parse-python-file #:parse-python-string #:parse-python-one-expr
-	   #:with-python-code-reader
+  (:export #:parse-python-file #:parse-python-string #:with-python-code-reader
 	   
-	   *tab-width-spaces* ;; lexer options
-	   *wrap-ast-in-module-stmt* *include-line-numbers* ;; AST options
-	   
-	   #:walk-py-ast #:with-py-ast ;; code walker
+           #:walk-py-ast #:with-py-ast ;; code walker
 	   #:+normal-target+ #:+delete-target+ #:+augassign-target+ #:+no-target+
 	   #:+normal-value+ #:+augassign-value+ #:+no-value+
 
