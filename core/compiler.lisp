@@ -119,7 +119,7 @@ Only has effect when *include-line-number-hook-calls* is true.")
 (defmacro with-line-numbers ((&key compile-hook runtime-hook) &body body)
   ;; You have to set *runtime-line-number-hook* yourself.
   `(let ((*include-line-number-hook-calls* t)
-	 (.parser:*include-line-numbers* t)
+	 (.parser::*include-line-numbers* t)
 	 ,@(when runtime-hook `((*runtime-line-number-hook* ,runtime-hook)))
 	 ,@(when compile-hook `((*compile-line-number-hook* ,compile-hook))))
      ,@body))
@@ -696,7 +696,11 @@ input arguments."
 				  (values fname "function"))))
 	   (when (member name globals)
 	     (py-raise '{SyntaxError}
-		       "The ~A name `~A' may not be declared `global'." kind name)))
+		       "The ~A name `~A' may not be declared `global'." kind name))
+           (unless (or (member name locals)
+                       (member name new-locals))
+             (push name locals)
+             (push name new-locals)))
 	 (values nil t))
 	
 	([identifier-expr]
