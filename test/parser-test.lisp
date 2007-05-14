@@ -10,6 +10,10 @@
 ;;;; Python parser test
 
 (in-package :clpython.test)
+
+(eval-when (:compile-top-level :load-toplevel :execute)
+  (import 'clpython.parser::parse-python-one-expr))
+
 (in-syntax *ast-user-readtable*)
 	   
 (defun ps (s &optional (incl-module t))

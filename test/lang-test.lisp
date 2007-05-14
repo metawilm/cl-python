@@ -322,9 +322,6 @@ assert f(1, lambda: 2) == 1 + 2")
 (defmethod test-lang ((kind (eql :suite-stmt)))
   )
 
-(defmethod test-lang ((kind (eql :return-stmt)))
-  )
-
 (defmethod test-lang ((kind (eql :raise-stmt)))
   )
 
@@ -398,4 +395,3 @@ assert g.next() == 42"))
 
 (defmethod test-lang ((kind (eql :yield-stmt)))
   )
-k

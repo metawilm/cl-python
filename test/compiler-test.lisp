@@ -204,20 +204,19 @@ def f():
   (run-code-test "
 def f( (x,y) ):
   def g(a,**b):
-    TEST"        (test-true (seq-equal '({x} {y} {a} {b}) #1#)))
+    TEST"        (test-true (seq-equal '({x} {y} {a} {b} {g}) #1#)))
 
   (run-code-test "
 def f( (x,y) ):
   def g( x=3,**y):
-    TEST"        (test-true (seq-equal '({x} {y}) #1#)))
+    TEST"        (test-true (seq-equal '({x} {y} {g}) #1#)))
 
   (run-code-test "
 def f( (x,y) ):
   def g(z):
     pass
   TEST"        (test-true (seq-equal '({g} {x} {y}) #1#)
-			  :known-failure t
-			  :fail-info "Function names are not considered variable names yet."))
+                          :fail-info "Function names are not considered variable names yet."))
   
   (run-code-test "
 class C(D):
@@ -240,7 +239,9 @@ class C(D):
       bbb = 23
       def g(z):
         TEST"
-		 (test-true (seq-equal '({x} {z}) #1#)))
+		 (test-true (seq-equal '({C} {f} {x} {Q} {bbb} {g} {z}) #1#)
+                            :known-failure t
+                            :fail-info "Something going wrong with lex vars"))
   )
 
 (defmethod test-comp-decl ((kind (eql :lexically-declared-globals)))

@@ -44,8 +44,15 @@
   (let* ((i2 (coerce ignore 'list))
 	 (x2 (set-difference (coerce x 'list) i2 :test test))
 	 (y2 (set-difference (coerce y 'list) i2 :test test)))
-    (and (null (set-difference x2 y2 :test test))
-	 (null (set-difference y2 x2 :test test)))))
+    (let ((sd1 (set-difference x2 y2 :test test))
+          (sd2 (set-difference y2 x2 :test test)))
+      (if (and (null sd1)
+               (null sd2))
+          t
+        (progn (when (or sd1 sd2)
+                 (format t "seq-equal deviations between ~A and ~A: ~A; ~A"
+                         x y sd1 sd2))
+               nil)))))
 
 (defun seq-member (item seq)
   (not (null (position item seq))))
