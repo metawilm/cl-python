@@ -1,4 +1,4 @@
-;; -*- package: clpython -*-
+;; -*- package: clpython; readtable: py-user-readtable -*-
 ;;
 ;; This software is Copyright (c) Franz Inc. and Willem Broekema.
 ;; Franz Inc. and Willem Broekema grant you the rights to
@@ -8,6 +8,7 @@
 ;; known as the LLGPL.
 
 (in-package :clpython)
+(in-syntax *user-readtable*)
 
 (defstruct (format-string (:conc-name fs-) (:constructor make-fs))
   (string        :type string)
@@ -33,8 +34,8 @@
 			     
 			       (unless (= (length args) (fs-list-num-args fs))
 				 (py-raise 
-				  'ValueError "Wrong number of arguments for format string ~
-                                             (wanted ~A, got ~A)"
+				  '{ValueError}
+                                  "Wrong number of arguments for format string (wanted ~A, got ~A)"
 				  (fs-list-num-args fs) (length args)))
 			       args))
 				 
@@ -92,11 +93,11 @@
 	 (typecase obj
 	   (integer (clpython.user.builtin.function:|chr| obj))
 	   (string  (unless (= (length obj) 1)
-		      (py-raise 'TypeError
+		      (py-raise '{TypeError}
 				"The %c formatting code wants 1-char string (got: ~S)."
 				obj))
 		    obj)
-	   (t (py-raise 'TypeError "Invalid object for %c format convertion: ~S." obj))))
+	   (t (py-raise '{TypeError} "Invalid object for %c format convertion: ~S." obj))))
     (#\i (format nil "~D" (deproxy obj)))
     (#\o (format nil "~O" (deproxy obj)))
     
@@ -127,7 +128,7 @@
     
     (when (or alt-form-p sign-p blank-prefix-for-pos-num)
       (unless (numberp obj)
-	(py-raise 'TypeError
+	(py-raise '{TypeError}
 		  "The `#', `+' and ` ' (space) conversion flags may only be used ~
                    for numeric arguments (got: ~S)." obj)))
     
@@ -214,8 +215,8 @@
     (labels ((next-ch-nil   () (prog1 (and (< i s.len) (char string i))
 				 (incf i)))
 	     (next-ch-error () (or (next-ch-nil)
-				   (py-raise 'ValueError "Unfinished format string (~S)." 
-					     string)))
+				   (py-raise '{ValueError}
+                                             "Unfinished format string (~S)." string)))
 	     (unread-ch     () (progn (decf i)
 				      (assert (and (>= i 0))))))
       
@@ -272,7 +273,7 @@
 				 ((char= c #\*) ;; to be supplied as argument
 				  :arg)
 				 
-				 (t (py-raise 'ValueError
+				 (t (py-raise '{ValueError}
 					      "Format string contains illegal precision ~@
                                                (got ~A after dot; expected number)." c))))
 		       
@@ -287,7 +288,7 @@
 		    (conversion-type
 		     (let ((c (next-ch-error)))
 		       (unless (position c "diouxXeEfFgGcrs%" :test #'char=)
-			 (py-raise 'ValueError
+			 (py-raise '{ValueError}
 				   "In format string, unrecognized conversion type found: `~A'." c))
 		       
 		       (case c ;; Some codes are redundant
@@ -314,7 +315,7 @@
 	   (kind (let ((num-not-map (count nil (mapcar #'second fmt-ops))))
 		   (cond ((= num-not-map 0)                :mapping)
 			 ((= num-not-map (length fmt-ops)) :list)
-			 (t (py-raise 'ValueError
+			 (t (py-raise '{ValueError}
 				      "Both mapping and non-mapping formatting operations ~
                                        found in format string (~S)." string)))))
 	   
@@ -330,7 +331,7 @@
 				     do (assert (eq format :format))
 				     when (or (eq min-fld-width :arg)
 					      (eq prec :arg))
-				     do (py-raise 'ValueError
+				     do (py-raise '{ValueError}
 						  "This format string uses mapping arg. Therefore ~
                                                    it cannot refer (using `*') to an argument in ~
                                                    the field-width or precision (~S)." string)
