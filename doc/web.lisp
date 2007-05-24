@@ -49,29 +49,30 @@
       (:html
        (:head (:title ,title)
               (:princ *style*))
-       ((:body style "position: absolute; left: 10%; width: 80%")
-        ((:div style "text-align: center; margin-bottom: 35px")
+       (:body
+        ((:div style "position: absolute; left: 10%; width: 80%")
+         ((:div style "text-align: center; margin-bottom: 35px")
 
-         ((:div style "text-align: left; font-size: small")
-          ,(if (eq page :main) "Introduction" '((:a href "./index.html") "Introduction"))
-          " | "
-          ,(if (eq page :manual) "Reference Manual" '((:a href "./manual.html") "Reference Manual"))
-          " | "
-          ,(if (eq page :dictionary) "Dictionary" '((:a href "./dictionary.html") "Dictionary"))
-          " | "
-          ,(if (eq page :status) "Status" '((:a href "./status.html") "Status"))
-          )
-         
-         (:h1 ,title))
-        ,@body
-        (:p)
-        ((:div style "font-size: small; text-align: center")
-         "&mdash; Updated "
-         (:princ (multiple-value-bind (second minute hour date month year day)
-                     (get-decoded-time)
-                   (declare (ignore second minute hour day))
-                   (format nil "~4,'0D-~2,'0D-~2,'0D" year month date)))
-         " &mdash"))))))
+          ((:div style "text-align: left; font-size: small")
+           ,(if (eq page :main) "Introduction" '((:a href "./index.html") "Introduction"))
+           " | "
+           ,(if (eq page :manual) "Reference Manual" '((:a href "./manual.html") "Reference Manual"))
+           " | "
+           ,(if (eq page :dictionary) "Dictionary" '((:a href "./dictionary.html") "Dictionary"))
+           " | "
+           ,(if (eq page :status) "Status" '((:a href "./status.html") "Status"))
+           )
+          
+          (:h1 ,title))
+         ,@body
+         (:p)
+         ((:div style "font-size: small; text-align: center")
+          "&mdash; Updated "
+          (:princ (multiple-value-bind (second minute hour date month year day)
+                      (get-decoded-time)
+                    (declare (ignore second minute hour day))
+                    (format nil "~4,'0D-~2,'0D-~2,'0D" year month date)))
+          " &mdash;")))))))
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
 (defun make-anchor-text (string)
@@ -123,7 +124,7 @@ The main dependencies on Allegro CL are yacc (for parsing) and environments acce
     (h2-anchor #3#)
     (:p "The source code is in a public CVS repository. To grab it: ")
     (:pre "<span class=\"input\">cvs -d :pserver:cvspublic@cvspublic.franz.com:/cvs-public login</span>
-Password: <span class=\"input\">cvspublic</a><span>
+Password: <span class=\"input\">cvspublic</span>
 <span class=\"input\">cvs -d :pserver:cvspublic@cvspublic.franz.com:/cvs-public checkout clpython</span>")
     (:p "To compile and load CLPython, use asdf to load the systems <i>clpython</i> and <i>clpython-app</i>
 \(in either ANSI or Modern mode).")
