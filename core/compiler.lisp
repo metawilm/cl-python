@@ -1036,61 +1036,57 @@ input arguments."
   ;;(check-type dyn-glob hash-table)
   (assert (or create-mod existing-mod))
   (assert (not (and create-mod existing-mod)))
-  
-  `(let ((*package* *package*))
-     ;; Otherwise Lisp REPL module will be changed after running this code.
-     (progn (in-package :clpython)
-	  
-	  (let* ((*habitat* (or *habitat* (make-habitat :search-paths '("."))))
-		 (+mod-static-globals-names+  ,glob-names)
-		 (+mod-static-globals-values+ ,glob-values)
-		 (+mod-static-globals-builtin-values+
-		  (make-array ,(length glob-names)
-			      :initial-contents (mapcar 'builtin-value ',(coerce glob-names 'list))))
-		 (+mod-dyn-globals+ ,dyn-glob)
-		 (+mod+ ,(if create-mod
-			     
-			     `(make-module :globals-names  +mod-static-globals-names+
-					   :globals-values +mod-static-globals-values+
-					   :dyn-globals    +mod-dyn-globals+
-					   :name ,module-name
-					   :path ,module-path)
-			   existing-mod)))
 
-	    (declare (ignorable +mod-static-globals-names+
-				+mod-static-globals-values+
-				+mod-static-globals-builtin-values+
-				+mod-dyn-globals+
-				+mod+))
-	    
-	    (progn ;; Initialize global value arrays
-	      ,@(when set-builtins
-		  `((replace +mod-static-globals-values+ +mod-static-globals-builtin-values+)))
-	      
-	      ,@(loop with res
-		    for (k v) in `(({__name__}  ,(or module-name "__main__"))
-				   ({__debug__}  1))
-		    unless (and set-builtins (builtin-value k))
-		    do (let ((ix (position k glob-names)))
-			 (when ix
-			   (push `(setf (svref +mod-static-globals-values+ ,ix) ,v) res)))
-		    finally (return res))
-	      
-	      #+(or) ;; debug
-	      (loop for n across +mod-static-globals-names+
-		  for v across +mod-static-globals-values+
-		  do (format t "~A: ~A~%" n v)))
-	      
-	    ,@(when call-hook
-		`((when *module-hook*
-		    (funcall *module-hook* +mod+))))
-	    
-	    (with-pydecl
-		((:mod-globals-names  ,glob-names)
-		 (:context            :module)
-		 (:mod-futures        :todo-parse-module-ast-future-imports))
-	      
-	      ,@body)))))
+  `(let* ((*habitat* (or *habitat* (make-habitat :search-paths '("."))))
+          (+mod-static-globals-names+  ,glob-names)
+          (+mod-static-globals-values+ ,glob-values)
+          (+mod-static-globals-builtin-values+
+           (make-array ,(length glob-names)
+                       :initial-contents (mapcar 'builtin-value ',(coerce glob-names 'list))))
+          (+mod-dyn-globals+ ,dyn-glob)
+          (+mod+ ,(if create-mod
+                      
+                      `(make-module :globals-names  +mod-static-globals-names+
+                                    :globals-values +mod-static-globals-values+
+                                    :dyn-globals    +mod-dyn-globals+
+                                    :name ,module-name
+                                    :path ,module-path)
+                    existing-mod)))
+
+     (declare (ignorable +mod-static-globals-names+
+                         +mod-static-globals-values+
+                         +mod-static-globals-builtin-values+
+                         +mod-dyn-globals+
+                         +mod+))
+     
+     (progn ;; Initialize global value arrays
+       ,@(when set-builtins
+           `((replace +mod-static-globals-values+ +mod-static-globals-builtin-values+)))
+       
+       ,@(loop with res
+             for (k v) in `(({__name__}  ,(or module-name "__main__"))
+                            ({__debug__}  1))
+             unless (and set-builtins (builtin-value k))
+             do (let ((ix (position k glob-names)))
+                  (when ix
+                    (push `(setf (svref +mod-static-globals-values+ ,ix) ,v) res)))
+             finally (return res))
+       
+       #+(or) ;; debug
+       (loop for n across +mod-static-globals-names+
+           for v across +mod-static-globals-values+
+           do (format t "~A: ~A~%" n v)))
+     
+     ,@(when call-hook
+         `((when *module-hook*
+             (funcall *module-hook* +mod+))))
+     
+     (with-pydecl
+         ((:mod-globals-names  ,glob-names)
+          (:context            :module)
+          (:mod-futures        :todo-parse-module-ast-future-imports))
+       
+       ,@body)))
 
 (defmacro create-module-globals-dict ()
   ;; Updating this dict really modifies the globals.
