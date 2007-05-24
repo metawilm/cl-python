@@ -861,7 +861,7 @@ non-whitespace character) measured in spaces, where each Tab is equivalent
 to *tab-width-spaces* spaces - so N >= 0.
 
 If no Newline was encountered before a non-whitespace character, or if EOF
-is encountered, NIL is returned."
+is encountered: NIL, N are returned"
 
   (loop
       with found-newline = nil and n = 0
@@ -882,7 +882,9 @@ is encountered, NIL is returned."
 	   
 	   (t                      (unread-chr c)
 				   (return-from read-whitespace
-				     (if found-newline (values t n) nil))))))
+				     (if found-newline
+                                         (values t n)
+                                       (values nil n)))))))
 
 (defun read-comment-line (c)
   "Read until the end of the line, leaving the last #\Newline in the source."
