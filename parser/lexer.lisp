@@ -48,31 +48,44 @@ READ-CHR."
       (block lexer
 	
 	(when (eq op :report-location)  ;; used when GRAMMAR-PARSE-ERROR occurs
-	  (return-from lexer `((:line-no ,curr-src-line))))
+	  (return-from lexer `((:line-no ,curr-src-line)
+                               (:eof-seen ,(member 'excl.yacc:eof tokens-todo :key #'second)))))
 
 	;; The lexer does not currently detect leading whitespace on the first line (with
 	;; some non-whitespace after it), which can hide syntax errors. As hack, we act as
 	;; if the first character is a #\Newline. That explains *lex-[un]read-char*.
 	
-	(let ((*lex-read-char* (lambda ()
-				 (if (= (incf curr-char) 1)
-				     #\Newline
-				   (let ((ch (funcall read-chr)))
-				     (when (and ch (char= ch #\Newline))
-				       (incf curr-src-line))
-				     ch))))
+	(let ((*lex-read-char* (lambda () (let ((ch (funcall read-chr)))
+                                            (incf curr-char)
+                                            (when (and ch (char= ch #\Newline))
+                                              (incf curr-src-line))
+                                            ch)))
 	      
-	      (*lex-unread-char* (lambda (ch)
-				   (unless (= (decf curr-char) 0)
-				     (when (char= ch #\Newline)
-				       (decf curr-src-line))
-				     (funcall unread-chr ch))))
+              (*lex-unread-char* (lambda (ch) (progn (assert ch)
+                                                     (funcall unread-chr ch)
+                                                     (decf curr-char)
+                                                     (when (char= ch #\Newline)
+                                                       (decf curr-src-line)))))
 	      
 	      (*curr-src-line*    curr-src-line)
 	      (*tab-width-spaces* tab-width-spaces)
 	      (*lex-debug*        debug)
 	      (*include-line-numbers* include-line-numbers))
 	  
+          (when (= curr-char 0)
+            ;; Detect leading whitespace. This will go unnoticed by the lexer otherwise.
+            (let ((ch (read-chr-nil)))
+              (if (char-member ch +whitespace+)
+                  (progn (unread-chr ch)
+                         (multiple-value-bind (newline new-indent)
+                             (read-whitespace)
+                           (declare (ignore newline))
+                           (when (> new-indent 0)
+                             (restart-case (raise-syntax-error "Leading whitespace on first non-blank line.")
+                               (cl-user::continue ()
+                                   :report "Continue parsing, ignoring the leading whitespace.")))))
+                (when ch (unread-chr ch)))))
+          
 	  (when tokens-todo
 	    (let ((item (pop tokens-todo)))
 	      (when *lex-debug*

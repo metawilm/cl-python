@@ -22,6 +22,7 @@
 	((typep c 'excl.yacc:grammar-parse-error)
 	 (let* ((pos (excl.yacc:grammar-parse-error-position c))
 		(line (second (assoc :line-no pos)))
+                (eof-seen (second (assoc :eof-seen pos)))
 		(token (excl.yacc:grammar-parse-error-token c))
 		(encl-error (excl.yacc::grammar-parse-error-enclosed-error c)))
 
@@ -39,7 +40,8 @@
 		   (format nil "Parse error at line ~A~@[, at token `~S'~].~%[inner error: ~A]"
 			   line token encl-error)))
 		 
-		 ((eq token 'excl.yacc:eof)
+		 ((or (eq token 'excl.yacc:eof)
+                      eof-seen)
 		  (raise-unexpected-eof)
 		  (assert nil () "unreachable"))
 		 
