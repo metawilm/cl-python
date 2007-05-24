@@ -14,6 +14,7 @@
 (in-syntax *ast-readtable*)
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
+  (require :yacc)
   (import 'excl.yacc:(defgrammar grammar defproduction build-grammar)))
 
 (defgrammar python-grammar (grammar)
