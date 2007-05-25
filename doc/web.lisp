@@ -23,18 +23,22 @@
 
 (defparameter *style*
     "<style type=\"text/css\">
+ body {line-height: 1.4em}
  h1, h2 {font-family: Georgia, Palatino, \"Times New Roman\", Times, serif; font-weight: normal;}
  h1 {color: navy}
  body, div {color: #000; background-color: #fff}
- h2     {font-family: Georgia, Palatino, Times, serif; font-size: 120%; xbackground-color: #ddd;
-         position: relative; left: -20px; margin-right: -12px; display: inline}
- pre {font-family: \"Lucida Console\", Monaco, monospace; font-size: 80%; background-color: #dedede;
-        position: relative; left: 0%; width: 100%; overflow: auto; padding: 4px}
+ h2     {font-family: Georgia, Palatino, Times, serif; font-size: 1.2em;
+         position: relative; left: -1em; margin-right: -0.8em; display: inline}
+ pre {font-family: \"Lucida Console\", Monaco, monospace; font-size: 0.9em; background-color: #dedede;
+        position: relative; left: 0%; width: 100%; overflow: auto}
  .input {color: brown}
  h2 + p {display: inline}
  h2:after {content: \" \\02014 \"} /* 02014 = mdash */
  .params {position: relative; left: 15px}
  .dict {margin-bottom: 30px}
+ p {margin-bottom: 1.4em; margin-top: 1.4em}
+ pre {padding: 0.7em 0em 0.7em 1em; margin: -0.7em 0em; color: #333}
+ li > pre {display: inline; margin: 0 0.7em; padding: 0 0.7em}
 </style>")
 
 (defgeneric fill-page (page)
@@ -102,12 +106,12 @@
                        #5="Documentation" #6="Mailing Lists")
 
     (h2-anchor #1#)
-    (:p "CLPython is a complete implementation of "
+    (:p "CLPython is a fairly complete implementation of "
         ((:a href "http://www.python.org")
          "Python")
-        " in Common Lisp. With CLPython you can run
+        " written in Common Lisp. With CLPython you can run
 Python programs in a Lisp environment. Moreover, libraries written in Lisp can be made available to Python code, and Python libraries can be accessed by Lisp code.")
-    (:p "CLPython also offers functionality to analyse Python source code. This can be used for automatic documentation generation, and it can be used by tools that check source code for semantic errors.")
+    (:p "CLPython also offers functionality to analyse Python source code. Some intended use cases are automatic documentation generation, and tools that check source code for semantic errors.")
 
     (:p "CLPython is developed by Willem Broekema with support from Franz Inc. and released under the "
         ((:a href "http://opensource.franz.com/preamble.html")
@@ -123,6 +127,7 @@ The main dependencies on Allegro CL are yacc (for parsing) and environments acce
     (:p)
     (h2-anchor #3#)
     (:p "The source code is in a public CVS repository. To grab it: ")
+    (:p)
     (:pre "<span class=\"input\">cvs -d :pserver:cvspublic@cvspublic.franz.com:/cvs-public login</span>
 Password: <span class=\"input\">cvspublic</span>
 <span class=\"input\">cvs -d :pserver:cvspublic@cvspublic.franz.com:/cvs-public checkout clpython</span>")
@@ -131,6 +136,7 @@ Password: <span class=\"input\">cvspublic</span>
      
     (h2-anchor #4#)
     (:p "There are different ways to execute Python code. In this example we use the file <i>b2.py</i> from the Pie-thon benchmarks, which calculates the first 1000 digits of pi. To compile and run this file, we can call <i>run-python-file</i>:")
+    (:p)
     (:pre
      "clpython(119): <span class=\"input\">(run-python-file \"./lib/parrotbench/b2.py\")</span>
  3 1 4 1 5 9 2 6 5 3 5 8 9 7 9 3 2 3 8 4 6 2 6 4 3 3 8 3 2 7 9 5 0 2 8 8 4 1 9 <i>(output truncated)</i>
@@ -232,6 +238,7 @@ asdf system <i>clpython</i>." (:br) "Meanwhile, <i>repl</i> is exported from pac
     (:p "To run the test suite, either of these two expressions can be used:")
     (:pre "(asdf:operate 'asdf:load-op :clpython-test)
 \(asdf:operate 'asdf-test-op :clpython)")
+    (:p)
 
     (h2-anchor #11#)
     (:p "CLPython has one main package, named <i>clpython</i>, which is the package that applications built on top of CLPython should typically <i>use</i>. But internally the functionality is spread over separate packages:")
@@ -298,6 +305,7 @@ else:
     (:p)
     (h2-anchor #3#)
     (:p "The pretty printer emits the Python source code for a given AST:")
+    (:p)
     (:pre "clpython(161): <span class=\"input\">(py-pprint (parse-python-string \"
 if x > 0:
   s = 'positive'
@@ -319,7 +327,9 @@ thus the emitted source code will not contain them. (But docstrings, being regul
          (:li "String delimiters are by default single quotes: \"a\" will be printed as 'a'.")
          (:li "Brackets put around subexpresions are printed only if the priority of operations requires it: '(1 * 2) + 3' will be printed as '1 * 2 + 3'.")
          (:li "Whitespace is normalized: '1+2' is printed as '1 + 2'.")
-         (:li "Indentation is normalized, to use multiples of 4 characters, and no tabs.")
+         (:li "Indentation is normalized, to use multiples of "
+              (:princ clpython.parser::*tab-width-spaces*)
+              " characters, and no tabs.")
          (:li "Consecutive string constants are concatenated: \"x = 'a' 'b'\" will be printed as \"x = 'ab'\"."))
     (h2-anchor #4#)
     (:p "todo")
