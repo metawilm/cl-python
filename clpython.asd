@@ -103,7 +103,7 @@
 (defmethod asdf:perform :after ((op asdf:load-op) (c (eql (asdf:find-system :clpython))))
   (terpri)
   (format t "CLPython quick start:~%")
-  (format t "  Run a Python file: (clpython:run-python-file \"~~/example/foo.py\").~%")
+  (format t "  Run a Python file: (clpython:run-python-file \"~~/example/foo.py\").~%~%")
   (format t "After loading ASDF system :CLPYTHON-APP you can:~%")
   (format t "  Start the Python read-eval-print loop: (clpython.app.repl:repl)~%")
   (format t "  See the call count profiler: (clpython.app.profiler:profile-test).~%~%"))
