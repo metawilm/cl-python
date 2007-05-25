@@ -135,7 +135,32 @@ assert C.__mro__ == (C, object)")
 class C: pass
 class D(C): pass
 assert D.__mro__ == (D, C, object)")
-  )
+  (run-no-error "
+class C:
+  x = 3          # this variable X can not be closed over by methods
+  def g(self):
+    return x   # so this should give an error
+
+try:
+  print C().g()
+  assert False
+except NameError:
+  'ok'
+")
+  (run-no-error "
+def f():
+  class C:
+    x = 3          # this variable X can not be closed over by methods
+    def g(self):
+	return x   # so this should give an error
+  return C().g
+
+try:
+  print f()()
+  assert False
+except NameError:
+  'ok'
+"))
 
 (defmethod test-lang ((kind (eql :comparison-expr)))
   ;; Ensure py-list.__eq__ can handle non-lists, etc.
@@ -265,7 +290,17 @@ def f():
   return g
 f()(4)
 assert x == 4" :fail-info "Global decl is also valid for nested functions")
-  )
+  (test-warning (run-python-string "
+global y  # bogus declaration; check it does not leak into f
+def f(a):
+  y = a
+f(3)
+try:
+  print y
+  assert False
+except NameError:
+  pass"
+  )))
 
 (defmethod test-lang ((kind (eql :identifier-expr)))
   )

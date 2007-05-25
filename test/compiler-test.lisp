@@ -46,7 +46,12 @@
       (compile nil `(lambda () ,ast)))))
 
 (defmacro run-code-test (string test-expr)
-  `(run-with-tests ,string '(({TEST} . ,test-expr))))
+  `(progn
+     (when util.test::*announce-test*
+       (terpri)
+       (format t "Run-code-test:~% ~S~% ~S~%" ',string ',test-expr))
+     (let ((util.test::*announce-test* nil))
+       (run-with-tests ,string '(({TEST} . ,test-expr))))))
 
 (defun run-compiler-test ()
   (with-subtest (:name "CLPython-Compiler")
@@ -195,41 +200,45 @@ def f():
   (run-code-test "a = 3; TEST" (test-equal () #1#))
   (run-code-test "TEST; a = 3" (test-equal () #1#))
   
-  (run-code-test "def f(): TEST"             (test-true (seq-equal '() #1#)))
-  (run-code-test "def f(x): TEST"            (test-true (seq-equal '({x}) #1#)))
-  (run-code-test "def f(x,y,z=3): TEST"      (test-true (seq-equal '({x} {y} {z}) #1#)))
-  (run-code-test "def f(x,*y,**z): TEST"     (test-true (seq-equal '({x} {y} {z}) #1#)))
-  (run-code-test "def f( (x,y,z), *a): TEST" (test-true (seq-equal '({x} {y} {z} {a}) #1#)))
+  (run-code-test "def f(): TEST"             (test-true (seq-equal '({f}) #1#)))
+  (run-code-test "def f(x): TEST"            (test-true (seq-equal '({f} {x}) #1#)))
+  (run-code-test "def f(x,y,z=3): TEST"      (test-true (seq-equal '({f} {x} {y} {z}) #1#)))
+  (run-code-test "def f(x,*y,**z): TEST"     (test-true (seq-equal '({f} {x} {y} {z}) #1#)))
+  (run-code-test "def f( (x,y,z), *a): TEST" (test-true (seq-equal '({f} {x} {y} {z} {a}) #1#)))
   
   (run-code-test "
 def f( (x,y) ):
   def g(a,**b):
-    TEST"        (test-true (seq-equal '({x} {y} {a} {b} {g}) #1#)))
+    TEST"        (test-true (seq-equal '({x} {y} {a} {b} {f} {g}) #1#)))
 
   (run-code-test "
 def f( (x,y) ):
   def g( x=3,**y):
-    TEST"        (test-true (seq-equal '({x} {y} {g}) #1#)))
+    TEST"        (test-true (seq-equal '({x} {y} {f} {g}) #1#)))
 
   (run-code-test "
 def f( (x,y) ):
   def g(z):
     pass
-  TEST"        (test-true (seq-equal '({g} {x} {y}) #1#)
-                          :fail-info "Function names are not considered variable names yet."))
+  TEST"        (test-true (seq-equal '({f} {g} {x} {y}) #1#)))
   
   (run-code-test "
 class C(D):
   TEST"
-		 (test-equal () #1#))
+		 (test-equal '() #1#))
 
   (run-code-test "
 class C(D):
   pass
 TEST"
-		 (test-equal '({C}) #1#
-			     :known-failure t
-			     :fail-info "Class names are not considered variable names yet."))
+		 (test-equal '() #1#
+                             :fail-info "At module level, lex-vis-vars is by definition empty."))
+  (run-code-test "
+def g():
+  class C(D):
+    pass
+  TEST"
+		 (test-equal '({g} {C}) #1#))
   
   (run-code-test "
 aaa = 4
@@ -239,25 +248,22 @@ class C(D):
       bbb = 23
       def g(z):
         TEST"
-		 (test-true (seq-equal '({C} {f} {x} {Q} {bbb} {g} {z}) #1#)
-                            :known-failure t
-                            :fail-info "Something going wrong with lex vars"))
+		 (test-true (seq-equal '({f} {x} {Q} {g} {z}) #1#)
+                            :fail-info "The class C is not lex-vis"))
   )
 
 (defmethod test-comp-decl ((kind (eql :lexically-declared-globals)))
   (run-code-test "TEST"             (test-equal () #1=(pydecl :lexically-declared-globals)))
   (run-code-test "a = 3; TEST"      (test-equal () #1#))
-  (run-code-test "global a,b; TEST" (test-true (seq-equal '({a} {b}) #1#)
-					       :known-failure t 
-					       :fail-info #9="Module-level globals not collected."))
   (run-code-test "
-global x
+global a,b  ## module-levels vars should not end up in :lex-decl-glob
+TEST" (test-true (seq-equal '() #1#)))
+  (run-code-test "
+global x  ## bogus decl; should not leak into F
 def f():
   global b
   TEST
-  b = x"		 (test-true (seq-equal '({b} {b} {x}) #1#)
-				    :known-failure t
-				    :fail-info #9#)))
+  b = x"		 (test-true (seq-equal '({b}) #1#))))
 
 (defmethod test-comp-decl ((kind (eql :inside-function-p)))
   (run-code-test "TEST"             (test-false #1=(pydecl :inside-function-p)))

@@ -34,12 +34,13 @@
   ;; at the end.
   `(flet ((run-body () ,@body))
      (if *test-active*
-	 (progn (format t "~%[subtest: ~A]" ,(getf options :name))
+	 (progn (format t "~%[subtest: ~A]~%" ,(getf options :name))
 		(run-body))
-       (let ((*test-active* t))
+       (let ((*test-active* t)
+             (util.test::*announce-test* t))
 	 (with-tests ,options (run-body))))))
 
-(defun seq-equal (x y &key (test 'eq) ignore)
+(defun seq-equal (x y &key (test 'eq) ignore silent)
   "Are X and Y equal sequences (apart from items in IGNORE)"
   (let* ((i2 (coerce ignore 'list))
 	 (x2 (set-difference (coerce x 'list) i2 :test test))
@@ -49,9 +50,10 @@
       (if (and (null sd1)
                (null sd2))
           t
-        (progn (when (or sd1 sd2)
-                 (format t "seq-equal deviations between ~A and ~A: ~A; ~A"
-                         x y sd1 sd2))
+        (progn (unless silent
+                 (when (or sd1 sd2)
+                   (format t "~%seq-equal deviations between ~A and ~A: ~A; ~A~%"
+                           x y sd1 sd2)))
                nil)))))
 
 (defun seq-member (item seq)
@@ -60,11 +62,11 @@
 (defun test-comp-testfunc ()
   "Test the test functions"
   (with-subtest (:name "CLPython-Testfunc")
-    (test-false (seq-equal '(a) ()))
+    (test-false (seq-equal '(a) () :silent t))
     (test-true  (seq-equal '(a) () :ignore #(a)))
-    (test-false (seq-equal '(a) '(b)))
-    (test-false (seq-equal '(a b) '(b)))
-    (test-false (seq-equal #(a b) #(b)))
+    (test-false (seq-equal '(a) '(b) :silent t))
+    (test-false (seq-equal '(a b) '(b) :silent t))
+    (test-false (seq-equal #(a b) #(b) :silent t))
     (test-true  (seq-equal #(a b) #(b) :ignore '(a)))
     (test-true  (seq-member 'a #(a b)))
     (test-true  (seq-member 'a '(a b)))
