@@ -103,6 +103,9 @@ When true, call expressions result in more code. It is rare for Python code to r
 (defvar *warn-unused-function-vars* t
   "Controls insertion of IGNORABLE declaration around function variables.")
 
+(defvar *warn-bogus-global-declarations* t
+  "Controls insertion of IGNORABLE declaration around function variables.")
+
 (defvar *include-line-number-hook-calls* nil
   "Include calls to *runtime-line-number-hook* in generated code?")
 
@@ -459,14 +462,14 @@ XXX Currently there is not way to set *__debug__* to False.")
 		  ;; definition. This will fill +cls-namespace+ with the
 		  ;; class attributes and methods.
 		  
+                  ;; Note that the local class variables are not locally visible
+                  ;; i.e. they don't extend ":lexically-visible-vars".
+                                    
 		  (with-pydecl ((:context :class)
 				(:context-stack ,new-context-stack)
 				(:lexically-declared-globals
 				 ,class-cumul-declared-globals))
-		    
-		    ;; Note that the local class variables are not locally visible
-		    ;; i.e. they don't extend ":lexically-visible-vars"
-		    
+		    		    
 		    ,(if *mangle-private-variables-in-class*
 			(mangle-suite-private-variables cname suite)
 		       suite))
@@ -775,8 +778,9 @@ input arguments."
 				   (:context-stack ,new-context-stack)
 				   (:inside-function-p t)
 				   (:lexically-visible-vars
-				    ,(append all-nontuple-func-locals
-					     (get-pydecl :lexically-visible-vars e)))
+				    ,(cons fname
+                                           (append all-nontuple-func-locals
+                                                   (get-pydecl :lexically-visible-vars e))))
 				   (:safe-lex-visible-vars
 				    ,(nset-difference
 				      (append nontuple-arg-names
@@ -860,7 +864,8 @@ input arguments."
   ;; GLOBAL statements are already determined and used at the moment a
   ;; FUNCDEF-STMT is handled.
   (declare (ignore names))
-  (unless (get-pydecl :inside-function-p e)
+  (when (and *warn-bogus-global-declarations*
+             (not (get-pydecl :inside-function-p e)))
     (warn "Bogus `global' statement found at top-level.")))
 
 (define-setf-expander [identifier-expr] (name &environment e)

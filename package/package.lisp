@@ -208,7 +208,8 @@
 
 	   ;; compiler
 	   #:+standard-module-globals+
-	   #:*warn-unused-function-vars* #:with-line-numbers #:*runtime-line-number-hook*
+	   #:*warn-unused-function-vars* #:*warn-bogus-global-declarations*
+           #:with-line-numbers #:*runtime-line-number-hook*
 
 	   ;; module status
 	   #:impl-status #:set-impl-status
