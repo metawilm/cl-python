@@ -94,8 +94,12 @@
 ;;; Compiler optimization and debugging options.
 
 (defvar *allow-indirect-special-call* nil
-  "Whether `eval', `locals' and `globals' can be called indirectly, like `x = locals; x()'
-When true, call expressions result in more code. It is rare for Python code to require this.")
+  "Whether `eval', `locals' and `globals' can be called indirectly, like:
+ x = locals; x()
+If true, the compiler must generate additional code for every call,
+and execution will be slower. As it is rare for Python code to use
+indirect calls, the default value is false.")
+;; This is similar to the Javscript restriction on `eval' (ECMA 262, §15.1.2.1)
 
 (defvar *mangle-private-variables-in-class* nil
   "In class definitions, replace __foo by _CLASSNAME__foo, like CPython does")
