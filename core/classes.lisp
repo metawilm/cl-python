@@ -1565,11 +1565,11 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 (defconstant +impl-status-comment-prop+ 'clpython::.impl-status-comment.)
 (defconstant +impl-warned-prop+         'clpython::.impl-warned.)
 
-(defconstant +impl-statuses+ '((nil         . "unknown")
-			       (:todo       . "todo")
+(defconstant +impl-statuses+ '((t           . "complete")
+                               (:incomplete . "incomplete")
+                               (:todo       . "todo")
 			       (:n/a        . "not applicable")
-			       (t           . "complete")
-			       (:incomplete . "incomplete")))
+                               (nil         . "unknown status")))
 
 (defun impl-status (symbol &optional want-comment)
   "Returns impl status of symbol, and optionally the corresponding comment."
@@ -1605,35 +1605,63 @@ invalid status; must be one of ~S"
   new-status)
 
 (defun package-impl-status (pkg)
-  "Returns ALIST, COMPLETENESS
-with ALIST like ((:incomplete . 2) (:todo . 20) (:n/a . 3) (nil . 1) (t . 10))
-and COMPLETENESS denoting roughly the degree of completeness, as ratio between 0 and 1 (or NIL if unknown)"
+  "Returns ALIST, COMPLETENESS, DETAILS
+ALIST: e.g. ((:incomplete . 2) (:todo . 20) (:n/a . 3) (nil . 1) (t . 10))
+COMPLETENESS: ratio between 0 and 1, or NIL if unknown
+DETAILS: alist ((:incomplete . (foo bar)) (:todo . (baz)))"
   (let ((ht (make-hash-table :test 'eq)))
     (do-external-symbols (s pkg)
-      (incf (gethash (clpython::impl-status s) ht 0)))
-    (loop for k being the hash-key in ht
-        using (hash-value v)
-        collect (cons k v) into alist
-        when (member k '(t :n/a)) sum v into complete
-        when (member k '(:incomplete)) sum v into half-complete
-        when (member k '(:todo)) sum v into missing
-        finally (if (> (+ complete half-complete missing) 0)
-                    (return (values alist
-                                    (/ (+ complete (* 1/2 half-complete))
-                                       (+ complete half-complete missing))))
-                  (return (values () nil))))))
+      (let ((st (clpython::impl-status s)))
+        (push s (gethash st ht))))
+    
+    (multiple-value-bind (summary details)
+        (loop for k in (mapcar #'first +impl-statuses+)
+            collect (cons k (length (gethash k ht))) into summary
+            collect (cons k (gethash k ht)) into details
+            finally (return (values summary details)))
+      
+      (let ((completeness (let ((complete (+ (length (gethash t ht))
+                                             (length (gethash :n/a ht))))
+                                (half-complete (length (gethash :incomplete ht)))
+                                (missing (length (gethash :todo ht))))
+                            (if (> (+ complete half-complete missing) 0)
+                                (/ (+ complete (* 1/2 half-complete))
+                                   (+ complete half-complete missing))
+                              nil))))
+        
+        (values summary completeness details)))))
 
 (defclass lisp-package (py-core-object)
   ()
   (:metaclass py-core-type))
 
-(defun relative-package-name (pkg)
-  "Returns part of package name after last dot."
-  (let* ((name (package-name pkg))
-	 (dot-ix (position #\. name :from-end t)))
-    (if dot-ix
-	(subseq name (1+ dot-ix))
-      name)))
+(defun relative-package-name (pkg &optional relative-to)
+  "Returns part of package name after last dot; or full name if no dot in name.
+But if RELATIVE-TO package name is given, result may contains dots."
+  (let* ((name (package-name pkg)))
+    (if relative-to
+        (let* ((rel-name (package-name relative-to))
+               (rel-name-len (length rel-name)))
+          (if (and (> (length name) (1+ rel-name-len))
+                   (string-equal (subseq name 0 rel-name-len) rel-name)
+                   (char= (aref name rel-name-len) #\.))
+              (subseq name (1+ rel-name-len))
+            name))
+      (let ((dot-ix (position #\. name :from-end t)))
+        (if dot-ix
+            (subseq name (1+ dot-ix))
+          name)))))
+
+#||
+(assert (string-equal (clpython::relative-package-name :clpython.module.math)
+                      "math"))
+(assert (string-equal (clpython::relative-package-name :clpython.module.math
+                                                       :clpython.module)
+                      "math"))
+(assert (string-equal (clpython::relative-package-name :clpython.module.math
+                                                       :clpython)
+                      "module.math"))
+||#
 
 (def-py-method lisp-package.__getattribute__ (pkg name)
   (declare (optimize (speed 3) (safety 0) (debug 0)))
