@@ -53,7 +53,10 @@
            #:|urandom|))
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
-  (user::cascade-external-symbols :clpython.module.os))
+  (user::cascade-external-symbols :clpython.module.os
+                                  (set-difference (package-use-list :clpython.module.os)
+                                                  '(:clpython :common-lisp)
+                                                  :key #'package-name)))
 
 (in-package :clpython)
 (in-syntax *user-readtable*)
