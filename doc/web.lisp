@@ -184,6 +184,19 @@ asdf system <i>clpython</i>." (:br) "Meanwhile, <i>repl</i> is exported from pac
          "announce")
         ": for announcements of new releases.")))
 
+(defmacro with-package-details ((rel-name is-first perc details) &body body)
+  `(let ((.pkgs (sort (excl:package-children :clpython.module) #'string<
+                      :key #'package-name)))
+     (loop for .p in .pkgs
+         for ,is-first = t then nil
+         do (multiple-value-bind (.summary .ratio ,details)
+                (clpython::package-impl-status .p)
+              (declare (ignore .summary))
+              (let ((,perc (round (* 100 (or .ratio 0))))
+                    (,rel-name (clpython::relative-package-name .p :clpython.module)))
+                (declare (ignorable ,is-first ,details ,perc))
+                ,@body)))))
+
 (defmethod fill-page ((page (eql :status)))
   (with-page-template ((:page :status)
                        (:title "CLPython Status")
@@ -205,20 +218,49 @@ asdf system <i>clpython</i>." (:br) "Meanwhile, <i>repl</i> is exported from pac
     (h2-anchor #2#)
     (:p "The following modules of the "
         ((:a href "http://python.org/doc/current/modindex.html")
-         "Python standard library")
-        " are currently being implemented:")
-    (:ul
-     (loop for p in (sort (excl:package-children :clpython.module) #'string< :key #'package-name)
-         for first = t then nil
-         do (let* ((completeness (or (nth-value 1 (clpython::package-impl-status p)) 0))
-                   (percentage (round (* 100 completeness))))
-             (html (:li (:princ (clpython::relative-package-name p))
-                        ": "
+         "Python library")
+        " have been implemented, to some degree:")
+
+    (html (:ul
+           (with-package-details (rel-name is-first percentage details)
+             (html (:li (:princ rel-name) ": "
                         (:princ percentage)
                         "%"
-                        (when first
-                          (html " completed")))))))))
-
+                        (when is-first (html (:princ " completed"))))))))
+      
+    (html (:p "More specific, the implementation status per module is as follows:")
+          ((:table style "font-size: small; border: 1px solid black; border-width: 1px 0px")
+           (with-package-details (rel-name is-first percentage details)
+             (loop with first-row = t
+                 for (code . desc) in clpython::+impl-statuses+
+                 for syms = (cdr (assoc code details))
+                 when syms do
+                   (let ((st (if (and (not is-first) first-row)
+                                 "border-top: 1px dotted #999" "")))
+                     (html ((:tr valign "top")
+                            ((:td style st)
+                             (when first-row (html (:br) (:princ rel-name) "&nbsp;")))
+                            (html ((:td style st)
+                                   (when first-row
+                                     (html (:br)))
+                                   (:nobr "&nbsp;" (:princ desc) ":&nbsp;"))
+                                  ((:td style st)
+                                   (when first-row
+                                     (html (:br)))
+                                   (let (prev)
+                                     (dolist (s (sort syms #'string<))
+                                       (when prev
+                                         ;; linebreaks between different sets of names
+                                         (let ((first-chars (list (aref (string s) 0)
+                                                                  (aref (string prev) 0))))
+                                           (when (or (= 1 (count #\_ first-chars :test #'char=))
+                                                     (= 1 (count-if #'upper-case-p first-chars)))
+                                             (html (:br)))))
+                                       (html (:princ s) "&nbsp; ")
+                                       (setf prev s)))
+                                   (:br) "&nbsp;"))))
+                     (setf first-row nil))))))))
+  
 (defmethod fill-page ((page (eql :manual)))
   (with-page-template ((:page :manual)
                        (:title "CLPython Reference Manual")
