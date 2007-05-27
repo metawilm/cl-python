@@ -12,6 +12,7 @@
 (defpackage :clpython.test
   (:use :common-lisp :clpython :util.test)
   (:import-from :clpython #:in-syntax)
+  (:import-from :clpython.parser #:parse-python-one-expr)
   (:export #:run))
 
 (in-package :clpython.test)
