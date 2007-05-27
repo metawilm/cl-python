@@ -85,6 +85,27 @@ Relevant Lisp variables:
 
 (defvar *repl-mod* nil "The REPL module (for debugging)")
 
+(defun profile (f kind)
+  "Call F in profiling context.
+KIND can be :ptime, :time, :space, :pspace or NIL."
+  (check-type f function)
+  (ecase kind
+    (:ptime  (prof:with-profiling (:type :time)
+               (funcall f))
+             (terpri)
+             (prof:show-call-graph))
+    (:time  (prog1 (time (funcall f))
+              (terpri)))
+    (:space  (prof:with-profiling
+                 (:type :space :count t) (funcall f))
+             (terpri)
+             (prof:show-flat-profile))
+    (:pspace (prof:with-profiling (:type :space)
+               (funcall f))
+             (terpri)
+             (prof:show-call-graph))
+    ((nil)   (funcall f))))
+    
 (defun repl ()
   (let* ((repl-mod (make-module))
 	 (*repl-mod* repl-mod)
@@ -130,22 +151,7 @@ Relevant Lisp variables:
                                           (retry-repl-eval
                                            "Retry the execution the compiled REPL command. [:re]")
                                         (return-from :val
-                                          (ecase *repl-prof*
-                                            (:ptime  (prof:with-profiling (:type :time)
-                                                       (funcall helper-func))
-                                                     (terpri)
-                                                     (prof:show-call-graph))
-                                            (:time  (prog1 (time (funcall helper-func))
-                                                      (terpri)))
-                                            (:space  (prof:with-profiling
-                                                         (:type :space :count t) (funcall helper-func))
-                                                     (terpri)
-                                                     (prof:show-flat-profile))
-                                            (:pspace (prof:with-profiling (:type :space)
-                                                       (funcall helper-func))
-                                                     (terpri)
-                                                     (prof:show-call-graph))
-                                            ((nil)   (funcall helper-func))))))))))))
+                                          (profile helper-func *repl-prof*))))))))))
                    (remember-value (car vals))
                    (block :repr
                      (loop
