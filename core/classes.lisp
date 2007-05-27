@@ -78,6 +78,7 @@
 
 (eval-when (compile load eval)
   (defun make-dict ()
+    (declare (optimize (speed 3) (safety 0) (debug 0)))
     (make-instance 'py-dict))
 )
 
@@ -1361,6 +1362,7 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
   (py-type.__repr__ x))
 
 (def-py-method py-type.__call__ (cls &rest args)
+  (declare (optimize (speed 3) (safety 1) (debug 0)))
   
   (cond ((and (eq cls (ltv-find-class 'py-type))
 	      args
@@ -1378,15 +1380,20 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 	       ;; Inline common case: creating new classes with TYPE as requested metaclass
 	       (apply #'py-type.__new__ cls args)
 	     
-	     (let* ((__new__ (recursive-class-dict-lookup cls '{__new__})) ;; XXX bind __new__?
-		    (bound-new (bind-val __new__ cls (py-class-of cls)))
+	     (let* ((__new__ (recursive-class-dict-lookup cls '{__new__}))
+                    (bound-new (if (eq (class-of __new__) (ltv-find-class 'py-static-method))
+                                   __new__ ;; inline common case
+                                 (bind-val __new__ cls (py-class-of cls))))
 		    (inst    (apply #'py-call bound-new cls args))) ;; including CLS as arg!
 	       
 	       (when (or (eq (class-of inst) cls) ;; <- Efficiency optimization
 			 (subtypep (py-class-of inst) cls)) ;; <- real test
-		 ;; Don't do this when inst is not of type cls
-		 (let ((__init__ (recursive-class-lookup-and-bind inst '{__init__})))
-		   (apply #'py-call __init__ args)))
+		 ;; Don't run __init__ when inst is not of type cls
+                 (let ((__init__-unbound (recursive-class-dict-lookup cls '{__init__})))
+                   (if (functionp __init__-unbound)
+                       (apply __init__-unbound inst args) ;; inline common case
+                     (let ((__init__ (recursive-class-lookup-and-bind inst '{__init__})))
+                       (apply #'py-call __init__ args)))))
 	       
 	       inst)))))
 
