@@ -12,7 +12,7 @@
 (in-package :clpython.test)
 (in-syntax *user-readtable*)
 
-(defmacro test-code (string)
+#+(or)(defmacro test-code (string)
   `(test-no-error (run-python-string ,string)))
 
 (defun run-lang-test ()
@@ -29,14 +29,27 @@
                     :while-stmt :yield-stmt))
       (test-lang node))))
 
+(defmacro with-all-compiler-variants-tried (&body body)
+  (let ((g1 (gensym))
+        (g2 (gensym)))
+    `(dolist (,g1 '(t nil))
+       (dolist (,g2 '(t nil))
+         (let ((clpython::*use-environment-acccessors* ,g1)
+               (clpython::*compile-python-ast-before-running* ,g2))
+           ,@body)))))
+
 (defmacro run-error (string condtype &rest options)
-  `(test-error (run-python-string ,string) :condition-type ',condtype ,@options))
+  `(with-all-compiler-variants-tried
+       (test-error (run-python-string ,string) :condition-type ',condtype ,@options)))
 
 (defmacro run-no-error (string &rest options)
-  `(test-no-error (run-python-string ,string) ,@options))
+  `(with-all-compiler-variants-tried
+       (test-no-error (run-python-string ,string) ,@options)))
 
 (defmacro run-test (val string &rest options)
-  `(test ,val (run-python-string ,string) ,@options))
+  `(with-all-compiler-variants-tried
+       (test ,val (run-python-string ,string) ,@options)))
+
 
 (defgeneric test-lang (kind))
 
