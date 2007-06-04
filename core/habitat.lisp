@@ -97,12 +97,18 @@
     (remove name (habitat-loaded-mods habitat)
 	    :test #'string-equal :key #'module-name)))
 
-
-(defun run-python-ast (ast &key habitat)
-  "Run Python AST in freshly bound habitat"
+(defvar *compile-python-ast-before-running* t
+  "Whether to compile an AST before running it.")
+    
+(defun run-python-ast (ast &key habitat (compile *compile-python-ast-before-running*))
+  "Run Python AST in freshly bound habitat.
+If COMPILE is true, the AST is compiled into a function before running."
   (let* ((*habitat* habitat)
-	 (f (compile nil `(lambda () ,ast))))
-    (funcall f)))
+         (f `(lambda () ,ast))
+	 (fc (if compile
+                 (compile nil f)
+               (coerce f 'function))))
+    (funcall fc)))
     
 (defun run-python-string (string &rest args)
   (apply #'run-python-ast (parse-python-string string) args))
