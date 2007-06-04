@@ -26,70 +26,11 @@
 ;; In the macro expansions, lexical variables that keep context state
 ;; have a name like +NAME+.
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;;;
-;;; Declarations
-;;
-;; The Python compiler uses its own set of declaration to keep state
-;; in generated code. This declaration is named "pydecl".
-;; The declarations are in the form of (:key ...val...) pairs.
-;; 
-;; Currently, the following "pydecl" declaration keys are used:
-;;  
-;;  :mod-globals-names          : vector of variable names at the module level
-;;  :mod-futures                : the features imported from the __future__ module
-;;
-;;  :context                    : innermost context, one of (:class :module :function)
-;;  :context-stack              : list of class and function names, innermost first;
-;;                                starts with :lambda if in anonymous function
-;;  
-;;  :lexically-declared-globals : list of variable names declared global in an outer scope
-;;                                (which makes them also global in inner scopes)
-;;  :lexically-visible-vars     : list of variable names that can be closed over
-;; 
-;;  :inside-loop-p              : T iff inside WHILE of FOR  (to check BREAK, CONTINUE)
-;;  :inside-function-p          : T iff inside FUNCDEF       (to check RETURN)
-;;
-;;  :safe-lex-visible-vars      : list of all variables guaranteed to be lexically visible and bound;
-;;                                subset of :LEXICALLY-VISIBLE-VARS.
-;;
-;;  :inside-setf-py-attr        : T if insides a (setf (py-attr ..) ..) form (to work around Allegro CL
-;;                                issues w.r.t. compiler macros and setf forms.
-
-(sys:define-declaration
-    pydecl (&rest property-pairs) nil :declare
-    (lambda (declaration env)
-      (values :declare
-	      (cons 'pydecl
-		    (nconc (copy-list (cdr declaration))
-			   (sys:declaration-information 'pydecl env))))))
-
-(defun get-pydecl (var env)
-  (let ((res (second (assoc var (sys:declaration-information 'pydecl env) :test #'eq))))
-    (when (and (eq var :context) (null res))
-      (warn "Environment info for var ~S is missing; assuming now in global scope." var)
-      (setf res :module))
-    res))
-
-(defmacro with-pydecl (pairs &body body)
-  `(locally (declare (pydecl ,@pairs))
-     ,@body))
-
-;; Allegro CL 8.0, during file compilation, sometimes calls CONSTANTP without
-;; environment. However, in case of operations on Python variables, the
-;; environment is needed to look up what kind of variable we're dealing with.
-;; 
-;; As a workaround, in those situations the variable macroexpands into a
-;; reference to *the-great-unknown*, about which nothing is known --
-;; least of all, whether it is a constant...
-
-(defvar *the-great-unknown*)
 
 (defmacro with-gensyms (list &body body)
   `(let ,(loop for x in list
 	     collect `(,x (gensym ,(symbol-name x))))
      ,@body))
-
 
 ;;; Compiler optimization and debugging options.
 
@@ -875,7 +816,8 @@ input arguments."
 (define-setf-expander [identifier-expr] (name &environment e)
   ;; As looking up identifiers is side-effect free, the valuable
   ;; functionality here is the "store form" (fourth value).
-  ;; As a bonus the "delete form" is given (sixth value). 
+  ;; As a bonus the "delete form" is given (sixth value).
+  (warn "def-setf-exp id-expr: ~A ~A" name e)
   (let ((glob-ix (position name (get-pydecl :mod-globals-names e))))
     (assert (not (eq name '{...})))
     (with-gensyms (val)
@@ -898,8 +840,7 @@ input arguments."
 			       local-set))
 		 (:class     (if (member name (get-pydecl :lexically-declared-globals e))
 				 module-set 
-			       class-set))
-		 ((nil)      `*the-great-unknown*))))
+			       class-set)))))
 	  ;; 2) Del form
 	  (symbol-macrolet ((module-del
 				`(delete-identifier-at-module-level ',name ,glob-ix +mod+))
@@ -922,9 +863,7 @@ input arguments."
 				  local-del))
 		     (:class    (if (member name (get-pydecl :class-globals e))
 				    module-del
-				  class-del))
-		     ((nil)     #+(or)(break "Environment info is missing")
-				`*the-great-unknown*))))
+				  class-del)))))
 	      (values
 	       () ;; temps
 	       () ;; values
@@ -937,6 +876,8 @@ input arguments."
   ;; The identifier is used for its value; it is not an assignent
   ;; target (as the latter case is handled by ASSIGN-STMT).
   (assert (symbolp name) () "Identifier name should be a symbol: ~S" name)
+  (unless e
+    (break "no env: id-expr ~A ~A" name e))
   
   (flet ((module-lookup ()
 	   (let ((ix (position name (get-pydecl :mod-globals-names e))))
@@ -964,10 +905,7 @@ input arguments."
       (:class    `(or (this-dict-get +cls-namespace+ ',(symbol-name name))
 		      ,(if (member name (get-pydecl :lexically-visible-vars e))
 			   (local-lookup)
-			 (module-lookup))))
-      
-      ((nil)     (break)
-		 `*the-great-unknown*))))
+			 (module-lookup)))))))
 
 (defmacro [if-stmt] (if-clauses else-clause)
   `(cond ,@(loop for (cond body) in if-clauses

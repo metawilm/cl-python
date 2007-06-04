@@ -66,15 +66,16 @@
     :description "Python semantics and compiler"
     :depends-on (:clpython.package :clpython.parser)
     :components ((:module "core"
-			  :serial t
-			  :components ((:file "csetup"       )
-				       (:file "formatstring" )
-				       (:file "classes"      )
-				       (:file "exceptions"   )
-				       (:file "compiler"     )
-				       (:file "optimize"     )
-				       (:file "habitat"      )
-				       (:file "import"       )))))
+                          :serial t
+                          :components ((:file "csetup"       )
+                                       (:file "pydecl"       )
+                                       (:file "formatstring" )
+                                       (:file "classes"      )
+                                       (:file "exceptions"   )
+                                       (:file "compiler"     )
+                                       (:file "optimize"     )
+                                       (:file "habitat"      )
+                                       (:file "import"       )))))
 
 (asdf:defsystem :clpython.lib
     :description "Python module library"

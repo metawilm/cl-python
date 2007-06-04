@@ -767,7 +767,9 @@
       (if (typep func 'py-function)
 	  
 	  (progn
-	    (format s "python-function ~A" (py-function-name func))
+	    (format s "python-function ~A ~@[(~A)~]"
+                    (py-function-name func)
+                    (unless (compiled-function-p (py-function-lambda func)) "interpreted"))
 	    (when (string/= (py-function-name func)
 			    (py-function-context-name func))
 	      (format s " (~A)" (py-function-context-name func))))
