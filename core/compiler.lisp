@@ -1032,7 +1032,9 @@ input arguments."
           (:context            :module)
           (:mod-futures        :todo-parse-module-ast-future-imports))
        
-       ,@body)))
+       
+       (with-py-errors
+           ,@body))))
 
 (defmacro create-module-globals-dict ()
   ;; Updating this dict really modifies the globals.
