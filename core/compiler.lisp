@@ -817,7 +817,6 @@ input arguments."
   ;; As looking up identifiers is side-effect free, the valuable
   ;; functionality here is the "store form" (fourth value).
   ;; As a bonus the "delete form" is given (sixth value).
-  (warn "def-setf-exp id-expr: ~A ~A" name e)
   (let ((glob-ix (position name (get-pydecl :mod-globals-names e))))
     (assert (not (eq name '{...})))
     (with-gensyms (val)
