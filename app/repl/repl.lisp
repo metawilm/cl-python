@@ -12,7 +12,7 @@
 (defpackage :clpython.app.repl
   (:documentation "Python read-eval-print loop")
   (:use :common-lisp :clpython :clpython.parser )
-  (:export #:repl #:*repl-prof* ))
+  (:export #:repl #:*repl-compile* #:*repl-prof*))
 
 (in-package :clpython.app.repl)
 (in-syntax *ast-user-readtable*)
@@ -56,6 +56,9 @@
   "Execution of each expression is profiled according to this setting.
 Possible values: :time :ptime :space :pspace nil")
 
+(defvar *repl-compile* nil
+  "Whether code typed in the REPL is compiled before running.")
+
 (defvar *repl-doc* "
 In the Python interpreter:
 
@@ -72,7 +75,10 @@ In the Lisp debugger:
      :re            => retry the last (failed) Python command
 
 
-Relevant Lisp variables:
+Relevant Lisp variables (exported from package :clpython.app.repl):
+
+   *repl-compile*  => whether source code is compiled into assembly
+                      before running
 
    *repl-prof*     => profile all Python commands
                       value must be one of:
@@ -131,9 +137,12 @@ KIND can be :ptime, :time, :space, :pspace or NIL."
 
 	     (run-ast-func (suite)
 	       #+(or)(warn "AST: ~S" suite)
-               `(lambda ()
-                  (clpython::with-this-module-context (,repl-mod)
-                    ,suite)))
+               (let ((f `(lambda ()
+                           (clpython::with-this-module-context (,repl-mod)
+                             ,suite))))
+                 (when *repl-compile*
+                   (setf f (compile nil f)))
+                 f))
 	     
 	     (eval-print-ast (ast)
 	       (destructuring-bind (module-stmt suite) ast
