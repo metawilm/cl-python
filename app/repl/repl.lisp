@@ -88,7 +88,6 @@ Relevant Lisp variables:
 (defun profile (f kind)
   "Call F in profiling context.
 KIND can be :ptime, :time, :space, :pspace or NIL."
-  (check-type f function)
   (ecase kind
     (:ptime  (prof:with-profiling (:type :time)
                (funcall f))
@@ -132,10 +131,9 @@ KIND can be :ptime, :time, :space, :pspace or NIL."
 
 	     (run-ast-func (suite)
 	       #+(or)(warn "AST: ~S" suite)
-	       (compile nil `(lambda ()
-			       (declare (optimize (debug 3)))
-			       (clpython::with-this-module-context (,repl-mod)
-				 ,suite))))
+               `(lambda ()
+                  (clpython::with-this-module-context (,repl-mod)
+                    ,suite)))
 	     
 	     (eval-print-ast (ast)
 	       (destructuring-bind (module-stmt suite) ast
