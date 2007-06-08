@@ -77,13 +77,17 @@ READ-CHR."
             (let ((ch (read-chr-nil)))
               (if (char-member ch +whitespace+)
                   (progn (unread-chr ch)
-                         (multiple-value-bind (newline new-indent)
+                         (multiple-value-bind (newline new-indent eof-p)
                              (read-whitespace)
                            (declare (ignore newline))
-                           (when (> new-indent 0)
-                             (restart-case (raise-syntax-error "Leading whitespace on first non-blank line.")
-                               (cl-user::continue ()
-                                   :report "Continue parsing, ignoring the leading whitespace.")))))
+                           (unless eof-p
+                             (when (> new-indent 0)
+                               (restart-case
+                                   (raise-syntax-error
+                                    "Leading whitespace on first non-blank line.")
+                                 (cl-user::continue ()
+                                     :report "Continue parsing, ignoring ~@
+                                              the leading whitespace."))))))
                 (when ch (unread-chr ch)))))
           
 	  (when tokens-todo
@@ -182,9 +186,9 @@ READ-CHR."
 
 		   ((char-member c +whitespace+)
 		    (unread-chr c)
-		    (multiple-value-bind (newline new-indent)
+		    (multiple-value-bind (newline new-indent eof-p)
 			(read-whitespace)
-		      
+		      (declare (ignore eof-p))
 		      (when (or (not newline) open-brackets)
 			(go next-char))
 
@@ -860,14 +864,17 @@ non-whitespace character (in other words, the indentation of the first
 non-whitespace character) measured in spaces, where each Tab is equivalent
 to *tab-width-spaces* spaces - so N >= 0.
 
-If no Newline was encountered before a non-whitespace character, or if EOF
-is encountered: NIL, N are returned"
+If no Newline was encountered before a non-whitespace character then
+NIL, N are returned.
+
+If EOF was encountered then NIL, NIL, T are returned."
 
   (loop
       with found-newline = nil and n = 0
       for c = (read-chr-nil)
       do (case c
-	   ((nil)                  (return-from read-whitespace nil))
+	   ((nil)                  (return-from read-whitespace
+                                     (values nil nil t)))
 	   
 	   ((#\Newline #\Return)   (setf found-newline t
 					 n 0))
