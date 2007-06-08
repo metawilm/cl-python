@@ -4439,6 +4439,9 @@ the lisp list will be returned).")
 	       (py-call write-func s)
 	       (when (> (length s) 0)
 		 (setf last-char-written (aref s (1- (length s)))))))
+
+      (unless comma?
+        (py-call write-func #.(string #\Newline)))
       
       (let* ((printed-newline-already (or (not comma?)
 					  (char= last-char-written #\Newline)))
