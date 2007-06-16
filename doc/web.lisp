@@ -29,7 +29,7 @@
  body, div {color: #000; background-color: #fff}
  h2     {font-family: Georgia, Palatino, Times, serif; font-size: 1.2em;
          position: relative; left: -1em; margin-right: -0.8em; display: inline}
- pre {font-family: \"Lucida Console\", Monaco, monospace; font-size: 0.9em; background-color: #dedede;
+ pre {font-family: Monaco, monospace; font-size: 0.85em; line-height: 1.4em; background-color: #dedede;
         position: relative; left: 0%; width: 100%; overflow: auto}
  .input {color: brown}
  h2 + p {display: inline}
@@ -267,19 +267,14 @@ asdf system <i>clpython</i>." (:br) "Meanwhile, <i>repl</i> is exported from pac
                        (:backlink t))
     (make-anchor-links #10="ASDF Systems" #11="Packages" #1="Readtables" #2="Parser"
                        #3="Pretty Printer"
-                       #4="Compiler" #5="Runtime" #6="Test suite")
- 
+                       #4="Compiler" #5="Compiled vs Interpreted Code" #6="Python Object Representation" #7="Test suite")
+    
     (h2-anchor #10#)
     (:p "The CLPython source code is divided into three ASDF systems:")
     (:ul (:li "<i>clpython</i> contains the parser, compiler and runtime;")
          (:li "<i>clpython-test</i> contains the test suite for <i>clpython</i>;")
          (:li "<i>clpython-app</i> contains applications built on top of CLPython, for example the read-eval-print loop (\"interpreter\" in Python parlance)."))
-    (:p "To load the runtime and applications:")
-    (:pre "(asdf:operate 'asdf:load-op :clpython-app)")
     (:p "Both <i>clpython-test</i> and <i>clpython-app</i> depend on <i>clpython</i>, and the latter system will thus be loaded automatically when one of the former is.")
-    (:p "To run the test suite, either of these two expressions can be used:")
-    (:pre "(asdf:operate 'asdf:load-op :clpython-test)
-\(asdf:operate 'asdf-test-op :clpython)")
     (:p)
 
     (h2-anchor #11#)
@@ -374,15 +369,99 @@ thus the emitted source code will not contain them. (But docstrings, being regul
               " characters, and no tabs.")
          (:li "Consecutive string constants are concatenated: \"x = 'a' 'b'\" will be printed as \"x = 'ab'\"."))
     (h2-anchor #4#)
-    (:p "todo")
+    (:p "The compiler translates an AST into Lisp code.")
+    (:p "Most of the compilation is carried out by macros: every node in the AST has a corresponding macro that implements the Python semantics of the node. For example an <i>if</i> statement...")
+    (:p)
+    (:pre "if 4 > 3:
+  print 'y'
+else:
+  print 'n'")
+    (:p "...macroexpands into a <i>cond</i>:")
+    (:pre "
+\(cond ((py-val-&gt;lisp-bool (funcall #'py-&gt; 4 3))
+       (py-print nil (list \"y\") nil))
+      (t
+       (py-print nil (list \"n\") nil)))")
+    (:p "...as defined by the macro:")
+    (:pre "
+\(defmacro [if-stmt] (if-clauses else-clause)
+  `(cond ,@(loop for (cond body) in if-clauses
+	       collect `((py-val->lisp-bool ,cond) ,body))
+	 ,@(when else-clause
+	     `((t ,else-clause)))))")
+    (:p "Note that the expansion contains calls to functions <i>py-val-&gt;lisp-bool</i>, <i>py-&gt;</i> and <i>py-print</i>. The role of these functions should be obvious from their names. These function are part of CLPython and not part of the generated code, which means that CLPython must be loaded before this code can be executed.")
+    (:p "Sometimes, the generated Python code can be simplified because the value of an expressions is known at compile time.
+This is where <i>compiler macros</i> come in.
+In this example, as 4 > 3 always holds, the compiler macro for <i>py-&gt;</i> replaces <i>(funcall #'py-&gt; 4 3)</i> by the Python value <i>True</i>.
+After that, the compiler macro for <i>py-val-&gt;lisp-bool</i> recognizing <i>True</i> is a constant value, replaces <i>(py-val-&gt;lisp-bool True)</i> by <i>t</i>.
+The Lisp compiler then deduces that always the first branch of the <i>if</i> expression is taken,
+and replace the whole <i>(cond ...)</i> by <i>(py-print nil (list \"y\") nil)</i>.")
+    (:p "In this example the compiler macros were able to remove a lot of the Lisp code at compile time. This results in more efficient code.
+However, in practice there is often not that much that can be decided at compile time, due to Python-the-language being very dynamic.
+For example, in the expression <i>5 + x</i> the value of <i>x</i> can be anything. As classes are able to redefine how the <i>+</i> operator
+behaves (by means of the <i>__add__</i> and <i>__radd__</i> methods), the value of <i>5 + x</i> can be anything as well.
+Unless the context gives more information about the type of <i>x</i>, the Lisp code must contain a call to the generic addition function <i>py-+</i>.")
+    (:p "Nevertheless, the compiler macro will inline \"common\" case, and make the generic call only for \"uncommon\" arguments.
+If small integers (fixnums) are common for the <i>+</i> operator, the compiler macro for <i>py-+</i> could emit:")
+    (:pre "(if (typep x 'fixnum)
+    (+ 5 x)
+  (py-+ 5 x))")
+    (:p "The check for x being <i>fixnum</i> is very fast; and if x is indeed a <i>fixnum</i> then the inline addition is also very fast.
+If x is not a fixnum, it could another kind of (Lisp) number, or even a Pythonic object posing as a number.
+The generic <i>py-+</i> will handle that.")
     (:p)
     (h2-anchor #5#)
-    (:p "todo")
-    (:p)
+    (:p "CLPython can run Python code in two modes, <i>interpreted</i> or <i>compiled</i>. In the latter case, the Lisp code is translated into assembly. The advantage of interpreted code is that debugging is easier (the stack trace contains more information); on the other hand execution of compiled code is much faster.")
+    (:p "Expressions entered in the <i>repl</i> are typically run interpreted (though this can be changed by setting <i>*repl-compile*</i>). When a Python module is compiled, the functions are compiled into assembly code, and written to a <i>.fasl</i> file ")
+    
     (h2-anchor #6#)
-    (:p "todo")
+    (:p "Python objects are represented either by the equivalent Lisp value; other values are CLOS instance.
+An overview:")
     (:p)
-    ))
+    ((:table style "position: relative; left: 1em; font-size: small")
+     (:tr ((:td style "border-top: 1px solid black; border-bottom: 1px dotted #999")
+           "Python data type")
+          ((:td style "border-top: 1px solid black; border-bottom: 1px dotted #999")
+           "Representation in CLPython"))
+     (loop with data = '(("Class"              "CLOS Class")
+                         ("Instance of user-defined class" "CLOS instance")
+                         ("Function"           "Function")
+                         ("Dict"               "Hashtable")
+                         ("(Unicode) String"   "Unicode string")
+                         ("List"               "Adjustable vector")
+                         ("Tuple"              "Consed list")
+                         ("Long, Integer, Boolean" "Integer")
+                         ("Complex"            "Complex")
+                         ("Float"              "Double-float")
+                         ("Complex"            "Complex"))
+         for (k v) in data
+         for i from 1
+         do (let ((style (if (= i (length data))
+                             "border-bottom: 1px solid black"
+                           "")))
+              (html (:tr ((:td style style)
+                          (:princ k))
+                         ((:td style style)
+                          (:princ v)))))))
+    
+    (:p "There is a CLOS class defined for every built-in Python class. Built-in methods are associated with that class.
+For example, the class <i>py-string</i> and <i>py-dict</i> represents Python strings and dictionaries (hash tables).
+Classes like <i>py-string</i> have metaclass
+<i>py-type</i> (in Python: class <i>type</i>), and are subclasses of <i>py-object</i> (in Python: class <i>object</i>).
+Methods of built-in classes are defined using the macro <i>def-py-method</i>, and stored in the dictionary of the respective class.")
+    (:p "Note that although there is a class <i>py-string</i>, Python strings are usually not represented by instance of <i>py-string</i>,
+but rather as regular Lisp strings (of Lisp type <i>string</i>). An exception is made for instance of a user-defined subclass of <i>str</i>:
+such instances are actual instances of <i>py-string</i> (and are supplied with a <i>__dict__</i>). There is a function <i>py-class-of</i> that returns the appropriate
+<i>py-...</i> class for all Lisp objects that represent Python objects.")
+    
+    (h2-anchor #7#)
+    (:p "CLPython comes with a test suite for the parser, compiler and language semantics.
+To run it, use the following expression:")
+    (:p)
+    (:pre "(asdf:operate 'asdf-test-op :clpython)")
+    (:p "The test suite is built on top of <a href=\"http://opensource.franz.com/test/\">Tester</a>, an open-source test harness for Allegro made available by Franz.")
+    (:p)
+    )))
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
 (defmacro func-entry (&rest symbols)
