@@ -202,6 +202,20 @@
 (defmethod py->  ((x fixnum) (y fixnum)) (py-bool (>  x y)))
 (defmethod py->= ((x fixnum) (y fixnum)) (py-bool (>= x y)))
 
+(defmacro generate-cmp-cm (op)
+  `(define-compiler-macro ,op (&whole whole x y)
+     (if (and (numberp x) (numberp y))
+         (let ((val (py-bool (,op x y))))
+           `,val)
+       whole)))
+
+(generate-cmp-cm py-<)
+(generate-cmp-cm py-<=)
+(generate-cmp-cm py->)
+(generate-cmp-cm py->=)
+
+(py-<= 1 2)
+    
 ;;; Arithmetic: + * // etc
 
 (define-compiler-macro py-+ (&whole whole x y)
