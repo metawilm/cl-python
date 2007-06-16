@@ -63,22 +63,39 @@
 	(#\? `((defproduction (,name python-grammar) ())
 	       (defproduction (,name python-grammar) (,item) ($1))))))))
 
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (defvar *save-python-prods* nil "Whether to save the grammar production rules in *PYTHON-PRODS*")
+  (defvar *python-prods* nil "Hashtable containing all grammar rules."))
+;; The goal of saving the production rules, is to eventually support other parser than Allegro's YACC.
 
 (defmacro python-prods (&rest prodrules)
-  (let ((res ()))
+  (let (res all-prods)
     (loop for (name . rest) in prodrules
 	do (cond ((keywordp name) (assert (null rest))
 				  (nconc res (generate-python-rules name)))
 		 ((eq (car rest) ':or)
 		  (dolist (x (cdr rest))
-		    (push `(defproduction (,name python-grammar)
-			       ,@(if (symbolp x)
-				     ` ((,x) ($1))
-				   `(,(car x) ,(cdr x))))
-			  res)))
-		 (t (push `(defproduction (,name python-grammar) ,@rest)
-			  res))))
-    `(progn ,@(nreverse res))))
+                    (multiple-value-bind (terms outcome)
+                        (if (symbolp x)
+                            (values `(,x) '($1))
+                          (values (car x) (cdr x)))
+                      
+                      (push `(defproduction (,name python-grammar) ,terms ,outcome) res)
+                      (when *save-python-prods*
+                        (push `(,name ,terms ,outcome) all-prods)))))
+                  
+		 (t (push `(defproduction (,name python-grammar) ,@rest) res)
+                    (when *save-python-prods*
+                      (push (cons name rest) all-prods)))))
+    
+    (setf res (nreverse res))
+    `(progn (when *save-python-prods*
+              (setf *python-prods* ',(loop with ht = (make-hash-table :test 'eq)
+                                         for (name terms outcome) in all-prods
+                                         do (assert (listp outcome))
+                                            (push (list terms (car outcome)) (gethash name ht))
+                                         finally (return ht))))
+            ,@res)))
 
 ;; These rules, including most names, are taken from the CPython
 ;; grammar file from CPython CVS, file Python/Grammar/Grammar,
