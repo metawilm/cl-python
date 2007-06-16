@@ -1919,8 +1919,13 @@ Non-negative integer denoting the number of args otherwise."
      (py-raise '{RuntimeError} "Stack overflow (~A)" *max-py-error-level*))))
 
 (defmacro with-py-errors (&body body)
-  `(let ((*with-py-error-level* (fast (1+ (the fixnum *with-py-error-level*)))))
-     (check-max-with-py-error-level)
+  `(let ((f (lambda () ,@body)))
+     (declare (dynamic-extent f))
+     (call-with-py-errors f)))
+
+(defun call-with-py-errors (f)
+  (let ((*with-py-error-level* (fast (1+ (the fixnum *with-py-error-level*)))))
+    (check-max-with-py-error-level)
      
      ;; Using handler-bind, so uncatched errors are shown in precisely
      ;; the context where they occur.
@@ -1953,7 +1958,7 @@ Non-negative integer denoting the number of args otherwise."
 	  (error (lambda (c)
 		   (warn "with-py-handlers passed on error: ~A" c))))
        
-       ,@body)))
+       (funcall f))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; 
