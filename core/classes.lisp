@@ -2313,6 +2313,12 @@ But if RELATIVE-TO package name is given, result may contains dots."
 (def-py-method py-int.__hex__ (x^) (format nil "0x~x" x))
 (def-py-method py-int.__oct__ (x^) (format nil "0~o" x))
 
+(def-py-method py-int.__invert__ (x^)
+  "2's complement inverse"
+  (1- (- x)))
+
+;; Bool
+
 (def-proxy-class py-bool (py-int))
 
 (def-py-method py-bool.__new__ :static (cls &optional (val 0))
@@ -3814,12 +3820,8 @@ finished; F will then not be called again."
 ;; __iadd__ was found.
 
 (defun raise-invalid-operands (operation left &optional right)
-  ;; XXX merge into one pretty printer string
-  ;; XXX TypeError
-  (error (if right
-	     (format nil "Operation '~A' not supported for operands ~S and ~S."
-		     operation left right)
-	   (format nil "Operation '~S' not supported for operand ~S." operation left))))
+  (py-raise '{TypeError} "Operation `~A' not supported for operand~@[s~*~] `~A'~@[ and `~A'~]."
+            operation right left right))
 
 (defvar *binary-op-funcs-ht* (make-hash-table :test #'eq))
 (defvar *binary-iop-funcs-ht* (make-hash-table :test #'eq))
