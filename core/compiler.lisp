@@ -92,15 +92,17 @@ XXX Currently there is not way to set *__debug__* to False.")
   "The path of the Python file being compiled; saved in module's `filepath' slot.")
 
 
-(defmacro fast (&body body)
-  `(locally (declare (optimize (speed 3) (safety 0)))
-     ,@body))
-
 (defconstant +standard-module-globals+ '({__name__} {__debug__})
   "Names of global variables automatically created for every module")
 
-(defconstant +std-optimize-decl+ '(optimize (speed 3) (safety 1) (debug 1))
-  "Default optimization settings in generated code.")
+(defconstant +optimize-std+     '(optimize (speed 3) (safety 1) (debug 1)))
+(defconstant +optimize-fast+    '(optimize (speed 3)))
+(eval-when (compile load eval)
+  (defconstant +optimize-fastest+ '(optimize (speed 3) (safety 0) (debug 0))))
+
+(defmacro fast (&body body)
+  `(locally (declare ,+optimize-fastest+)
+     ,@body))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; 
@@ -733,8 +735,7 @@ input arguments."
 				      (ast-deleted-variables suite)))))
 	       (func-lambda
 		`(py-arg-function
-		  t ;;,(generator-ast-p suite) TODO
-		  ,context-fname
+                  ,context-fname
 		  (,lambda-pos-args ;; list of symbols
 		   ,(loop for ((nil name) val) in key-args collect `(,name ,val))
 		   ,(when *-arg  (second *-arg))
@@ -1612,7 +1613,7 @@ Non-negative integer denoting the number of args otherwise."
   (py-raise '{TypeError}
 	    "Function got multiple values for keyword argument `~A'." kw))
 
-(defmacro py-arg-function (generator-p name (pos-args key-args *-arg **-arg) &body body)
+(defmacro py-arg-function (name (pos-args key-args *-arg **-arg) &body body)
   ;; Non-consing argument parsing! (except when *-arg or **-arg
   ;; present)
   ;; 
@@ -1622,7 +1623,6 @@ Non-negative integer denoting the number of args otherwise."
   ;; 
   ;; XXX todo: the generated code can be cleaned up a bit when there
   ;; are no arguments (currently zero-length vectors are created).
-  (declare (ignore generator-p))
   (assert (symbolp name))
   (let* ((num-pos-args (length pos-args))
 	 (num-key-args (length key-args))
@@ -1703,113 +1703,90 @@ Non-negative integer denoting the number of args otherwise."
 	     (locally #+(or)(declare (optimize (safety 3) (debug 3)))
 	       ,@body)))))))
 
-
-(defun py-arg-function-1-kw-test (nargs got-kw want-kw)
-  (declare (optimize (speed 3) (safety 1) (debug 1))
-	   (fixnum nargs))
-  (unless (and (= nargs 2) (eq got-kw want-kw))
+(defun check-1-kw-call (got-kw nargs-mi want-kw)
+  (unless (and (= (excl::ll :mi-to-fixnum nargs-mi) 2)
+               (eq got-kw want-kw))
     (raise-wrong-args-error)))
 
-(defun py-arg-function-2-kw-test (nargs a1 a2 a3 a4 kw1 kw2)
-  (declare (optimize (speed 3) (safety 1) (debug 1))
-	   (fixnum nargs))
-  (cond ((and (= nargs 3) (eq a2 kw2))
-	 (return-from py-arg-function-2-kw-test (values a1 a3)))
-	((= nargs 4)
-	 (cond ((and (eq a1 kw1)
-		     (eq a3 kw2))
-		(return-from py-arg-function-2-kw-test (values a2 a4)))
-	       ((and (eq a1 kw2)
-		     (eq a3 kw1))
-		(return-from py-arg-function-2-kw-test (values a4 a2))))))
-  (raise-wrong-args-error))
+(defun slow-2-kw-call (nargs-mi a1 a2 a3 a4 kw12 f)
+  (let ((nargs (excl::ll :mi-to-fixnum nargs-mi)))
+    (destructuring-bind (kw1 kw2) kw12
+      (multiple-value-bind (pa pb)
+        (cond ((and (= nargs 3) (eq a2 kw2))
+               (values a1 a3))
+              ((= nargs 4)
+               (cond ((and (eq a1 kw1)
+                           (eq a3 kw2))
+                      (values (values a2 a4)))
+                     ((and (eq a1 kw2)
+                           (eq a3 kw1))
+                      (values a4 a2))
+                     (t #1=(raise-wrong-args-error))))
+              (t #1#))
+        (funcall f pa pb)))))
 
-#+(or) ;; Equivalent, but ignoring NARGS and using fact that args not provided are NULL.
-(defun py-arg-function-2-kw-test (nargs a1 a2 a3 a4 kw1 kw2)
-  ;; A3 is not NIL, or A1 is a symbol
-  (cond (a4
-	 ;; either:  (a1=kw1) = a2, (a3=kw2) = a4
-	 ;;     or:  (a1=kw2) = a2, (a3=kw1) = a4
-	 (cond ((and (eq a1 kw1) (eq a3 kw2))
-		(values a2 a4))
-	       
-	       ((and (eq a1 kw2) (eq a3 kw1))
-		(values a4 a2))
-		  
-	       (t (raise-wrong-args-error))))
-	
-	(a3 ;; must be  a1, (a2=kw2) = a3
-	 (cond ((eq a2 kw2)
-		(values a1 a3))
-	       
-	       (t (raise-wrong-args-error))))
-	
-	;; a1 is a symbol
-	(t (raise-wrong-args-error))))
-		  
+(defmacro with-nof-args-supplied-as-mi ((n) &body body)
+  "Bind N to nofargs, as machine integer (not regular fixnum)"
+  `(let* ((,n (excl::ll :register :nargs)))
+     ,@body))
 
 (define-compiler-macro py-arg-function (&whole whole
-					       generator-p
-					       name (pos-args key-args *-arg **-arg) &body body)
-  
-  ;; Special code for functions that take only a few positional arguments.
+                                               name (pos-args key-args *-arg **-arg) &body body)
+  ;; More efficient argument-parsing, for functions that take only a few positional arguments.
+  ;; Allegro passes the number of supplied args in a register; the code below makes use of
+  ;; that register value.
+  ;; 
+  ;; If BODY creates closures, then the register value will be overwritten before we have
+  ;; a chance to look at it. Therefore, if we read the :nargs register, the BODY is wrapped
+  ;; in FLET.
   (when (or (>= (length pos-args) 3)
-	    key-args
-	    *-arg
-	    **-arg)
+            key-args *-arg **-arg)
     (return-from py-arg-function whole))
   
   (ecase (length pos-args)
+    (0 `(excl:named-function ,name
+          (lambda ()
+            ,@body)))
     
-    (0 ;; No args
-     `(excl:named-function ,name
-	(lambda ()
-	  ,@body)))
+    (1 (let* ((pa (car pos-args))
+              (ka (intern (symbol-name pa) :keyword))
+              (e  (gensym "e")))
+         `(excl:named-function ,name
+            (lambda (,pa ,e)
+              (declare ,+optimize-fastest+) ;; surpress default arg checking
+              (let ((f-body (lambda (,pa)
+                              (declare ,+optimize-fastest+) ;; surpress default arg checking
+                              (locally (declare ,+optimize-std+) ;; but run body with safety
+                                ,@body))))
+                (declare (dynamic-extent f-body))
+                (with-nof-args-supplied-as-mi (nargs-mi)
+                  (unless (excl::ll := nargs-mi (excl::ll :fixnum-to-mi 1))
+                    (check-1-kw-call ,pa nargs-mi ,ka)
+                    (setf ,pa ,e)))
+                (funcall f-body ,pa))))))
     
-    (1 ;; One pos arg
-     (let* ((pa (car pos-args))
-	    (ka (intern (symbol-name pa) :keyword))
-	    (e  (gensym "e")))
-
-       `(excl:named-function ,name
-	  (lambda (,pa &optional ,e)
-	    (declare (optimize (speed 3) (safety 0) (debug 0)))
-	    (let ((nargs ,(if generator-p
-			      `(if ,e 2 1)
-			    `(excl::ll :mi-to-fixnum (excl::ll :register :nargs)))))
-	      (declare (fixnum nargs))
-	      (when (/= nargs 1)
-		(py-arg-function-1-kw-test nargs ,pa ,ka)
-		(setf ,pa ,e)))
-	    
-	    (locally (declare ,+std-optimize-decl+)
-	      ,@body)))))
-    
-    (2 ;; Two pos args
-     (destructuring-bind (pa pb)
-	 pos-args
-       (let ((ka (intern (symbol-name pa) :keyword))
-	     (kb (intern (symbol-name pb) :keyword))
-	     (e1 (gensym "e1"))
-	     (e2 (gensym "e2")))
-	 
-	 `(excl:named-function ,name
-	    (lambda (,pa ,pb &optional ,e1 ,e2)
-	      (declare (optimize (speed 3) (safety 1) (debug 0)))
-	      
-	      (let ((nargs ,(if generator-p
-				`(cond (,e2 4)
-				       (,e1 3)
-				       (t   2))
-			      `(excl::ll :mi-to-fixnum (excl::ll :register :nargs)))))
-		(unless (and (= nargs 2)
-			     (not (symbolp ,pa)))
-		  (multiple-value-setq (,pa ,pb) 
-		    (py-arg-function-2-kw-test nargs ,pa ,pb ,e1 ,e2 ,ka ,kb))))
-	      
-	      (locally (declare ,+std-optimize-decl+)
-		,@body))))))))
-
+    (2 (destructuring-bind (pa pb)
+           pos-args
+         (let ((ka (intern (symbol-name pa) :keyword))
+               (kb (intern (symbol-name pb) :keyword))
+               (e1 (gensym "e1"))
+               (e2 (gensym "e2")))
+           `(excl:named-function ,name
+              (lambda (,pa ,pb ,e1 ,e2)
+                (declare ,+optimize-fastest+) ;; surpress default arg checking
+                (let ((f-body (excl:named-function ,name
+                                (lambda (,pa ,pb)
+                                  (declare ,+optimize-fastest+) ;; surpress default arg checking
+                                  (locally (declare ,+optimize-std+) ;; but run body with safety
+                                    ,@body)))))
+                  (declare (dynamic-extent f-body))
+                  (with-nof-args-supplied-as-mi (nargs-mi)
+                    (if (and (excl::ll := nargs-mi (excl::ll :fixnum-to-mi 2))
+                             (not (symbolp ,pa)))
+                        (funcall f-body ,pa ,pb)
+                      (slow-2-kw-call ,pa ,pb ,e1 ,e2
+                                      nargs-mi
+                                      '(,ka ,kb) f-body)))))))))))
 
 (defstruct (func-args (:type vector) (:conc-name fa-) (:constructor make-fa))
   (num-pos-args         :type fixnum :read-only t)
