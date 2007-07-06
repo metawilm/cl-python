@@ -1760,7 +1760,7 @@ Non-negative integer denoting the number of args otherwise."
                                 ,@body))))
                 (declare (dynamic-extent f-body))
                 (with-nof-args-supplied-as-mi (nargs-mi)
-                  (unless (excl::ll := nargs-mi (excl::ll :fixnum-to-mi 1))
+                  (unless (eq nargs-mi (excl::ll :fixnum-to-mi 1))
                     (check-1-kw-call ,pa nargs-mi ,ka)
                     (setf ,pa ,e)))
                 (funcall f-body ,pa))))))
@@ -1781,7 +1781,7 @@ Non-negative integer denoting the number of args otherwise."
                                     ,@body)))))
                   (declare (dynamic-extent f-body))
                   (with-nof-args-supplied-as-mi (nargs-mi)
-                    (if (and (excl::ll := nargs-mi (excl::ll :fixnum-to-mi 2))
+                    (if (and (eq nargs-mi (excl::ll :fixnum-to-mi 2))
                              (not (symbolp ,pa)))
                         (funcall f-body ,pa ,pb)
                       (slow-2-kw-call ,pa ,pb ,e1 ,e2
