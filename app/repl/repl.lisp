@@ -129,11 +129,12 @@ KIND can be :ptime, :time, :space, :pspace or NIL."
 	     (remember-value (val)
 	       ;; Make last three return values available as _, __, ___
 	       ;; for both Python (repl module namespace) and Lisp (dynamic vars).
-	       (shiftf ___ __ _ val)
-	       (shiftf (gethash '{___} dyn-globals)
-		       (gethash '{__}  dyn-globals)
-		       (gethash '{_}   dyn-globals)
-		       val))
+               (when val ;; don't save NIL (which can be return value for Lisp eval)
+                 (shiftf ___ __ _ val)
+                 (shiftf (gethash '{___} dyn-globals)
+                         (gethash '{__}  dyn-globals)
+                         (gethash '{_}   dyn-globals)
+                         val)))
 
 	     (run-ast-func (suite)
 	       #+(or)(warn "AST: ~S" suite)
