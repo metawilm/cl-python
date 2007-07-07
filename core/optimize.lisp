@@ -221,7 +221,7 @@
 (defmacro fixnump (x)
   `(typep ,x 'fixnum))
 
-(define-compiler-macro fixnump (&whole whole x &environment env)
+(define-compiler-macro fixnump (&whole whole x)
   (if (numberp x)
       (typep x 'fixnum)
     whole))

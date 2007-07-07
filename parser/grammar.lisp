@@ -457,8 +457,9 @@
 	       (multiple-value-bind (pos key)
 		   (cond ((and key-start pos-end)
 			  (when (< key-start pos-end)
-			    (raise-syntax-error "Postional argument `~A' found after keyword argument `~A'."
-						(cadadr (nth pos-end $1)) (cadadr (nth key-start $1))))
+			    (raise-syntax-error
+                             "Postional argument was found after keyword argument `~A = ...'."
+                             (cadadr (nth key-start $1))))
 			  (let ((pos-args $1)
 				(key-args (nthcdr key-start $1)))
 			    (setf (cdr (nthcdr pos-end $1)) nil)
@@ -538,7 +539,14 @@
 
 (defun reg-patterns ()
   (macrolet ((rp (ast-node &rest args)
-               `(register-ast-pattern ',ast-node ',args)))
+               `(progn (register-ast-pattern ',ast-node ',args)
+                       (defstruct (,ast-node
+                                   :named
+                                   (:type list)
+                                   (:constructor ,(intern (format nil "make-~A" ast-node)
+                                                          :clpython.ast)))
+                         ,@args))))
+    
     (rp [assert-stmt] test raise-arg)
     (rp [assign-stmt] value targets)
     (rp [attributeref-expr] item attr)
@@ -548,11 +556,12 @@
     (rp [binary-lazy-expr] op left right)
     (rp [break-stmt])
     (rp [call-expr] primary all-args)
+    (rp [classdef-stmt] name inheritance suite)
     (rp [comparison-expr] cmp left right)
     (rp [continue-stmt])
-    (rp [del-stmt])
-    (rp [dict-expr])
-    (rp [exec-stmt])
+    (rp [del-stmt] item)
+    (rp [dict-expr] alist)
+    (rp [exec-stmt] code globals locals)
     (rp [for-in-stmt] target source suite else-suite)
     (rp [funcdef-stmt] decorators fname args suite)
     (rp [generator-expr] item for-in/if-clauses)
@@ -567,16 +576,26 @@
     (rp [module-stmt] suite)
     (rp [pass-stmt] )
     (rp [print-stmt] dest items comma?)
+    (rp [raise-stmt] exc var tb)
     (rp [return-stmt] val)
     (rp [slice-expr] start stop step)
     (rp [subscription-expr] item subs)
     (rp [suite-stmt] stmts)
-    (rp [raise-stmt] exc var tb)
     (rp [try-except-stmt] suite except-clauses else-suite)
     (rp [try-finally-stmt] try-suite finally-suite)
     (rp [tuple-expr] items)
     (rp [unary-expr] op item)
     (rp [while-stmt] test suite else-suite)
-    (rp [yield-stmt] val)))
+    (rp [yield-stmt] val))
+    
+  ;; Some shortcuts
+  (defun [make-identifier-expr*] (name)
+    ([make-identifier-expr] :name name))
+  
+  (defun [make-suite-stmt*] (&rest args)
+    ([make-suite-stmt] :stmts args))
+  
+  (defun [make-assign-stmt*] (&key value target)
+    ([make-assign-stmt] :value value :targets (list target))))
 
 (reg-patterns)

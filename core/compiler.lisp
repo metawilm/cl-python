@@ -582,12 +582,22 @@ differs in structure from the template for ~A ast nodes, which is: ~A"
 (defmacro [dict-expr] (alist)
   `(make-dict-unevaled-list ,alist))
 
+
+;;; `Exec' statement
+
+(defvar *exec-early-parse-constant-string* t
+  "Whether a constant string argument to the `exec' statement may be
+parsed at compile time already.")
+
+(defvar *exec-stmt-compile-before-run* t
+  "The code in the `exec' statement is translated into a function, that is
+then (optionally) compiled and called. Should it be compiled before running?")
+
 (defvar *exec-stmt-result-handler* nil)
 
-(defmacro [exec-stmt] (code globals locals &key (allowed-stmts t) &environment e)
+(defmacro [exec-stmt] (code-string globals locals &key (allowed-stmts t) &environment e)
   ;; TODO:
   ;;   - allow code object etc as CODE
-  ;;   - when code is a constant string, parse it already at compile time etc
   ;;
   ;; An EXEC-STMT is translated into a Python suite containing a
   ;; function definition and a subsequent call of the function.
@@ -596,69 +606,111 @@ differs in structure from the template for ~A ast nodes, which is: ~A"
   ;;                   a list: allow only those statements
   ;;                   NIL:    allow no statements
   ;;  (not evaluated)
-  
-  (let ((context (if locals
-		     "context-not-needed"
-		   (get-pydecl :context e))))
+
+  (let ((locals-ht  `(convert-to-namespace-ht 
+                      ,(or locals
+                           (if (eq (get-pydecl :context e) :module)
+                               `(create-module-globals-dict)
+                             `(.locals.)))))
+        (globals-ht `(convert-to-namespace-ht
+                      ,(or globals
+                           `(create-module-globals-dict)))))
     
-    `(let ((ast (parse-python-string ,code)))
+    `(exec-stmt-string ,code-string ,globals-ht ,locals-ht ,allowed-stmts)))
 
-       (when (ast-contains-stmt-p ast :allowed-stmts ,allowed-stmts)
-	 (py-raise '{TypeError}
-		   "No statements allowed in Python code string (got: ~S)" ,code))
+(defun exec-stmt-string (code-string globals locals allowed-stmts)
+  (let ((ast (parse-python-string code-string)))
+    (exec-stmt-check-ast ast allowed-stmts)
+    (exec-stmt-ast ast globals locals)))
 
-       ;; Some statements are valid in a function, but no in an EXEC.
-       ;; We catch those here.
-       (with-py-ast (form ast :into-nested-namespaces nil)
-	 (case (car form)
-	   ([return-stmt] (py-raise '{TypeError}
-				    "RETURN statement found outside function (in EXEC)."))
-	   (t form)))
-       
-       (let* ((ast-suite (with-matching (ast ([module-stmt] ?suite))
-                           (assert (match-p ?suite '([suite-stmt] ?stmts)))
-                           ?suite))
-	      (locals-ht  (convert-to-namespace-ht 
-			   ,(or locals
-				(if (eq context :module) `(create-module-globals-dict) `(.locals.)))))
-	      (globals-ht (convert-to-namespace-ht ,(or globals `(create-module-globals-dict))))
-	      (loc-kv-pairs (loop for k being the hash-key in (py-dict-hash-table locals-ht)
-				using (hash-value val)
-				for k-sym = (py-string->symbol k)
-				collect (list k-sym val)))
-	      (lambda-body `(with-module-context (#() #() (py-dict-hash-table ,globals-ht) :create-mod t)
-			      ([suite-stmt]
+(define-compiler-macro exec-stmt-string (&whole whole code-string globals locals allowed-stmts)
+  ;; Move compilation of string to compile-time. Warn if string contains errors.
+  (when (and *exec-early-parse-constant-string*
+             (stringp code-string))
+    (multiple-value-bind (ast error)
+        (ignore-errors (parse-python-string code-string))
+      (if error
+          (warn "Constant string for `exec' contains syntax errors: ~A~_(String: ~S)"
+                error (if (> (length code-string) 40)
+                          (concatenate 'string (subseq code-string 0 40) "...")
+                        code-string))
+        (multiple-value-bind (ok error)
+            (ignore-errors (exec-stmt-check-ast ast allowed-stmts))
+          (declare (ignore ok))
+          (if error
+              (warn "Constant string for `exec' contains errors: ~A" error)
+            (return-from exec-stmt-string
+              `(exec-stmt-ast ',ast ,globals ,locals)))))))
+  whole)
 
-			       ;; Create helper function
-			       (([funcdef-stmt]
-				 nil ([identifier-expr] exec-stmt-helper-func)
-				 (nil nil nil nil)
-				 ([suite-stmt]
-				  ((block helper
-				     ([suite-stmt]
-				      
-				      ;; set local variables
-				      (,@(loop for (k v) in loc-kv-pairs
-					     collect `([assign-stmt] ,v (([identifier-expr] ,k))))
-					 
-					 ;; execute suite
-					 (let ((res ,ast-suite))
-					   (when *exec-stmt-result-handler*
-					     (funcall *exec-stmt-result-handler* res))
-					   (return-from helper res))))))))
-				
-				;; Call helper function
-				([call-expr] ([identifier-expr] exec-stmt-helper-func)
-					     (nil nil nil nil)))))))
-		       
-	 #+(or)(warn "EXEC-STMT: lambda-body: ~A" lambda-body)
-	 (let ((func (let ((.parser::*walk-warn-unknown-form* nil))
-		       (compile nil `(lambda ()
-				       (locally (declare (optimize (debug 3)))
-					 ,lambda-body))))))
-	   (funcall func))))))
+(defun exec-stmt-check-ast (ast allowed-stmts)
+  (when (ast-contains-stmt-p ast :allowed-stmts allowed-stmts)
+    (py-raise '{TypeError}
+              "Statements are not allowed in Python code string"))
+  
+  (with-py-ast (form ast :into-nested-namespaces nil)
+    (case (car form)
+      ([return-stmt] (py-raise '{TypeError}
+                               "`return' statement found outside function (in `exec')."))
+      (t form)))
+  
+  t)
+
+(defun exec-stmt-ast (ast globals locals)
+  (let ((f `(with-module-context (#() #() (py-dict-hash-table ,globals)
+                                      :create-mod t)
+              ,([make-suite-stmt*]
+
+                ;; Define helper function
+                ([make-funcdef-stmt]
+                 :fname ([make-identifier-expr*] 'exec-stmt-helper-func)
+                 :args '(() () nil nil)
+                 :suite
+                 ([make-suite-stmt*]
+                  `(block helper
+                     ,([make-suite-stmt*]
+                       
+                       `([suite-stmt]
+                         ;; Set local variables
+                         ,(loop for k being the hash-key in (py-dict-hash-table locals)
+                              using (hash-value v)
+                              do (assert (not (null v)) () 
+                                   "Local var `~A' (passed as EXEC local) is NIL." k)
+                              collect ([make-assign-stmt*]
+                                       :value v
+                                       :target ([make-identifier-expr*] (py-string->symbol k)))))
+                       
+                       `(progn ;; execute exec suite
+                          (let ((res ,(with-matching (ast ([module-stmt] ?suite))
+                                        (assert (match-p ?suite '([suite-stmt] ?stmts)))
+                                        ?suite)))
+                            (when *exec-stmt-result-handler*
+                              (funcall *exec-stmt-result-handler* res))
+                            (return-from helper res)))))))
+                
+                ;; Call helper function
+                ([make-call-expr] :primary ([make-identifier-expr*] 'exec-stmt-helper-func)
+                                  :all-args '(() () nil nil))))))
+    
+    #+(or)(warn "EXEC-STMT: lambda-body: ~A" f)
+    
+    (setf f `(lambda ()
+               (locally (declare (optimize (debug 3)))
+                 ;; When this is compiled, the environment object is NIL.
+                 ;; 
+                 (with-pydecl ((:function-must-save-locals t))
+                   ,f))))
+    
+    (when *exec-stmt-compile-before-run*
+      (setf f (compile nil f)))
+    
+    (funcall f)))
+
+
+;;; `Call' expression
 
 (defun call-expr-eval (locals-dict globals-dict pos-args key-args-p)
+  "Handle call to `Eval' at runtime."
   ;; Uses exec-stmt, therefore below it.
   (when (or key-args-p 
 	    (not pos-args)
@@ -847,7 +899,7 @@ input arguments."
 		    
 		    (block function-body
 		      (flet
-			  (,@(when (funcdef-should-save-locals-p suite)
+			  (,@(when (funcdef-should-save-locals-p suite e)
 			       `((.locals. () 
 					   ;; lambdas and gen-exprs have 'locals()' too
 					   (make-locals-dict 
@@ -1041,9 +1093,8 @@ input arguments."
 				     (([identifier-expr] ,(or bind-name item))))))))
        
 (defmacro [lambda-expr] (args expr)
-  ;; XXX Maybe treating lambda as a funcdef-stmt results in way more
+  ;; XXX Treating lambda as a funcdef-stmt results in way more
   ;; code than necessary for the just one expression it contains.
-  
   `([funcdef-stmt] nil :lambda ,args ([suite-stmt] (([return-stmt] ,expr)))))
   
 (defmacro [listcompr-expr] (item for-in/if-clauses)
@@ -2031,8 +2082,9 @@ be bound."
 	(t form)))
     deleted-names))
   
-(defun funcdef-should-save-locals-p (ast)
-  (when *allow-indirect-special-call*
+(defun funcdef-should-save-locals-p (ast env)
+  (when (or *allow-indirect-special-call*
+            (get-pydecl :function-must-save-locals env))
     (return-from funcdef-should-save-locals-p t))
   
   (with-py-ast (form ast)

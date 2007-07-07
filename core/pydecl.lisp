@@ -14,28 +14,27 @@
 ;; The Python compiler uses its own set of declaration to keep state
 ;; in generated code. This declaration is named "pydecl".
 ;; The declarations are in the form of (:key ...val...) pairs.
-;; 
-;; Currently, the following "pydecl" declaration keys are used:
-;;  
-;;  :mod-globals-names          : vector of variable names at the module level
-;;  :mod-futures                : the features imported from the __future__ module
-;;
-;;  :context                    : innermost context, one of (:class :module :function)
-;;  :context-stack              : list of class and function names, innermost first;
-;;                                starts with :lambda if in anonymous function
-;;  
-;;  :lexically-declared-globals : list of variable names declared global in an outer scope
-;;                                (which makes them also global in inner scopes)
-;;  :lexically-visible-vars     : list of variable names that can be closed over
-;; 
-;;  :inside-loop-p              : T iff inside WHILE of FOR  (to check BREAK, CONTINUE)
-;;  :inside-function-p          : T iff inside FUNCDEF       (to check RETURN)
-;;
-;;  :safe-lex-visible-vars      : list of all variables guaranteed to be lexically visible and bound;
-;;                                subset of :LEXICALLY-VISIBLE-VARS.
-;;
-;;  :inside-setf-py-attr        : T if insides a (setf (py-attr ..) ..) form (to work around Allegro CL
-;;                                issues w.r.t. compiler macros and setf forms.
+
+(defparameter *pydecl-keys*
+    '(:context                    ;; Innermost context, one of (:class :module :function).
+      :context-stack              ;; List of class and function names, innermost first; car is :lambda if in anonymous function.
+      :function-must-save-locals  ;; T to force functions to  support `locals()' call in body (normally deduced from body).
+      :inside-function-p          ;; T iff inside FUNCDEF       (to check RETURN).
+      :inside-loop-p              ;; T iff inside WHILE of FOR  (to check BREAK, CONTINUE).
+      :inside-setf-py-attr        ;; T if insides a (setf (py-attr ..) ..) form (work around Allegro CL bug).
+      :lexically-declared-globals ;; List of variable names declared global in an outer scope (also global in inner scopes).
+      :lexically-visible-vars     ;; List of variable names that can be closed over.
+      :mod-futures                ;; The features imported from the __future__ module.
+      :mod-globals-names          ;; Vector of variable names at the module level.
+      :safe-lex-visible-vars      ;; List of all variables guaranteed to be lexically visible and bound; subset of :LEX-VIS-VARS.
+      
+      ;; in development (?):
+      :class-globals
+      )
+  "The PYDECL keys currently in use")
+
+(defvar *check-valid-pydecl-keys* nil
+  "Whether to check for validity of key upon setting or getting")
 
 (defparameter *use-environment-acccessors*
       #+(and :allegro :new-environments) t
@@ -54,12 +53,19 @@
                            (sys:declaration-information 'pydecl env))))))
 
 (defmacro with-pydecl (pairs &body body &environment env)
+  (when *check-valid-pydecl-keys*
+    (apply #'ensure-valid-pydecl-keys (mapcar #'car pairs)))
   (if *use-environment-acccessors*
       `(locally (declare (pydecl ,@pairs))
          ,@body)
-    `(macrolet ((%pydecl-state% () ',(nconc (copy-list pairs)
-                                            (get-pydecl-state env))))
+    `(symbol-macrolet ((%pydecl-state% ,(nconc (copy-list pairs)
+                                         (get-pydecl-state env))))
        ,@body)))
+
+(defun ensure-valid-pydecl-keys (&rest keys)
+  (dolist (k keys)
+    (unless (member k *pydecl-keys* :test 'eq)
+      (error "Unknown pydecl key: `~A'." k))))
 
 (defun get-pydecl-state (env)
   (if *use-environment-acccessors*
@@ -72,10 +78,12 @@ use the CLTL-like environment accessors in this Lisp:~%  ~A ~A."
                     (lisp-implementation-type)
                     (lisp-implementation-version)))
     (multiple-value-bind (state state-p)
-        (macroexpand-1 '(%pydecl-state%) env)
+        (macroexpand-1 '%pydecl-state% env)
       (and state-p state))))
 
 (defun get-pydecl (var env)
+  (when *check-valid-pydecl-keys*
+    (ensure-valid-pydecl-keys var))
   (let ((res (second (assoc var (get-pydecl-state env) :test #'eq))))
   
     #+(and :allegro :new-environments)
@@ -88,7 +96,6 @@ use the CLTL-like environment accessors in this Lisp:~%  ~A ~A."
           (setf res :module)))
     res))
 
-
 #+(and :allegro :new-environments)
 (progn
   ;; Because PYDECL declarations are (currently) ignored by Allegro in the
@@ -97,11 +104,12 @@ use the CLTL-like environment accessors in this Lisp:~%  ~A ~A."
  
   (defun use-fallback-env-accessors (env)
     (and *use-environment-acccessors*
-         (ecase (sys::augmentable-environment-kind env)
-           (:interpreter t)
-           (:compiler    nil)
-           ;; need to handle more cases?
-           )))
+         (or (null env) ;; the environment in which EXEC lambda is compiled, is NIL 
+             (ecase (sys::augmentable-environment-kind env)
+               (:interpreter t)
+               (:compiler    nil)
+               ;; need to handle more cases?
+               ))))
   
   (excl:def-fwrapper with-pydecl-fwrapper (form env)
     (if (use-fallback-env-accessors env)

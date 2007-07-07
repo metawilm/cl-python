@@ -32,6 +32,9 @@
 (defconstant +augassign-value+ :augassign  "A place that is an augmented assignment value and target.")
 (defconstant +no-value+        nil         "An expression that is not used for its value.")
 
+(defvar *walk-debug* nil
+  "Print every walk step")
+
 (defun walk-py-ast (ast f &key (value +no-value+)
 			       (target +no-target+)
 			       (lists-only t) 
@@ -77,7 +80,9 @@ CLASSDEF, FUNCDEF or LAMBDA."
   (labels ((walk-py-ast-1 (ast &key value target)
 	     (declare (optimize (debug 3)))
 	     
-	     #+(or)(warn "w> ~A" ast)
+	     (when *walk-debug*
+               (warn "w> ~A" ast))
+             
 	     (assert ast () "Attempt to WALK-PY-AST into an AST that is NIL")
 	     
 	     (when (and lists-only (not (consp ast)))
@@ -357,9 +362,11 @@ VALUE and TARGET context."
        (make `([yield-stmt] ,(funcall f (second form) :value +normal-value+))))
     
       (t
-       (when (and (not (fboundp (car form)))
+       (when (and (symbolp (car form))
+                  (not (fboundp (car form)))
 		  *walk-warn-unknown-form*)
 	 (warn "WALK: assuming ~S is a Lisp form: not walked into." form))
+        
        form))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
