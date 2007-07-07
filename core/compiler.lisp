@@ -26,11 +26,8 @@
 ;; In the macro expansions, lexical variables that keep context state
 ;; have a name like +NAME+.
 
-
-(defmacro with-gensyms (list &body body)
-  `(let ,(loop for x in list
-	     collect `(,x (gensym ,(symbol-name x))))
-     ,@body))
+(defvar *compiler-verbose* nil
+  "Whether to print Python compiler messages, e.g. inlining decisions")
 
 ;;; Compiler optimization and debugging options.
 
@@ -38,8 +35,8 @@
   "Whether `eval', `locals' and `globals' can be called indirectly, like:
  x = locals; x()
 If true, the compiler must generate additional code for every call,
-and execution will be slower. As it is rare for Python code to use
-indirect calls, the default value is false.")
+and execution will be slower. It is very rare for Python code to do
+such indirect special calls.")
 ;; This is similar to the Javscript restriction on `eval' (ECMA 262, §15.1.2.1)
 
 (defvar *mangle-private-variables-in-class* nil
@@ -63,6 +60,13 @@ Only has effect when *include-line-number-hook-calls* is true.")
 
 (defvar *inline-fixnum-arithmetic* t
   "For common arithmetic operations (+,-,*,/) the (often common) two-fixnum case is inlined")
+
+(defvar *inline-builtin-methods* t
+  "Inline method calls to common builtin methods (with a run-time check) for calls
+to 'join (string.join), 'sort (list.sort)")
+
+(defvar *inline-getattr-call* t
+  "Inline getattr(x,y).(zzz) calls, which often optimizes away building bound method.")
 
 (defmacro with-line-numbers ((&key compile-hook runtime-hook) &body body)
   ;; You have to set *runtime-line-number-hook* yourself.
@@ -104,6 +108,128 @@ XXX Currently there is not way to set *__debug__* to False.")
   `(locally (declare ,+optimize-fastest+)
      ,@body))
 
+(defun compiler-message (&rest args)
+  (when *compiler-verbose*
+    (format t "CLPython compiler: ")
+    (apply #'format t args)))
+
+;; Gensym handling
+
+(defmacro with-gensyms (list &body body)
+  `(let ,(loop for x in list
+	     collect `(,x (gensym ,(symbol-name x))))
+     ,@body))
+
+(defun multi-eval-safe (form)
+  ;; Can FORM be evaluated multiple times safely?
+  ;; (Always yielding the same result, without side effects)
+  (cond ((match-p form '([identifier-expr] ?_))
+         ;; variable lookup
+         t)
+        ((atom form)
+         t)
+        (t
+         nil)))
+
+(eval-when (compile load eval)
+(defun wildcard-sym-p (x)
+  (and (symbolp x)
+       (let ((name (symbol-name x)))
+         (and (> (length name) 0)
+              (char= (aref name 0) #\?)))))
+
+(defun template-wildcards (template)
+  (let (res)
+    (labels ((collect (x)
+               (etypecase x
+                 (symbol (when (wildcard-sym-p x) (push x res)))
+                 (list (dolist (xi x) (collect xi))))))
+      (collect template)
+      (sort (remove-duplicates res) #'string<))))
+
+(defun match-p (form template &key verbose (check-consistency t))
+  "Pattern matcher for lists/symbols, to detect AST patterns.
+FORM and TEMPLATE must both be trees. Symbols starting with #\?
+in TEMPLATE are wildcards, bound to list or symbol of FORM.
+Returns MATCH-P, BINDINGS; the latter is alist of wildcard-form pairs."
+  ;; Maybe use CL-Unification at some point
+  (when check-consistency
+    (check-consistent-template template))
+  (let (bindings)
+    (labels ((match-forms (form template)
+               (cond ((wildcard-sym-p template) ;; wildcards symbol
+                      (push (cons template form) bindings))
+                     ((and (listp form) (listp template) ;; two lists
+                           (= (length form) (length template)))
+                      (loop for fi in form for ti in template
+                          do (match-forms fi ti)))
+                     ((and (symbolp form) ;; two symbols
+                           (symbolp template)
+                           (eq form template)))
+                     (t
+                      (when verbose (warn "Mismatch: ~A != ~A" form template))
+                      (return-from match-p nil)))))
+
+      (match-forms form template)
+      
+      (loop for sublist on bindings
+          for (key . val) = (car sublist)
+          for next-entry = (find key (cdr sublist) :key #'car)
+          when next-entry
+          unless (equal val (cdr next-entry))
+          do (when verbose (warn "Wildcard mismatch for ~A: ~A != ~A"
+                                 key val (cdr next-entry)))
+             (return-from match-p nil))
+      
+      (values t bindings))))
+
+(defvar *inside-match-check-template* nil)
+
+(define-compiler-macro match-p (&whole whole form template
+                                &key verbose (check-consistency t))
+  (declare (ignore form verbose))
+  (when (and check-consistency
+             (not *inside-match-check-template*)
+             (listp template)
+             (eq (car template) 'quote))
+    (check-consistent-template (second template)))
+  whole)
+
+(defun check-consistent-template (template)
+  (unless *inside-match-check-template*
+    (let ((*inside-match-check-template* t))
+      (let ((x (car template)))
+        (when (and (symbolp x)
+                   (eq x (find-symbol (symbol-name x) :clpython.ast)))
+          (whereas ((ast-pattern (clpython.parser::get-ast-pattern x)))
+            (unless (match-p template ast-pattern)
+              (warn "Attempt to use template of the form ~A. This template ~
+differs in structure from the template for ~A ast nodes, which is: ~A"
+                    template x ast-pattern))))))))
+
+(defmacro with-matching ((form template &key (must-hold t) (check-consistency t))
+                         &body body)
+  (when check-consistency
+    (check-consistent-template template))
+  (let ((wildcards (template-wildcards template)))
+    `(multiple-value-bind (.match-p .bindings)
+         (match-p ,form ',template :check-consistency nil)
+       ,@(unless wildcards
+           `((declare (ignore .bindings))))
+       ,@(when must-hold
+           `((assert .match-p () 
+               "Form does not match required pattern: ~A != ~A" ,form ',template)))
+       (when .match-p
+         (let ,(loop for wc in wildcards
+                   collect `(,wc (cdr (assoc ',wc .bindings))))
+           (declare (ignorable ,@wildcards template))
+           ,@body)))))
+
+(defmacro with-perhaps-matching ((form template &rest args) &body body)
+  `(with-matching (,form ,template :must-hold nil ,@args)
+     ,@body))
+) ;; eval-when
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; 
 ;;;  The macros corresponding to AST nodes
@@ -129,11 +255,9 @@ XXX Currently there is not way to set *__debug__* to False.")
     val-list))
 
 (defun assign-stmt-get-bound-vars (ass-stmt)
-  (destructuring-bind (assign-statement value targets) ass-stmt
-    (declare (ignore value))
-    (assert (eq assign-statement '[assign-stmt]))
-    (let* ((todo targets)
-	   (res  ()))
+  (with-matching (ass-stmt ([assign-stmt] ?value ?targets))
+    (declare (ignore ?value))
+    (let* ((todo ?targets) res)
       (loop for x = (pop todo)
 	  while x do
 	    (ecase (first x)
@@ -163,21 +287,20 @@ XXX Currently there is not way to set *__debug__* to False.")
     whole))
 
 (defmacro [attributeref-expr] (item attr)
-  (assert (eq (car attr) '[identifier-expr]))
-  `(py-attr ,item ',(second attr)))
+  (with-matching (attr ([identifier-expr] ?name))
+    `(py-attr ,item ',?name)))
 
 (define-setf-expander [attributeref-expr] (item attr)
-  (assert (eq (car attr) '[identifier-expr]))
-  (with-gensyms (prim store)
-    (values `(,prim) ;; temps
-	    (list item) ;; values
-	    `(,store) ;; stores
-	    `(with-pydecl ((:inside-setf-py-attr t)) ;; store-form
-	       (setf (py-attr ,prim ',(second attr)) ,store))
-	    `(py-attr ,prim ',(second attr)) ;; read-form
-	    `(with-pydecl ((:inside-setf-py-attr t)) ;; del-form
-	       (setf (py-attr ,prim ',(second attr)) nil)))))
-    
+  (with-matching (attr ([identifier-expr] ?name))
+    (with-gensyms (prim store)
+      (values `(,prim)    ;; temps
+              `(,item) ;; values
+              `(,store)   ;; stores
+              `(with-pydecl ((:inside-setf-py-attr t)) ;; store-form
+                 (setf (py-attr ,prim ',?name) ,store))
+              `(py-attr ,prim ',?name)                 ;; read-form
+              `(with-pydecl ((:inside-setf-py-attr t)) ;; del-form
+                 (setf (py-attr ,prim ',?name) nil))))))
 
 (defmacro [augassign-stmt] (&whole whole op place val &environment env)
   (case (car place)
@@ -280,13 +403,11 @@ XXX Currently there is not way to set *__debug__* to False.")
 					     ,(%pos-args) ,(%there-are-key-args)))))
 		      (t (call-expr-1 ,prim ,@(cddr whole))))))
       
-      (let ((specials-to-check (cond (*allow-indirect-special-call*
-				      *special-calls*)
-				     ((and (listp primary)
-					   (eq (first primary) '[identifier-expr])
-					   (member (second primary) *special-calls*))
-				      (list (second primary))))))
-	(if specials-to-check
+      (let ((specials-to-check (if *allow-indirect-special-call*
+                                   *special-calls*
+                                 (with-perhaps-matching (primary ([identifier-expr] ?name))
+                                   (intersection (list ?name) *special-calls*)))))
+        (if specials-to-check
 	    `(let* ((.prim ,primary))
 	       ,(%do-maybe-special-call '.prim specials-to-check))
 	  `(call-expr-1 ,@(cdr whole)))))))
@@ -329,71 +450,52 @@ XXX Currently there is not way to set *__debug__* to False.")
 (defun call-expr-* (prim *-args)
   (apply #'py-call prim (py-iterate->lisp-list *-args)))
 
-(define-compiler-macro [call-expr] (&whole whole primary (pos-args kwd-args *-arg **-arg))
-  (cond ((and (listp primary) 
-	      (eq (car primary) '[attributeref-expr])
-	      (null (or kwd-args *-arg **-arg)))
-	 ;; Optimize x.y( ...), saving allocation of bound method
-	 (destructuring-bind (obj (identifier-expr attr)) (cdr primary)
-	   (assert (eq identifier-expr '[identifier-expr]))
-	   `(py-attr-call ,obj ,attr ,@pos-args)))
-	
-	((and (listp primary)
-	      (eq (first primary) '[call-expr])
-	      (equal (second primary) '([identifier-expr] {getattr}))
-	      (not (or kwd-args *-arg **-arg))
-	      (destructuring-bind (p k s ss)
-		  (third primary)
-		(and (= 2 (length p))
-		     (not (or k s ss)))))
-	 ;; Optimize "getattr(x,y)(...)" where getattr(x,y) is a function.
-	 ;; This saves allocation of bound method
-	 
-	 ;; As primary is IDENTIFIER-EXPR, accessing it is side effect-free.
-	 `(if (eq ,(second primary) (symbol-function '{getattr}))
-	      
-	      ,(destructuring-bind ((obj attr) k s ss)
-		   (third primary)
-		 (declare (ignore k s ss))
-		 `(multiple-value-bind (.a .b .c)
-		      (getattr-nobind ,obj ,attr nil)
-		    (if (eq .a :class-attr)
-			(funcall .b .c ,@pos-args)
-		      (py-call .a ,@pos-args))))
+(define-compiler-macro [call-expr] (&whole whole  primary args)
+  (declare (ignore primary args))
 
-	    (py-call ,primary ,@pos-args)))
-	
-	;; XXX todo: Optimize obj.__get__(...)
-	(t whole)))
+  ;; The transformations below inline common cases, but
+  ;; there are still run-time checks to verify whether
+  ;; the inline case should be taken.
 
-(defmacro py-attr-call (prim attr &rest args)
-  ;; A method call with only positional args: <prim>.<attr>(p1, p2, .., pi)
-  (if (inlineable-method-p attr args)
-      (let ((prim-var (if (multi-eval-safe prim)
-			  prim
-			(with-gensyms (evaled-prim)
-			  evaled-prim))))
-	
-	(multiple-value-bind (test outcome)
-	    (inlineable-method-code prim-var attr args)
-	  `(let ,(unless (eq prim-var prim)
-		   `((,prim-var ,prim)))
-	     (if ,test
-		 ,outcome
-	       (py-call (py-attr ,prim-var ',attr) ,@args)))))
+  ;; Optimize calls of the form OBJ.ATTR(POS-ARGS..)
+  ;; where ATTR is usually a built-in method,
+  ;; so "x.sort()" gets inlined call to `py-list.sort'.
+  (when *inline-builtin-methods*
+    (with-perhaps-matching (whole
+                            ([call-expr] ([attributeref-expr] ?obj ([identifier-expr] ?attr-name))
+                                         (?pos-args () nil nil)))
+      (when (inlineable-method-p ?attr-name (length ?pos-args))
+        (compiler-message "Inlining call to builtin method `~A'." ?attr-name)
+        (return-from [call-expr]
+          (inlined-method-code ?obj ?attr-name ?pos-args)))))
+          
+  ;; Optimize "getattr(OBJ, ATTR)(POSARGS...)", to save allocation of bound method.
+  (when *inline-getattr-call*
+    (with-perhaps-matching (whole ([call-expr]
+                                   ([call-expr] ?id-getattr ((?obj ?attr) () nil nil))
+                                   (?pos-args () nil nil)))
+      (with-perhaps-matching (?id-getattr ([identifier-expr] {getattr}))
+        (assert (multi-eval-safe ?id-getattr))
+        (compiler-message "Optimizing \"getattr(x,y)(...)\" call, skipping bound method.")
+        (return-from [call-expr]
+          `(if (eq ,?id-getattr (symbol-function '{getattr}))
+               (multiple-value-bind (.a .b .c)
+                   (getattr-nobind ,?obj ,?attr nil)
+                 (if (eq .a :class-attr)
+                     (funcall .b .c ,@?pos-args)
+                   (py-call .a ,@?pos-args)))
+             (py-call ,?id-getattr ,@?pos-args))))))
   
-    `(py-call (py-attr ,prim ',attr) ,@args)))
-	    
+  ;; XXX todo: Optimize obj.__get__(...)
+  whole)
 
 (defmacro [classdef-stmt] (name inheritance suite &environment e)
   ;; todo: define .locals. containing class vars
-  (assert (eq (car name) '[identifier-expr]))
-  (assert (eq (car inheritance) '[tuple-expr]))
-  
   (multiple-value-bind (all-class-locals new-locals class-cumul-declared-globals)
       (classdef-stmt-suite-globals-locals suite (get-pydecl :lexically-declared-globals e))
     (assert (equal new-locals all-class-locals))
-    (let* ((cname             (second name))
+    (let* ((cname             (with-matching (name ([identifier-expr] ?name))
+                                ?name))
 	   (new-context-stack (cons cname (get-pydecl :context-stack e)))
 	   (context-cname     (ensure-user-symbol 
 			       (format nil "~{~A~^.~}" (reverse new-context-stack)))))
@@ -425,19 +527,21 @@ XXX Currently there is not way to set *__debug__* to False.")
 	   
 	   ;; Second, now that +cls-namespace+ is filled, make the
 	   ;; class with that as namespace.
-	   (let ((,cls (make-py-class :name ',cname
-				      :context-name ',context-cname
-				      :namespace new-cls-dict
-				      :supers (list ,@(second inheritance))
-				      :cls-metaclass (py-dict-getitem new-cls-dict "__metaclass__")
-				      :mod-metaclass
-				      ,(let ((ix (position '{__metaclass__}
-							   (get-pydecl :mod-globals-names e))))
-					 (if ix
-					     `(svref +mod-static-globals-values+ ,ix)
-					   `(gethash '{__metaclass__} +mod-dyn-globals+))))))
-
-	     ;; See comment for record-source-file at funcdef-stmt
+	   (let ((,cls (make-py-class
+                        :name ',cname
+                        :context-name ',context-cname
+                        :namespace new-cls-dict
+                        :supers ,(with-matching (inheritance ([tuple-expr] ?supers))
+                                   `(list ,@?supers))
+                        :cls-metaclass (py-dict-getitem new-cls-dict "__metaclass__")
+                        :mod-metaclass
+                        ,(let ((ix (position '{__metaclass__}
+                                             (get-pydecl :mod-globals-names e))))
+                           (if ix
+                               `(svref +mod-static-globals-values+ ,ix)
+                             `(gethash '{__metaclass__} +mod-dyn-globals+))))))
+             
+             ;; See comment for record-source-file at funcdef-stmt
 	     (excl:without-redefinition-warnings
 	      (excl:record-source-file ',context-cname :type :type)
 	      ,(let ((upcase-sym (ensure-user-symbol (string-upcase context-cname))))
@@ -511,10 +615,9 @@ XXX Currently there is not way to set *__debug__* to False.")
 				    "RETURN statement found outside function (in EXEC)."))
 	   (t form)))
        
-       (let* ((ast-suite (destructuring-bind (module-stmt suite) ast
-			   (assert (eq module-stmt '[module-stmt]))
-			   (assert (eq (car suite) '[suite-stmt]))
-			   suite))
+       (let* ((ast-suite (with-matching (ast ([module-stmt] ?suite))
+                           (assert (match-p ?suite '([suite-stmt] ?stmts)))
+                           ?suite))
 	      (locals-ht  (convert-to-namespace-ht 
 			   ,(or locals
 				(if (eq context :module) `(create-module-globals-dict) `(.locals.)))))
@@ -596,7 +699,7 @@ XXX Currently there is not way to set *__debug__* to False.")
     (labels ((sym-tuple-name (tup)
 	       ;; Convert tuple with identifiers to symbol:  (a,(b,c)) -> |(a,(b,c))|
 	       ;; Returns the symbol and a list with the "included" symbols (here: a, b and c)
-	       (assert (and (listp tup) (eq (first tup) '[tuple-expr])))
+	       (assert (match-p tup '([tuple-expr] ?items)))
 	       (labels ((rec (x)
 			  (ecase (car x)
 			    ([tuple-expr] (format nil "(~{~A~^, ~})"
@@ -624,7 +727,7 @@ XXX Currently there is not way to set *__debug__* to False.")
 variables assigned to within the function body. Both share tail structure with
 input arguments."
   (declare (optimize (debug 3)))
-  (assert (eq (car suite) '[suite-stmt]))
+  (assert (match-p suite '([suite-stmt] ?items)))
   (let (new-locals)
     (with-py-ast ((form &key value target) suite :value t)
       ;; Use :VALUE T, so the one expression for lambda suites is handled correctly.
@@ -634,16 +737,12 @@ input arguments."
 	(([classdef-stmt] [funcdef-stmt])
 	 (multiple-value-bind (name kind)
 	     (ecase (pop form)
-	       ([classdef-stmt] (destructuring-bind ((identifier cname) inheritance csuite)
-				    form
-				  (declare (ignore inheritance csuite))
-				  (assert (eq identifier '[identifier-expr]))
-				  (values cname "class")))
-	       ([funcdef-stmt]  (destructuring-bind (decorators (identifier-expr fname) args suite)
-				    form
-				  (declare (ignore decorators suite args))
-				  (assert (eq identifier-expr '[identifier-expr]))
-				  (values fname "function"))))
+	       ([classdef-stmt]
+                (with-matching (form (([identifier-expr] ?cname) ?inhericante ?csuite))
+                  (values ?cname "class")))
+	       ([funcdef-stmt]
+                (with-matching (form (?decorators ([identifier-expr] ?fname) ?fargs ?fsuite))
+                  (values ?fname "function"))))
 	   (when (member name globals)
 	     (py-raise '{SyntaxError}
 		       "The ~A name `~A' may not be declared `global'." kind name))
@@ -663,12 +762,10 @@ input arguments."
 	 (values nil t))
 	
 	([global-stmt]
-         (destructuring-bind (tuple-expr (&rest identifiers))
-             (second form)
-           (assert (eq tuple-expr '[tuple-expr]))
-           (assert (listp identifiers))
-           (assert (every (lambda (x) (eq (car x) '[identifier-expr])) identifiers))
-           (let* ((sym-list (mapcar #'second identifiers))
+         (with-matching ((second form) ([tuple-expr] ?identifiers))
+           (dolist (x ?identifiers)
+             (assert (match-p x '([identifier-expr] ?_))))
+           (let* ((sym-list (mapcar #'second ?identifiers))
                   (erroneous (intersection sym-list locals :test 'eq)))
              (when erroneous
                ;; CPython gives SyntaxWarning, and seems to internally move the `global'
@@ -698,17 +795,18 @@ input arguments."
   
   (cond ((keywordp fname)
 	 (assert (null decorators)))
-	((and (listp fname) (eq (car fname) '[identifier-expr]))
-	 (setf fname (second fname)))
+	((with-matching (fname ([identifier-expr] ?name))
+           (setf fname ?name)
+           t))
 	((break :unexpected) ))
   
   (multiple-value-bind (lambda-pos-args tuples-destruct-form normal-pos-args destruct-nested-vars)
       (lambda-args-and-destruct-form pos-args)
         
     (let ((nontuple-arg-names (append normal-pos-args destruct-nested-vars)))
-      (loop for ((identifier-expr name) nil) in key-args
-	  do (assert (eq identifier-expr '[identifier-expr]))
-	     (push name nontuple-arg-names))
+      (dolist (k key-args)
+        (with-matching (k (([identifier-expr] ?name) ?val))
+          (push ?name nontuple-arg-names)))
       (when *-arg (push (second *-arg) nontuple-arg-names))
       (when **-arg (push (second **-arg) nontuple-arg-names))
 
@@ -1138,8 +1236,7 @@ input arguments."
   ;; KISS: if there is a del-stmt somewhere in the suite, skip this optimization.
   ;; This should be more nuanced.
   
-  (cond ((and (some (lambda (s)
-		      (and (listp s) (eq (car s) '[assign-stmt])))
+  (cond ((and (some (lambda (s) (match-p s '([assign-stmt] ?value ?targets)))
 		    (butlast stmts))
 	      (not (ast-deleted-variables whole)))
 	 
@@ -1148,7 +1245,7 @@ input arguments."
 	 (multiple-value-bind (before-stmts ass-stmt after-stmts)
 	     (loop for sublist on stmts
 		 for s = (car sublist)
-		 until (and (listp s) (eq (car s) '[assign-stmt]))
+		 until (match-p s '([assign-stmt] ?value ?targets))
 		 collect s into before
 		 finally (return (values before s (cdr sublist))))
 	   #+(or)(warn "bef: ~A  ass: ~A  after: ~A" before-stmts ass-stmt after-stmts)
@@ -1342,24 +1439,6 @@ input arguments."
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;
-;;; Detecting whether we need to use gensyms in order to evaluate a form just
-;;; once.
-
-(defun multi-eval-safe (form)
-  ;; Can FORM be evaluated multiple times or would that cause side effects?
-  ;; Only variable lookup is considered safe.
-  (cond ((and (listp form)
-	      (= (length form) 2)
-	      (eq (car form) '[identifier-expr]))
-	 t)
-	
-	((listp form)
-	 nil)
-	
-	(t t)))
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;;;
 ;;; Detecting names and values of built-ins
 
 (defun builtin-name-p (x)
@@ -1380,21 +1459,21 @@ input arguments."
 (defun register-inlineable-methods ()
   (clrhash *inlineable-methods*)
   (loop for item in
-	'(({isalpha} 0 stringp      py-string.isalpha)
-	  ({isalnum} 0 stringp      py-string.isalnum)
-	  ({isdigit} 0 stringp      py-string.isdigit)
-	  ({islower} 0 stringp      py-string.islower)
-	  ({isspace} 0 stringp      py-string.isspace)
-	  ({join}    0 stringp      py-string.join   )
-	  ({lower}   0 stringp      py-string.lower  )
-	  ({strip}   0 stringp      py-string.strip  )
-	  ({upper}   0 stringp      py-string.upper  )
-	  	  
-	  ({keys}    0 py-dict-p    py-dict.keys     )
-	  ({items}   0 py-dict-p    py-dict.items    )
-	  ({values}  0 py-dict-p    py-dict.values   )
-	  	  
-	  ({next}    0 py-func-iterator-p py-func-iterator.next)
+	'(({isalpha}    0 stringp      py-string.isalpha)
+	  ({isalnum}    0 stringp      py-string.isalnum)
+	  ({isdigit}    0 stringp      py-string.isdigit)
+	  ({islower}    0 stringp      py-string.islower)
+	  ({isspace}    0 stringp      py-string.isspace)
+	  ({join}       0 stringp      py-string.join   )
+	  ({lower}      0 stringp      py-string.lower  )
+	  ({strip}      0 stringp      py-string.strip  )
+	  ({upper}      0 stringp      py-string.upper  )
+	  	     
+	  ({keys}       0 py-dict-p    py-dict.keys     )
+	  ({items}      0 py-dict-p    py-dict.items    )
+	  ({values}     0 py-dict-p    py-dict.values   )
+	  	     
+	  ({next}       0 py-func-iterator-p py-func-iterator.next)
 	  
 	  ({read}       (0 . 1) filep    py-file.read      )
 	  ({readline}   (0 . 1) filep    py-file.readline  )
@@ -1413,42 +1492,29 @@ input arguments."
 
 (register-inlineable-methods)
 
-(defun inlineable-method-p (attr args)
+(defun inlineable-method-p (attr num-pos-args)
   (let ((item (gethash attr *inlineable-methods*)))
-    (when item
-      (destructuring-bind (req-args check func) 
-	  item
-	(declare (ignore check func))
-	(etypecase req-args
-	  (integer (= (length args) req-args))
-	  (cons    (= (car req-args) (length args) (cdr req-args))))))))
+    (and item
+         (destructuring-bind (req-args check inline-func) 
+             item
+           (declare (ignore check inline-func))
+           (etypecase req-args
+             (integer (= num-pos-args req-args))
+             (cons    (<= (car req-args) num-pos-args (cdr req-args))))))))
 
-(defun inlineable-method-code (prim attr args)
-  (let ((item (gethash attr *inlineable-methods*)))
-    (assert item)
-    
-    (destructuring-bind (req-args check func) 
-	item
-      (assert (etypecase req-args
-		(integer (= (length args) req-args))
-		(cons    (<= (car req-args) (length args) (cdr req-args)))))
-      
-      (let ((check-code
-	     (ecase check
-	       ((stringp vectorp) `(,check ,prim))
-	       
-	       (filep             `(eq (class-of ,prim)
-				       (load-time-value (find-class 'py-func-iterator))))
-	       
-	       (py-dict-p         `(eq (class-of ,prim)
-				       (load-time-value (find-class 'py-dict))))
-	       
-	       (py-func-iterator-p `(eq (class-of ,prim) 
-					(load-time-value (find-class 'py-func-iterator))))))
-	    
-	    (run-code `(,func ,prim ,@args)))
-	(values check-code run-code)))))
-
+(defun inlined-method-code (prim attr args)
+  (assert (inlineable-method-p attr (length args)))
+  (destructuring-bind (req-args check inline-func)
+      (gethash attr *inlineable-methods*)
+    (declare (ignore req-args))
+    `(let ((.prim ,prim))
+       (if ,(ecase check
+              ((stringp vectorp)  `(,check .prim))
+              (filep              `(eq (class-of .prim) (ltv-find-class 'py-func-iterator)))
+              (py-dict-p          `(eq (class-of .prim) (ltv-find-class 'py-dict)))
+              (py-func-iterator-p `(eq (class-of .prim) (ltv-find-class 'py-func-iterator))))
+           (,inline-func .prim ,@args)
+         (py-call (py-attr .prim ',attr) ,@args)))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; 
@@ -1537,19 +1603,14 @@ input arguments."
 
 	(([classdef-stmt]) 
 	 ;; name of this class, but don't recurse
-	 (destructuring-bind
-	     ((identifier-expr cname) inheritance csuite)  (cdr form)
-	   (declare (ignore inheritance csuite))
-	   (assert (eq identifier-expr '[identifier-expr]))
-	   (pushnew cname globals))
+         (with-matching ((cdr form) (([identifier-expr] ?cname) ?inhericance ?csuite))
+	   (pushnew ?cname globals))
 	 (values nil t))
 
 	([funcdef-stmt]
 	 ;; name of this function, but don't recurse
-	 (destructuring-bind (decorators (identifier-expr fname) args fsuite) (cdr form)
-	   (declare (ignore decorators fsuite args))
-	   (assert (eq identifier-expr '[identifier-expr]))
-	   (pushnew fname globals))
+         (with-matching ((cdr form) (?deco ([identifier-expr] ?fname) ?args ?fsuite))
+           (pushnew ?fname globals))
 	 (values nil t))
 	
 	([identifier-expr] (let ((name (second form)))
@@ -1562,10 +1623,8 @@ input arguments."
     (with-py-ast (form suite :into-nested-namespaces t)
       (case (car form)
 
-	([global-stmt] (destructuring-bind (tuple-expr (&rest identifiers))
-                           (second form)
-                         (assert (eq tuple-expr '[tuple-expr]))
-                         (dolist (name (mapcar #'second identifiers))
+	([global-stmt] (with-matching ((second form) ([tuple-expr] ?identifiers))
+                         (dolist (name (mapcar #'second ?identifiers))
                            (pushnew name globals))
                          (values nil t)))
 	
@@ -1946,7 +2005,7 @@ Non-negative integer denoting the number of args otherwise."
   
   ;; Note that LAMBDA-EXPR can't contain (yield) statements
   
-  (assert (not (eq (car ast) '[module-stmt])) ()
+  (assert (not (match-p ast '([module-stmt] ?_))) ()
     "GENERATOR-AST-P called with a MODULE ast.")
   
   (with-py-ast (form ast)
@@ -1982,12 +2041,11 @@ be bound."
 		       (cdr form)
 		     (declare (ignore args))
 		     ;; `locals()' or `globals()'
-		     (when (and (listp primary)
-				(eq (first primary) '[identifier-expr])
-				(member (second primary) '({locals} {globals} {eval})))
-		       ;; We could check for num args here already, but that is a bit hairy,
-		       ;; e.g. locals(*arg) is allowed if arg == [].
-		       (return-from funcdef-should-save-locals-p t))
+                     (with-perhaps-matching (primary ([identifier-expr] ?name))
+                       (when (member ?name '({locals} {globals} {eval}))
+                         ;; We could check for num args here already, but that is a bit hairy,
+                         ;; e.g. locals(*arg) is allowed if arg evaluates to e.g. [].
+                         (return-from funcdef-should-save-locals-p t)))
 		     form))
       ([exec-stmt] (return-from funcdef-should-save-locals-p t))
       (t form)))
@@ -1996,7 +2054,7 @@ be bound."
 (defun rewrite-generator-funcdef-suite (fname suite)
   ;; Returns the function body
   (assert (symbolp fname))
-  (assert (eq (car suite) '[suite-stmt]) ()
+  (assert (match-p suite '([suite-stmt] ?_)) ()
     "CAR of SUITE must be SUITE-STMT, but got: ~S" (car suite))
   (assert (generator-ast-p suite))
 

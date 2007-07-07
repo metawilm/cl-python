@@ -218,11 +218,19 @@
     
 ;;; Arithmetic: + * // etc
 
+(defmacro fixnump (x)
+  `(typep ,x 'fixnum))
+
+(define-compiler-macro fixnump (&whole whole x &environment env)
+  (if (numberp x)
+      (typep x 'fixnum)
+    whole))
+
 (define-compiler-macro py-+ (&whole whole x y)
   (if *inline-fixnum-arithmetic*
       `(let ((.x ,x)
 	     (.y ,y))
-	 (cond ((and (excl::fixnump .x) (excl::fixnump .y))
+	 (cond ((and (fixnump .x) (fixnump .y))
 		(+ (the fixnum .x) (the fixnum .y)))
 	       (t (locally (declare (notinline py-+))
 		    (py-+ .x .y)))))
@@ -232,7 +240,7 @@
   (if *inline-fixnum-arithmetic*
       `(let ((.x ,x)
 	     (.y ,y))
-	 (if (and (excl::fixnump .x) (excl::fixnump .y))
+	 (if (and (fixnump .x) (fixnump .y))
 	     (* (the fixnum .x) (the fixnum .y))
 	   (locally (declare (notinline py-*))
 	     (py-* .x .y))))
@@ -242,7 +250,7 @@
   (if *inline-fixnum-arithmetic*
       `(let ((.x ,x)
 	     (.y ,y))
-	 (if (and (excl::fixnump .x) (excl::fixnump .y))
+	 (if (and (fixnump .x) (fixnump .y))
 	     (- (the fixnum .x) (the fixnum .y))
 	   (locally (declare (notinline py--))
 	     (py-- .x .y))))
@@ -252,7 +260,7 @@
   (if *inline-fixnum-arithmetic*
       `(let ((.x ,x)
 	     (.y ,y))
-	 (if (and (excl::fixnump .x) (excl::fixnump .y))
+	 (if (and (fixnump .x) (fixnump .y))
 	     (floor (the fixnum .x) (the fixnum .y))
 	   (locally (declare (notinline py-//))
 	     (py-// .x .y))))
@@ -264,7 +272,7 @@
 	  `(py-string.__mod__ ,x ,y)
 	`(let ((.x ,x)
 	       (.y ,y))
-	   (if (and (excl::fixnump .x) (excl::fixnump .y))
+	   (if (and (fixnump .x) (fixnump .y))
 	       (mod (the fixnum .x) (the fixnum .y))
 	     (locally (declare (notinline py-%))
 	       (py-% .x .y)))))
