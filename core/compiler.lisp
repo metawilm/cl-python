@@ -585,9 +585,11 @@ differs in structure from the template for ~A ast nodes, which is: ~A"
 
 ;;; `Exec' statement
 
+(eval-when (:compile-toplevel :load-toplevel :execute)
 (defvar *exec-early-parse-constant-string* t
   "Whether a constant string argument to the `exec' statement may be
 parsed at compile time already.")
+)
 
 (defvar *exec-stmt-compile-before-run* t
   "The code in the `exec' statement is translated into a function, that is
