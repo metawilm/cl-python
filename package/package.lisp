@@ -89,7 +89,7 @@
 	   "make-identifier-expr" "make-lambda-expr" "make-listcompr-expr" "make-list-expr" "make-slice-expr"
 	   "make-subscription-expr" "make-tuple-expr" "make-unary-expr"
            
-           "make-identifier-expr*" "make-suite-stmt*" ;; shortcuts
+           "make-identifier-expr*" "make-suite-stmt*" "make-assign-stmt*" ;; shortcuts
            
            ))
 
