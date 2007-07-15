@@ -180,7 +180,15 @@ class C:
 assert type.__class__ == type
 assert M.__class__ == type
 assert M.__class__.__class__ == type
-assert C.__class__ == M"))
+assert C.__class__ == M")
+    (let ((clpython::*mro-filter-implementation-classes* t))
+      (run-no-error "
+class C(int):
+  pass
+x = C()
+assert x.__class__ == C
+assert C.__class__ == type
+assert C.__mro__ == (C, int, object)")))
 
 (defmethod test-lang ((kind (eql :comparison-expr)))
   ;; Ensure py-list.__eq__ can handle non-lists, etc.

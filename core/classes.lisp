@@ -369,13 +369,6 @@
       (py-raise 'TypeError "Superclasses are at different levels (some metaclass, ~
                             some regular class) (got: ~A)." supers))
     
-    ;; Python class `object' corresponds to Lisp class 'py-dictless-object
-    ;; but the new class should have a dict:
-    ;; [XXX perhaps not needed anymore, as py-object has a dict?]
-    (setf supers (nsubstitute (ltv-find-class 'py-object)
-			      (ltv-find-class 'py-dictless-object)
-			      supers))
-    
     (let ((metaclass (or cls-metaclass
 			 (when supers (class-of (car supers)))
 			 mod-metaclass
@@ -1331,6 +1324,11 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 				  :direct-superclasses bases)
     cls))
 
+(defvar *mro-filter-implementation-classes* t
+  "Whether to filter reasonable intermediate classes from the returned MRO.
+For example, `py-int' derives in this implementation from `py-real' and `py-number',
+but the latter two classes are not in CPython.")
+
 (def-py-method py-type.__mro__ :class-attribute (x)
   ;; We could filter out the Lisp implementation classes.
   (make-tuple-from-list
@@ -1338,8 +1336,12 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
        until (or (eq cls (ltv-find-class 'standard-class))
 		 (eq cls (ltv-find-class 'standard-object)))
        unless (member (class-name cls) '(py-user-object
-					 py-lisp-object py-dictless-object t
-                                         py-dict-mixin))
+                                         py-lisp-object
+                                         py-dictless-object
+                                         py-dict-mixin
+                                         t))
+       unless (and *mro-filter-implementation-classes*
+                   (member (class-name cls) '(py-real py-number)))
        collect cls into res
        finally (let ((base-cls (if (subtypep x 'py-meta-type)
 				   'py-type
@@ -1351,12 +1353,22 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 (def-py-method py-type.__subclasses__ (x)
   (make-py-list-from-list (mop:class-direct-subclasses x)))
 
+(defvar *class-display-without-py-prefix* t
+  "Whether to show class names without `py-' prefix: `int' instead of `py-int' etc.")
+
 (def-py-method py-type.__repr__ (x) ;; XXX deproxy not needed
-  (with-output-to-string (s)
-    (print-unreadable-object (x s :identity t)
-      (format s "~@[meta~*~]class ~A"
-	      (typep x (ltv-find-class 'py-meta-type))
-	      (class-name x)))))
+  (let ((name (if *class-display-without-py-prefix*
+                  (let ((n (symbol-name (class-name x))))
+                    (if (and (> (length n) 3)
+                             (string-equal (subseq n 0 3) "py-"))
+                        (subseq n 3)
+                      n))
+                x)))
+    (with-output-to-string (s)
+      (print-unreadable-object (x s :identity t)
+        (format s "~@[meta~*~]class ~A"
+                (typep x (ltv-find-class 'py-meta-type))
+                name)))))
 
 (def-py-method py-type.__str__ (x) ;; XXX deproxy not needed
   (py-type.__repr__ x))
@@ -3263,10 +3275,6 @@ Creates a function for doing fast lookup, using jump table"
   (:method ((x function))    (ltv-find-class 'py-function))
   (:method ((x py-function)) (ltv-find-class 'py-function))
   (:method ((x package)) (ltv-find-class 'lisp-package))
-  
-  #+(or)
-  (:method ((x py-dictless-object)) ;; integers etc
-           (ltv-find-class 'py-object))
   
   (:method ((x py-core-type)) (ltv-find-class 'py-type))
   (:method ((x py-user-type)) (ltv-find-class 'py-type))
