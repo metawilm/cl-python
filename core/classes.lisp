@@ -134,15 +134,10 @@
 	(py-dict-setitem d key val)
       (py-classlookup-bind-call d '{__setitem__} key val))))
 
-  
-(defclass py-class-mixin (py-dict-mixin)
-  ((mro :initarg :mro :accessor class-mro)))
-
-
 ;; Python metatype. Class `type' and subclasses thereof are instances
 ;; of py-meta-type.
 
-(defclass py-meta-type (py-class-mixin standard-class)
+(defclass py-meta-type (py-dict-mixin standard-class)
   ())
 
 (defmethod initialize-instance :after ((cls py-meta-type) &rest initargs)
@@ -152,7 +147,7 @@
 
 ;; A class for Python classes. This is an instance of py-meta-type
 
-(defclass py-type (py-class-mixin standard-class)
+(defclass py-type (py-dict-mixin standard-class)
   ()
   (:metaclass py-meta-type))
 
@@ -301,7 +296,7 @@
 	 
 	 (let* ((cls (or (find-class ',cls) (error "No such class: ~A" ',cls))))
 	   (unless (dict cls)
-	     (error "Class ~A has no dict" cls))
+	     (error "Class ~A has no dict (store ~A)" cls ',cls.meth))
 	   
 	   (let ((obj
 		  ,(ecase (car modifiers)
@@ -537,6 +532,10 @@
 ;;;
 
 (def-py-method py-dictless-object.__class__ :attribute (x)
+  ;; needed for:  type(3) -> int
+  (py-class-of x))
+
+(def-py-method py-type.__class__ :attribute (x)
   (py-class-of x))
 
 
@@ -1228,8 +1227,7 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
   (loop for c in (or cls-list (mop:class-precedence-list cls))
       until (or (eq c (ltv-find-class 'standard-class))
   		(eq c (ltv-find-class 'py-dict-mixin))
-		(eq c (ltv-find-class 'py-class-mixin))
-		(eq c (ltv-find-class 'standard-generic-function))) ;; condition copied from py-attr 
+                (eq c (ltv-find-class 'standard-generic-function))) ;; condition copied from py-attr 
 	    
       do (let* ((d (dict c))
 		(val (when d
@@ -1341,7 +1339,7 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 		 (eq cls (ltv-find-class 'standard-object)))
        unless (member (class-name cls) '(py-user-object
 					 py-lisp-object py-dictless-object t
-					 py-class-mixin py-dict-mixin))
+                                         py-dict-mixin))
        collect cls into res
        finally (let ((base-cls (if (subtypep x 'py-meta-type)
 				   'py-type
@@ -3254,45 +3252,35 @@ Creates a function for doing fast lookup, using jump table"
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;  
 
 (defgeneric py-class-of (x)
+  
+  ;; Lisp objects lead to their proxy class
   (:method ((x integer)) (ltv-find-class 'py-int    ))
   (:method ((x real))    (ltv-find-class 'py-float  ))
   (:method ((x complex)) (ltv-find-class 'py-complex))
   (:method ((x string))  (ltv-find-class 'py-string ))
   (:method ((x vector))  (ltv-find-class 'py-list   ))
   (:method ((x list))    (ltv-find-class 'py-tuple  ))
-    
   (:method ((x function))    (ltv-find-class 'py-function))
   (:method ((x py-function)) (ltv-find-class 'py-function))
-    
-  (:method ((x py-lisp-type)) (ltv-find-class 'py-type))
-  (:method ((x py-core-type)) (ltv-find-class 'py-type))
-  (:method ((x py-user-type)) (ltv-find-class 'py-type))
-
   (:method ((x package)) (ltv-find-class 'lisp-package))
   
-  (:method ((x class))   (cond
-			  ((eq x (ltv-find-class 'py-type))
-			   x)  ;; py-type is its own class
-			    
-			  ((eq x (ltv-find-class 'py-meta-type))
-			   ;; the metatypes is posing as `type'
-			   (ltv-find-class 'py-type))
-			    
-			  ((typep x (ltv-find-class 'py-meta-type))
-			   ;; metatypes fake being of type `type'
-			   (ltv-find-class 'py-type))
-			    
-			  ((typep x (ltv-find-class 'py-class-mixin))
-			   ;; maybe user-defined metaclass
-			   (class-of x))
-			    
-			  ((or (typep x (ltv-find-class 'standard-class))
-			       (typep x (ltv-find-class 'built-in-class)))
-			   (ltv-find-class 'py-type))
-			  
-			  (t (warn "py-class-of ~A -> ~A" x (class-of x))
-			     (class-of x))))
+  #+(or)
+  (:method ((x py-dictless-object)) ;; integers etc
+           (ltv-find-class 'py-object))
   
+  (:method ((x py-core-type)) (ltv-find-class 'py-type))
+  (:method ((x py-user-type)) (ltv-find-class 'py-type))
+  
+  (:method ((x py-meta-type)) ;; metatypes (including `type')
+                              ;;  fake being of type `type'
+                              (ltv-find-class 'py-type))
+  
+  (:method ((x py-type)) (class-of x))
+  
+  (:method ((x (eql (find-class 'py-meta-type))))
+           ;; the metatypes is posing as `type'
+           (ltv-find-class 'py-type))
+    
   (:method ((x t))       (class-of x)))
 
 
@@ -3382,8 +3370,7 @@ Creates a function for doing fast lookup, using jump table"
     (loop for c in (mop:class-precedence-list x.class)
 	until (or (eq c (ltv-find-class 'standard-class))
 		  (eq c (ltv-find-class 'py-dict-mixin))
-		  (eq c (ltv-find-class 'py-class-mixin))
-		  (eq c (ltv-find-class 'standard-generic-function)))
+                  (eq c (ltv-find-class 'standard-generic-function)))
 	      
 	for c.dict = (cond
 		      ((eq c (ltv-find-class 'py-user-object)) nil) ;; has no methods
@@ -3438,8 +3425,7 @@ Creates a function for doing fast lookup, using jump table"
 	#+(or)(break "cls ~A: cpl ~A" x (mop:class-precedence-list x))
 	(loop for c in (mop:class-precedence-list x)
 	    until (or (eq c (ltv-find-class 'standard-class))
-		      (eq c (ltv-find-class 'py-dict-mixin))
-		      (eq c (ltv-find-class 'py-class-mixin)))
+		      (eq c (ltv-find-class 'py-dict-mixin)))
 		  
 	    for c.dict = (dict c) ;; may be NIL
 			 

@@ -12,9 +12,6 @@
 (in-package :clpython.test)
 (in-syntax *user-readtable*)
 
-#+(or)(defmacro test-code (string)
-  `(test-no-error (run-python-string ,string)))
-
 (defun run-lang-test ()
   (with-subtest (:name "CLPython-Lang")
     (dolist (node '(:assert-stmt :assign-stmt :attributeref-expr :augassign-stmt
@@ -173,7 +170,17 @@ try:
   assert False
 except NameError:
   'ok'
-"))
+")
+  (run-no-error "
+class M(type): pass
+
+class C:
+  __metaclass__ = M
+
+assert type.__class__ == type
+assert M.__class__ == type
+assert M.__class__.__class__ == type
+assert C.__class__ == M"))
 
 (defmethod test-lang ((kind (eql :comparison-expr)))
   ;; Ensure py-list.__eq__ can handle non-lists, etc.
