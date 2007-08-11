@@ -118,7 +118,7 @@ Non-{string,symbol} names never have a magic ix."
 (unless (fboundp 'py-==)
   (defun py-== (x y)
     "Returns Python equality value: True = 1, False = 0."
-    (warn "old py-== ~A ~A" x y)
+    #+(or)(warn "old py-== ~A ~A" x y)
     (if (equalp x y) 1 0)))
 
 
