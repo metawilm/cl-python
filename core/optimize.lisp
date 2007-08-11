@@ -54,8 +54,11 @@
   (mapc f x))
 
 (defmethod map-over-py-object ((f function) (x py-dict))
-  (loop for key being the hash-key in (py-dict-hash-table x)
-      do (funcall f key)))
+  (let ((map-func (lambda (k v)
+                    (declare (ignore v))
+                    (funcall f k))))
+    (declare (dynamic-extent map-func))
+    (dict-map x map-func)))
 
 (defmethod map-over-py-object ((f function) (x py-xrange))
   (with-slots (start stop step) x
@@ -92,7 +95,7 @@
 
 (defmethod py-in (x (d py-dict))
   (if (eq (class-of d) (ltv-find-class 'py-dict))
-      (py-bool (py-dict-getitem d x))
+      (py-bool (sub/dict-get d x))
     (call-next-method)))
     
 (defmethod py-in ((item string) (seq string))
@@ -160,7 +163,9 @@
 
 (defmethod (setf py-subs) (val (x py-dict) item)
   (if (eq (class-of x) (ltv-find-class 'py-dict))
-      (py-dict.__setitem__ x item val)
+      (if val
+          (py-dict.__setitem__ x item val)
+        (py-dict.__delitem__ x item))
     (call-next-method)))
 
 ;;; Comparison: ==
@@ -188,17 +193,22 @@
 	     (py-!= .x .y))))
     whole))
 
+
+
 (defmethod py-== ((x fixnum) (y fixnum)) (py-bool (= x y)))
 (defmethod py-== ((x string) (y string)) (py-bool (string= x y)))
-
-(defmethod py-!= ((x fixnum) (y fixnum)) (py-bool (/= x y)))
-(defmethod py-!= ((x string) (y string)) (py-bool (string/= x y)))
+;; (py-== string symbol) and (py-== symbol string) are defined in classes.lisp already
 
 (defmethod py-== ((x vector) (y vector)) (py-list.__eq__ x y))
 (defmethod py-== ((x list)   (y list))   (py-tuple.__eq__ x y))
 
+(defmethod py-!= ((x fixnum) (y fixnum)) (py-bool (/= x y)))
+(defmethod py-!= ((x string) (y string)) (py-bool (string/= x y)))
+
 (defmethod py-<  ((x fixnum) (y fixnum)) (py-bool (<  x y)))
 (defmethod py-<= ((x fixnum) (y fixnum)) (py-bool (<= x y)))
+(defmethod py-<= ((x string) (y string)) (py-bool (string<= x y)))
+
 (defmethod py->  ((x fixnum) (y fixnum)) (py-bool (>  x y)))
 (defmethod py->= ((x fixnum) (y fixnum)) (py-bool (>= x y)))
 
@@ -214,7 +224,7 @@
 (generate-cmp-cm py->)
 (generate-cmp-cm py->=)
 
-(py-<= 1 2)
+;(py-<= 1 2)
     
 ;;; Arithmetic: + * // etc
 

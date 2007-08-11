@@ -18,121 +18,30 @@
 (in-package :clpython)
 (in-syntax *ast-user-readtable*)
 
-(eval-when (compile load eval)
-  
-  (defparameter *dict-id-counter* 1)
-  
-  (defclass py-dict () ;; Class redefinition  below, to set PY-CORE-OBJECT as superclass.
-    ((id              :accessor py-dict-id               :initform (new-dict-id) )
-     (symdict-func    :accessor py-dict-symdict-func     :initform nil )
-     (lookup-counter  :accessor py-dict-lookup-counter   :initform 0   )
-     (non-string-keys :accessor py-dict-non-string-keysp :initform nil )
-     (hash-table      :accessor py-dict-hash-table      
-		      :initform (make-hash-table :test 'py-==->lisp-val :hash-function 'py-hash))))
-  
-  (defun py-==->lisp-val (x y)
-    (/= (py-== x y) 0))
-  
-  (define-compiler-macro py-==->lisp-val (x y)
-    ;; A user can define a class whose instances are not equal to themselves.
-    ;; Because that leads to problems in hashtable lookup, and this function
-    ;; is used a lot for hash tables, we assume EQ => py-==.
-    ;; 
-    ;; This compiler macro speeds up the Pystone benchmark, from 8.7 to 8.2 sec.
-    `(let ((.x ,x)
-	   (.y ,y))
-       (if (eq .x .y)
-	   t
-	 (/= (py-== .x .y) 0))))
-	 
-  ;; The functions PY-HASH and PY-== are needed for bootstrapping, but
-  ;; the definition below is only temporary; below redefinition occurs.
-
-  (defun py-hash (x) (sxhash x))
-  (defun py-== (x y) (if (equalp x y) 1 0))
-      
-  (defun new-dict-id ()
-    (1- (incf *dict-id-counter*)))
-
-  (defmethod touch-py-dict ((x py-dict))
-    ;; Update ID; remove symdict func; reset counters.
-    (setf (py-dict-id x) (new-dict-id))
-    (when (py-dict-symdict-func x)
-      (setf (py-dict-symdict-func x) nil))
-    (setf (py-dict-lookup-counter x) 0))
-  
-  (defgeneric py-dict-setitem (dict key val)
-    (:documentation "Returns ITEM, or NIL")
-    (:method ((d py-dict) k v)
-	     (touch-py-dict d)
-	     (typecase k
-	       (symbol)
-	       (string)
-	       (t (setf (py-dict-non-string-keysp d) t)))
-	     (setf (gethash k (py-dict-hash-table d)) v)))
-  
-) ;; eval-when
+(defmacro ltv-find-class (clsname)
+  `(load-time-value (find-class ,clsname)))
 
 (defclass py-dict-mixin ()
   ((dict :initarg :dict :initform (make-dict) :accessor dict)))
 
-(eval-when (compile load eval)
-  (defun make-dict ()
-    (declare (optimize (speed 3) (safety 0) (debug 0)))
-    (make-instance 'py-dict))
-)
-
 (defmethod dict ((x t))
   nil)
 
-(defun ensure-dict (x)
-  (or (dict x)
-      (error "dict-get on ~A, which does not have dict" x)))
+(defmacro sub/dict-get (d key)
+  "Returns value or NIL; does not use dict's __getitem__ etc"
+  `(dikt-get (py-dict-dikt ,d) ,key))
 
-(defun dict-get (x key)
-  #+(or)(assert (stringp key))
-  (let ((d (ensure-dict x)))
-    (this-dict-get d key)))
+(defmacro sub/dict-set (d key val)
+  "Does not use dict's __getitem__ etc"
+  `(dikt-set (py-dict-dikt ,d) ,key ,val))
 
-(defmacro ltv-find-class (clsname)
-  `(load-time-value (find-class ,clsname)))
+(defun sub/dict-del (d key)
+  "Returns if succesfull (i.e. key was present)"
+  (check-type d py-dict)
+  (if (eq (class-of d) (ltv-find-class 'py-dict))
+      (dikt-del (py-dict-dikt d) key)
+    (py-classlookup-bind-call d '{__delitem__} key)))
 
-(defun normal-pydict-p (x)
-  (let ((x.cn (class-name (class-of x))))
-    ;; Bootstrapping: classes not available, so test on class name instead.
-    (or (eq x.cn 'py-dict)
-	(eq x.cn 'py-dict-classdict))))
-
-(defun this-dict-get (d key)
-  #+(or)(assert (stringp key))
-  #+(or)(assert d)
-  (if (normal-pydict-p d)
-      (py-dict-getitem d key)
-    (py-classlookup-bind-call d '{__getitem__} key)))
-
-(defun dict-del (x key)
-  (check-type key string)
-  (let ((d (ensure-dict x)))
-    (if (normal-pydict-p d)
-	(py-dict.__delitem__ d key)
-      (py-classlookup-bind-call d '{__delitem__} key))))
-
-(defun (setf dict-get) (val x key)
-  ;; NEW-VAL == NIL -> delete key; return whether it existed
-  (check-type key (or string symbol))
-  (let ((d (ensure-dict x)))
-    (setf (this-dict-get d key) val)))
-
-(defun (setf this-dict-get) (val d key)
-  (if (null val)
-      
-      (if (normal-pydict-p d)
-	  (py-dict-delitem d key)
-	(py-classlookup-bind-call d '{__setitem__} key val))
-      
-    (if (normal-pydict-p d)
-	(py-dict-setitem d key val)
-      (py-classlookup-bind-call d '{__setitem__} key val))))
 
 ;; Python metatype. Class `type' and subclasses thereof are instances
 ;; of py-meta-type.
@@ -195,7 +104,7 @@
 
 ;; Fix superclass and metaclass of PY-DICT.
 (mop:ensure-class 'py-dict
-		  :direct-superclasses (list 'py-lisp-object)
+		  :direct-superclasses (list 'py-core-object)
 		  :metaclass 'py-core-type)
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -294,9 +203,10 @@
 				   (block ,cls.meth
 				     ,body)))))
 	 
-	 (let* ((cls (or (find-class ',cls) (error "No such class: ~A" ',cls))))
-	   (unless (dict cls)
-	     (error "Class ~A has no dict (store ~A)" cls ',cls.meth))
+	 (let* ((cls (or (find-class ',cls) (error "No such class: ~A" ',cls)))
+                (dict (or (dict cls)
+                          (error "Class ~A has no dict (to store method ~A)"
+                                 cls ',cls.meth))))
 	   
 	   (let ((obj
 		  ,(ecase (car modifiers)
@@ -326,7 +236,7 @@
 					   nil ;; read function is already stored in dict
 					   )))))
 	     (when obj
-	       (setf (dict-get cls ',meth) obj))))))))
+	       (sub/dict-set dict ',meth obj))))))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;
@@ -397,7 +307,7 @@
 		    (make-symbol (symbol-name name))
 		    :direct-superclasses supers
 		    :metaclass (ltv-find-class 'py-meta-type)
-		    :dict (mark-as-classdict namespace))))
+		    :dict namespace)))
 	  (return-from make-py-class cls)))
             
       ;; Not a subclass of `type', so at the `object' level
@@ -1009,7 +919,6 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 
 
 (def-py-method py-super.__getattribute__ (x attr)
-  (declare (special *py-attr-sym*))
   (assert (stringp attr))
   (flet ((find-remaining-mro (mro cls)
 	   #+(or)(warn "find-preceding-class-in-mro ~A ~A..." mro cls)
@@ -1026,9 +935,7 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 								   (py-class-of object)))
 						current-class))
 	     (class (car remaining-mro))
-	     (attr.sym (if (string= (symbol-name *py-attr-sym*) attr)
-			   *py-attr-sym*
-			 (ensure-user-symbol attr)))
+	     (attr.sym (ensure-user-symbol attr))
 	     (val (recursive-class-dict-lookup class attr.sym remaining-mro)))
 	
 	(if val
@@ -1157,15 +1064,12 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 (defvar *py-object.__getattribute__-active* ())
 
 (def-py-method py-object.__getattribute__ (x attr)
-  (declare (special *py-attr-sym*))
   (assert (stringp attr))
   ;; ATTR may be a symbol, a string, or instance of user-defined subclass of string
   (when (string= (py-val->string attr) "__dict__")
     (return-from py-object.__getattribute__ (dict x)))
   
-  (let* ((attr.sym (if (string= (symbol-name *py-attr-sym*) attr)
-		       *py-attr-sym*
-		     (ensure-user-symbol attr)))
+  (let* ((attr.sym (ensure-user-symbol attr))
 	 (*py-object.__getattribute__-active*
 	  (cons (cons x attr.sym) *py-object.__getattribute__-active*)))
     (py-attr x attr.sym)))
@@ -1224,21 +1128,12 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 	    
       do (let* ((d (dict c))
 		(val (when d
-		       (if (normal-pydict-p d)
-			   (py-dict-getitem d attr)
-			 (let ((*py-attr-sym* attr))
-			   (declare (special *py-attr-sym*))
-			   (this-dict-get d (symbol-name attr)))))))
-	   #+(or)
-	   (if val
-	       (warn "Dict for cls ~A has key ~A, val ~A" cls attr val)
-	     (warn "Dict for cls ~A has no key ~A" cls attr))
-	   
-	   (when val
+		       (sub/dict-get d attr))))
+           (when val
 	     (return-from recursive-class-dict-lookup val)))
 
       finally ;; this seems not needed, in the finally clause
-	(let ((obj-attr (py-dict-getitem (load-time-value (dict (find-class 'py-object))) attr)))
+	(let ((obj-attr (sub/dict-get (load-time-value (dict (find-class 'py-object))) attr)))
 	  (when obj-attr
 	    #+(or)(warn "rec van py-object: ~A (cpl: ~A)" attr (mop:class-precedence-list cls))
 	    (return obj-attr)))))
@@ -1290,7 +1185,7 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 	     :metaclass (ecase cls-type
 			  (:metaclass (ltv-find-class 'py-meta-type))
 			  (:class     metacls))
-	     :dict (mark-as-classdict dict))))
+	     :dict dict)))
     
     (mop:finalize-inheritance c)
     
@@ -1308,7 +1203,8 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
   (dict cls))
 
 (def-py-method py-type.__dict__ :attribute-write (cls new-dict)
-  (setf (slot-value cls 'dict) (mark-as-classdict new-dict))
+  ;; XXX check NEW-DICT is of (sub)type PY-DICT.
+  (setf (slot-value cls 'dict) new-dict)
   (signal-class-dict-replacement cls (dict cls) new-dict))
 
 (def-py-method py-type.__bases__ :attribute-read (cls)
@@ -1432,8 +1328,8 @@ but the latter two classes are not in CPython.")
   (apply #'make-instance 'py-module options))
 
 (def-py-method py-module.__new__ :static (cls name)
-	       (let ((x (make-instance cls)))
-		 (setf (dict-get x '{__name__}) name)
+	       (let* ((x (make-instance cls)))
+		 (sub/dict-set (dict x) '{__name__} name)
 		 x))
 
 (def-py-method py-module.__init__ (&rest args)
@@ -2123,8 +2019,6 @@ But if RELATIVE-TO package name is given, result may contains dots."
   (typecase x
     ((or number string list function vector hash-table)
      x)
-    (py-dict
-     (py-dict-hash-table x))
     (py-lisp-object
      (proxy-lisp-val x))
     (t
@@ -2379,84 +2273,23 @@ But if RELATIVE-TO package name is given, result may contains dots."
 ;; Class py-dict is already defined above, as it's needed for
 ;; bootstrapping Python class hierarchy.
 
-(defconstant +dict-symhash-trigger+ 20)
-
-(defmethod incf-dict-lookup-count ((x py-dict))
-  (unless (or (py-dict-symdict-func x)
-	      (py-dict-non-string-keysp x))
-    (let ((new-count (the fixnum (incf (py-dict-lookup-counter x)))))
-      (when (and (= (the fixnum new-count) +dict-symhash-trigger+))
-	(py-dict-make-symdict-func x))
-    new-count)))
-
-(defparameter *symbol-dict-suffix-bits* 4)
-
-(defmethod py-dict-make-symdict-func ((x py-dict))
-  #+(or)(assert (not (py-dict-non-string-keysp x)) (x)
-    "Cannot create symdict-func for dict, as it has non-string keys")
-  #+(or)(break "comp ~A" x)
-  (loop for k being the hash-key in (py-dict-hash-table x)
-      using (hash-value v)
-      for k.sym = (if (symbolp k)
-		      k 
-		    (ensure-user-symbol k))
-      collect (cons k.sym v) into alist
-      finally (let ((f (make-symbol-hash-func alist)))
-		#+(or)(warn "compiling symdict!")
-		(setf (py-dict-symdict-func x) f)
-		(return t))))
-
-(defun make-symbol-hash-func (alist)
-  "ALIST is ((key . val)); each KEY is a symbol.
-Creates a function for doing fast lookup, using jump table"
-  (let* ((suffix-max (1- (expt 2 *symbol-dict-suffix-bits*)))
-	 (f `(lambda (x)
-	       #+(or)(assert (symbolp x))
-	       ;; For symbols, calling excl::symbol-hash-fcn is
-	       ;; approximately 4 times faster than calling sxhash.
-	       
-	       (let* ((hash (the fixnum (excl::symbol-hash-fcn x)))
-		      (suffix (logand hash ,suffix-max)))
-		
-		 (case (the (integer 0 15) suffix)
-		   
-		   ,@(loop for (s . val) in alist
-			 for hash = (excl::symbol-hash-fcn s)
-			 for suffix = (logand hash suffix-max)
-			 collect (list s val suffix) into hashes
-			 finally 
-			   (return
-			     (loop for ix from 0 to suffix-max
-				 collect
-			
-				   `(,ix ,(loop for (s val suffix) in hashes
-					      when (= suffix ix)
-					      collect (list s val) into candidates
-					      finally 
-						(return
-						  (if candidates
-						      `(cond ,@(loop for (c val) in candidates
-								   collect `((eq x ',c)
-									     ',val)))
-						    nil))))))))))))
-    (compile nil f)))
-
 (defun convert-if-symbol (x)
   (if (symbolp x)
       (symbol-name x)
     x))
 
 (defmacro make-dict-unevaled-list (items)
+  ;; XXX move to compiler
   (let ((dict '#:dict))
     `(let* ((,dict (make-dict)))
        ,@(loop for (k . v) in items
-	     collect `(py-dict-setitem ,dict ,k ,v))
+	     collect `(sub/dict-set ,dict ,k ,v))
        ,dict)))
 
 (defun make-dict-from-symbol-alist (alist)
   (loop with d = (make-dict)
       for (k . v) in alist 
-      do (py-dict-setitem d (string k) v)
+      do (sub/dict-set d (string k) v)
       finally (return d)))
 
 (def-py-method py-dict.__new__ :static (cls &rest kwargs)
@@ -2500,62 +2333,20 @@ Creates a function for doing fast lookup, using jump table"
 		(py-call setitem-meth (symbol-name key) val))))))
 
 (def-py-method py-dict.__delitem__ (dict k)
-  (or (py-dict-delitem dict k)
+  (or (dikt-del (py-dict-dikt dict) k)
       (py-raise '{KeyError} "Dict ~A has no such key: ~A" dict k)))
 
-(defgeneric py-dict-delitem (dict key)
-  (:documentation "Returns boolean indicating SUCCESS")
-  (:method :around ((d py-dict) k)
-	   (declare (ignore k))
-	   (if (call-next-method)
-	       (touch-py-dict d)
-	     nil))
-  
-  (:method ((d py-dict) k)
-	   (remhash k (py-dict-hash-table d))))
-
 (def-py-method py-dict.__eq__ (dict1 dict2)
-  (unless (and (typep dict1 'py-dict)
-               (typep dict2 'py-dict))
-    (return-from py-dict.__eq__ *the-false*))
-  (let ((ht1 (py-dict-hash-table dict1))
-        (ht2 (py-dict-hash-table dict2)))
-    (py-bool (and (= (hash-table-count ht1) (hash-table-count ht2))
-		  (loop for d1.k being the hash-key in ht1 using (hash-value d1.v)
-		      for d2.v = (gethash d1.k ht2)
-		      when (py-val->lisp-bool (py-!= d1.v d2.v)) return nil
-		      finally (return t))))))
+  (py-bool (cond ((eq dict1 dict2) t)
+                 ((and (typep dict1 'py-dict)
+                       (typep dict2 'py-dict))
+                  (dikt-equal (py-dict-dikt dict1) (py-dict-dikt dict2)))
+                 (t nil))))
 
 (def-py-method py-dict.__getitem__ (dict k)
   "KEY may be symbol (converted to string)"
-  (or (py-dict-getitem dict k)
+  (or (dikt-get (py-dict-dikt dict) k)
       (py-raise '{KeyError} "Dict ~A has no such key: ~A" dict k)))
-
-(defgeneric py-dict-getitem (dict key)
-  (:documentation "Returns ITEM, or NIL")
-
-  (:method :around ((d py-dict) (k symbol))
-	   (let ((f (py-dict-symdict-func d)))
-	     (if f
-		 (funcall f k)
-	       (call-next-method))))
-  
-  (:method :around ((d py-dict) k)
-	   (declare (ignore k))
-	   (incf-dict-lookup-count d)
-	   (call-next-method))
-  
-  (:method ((d py-dict) (k string))
-	   (declare (special *py-attr-sym*))
-	   (let* ((s *py-attr-sym*)
-		  (sn (symbol-name s)))
-	     (if (or (eq k sn)
-		     (string= (the string k) (the string sn)))
-		 (py-dict-getitem d s)
-	       (call-next-method))))
-
-  (:method ((d py-dict) k)
-	   (gethash k (py-dict-hash-table d))))
 
 (def-py-method py-dict.__iter__ (dict)
   ;; Iterator over the keys.
@@ -2564,96 +2355,85 @@ Creates a function for doing fast lookup, using jump table"
   ;;   an iteration is returned outside the dynamic extent of the
   ;;   with-hash-table-iterator form such as by returning some closure over
   ;;   the invocation form."
-  (with-hash-table-iterator (next-func (py-dict-hash-table dict))
-    (make-iterator-from-function
-     :name :py-dict-iterator
-     :func (lambda () (multiple-value-bind (ret key val) 
-			  (next-func)
-			(declare (ignore val))
-			(when ret key))))))
+  (make-iterator-from-function
+   :name :py-dict-iterator
+   :func (dikt-iter-keys-func (py-dict-dikt dict))))
 
 (def-py-method py-dict.__len__ (dict)
-  (hash-table-count (py-dict-hash-table dict)))
+  (dikt-count (py-dict-dikt dict)))
 
 (def-py-method py-dict.__nonzero__ (dict)
-  (py-bool (> (hash-table-count (py-dict-hash-table dict)) 0)))
+  (py-bool (> (py-dict.__len__ dict) 0)))
 
 (def-py-method py-dict.__repr__ (x)
-  (with-output-to-string (s)
-    (format s "{")
-    (loop with ht = (py-dict-hash-table x)
-	for k being the hash-key in ht
-	using (hash-value v)
-	for i downfrom (hash-table-count ht)
-	do (if (symbolp k)
-	       (write (symbol-name k) :stream s)
-	     (repr-fmt s k))
-	   (format s ": ")
-	   (repr-fmt s v)
-	   (unless (= 1 i)
-	     (format s ", ")))
-    (format s "}")))
+  (let ((kv-iter-func (dikt-iter-keys-values-func (py-dict-dikt x)))
+        (first-iter   t))
+    (with-output-to-string (s)
+      (format s "{")
+      (loop
+        (multiple-value-bind (k v)
+            (funcall kv-iter-func)
+          (unless k
+            (return))
+          (if first-iter
+              (setf first-iter nil)
+            (format s ", "))
+          (if (symbolp k)
+              (write (symbol-name k) :stream s)
+            (repr-fmt s k))
+          (format s ": ")
+          (repr-fmt s v)))
+      (format s "}"))))
   
 (def-py-method py-dict.__setitem__ (x key val)
-  (py-dict-setitem x key val))
+  (sub/dict-set x key val))
 
-(def-py-method py-dict.copy (x)
-  (loop
-      with copy = (make-dict)
-      with copy.ht = (py-dict-hash-table copy)
-      with x.ht = (py-dict-hash-table x)
-      for k being the hash-key in x.ht using (hash-value v)
-      do (setf (gethash k copy.ht) v)
-      finally (return copy)))
+(def-py-method py-dict.copy (d1)
+  (let* ((d2 (make-dict))
+         (d2.dikt (py-dict-dikt d2))
+         (f (dikt-iter-keys-values-func (py-dict-dikt d1))))
+    (loop (multiple-value-bind (k v)
+              (funcall f)
+            (unless k
+              (return))
+            (dikt-set d2.dikt k v)))
+    d2))
 
 (def-py-method py-dict.fromkeys :static (seq &optional val)
   (unless val
     (setf val *the-none*))
   (let* ((d (make-dict)))
-    (map-over-py-object (lambda (key) (py-dict-setitem d key val))
+    (map-over-py-object (lambda (key) (sub/dict-set d key val))
 			seq)
     d))
 
 (def-py-method py-dict.get (x k &optional (default *the-none*))
-  (or (py-dict-getitem x k)
+  (or (sub/dict-get x k)
       default))
       
 (def-py-method py-dict.has_key (x k)
-  (py-bool (py-dict-getitem x k)))
+  (py-bool (sub/dict-get x k)))
   
 (def-py-method py-dict.items (x)
-  (make-py-list-from-list
-   (loop for k being the hash-key in (py-dict-hash-table x)
-       using (hash-value v)
-       collect (make-tuple-from-list (list (convert-if-symbol k) v)))))
+  (let ((kv-iter-func (dikt-iter-keys-values-func (py-dict-dikt x)))
+        res)
+    (loop
+      (multiple-value-bind (k v)
+          (funcall kv-iter-func)
+        (unless k
+          (return))
+        (push (make-tuple-from-list (list (convert-if-symbol k) v)) res)))
+    res))
 
 (def-py-method py-dict.keys (x)
-  (make-py-list-from-list
-   (loop for k being the hash-key in (py-dict-hash-table x)
-       collect (convert-if-symbol k))))
+  (make-py-list-from-list (loop with f = (dikt-iter-keys-func (py-dict-dikt x))
+                              for key = (funcall f)
+                              while key collect (convert-if-symbol key))))
 
 (def-py-method py-dict.values (x)
-  (make-py-list-from-list
-   (loop for v being the hash-value in (py-dict-hash-table x)
-       collect v)))
-
-;; Dictionaries that act as class dicts need to signal changes 
-(defclass py-dict-classdict (py-dict)
-  ()
-  (:metaclass py-core-type))
-
-(defgeneric mark-as-classdict (dict)
-  (:method ((x py-dict))           (change-class x 'py-dict-classdict))
-  (:method ((x py-dict-classdict)) x))
-
-(defun make-class-dict ()
-  (mark-as-classdict (make-dict)))
-
-(defmethod py-dict-delitem :after ((x py-dict-classdict) key)
-  (signal-class-dict-del-key x key))
-
-(defmethod py-dict-setitem :after ((x py-dict-classdict) key val)
-  (signal-class-dict-set-key x key val))
+  (make-py-list-from-list (loop with f = (dikt-iter-values-func (py-dict-dikt x))
+                              for val = (funcall f)
+                              while val collect val)))
 
 ;; Dictionaries that act as proxy for module can be accessed using
 ;; "globals()"; apply changes to module too.
@@ -2664,15 +2444,18 @@ Creates a function for doing fast lookup, using jump table"
 (defvar *module-dict-ht* (make-hash-table :test #'eq :weak-keys t)
   "Mapping from dict to list of py-dict-moduledictproxy instances")
 			  
+#+(or)
 (defmethod initialize-instance :after ((x py-dict-moduledictproxy) &key module &allow-other-keys)
   (assert module)
   (push x (gethash module *module-dict-ht*)))
 
+#+(or)
 (defmethod py-dict-setitem :after ((x py-dict-moduledictproxy) key val)
   (mapc (lambda (mdp)
 	  (py-module-set-kv mdp (py-string->symbol key) val))
 	(gethash (mdp-module x) *module-dict-ht*)))
 
+#+(or)
 (defmethod py-dict-delitem :after ((x py-dict-moduledictproxy) key)
   (mapc (lambda (mdp)
 	  (py-module-set-kv mdp (py-string->symbol key) nil))
@@ -3294,9 +3077,6 @@ Creates a function for doing fast lookup, using jump table"
 
 ;;; Attributes are a fundamental thing: getting, setting, deleting
 
-(defvar *py-attr-sym* nil)
-(defparameter *use-py-attr-cache* nil)
-
 (defun py-attr (x attr.as_sym &key (bind-class-attr t) via-getattr)
   ;; If BIND-CLASS-ATTR = NIL, then if the attribute value is a function
   ;; found in a class dict, these values are returned:
@@ -3306,18 +3086,15 @@ Creates a function for doing fast lookup, using jump table"
   ;; If VIA-GETATTR is true, then when lookup fails a THROW to
   ;; :getattr-block takes place; this saves creation of condition.
   (assert (symbolp attr.as_sym))
-  (let* ((attr.as_string  (symbol-name attr.as_sym))
-	 (x.class         (py-class-of x))
+  (let* ((x.class         (py-class-of x))
 	 (inside-object-getattribute (loop for (obj . at) in *py-object.__getattribute__-active*
 					 when (and (eq obj x)
-						   (string= (py-val->string at) attr.as_string))
+						   (string= (py-val->string at) (symbol-name attr.as_sym)))
 					 return t
-					 finally (return nil)))
-	 (*py-attr-sym* attr.as_sym))
+					 finally (return nil))))
     
     (multiple-value-bind (result __getattr__ class-attr-val)
-	(funcall (if *use-py-attr-cache* #'py-attr-class-dicts-cached #'py-attr-class-dicts)
-		 x x.class attr.as_string attr.as_sym inside-object-getattribute)
+	(py-attr-class-dicts x x.class attr.as_sym inside-object-getattribute)
       #+(or)(format t "p-a-c-d ~A ~A => ~A ~A ~A" x x.class result __getattr__ class-attr-val)
       
       ;; Check if result determined by __getattribute__
@@ -3330,13 +3107,10 @@ Creates a function for doing fast lookup, using jump table"
 	  (if (and (not bind-class-attr)
 		   (functionp class-attr-val))
 	      (values :class-attr class-attr-val x)
-	    (bind-val class-attr-val x x.class)
-	    #+(or)(if (excl::classp x)
-		(bind-val class-attr-val nil x)
-	      (bind-val class-attr-val x x.class)))))
+	    (bind-val class-attr-val x x.class))))
 
       ;; Try instance dict
-      (let ((val (py-attr-instance-dict x attr.as_sym attr.as_string)))
+      (let ((val (py-attr-instance-dict x attr.as_sym)))
 	(when val
 	  (return-from py-attr val)))
 
@@ -3351,7 +3125,7 @@ Creates a function for doing fast lookup, using jump table"
       ;; Fall back to the __getattr__ hook (AttributeError is not caught)
       (when __getattr__
 	(return-from py-attr
-	  (py-call (bind-val __getattr__ x x.class) attr.as_string)))
+	  (py-call (bind-val __getattr__ x x.class) (symbol-name attr.as_sym))))
 
       (when (eq attr.as_sym '{__dict__})
 	(return-from py-attr (py-get-dict-attr x x.class)))
@@ -3359,22 +3133,22 @@ Creates a function for doing fast lookup, using jump table"
       ;; Give up.
       (if via-getattr
 	  (throw :getattr-block :py-attr-not-found)
-	(py-raise '{AttributeError} "No such attribute: ~A `~A'" x attr.as_string)))))
+	(py-raise '{AttributeError} "No such attribute: ~A `~A'" x (symbol-name attr.as_sym))))))
 
-(defun try-calling-getattribute (ga x x.class attr.as_string)
+(defun try-calling-getattribute (ga x x.class attr.as_sym)
+  (assert (symbolp attr.as_sym))
   (handler-case
-      (values (py-call (bind-val ga x x.class) attr.as_string))
+      (values (py-call (bind-val ga x x.class) (symbol-name attr.as_sym)))
     ({AttributeError} () nil) ;; __getattribute__ gave exception; also trying __getattr__ (if present)
     (:no-error (val) (return-from try-calling-getattribute val))))
 
-(defun py-attr-class-dicts (x x.class attr.as_string attr.as_sym inside-object-getattribute &key just-look)
-  ;; If JUST-LOOK, then returns: __GETATTRIBUTE__ __GETATTR__ CLASS-ATTR
-  ;;
-  ;; Else, returns: RESULT (if determined by __getattribute__)
-  ;;            or:  NIL, __GETATTR__, CLASS-ATTR
-  (declare (notinline py-call))
+(defun py-attr-class-dicts (x x.class attr.as_sym inside-object-getattribute)
+  ;; Returns: RESULT (if determined by __getattribute__)
+  ;;       or:  NIL, __GETATTR__, CLASS-ATTR
+  ;;(declare (notinline py-call))
   (let (__getattribute__ __getattr__ class-attr)
-    
+
+    ;; XXX find stop classes
     (loop for c in (mop:class-precedence-list x.class)
 	until (or (eq c (ltv-find-class 'standard-class))
 		  (eq c (ltv-find-class 'py-dict-mixin))
@@ -3386,47 +3160,33 @@ Creates a function for doing fast lookup, using jump table"
 		      ((eq c (ltv-find-class 'py-function))    (load-time-value (dict (find-class 'py-function))))
 		      (t                                       (dict c))) ;; may be NIL
 		     
-	for c.dict.class = (when c.dict (class-of c.dict))
 	when c.dict do 
 	  (unless (or inside-object-getattribute __getattribute__)
 	    ;; Try only the first __getattribute__ method found (but not py-object's).
-	    (let ((getattribute-meth (cond ((eq c (ltv-find-class 'py-object))
-					    #'py-object.__getattribute__)
-					   ((or (eq c.dict.class (ltv-find-class 'py-dict))
-						(eq c.dict.class (ltv-find-class 'py-dict-classdict)))
-					    (py-dict-getitem c.dict '{__getattribute__}))
-					   (t (let ((*py-attr-sym* '{__getattribute__}))
-						(this-dict-get c.dict "__getattribute__"))))))
+	    (let ((getattribute-meth (sub/dict-get c.dict '{__getattribute__})))
 	      (when (and getattribute-meth
 			 (not (eq getattribute-meth #'py-object.__getattribute__)))
 		(setf __getattribute__ getattribute-meth)
-		(unless just-look
-		  (let ((res (try-calling-getattribute __getattribute__ x x.class attr.as_string)))
-		    (when res (return-from py-attr-class-dicts res))
-		    ;; If __getattribute__ exists but gave exception, class-attr will not be looked up.
-		    (setf class-attr nil))))))
+                (let ((res (try-calling-getattribute __getattribute__ x x.class attr.as_sym)))
+                  (when res (return-from py-attr-class-dicts res))
+                  ;; If __getattribute__ exists but gave exception, class-attr will not be looked up.
+                  (setf class-attr nil)))))
 	  
 	  (unless (or class-attr __getattribute__)
 	    ;; Try to find attribute in class dict.
-	    (let ((val (cond ((or (eq c.dict.class (ltv-find-class 'py-dict))
-				  (eq c.dict.class (ltv-find-class 'py-dict-classdict)))
-			      (py-dict-getitem c.dict attr.as_sym))
-			     (t
-			      (this-dict-get c.dict attr.as_string)))))
+	    (let ((val (sub/dict-get c.dict attr.as_sym)))
 	      (when val
 		(setf class-attr val))))
 	  
 	  (unless (or inside-object-getattribute __getattr__)
 	    ;; Look for __getattr__ method (used if instance/class dicts fail).
-	    (let ((getattr-meth (cond ((eq c (ltv-find-class 'py-object)) nil)
-				      ((normal-pydict-p c.dict)           (py-dict-getitem c.dict '{__getattr__}))
-				      (t                                  (let ((*py-attr-sym* '{__getattr__}))
-									    (this-dict-get c.dict "__getattr__"))))))
-	      (when getattr-meth (setf __getattr__ getattr-meth)))))
+	    (let ((getattr-meth (sub/dict-get c.dict '{__getattr__})))
+	      (when getattr-meth
+                (setf __getattr__ getattr-meth)))))
 
-    (values (when just-look __getattribute__) __getattr__ class-attr)))
+    (values nil __getattr__ class-attr)))
 
-(defun py-attr-instance-dict (x attr.as_sym attr.as_string)
+(defun py-attr-instance-dict (x attr.as_sym)
   (if (typep x 'class)
 
       (progn
@@ -3438,9 +3198,7 @@ Creates a function for doing fast lookup, using jump table"
 	    for c.dict = (dict c) ;; may be NIL
 			 
 	    for val = (when c.dict
-			(if (normal-pydict-p c.dict)
-			    (py-dict-getitem c.dict attr.as_sym)
-			  (this-dict-get c.dict attr.as_string)))
+                        (sub/dict-get c.dict attr.as_sym))
 	    when val do
 	      #+(or)(warn "binding attr ~A to cls ~A" val x)
 	      (let ((bound-val (bind-val val *the-none* x)))
@@ -3452,9 +3210,7 @@ Creates a function for doing fast lookup, using jump table"
 
     (let ((x.dict (dict x)))
       (when x.dict
-	(let ((val (if (normal-pydict-p x.dict)
-		       (py-dict-getitem x.dict attr.as_sym)
-		     (this-dict-get x.dict attr.as_string))))
+	(let ((val (sub/dict-get x.dict attr.as_sym)))
 	  (when val
 	    ;; don't bind: coming from instance dict
 	    (return-from py-attr-instance-dict val)))))))
@@ -3467,9 +3223,15 @@ Creates a function for doing fast lookup, using jump table"
   ;; don't run this PY-ATTR compilar macro on (setf (py-attr ..) ..) forms
   ;; if the expanded form is invalid -- e.g. if expansion becomes a 'let,
   ;; then 'setf form becomes (setf (let ..) ..) which is invalid.
+  ;; 
+  ;; The (setf py-attr) case is detected usign our :inside-setf-py-attr
+  ;; declaration.
   
   (cond ((eq attr '{__class__})  
 	 ;; As "x.__class__ = y" is intercepted, __class__ is always a valid class.
+         ;; 
+         ;; Note that this is also okay within :inside-setf-py-attr, as (setf py-class-of)
+         ;; is defined.
 	 `(py-class-of ,x))
 	
 	((and (fboundp 'get-pydecl)
@@ -3480,14 +3242,13 @@ Creates a function for doing fast lookup, using jump table"
 	   ({__name__}  `(let ((.x ,x))
 			   (if (excl::classp .x)
 			       (symbol-name (class-name .x))
-			     
-			     (locally
+                             (locally
 				 (declare (notinline py-attr))
 			       (py-attr .x ,attr)))))
 	
 	   ({__dict__}  `(let ((x ,x))
 			   (or (dict x)
-			       (py-raise '{TypeError} "No __dict__ attribute: ~A" x))))
+			       (py-raise '{AttributeError} "No __dict__ attribute: ~A" x))))
 	
 	   (t            whole)))
 	
@@ -3522,8 +3283,7 @@ Creates a function for doing fast lookup, using jump table"
 				    (recursive-class-lookup-and-bind x.attr '{__del__})))))
 	  
 	  (or (when x.__delattr__
-		(let ((*py-attr-sym* attr.sym))
-		  (py-call (bind-val x.__delattr__ x x.class) (symbol-name attr.sym))))
+                (py-call (bind-val x.__delattr__ x x.class) (symbol-name attr.sym)))
 	      
 	      (when x.attr.__del__
 		(if (eq x.attr.__del__ *the-none*)
@@ -3536,12 +3296,8 @@ Creates a function for doing fast lookup, using jump table"
 		(when d
 		  #+(or)(warn "delattr ~A ~A: removing from dict ~A"
 			      x attr.sym d)
-		  (or (if (normal-pydict-p d)
-			  (py-dict-delitem d attr.sym)
-			(let ((*py-attr-sym* attr.sym))
-			  (setf (this-dict-get d (symbol-name attr.sym)) nil)))
-		    
-		      (py-raise '{AttributeError}
+		  (or (sub/dict-del d (symbol-name attr.sym))
+                      (py-raise '{AttributeError}
 				"Cannot delete attribute ~A of object ~A: does not exist"
 				attr.sym x))))
 	      
@@ -3567,8 +3323,7 @@ Creates a function for doing fast lookup, using jump table"
 		    x attr x.attr x.attr.__set__ x.__setattr__)
 	
 	(or (when x.__setattr__
-	      (let ((*py-attr-sym* attr.sym))
-		(py-call (bind-val x.__setattr__ x x.class) (symbol-name attr.sym) val)))
+		(py-call (bind-val x.__setattr__ x x.class) (symbol-name attr.sym) val))
 	      
 	    (when x.attr.__set__
 	      (if (eq x.attr.__set__ *the-none*)
@@ -3587,14 +3342,8 @@ Creates a function for doing fast lookup, using jump table"
 	    
 	    (let ((d (dict x)))
 	      (when d
-		(or (if (normal-pydict-p d)
-			(py-dict-setitem d attr.sym val)
-		      (let ((*py-attr-sym* attr.sym))
-			(setf (this-dict-get d (symbol-name attr.sym)) val)))
-			
-		    (py-raise '{AttributeError}
-			      "Cannot set attribute ~A of object ~A"
-			      attr.sym x))))
+		(sub/dict-set d attr.sym val)
+                t))
 
 	    (py-raise '{AttributeError}
 		      "(setf py-attr): no __setattr__ method for ~S" x))))))
@@ -4197,13 +3946,26 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
 
 ;; Necessary for bootstrapping (py-dict + def-py-method)
 (defmethod py-== ((x symbol) (y symbol))
+  (unless (eq (symbol-package x) (symbol-package y))
+    (break "py-== called for two symbols in different packages: ~S and ~S" x y))
   (if (eq x y) 1 0))
 
 (defmethod py-== ((x symbol) (y string))
-  (if (string= x y) 1 0))
+  (declare (optimize (speed 3) (safety 0) (debug 0)))
+  (if (or (eq (symbol-name x) y)
+          (and (char= (aref (symbol-name x) 0) (aref y 0))
+               (string= (symbol-name x) y)))
+      1
+    0))
 
 (defmethod py-== ((x string) (y symbol))
-  (if (string= x y) 1 0))
+  (declare (optimize (speed 3) (safety 0) (debug 0)))
+  (rotatef x y)
+  (if (or (eq (symbol-name x) y)
+          (and (char= (aref (symbol-name x) 0) (aref y 0))
+               (string= (symbol-name x) y)))
+      1
+    0))
 
 (defmethod py-== ((x symbol) y)
   (py-== (symbol-name x) y))
@@ -4248,7 +4010,9 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
 
 (defmethod py-hash ((x symbol))
   ;; Returning (py-hash (symbol-name x)) leads to infinite recursion.
-  (py-string.__hash__ (symbol-name x)))
+  (or (get x 'py-hash)
+      (let ((hash (py-string.__hash__ (symbol-name x))))
+        (setf (get x 'py-hash) hash))))
 
 (defun py-val->string (x)
   (if (symbolp x) ;; Symbols don't represent Python values, but this is just handy for ourselves
@@ -4468,16 +4232,16 @@ the lisp list will be returned).")
 
 
 (defun signal-class-dict-replacement (cls old new)
-  (declare (ignore old new))
-  (clear-cached-classinfo cls)
-  #+(or)(warn "** dict replacement cls ~A" (class-name cls)))
+  (declare (ignore cls old new))
+  #+(or)(warn "** dict replacement cls ~A" (class-name cls))
+  nil)
 
 (defun signal-class-changed-before (cls) 
   (declare (ignore cls))
   nil)
 
 (defun signal-class-changed-after (cls)
-  (clear-cached-classinfo cls)
+  (declare (ignore cls))
   #+(or)(warn "** Class ~A changed" (class-name cls)))
 
 (defun signal-class-created (cls)
@@ -4485,9 +4249,8 @@ the lisp list will be returned).")
   #+(or)(warn "** Class ~A created" (class-name cls)))
 
 (defun signal-class-dict-changed (dict key)
-  (declare (ignore key))
-  (declare (special *class-dict->classes*))
-  (mapcar #'clear-cached-classinfo (gethash dict *class-dict->classes*)) ;; not all clearing is required... XXX
+  (declare (ignore dict key))
+  ;; not all clearing is required... XXX
   #+(or)(warn "** Class had attribute ~A modified" attr))
    
 (defun signal-class-dict-set-key (dict key val)
@@ -4498,67 +4261,6 @@ the lisp list will be returned).")
 (defun signal-class-dict-del-key (dict key)
   (signal-class-dict-changed dict key)
   #+(or)(warn "** Class dict deleted key ~A" key))
-
-
-(defparameter *class-dict->classes* (make-hash-table :test #'eq)
-  "From dict to list of classes")
-
-(defparameter *class->info-st* (make-hash-table :test #'eq))
-
-(defun clear-cached-classinfo (c)
-  (check-type c class)
-  (setf (gethash c *class->info-st*) nil)) ;; or remhash
-
-(defstruct classinfo
-  normal-metaclass-p
-  (dict           :type p-dict)
-  (dict-timestamp :type integer)
-  __getattribute__
-  __getattr__
-  class-attr-ht)
-
-(defun create-classinfo (cls)
-  (make-classinfo :normal-metaclass-p (eq (class-of cls) (ltv-find-class 'py-meta-type))
-		  :dict (let ((d (dict cls)))
-			  (push cls (gethash d *class-dict->classes*))
-			  d)
-		  :dict-timestamp (py-dict-id (dict cls))
-		  :__getattribute__ (let ((ga (recursive-class-dict-lookup cls '{__getattribute__})))
-				      (unless (eq ga #'py-object.__getattribute__)
-					ga))
-		  :__getattr__ (recursive-class-dict-lookup cls '{__getattr__})
-		  :class-attr-ht (make-hash-table :test #'eq))) ;; attr -> class that has it in dict
-
-(defun py-attr-class-dicts-cached (x x.class attr.as_string attr.as_sym inside-object-getattribute)
-  "If attribute value Returns "
-  
-  (let ((cls-info (or (gethash x.class *class->info-st*)
-		      (multiple-value-bind (__getattribute__ __getattr__ class-attr)
-			  (py-attr-class-dicts x x.class attr.as_string attr.as_sym inside-object-getattribute
-					       :just-look t)
-			  
-			(setf (gethash x.class *class->info-st*)
-			  (make-classinfo :normal-metaclass-p t ; XXX
-					  :dict (dict x.class)
-					  :dict-timestamp (py-dict-id (dict x.class))
-					  :__getattribute__ __getattribute__
-					  :__getattr__ __getattr__
-					  :class-attr-ht (let ((ht (make-hash-table :test #'eq)))
-							   (setf (gethash attr.as_sym ht) class-attr)
-							   ht)))))))
-      
-    (let ((__getattribute__ (classinfo-__getattribute__ cls-info))
-	  (__getattr__      (classinfo-__getattr__ cls-info))
-	  (class-attr       (gethash attr.as_sym (classinfo-class-attr-ht cls-info))))
-
-      (when __getattribute__
-	(let ((res (try-calling-getattribute __getattribute__ x x.class attr.as_string)))
-	  (when res (return-from py-attr-class-dicts-cached res))
-	  ;; If __getattribute__ exists but gave exception, class-attr will not be looked up.
-	  (setf class-attr nil)))
-
-      (values nil __getattr__ class-attr))))
-
 
 ;; Utils
 
@@ -4572,3 +4274,51 @@ the lisp list will be returned).")
     (or (find-symbol x.string #.(find-package :clpython.user))
 	(when intern
 	  (intern x.string #.(find-package :clpython.user))))))
+
+;; At this point, we have redefined the functions PY-== and PY-HASH.
+;; Therefore we need to rehash all dicts.
+
+(defun rehash-py-dicts ()
+  #-(error "not implemented")
+  #+allegro
+  (flet ((get-py-hts ()
+           (loop for d across
+                 (excl::get-objects (sys::typecode (make-py-hash-table)))
+               when (and (hash-table-p d)
+                         (eq (hash-table-test d) 'py-==->lisp-val))
+               collect d))
+         (fix-ht (ht)
+           (check-type ht hash-table)
+           ;; Lets do this the KISS way; there are just about 12 dicts to fix.
+           (let* ((contents (loop for k being the hash-key in ht
+                                using (hash-value v)
+                                collect (cons k v)))
+                  (old-py-hash #'py-hash))
+             (unwind-protect
+                 ;; We now modify class dicts. That means we are temporarily unable
+                 ;; to look up the __hash__ attribute of instances. Therefore,
+                 ;; replace hash function with one specialized on strings/symbols.
+                 (progn
+                   (setf (fdefinition 'py-hash)
+                     (lambda (x)
+                       (etypecase x
+                         (string (py-string.__hash__ x))
+                         (symbol (py-string.__hash__ (symbol-name x))))))
+                   (clrhash ht)
+                   (loop for (k . v) in contents
+                       do (assert (or (symbolp k) (stringp k)))
+                          (setf (gethash k ht) v)))
+               (setf (fdefinition 'py-hash) old-py-hash))
+             ht)))
+        
+    ;; Simple test to see if we have the right hash function currently.
+    (let ((hts (or (get-py-hts)
+                   (break "There are no dicts to rehash ~@
+                           (after redefining py-== and py-hash)?!"))))
+      (mapc #'fix-ht hts)
+      ;; Simple test to see if we have the original hash function back.
+      (assert (integerp (py-hash 42)))
+      (assert (= (py-hash "a") (py-hash 'a)))
+      (length hts))))
+
+(rehash-py-dicts)

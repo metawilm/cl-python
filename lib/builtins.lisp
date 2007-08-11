@@ -118,9 +118,7 @@ POS-ARGS is any iterable object; KW-DICT must be of type PY-DICT."
 
 (defun {delattr} (x attr)
   (assert (stringp attr))
-  (let ((attr.sym (if (string= (symbol-name *py-attr-sym*) attr)
-		      *py-attr-sym*
-		    (ensure-user-symbol attr))))
+  (let ((attr.sym (ensure-user-symbol attr)))
     (setf (py-attr x attr.sym) nil)))
 
 (defun {dir} (&optional x)
@@ -190,10 +188,12 @@ POS-ARGS is any iterable object; KW-DICT must be of type PY-DICT."
 
 (defun {getattr} (x attr &optional default)
   ;; Exceptions raised during py-attr are not caught.
+  ;; 
+  ;; This interns the ATTR in the :clpython.user package - probably a
+  ;; small price to pay for using symbols in attribute lookup everywhere
+  ;; else.
   (assert (stringp attr))
-  (let* ((attr.sym (if (string= (symbol-name *py-attr-sym*) attr)
-		       *py-attr-sym*
-		     (ensure-user-symbol attr)))
+  (let* ((attr.sym (ensure-user-symbol attr))
 	 (val (catch :getattr-block
 		(handler-case
 		    (py-attr x attr.sym :via-getattr t)
@@ -208,9 +208,7 @@ POS-ARGS is any iterable object; KW-DICT must be of type PY-DICT."
   ;; Exceptions raised during py-attr are not catched.
   ;; Returns :class-attr <meth> <inst>
   ;;      or <value>
-  (let ((attr.sym (if (string= (symbol-name *py-attr-sym*) attr)
-		      *py-attr-sym*
-		    (ensure-user-symbol attr))))
+  (let ((attr.sym (ensure-user-symbol attr)))
     (multiple-value-bind (a b c)
 	(catch :getattr-block
 	  (handler-case
@@ -455,9 +453,7 @@ None, use identity function (multiple sequences -> list of tuples)."
 (defun {setattr} (x attr val)
   ;; XXX attr symbol/string
   (assert (stringp attr))
-  (let ((attr.sym (if (string= (symbol-name *py-attr-sym*) attr)
-		      *py-attr-sym*
-		    (ensure-user-symbol attr))))
+  (let ((attr.sym (ensure-user-symbol attr)))
     (setf (py-attr x attr.sym) val)))
 
 (defun {sorted} (x)

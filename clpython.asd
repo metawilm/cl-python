@@ -70,6 +70,7 @@
                           :components ((:file "csetup"       )
                                        (:file "pydecl"       )
                                        (:file "formatstring" )
+                                       (:file "early-dict"   )
                                        (:file "classes"      )
                                        (:file "exceptions"   )
                                        (:file "compiler"     )

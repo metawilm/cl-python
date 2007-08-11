@@ -167,7 +167,9 @@
 	   ;; comparison
 	   "__eq__" "__lt__" "__gt__" "__cmp__" 
 	   ;; representation
-	   "__repr__" "__str__" "__hex__" "__oct__" ))
+	   "__repr__" "__str__" "__hex__" "__oct__"
+           ;; iterator
+           "next"))
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (cascade-external-symbols :clpython.user.builtin.type))

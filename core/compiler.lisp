@@ -533,7 +533,7 @@ differs in structure from the template for ~A ast nodes, which is: ~A"
                         :namespace new-cls-dict
                         :supers ,(with-matching (inheritance ([tuple-expr] ?supers))
                                    `(list ,@?supers))
-                        :cls-metaclass (py-dict-getitem new-cls-dict "__metaclass__")
+                        :cls-metaclass (sub/dict-get new-cls-dict "__metaclass__")
                         :mod-metaclass
                         ,(let ((ix (position '{__metaclass__}
                                              (get-pydecl :mod-globals-names e))))
@@ -659,8 +659,11 @@ then (optionally) compiled and called. Should it be compiled before running?")
   t)
 
 (defun exec-stmt-ast (ast globals locals)
-  (let ((f `(with-module-context (#() #() (py-dict-hash-table ,globals)
-                                      :create-mod t)
+  (let ((f `(with-module-context (#() #() (let ((ht (make-py-hash-table)))
+                                            (dict-map (lambda (k v) (setf (gethash k ht) v))
+                                                      ,globals)
+                                            ht)
+                                  :create-mod t)
               ,([make-suite-stmt*]
 
                 ;; Define helper function
@@ -674,14 +677,18 @@ then (optionally) compiled and called. Should it be compiled before running?")
                        
                        `([suite-stmt]
                          ;; Set local variables
-                         ,(loop for k being the hash-key in (py-dict-hash-table locals)
-                              using (hash-value v)
-                              do (assert (not (null v)) () 
-                                   "Local var `~A' (passed as EXEC local) is NIL." k)
-                              collect ([make-assign-stmt*]
-                                       :value v
-                                       :target ([make-identifier-expr*] (py-string->symbol k)))))
-                       
+                         ,(let (res)
+                            (dict-map locals
+                                      (lambda (k v)
+                                        (assert (not (null v)) () 
+                                          "Local var `~A' (passed as EXEC local) is NIL." k)
+                                        (push ([make-assign-stmt*]
+                                               :value v
+                                               :target ([make-identifier-expr*]
+                                                        (py-string->symbol k)))
+                                              res)))
+                            res))
+                         
                        `(progn ;; execute exec suite
                           (let ((res ,(with-matching (ast ([module-stmt] ?suite))
                                         (assert (match-p ?suite '([suite-stmt] ?stmts)))
@@ -980,9 +987,7 @@ input arguments."
 				`(setf (svref +mod-static-globals-values+ ,glob-ix) ,val)
 			      `(setf (gethash ',name +mod-dyn-globals+) ,val)))
 			(local-set `(setf ,name ,val))
-			(class-set `(setf 
-					(this-dict-get +cls-namespace+ ,(symbol-name name))
-				      ,val)))
+			(class-set `(sub/dict-set +cls-namespace+ ,(symbol-name name) ,val)))
 	(let ((store-form
 	       (ecase (get-pydecl :context e)
 		 (:module    module-set)
@@ -1054,7 +1059,7 @@ input arguments."
 		 
       (:module   (module-lookup))
       
-      (:class    `(or (this-dict-get +cls-namespace+ ',(symbol-name name))
+      (:class    `(or (sub/dict-get +cls-namespace+ ',(symbol-name name))
 		      ,(if (member name (get-pydecl :lexically-visible-vars e))
 			   (local-lookup)
 			 (module-lookup)))))))
@@ -1590,15 +1595,15 @@ input arguments."
   ;; Convert a Python dict to a namespace, by replacing all string
   ;; keys by corresponding symbols.
   (:method ((x py-dict))
-	   (let ((new (make-class-dict)))
-	     (loop for k being the hash-key in (py-dict-hash-table x) using (hash-value v)
-		 if (typep k '(or string symbol))
-		 do (py-dict-setitem new k v)
-		 else do (py-raise
-			  '{TypeError}
-			  "Cannot use ~A as namespace dict, because non-string key present: ~A"
-			  x k)
-		 finally (return new)))))
+	   (let ((new (make-dict))) ;; WB was: class-dict
+             (dikt-map x (lambda (k v)
+                           (unless (typep k '(or string symbol))
+                             (py-raise
+                              '{TypeError}
+                              "Cannot use ~A as namespace dict, because non-string key: ~A"
+                              x k))
+                           (sub/dict-set new k v)))
+             new)))
 
 (defun py-**-mapping->lisp-arg-list (**-arg)
   ;; Return list: ( :|key1| <val1> :|key2| <val2> ... )

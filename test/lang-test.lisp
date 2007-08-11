@@ -237,7 +237,26 @@ assert i == 3"))
   (run-no-error "{1+2: 3+4}")
   (run-no-error "assert {1: 3}[1] == 3")
   (run-no-error "assert {1: 3, 2: 4}[1] == 3")
-  )
+  (run-no-error "
+d = {}
+d[3] = 1
+assert d[3] == 1
+del d[3]
+assert d == {}
+d[3] = 2
+assert d[3] == 2")
+  (run-no-error "
+# make sure user-defined subclasses of string work okay as key
+class C(str): pass
+x = C('a')
+d = {}
+d[x] = 3
+assert d['a'] == 3
+y = C('b')
+assert d.get(y) == None
+d[y] = 42
+assert d[y] == 42
+assert d['b'] == 42"))
 
 (defmethod test-lang ((kind (eql :exec-stmt)))
   )

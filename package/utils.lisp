@@ -33,7 +33,7 @@
 (defmacro whereas (bindings &body body)
   "A simple version of Erik Naggum's idea in
 http://groups.google.nl/group/comp.lang.lisp/msg/bc7772aa5ab1f3e4"
-  (let ((res `(progn ,@body)))
+  (let ((res `(locally ,@body))) ;; allow declarations
     (dolist (b (reverse bindings) res)
       (unless (and (= (length b) 2)
 		   (symbolp (car b)))
@@ -41,7 +41,7 @@ http://groups.google.nl/group/comp.lang.lisp/msg/bc7772aa5ab1f3e4"
       (destructuring-bind (k v) b
 	(setf res `(let ((,k ,v))
 		     (when ,k
-		       ,res)))))))
+                         ,res)))))))
 
 (defun sans (plist &rest keys)
   "By Erik Naggum,
