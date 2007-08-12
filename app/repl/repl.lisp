@@ -63,25 +63,18 @@ Possible values: :time :ptime :space :pspace nil")
 
 (defvar *repl-doc* "
 In the Python interpreter:
-
      :help          => print (this) help
      :q             => quit
-
   <command>         => execute Python or Lisp <command>
   <space><command>  => execute Lisp <command>
 
-
 In the Lisp debugger:
-
      :ptl           => back to Python top level
      :re            => retry the last (failed) Python command
 
-
 Relevant Lisp variables (exported from package :clpython.app.repl):
-
    *repl-compile*  => whether source code is compiled into assembly
                       before running
-
    *repl-prof*     => profile all Python commands
                       value must be one of:
                          :time    = like (TIME ...)
@@ -188,38 +181,52 @@ KIND can be :ptime, :time, :space, :pspace or NIL."
 			      ({UnexpectedEofError} () (return-from handle-as-python-code t))
 			      ({SyntaxError} (err) 
                                 (when print-error
-                                  (format t ";; Python eval failed:  ~A~%" err))
+                                  (format t ";; Python parse failed:  ~A~%" err))
                                 (return-from handle-as-python-code :syntax-error)))))
-		   
 		   (when ast
 		     (destructuring-bind (module-stmt (suite-stmt items)) ast
 		       (assert (eq module-stmt '[module-stmt]))
 		       (assert (eq suite-stmt '[suite-stmt]))
-		       (when (and (= (length items) 1)
-				  (or (not (listp (car items)))
-				      (not 
-				       (member (caar items)
-					       '([classdef-stmt] ;; Wait for empty line
-						 [for-in-stmt]   ;; for perhaps multi-line
-						 [funcdef-stmt]  ;; statements
-						 [if-stmt]
-						 [try-except-stmt]
-						 [try-finally-stmt]
-						 [while-stmt] )))))
+                       (warn "items: ~A" items)
+                       (when (cond #+(or) ;; think first clause can't happen
+                                   ((/= (length items) 1)
+                                    nil)
+                                   ((not (listp (car items)))
+                                    t)
+                                   ((and (eq (caar items) '[funcdef-stmt])
+                                         (clpython::with-perhaps-matching
+                                             ((cdar items)
+                                              (?decorators ([identifier-expr] ?fname)
+                                                           ?fargs
+                                                           ([suite-stmt] ?stmts)))
+                                           (eq (caar (last ?stmts)) '[return-stmt])))
+                                    t)
+                                   ((member (caar items)
+                                            '([classdef-stmt] ;; Wait for empty line
+                                              [for-in-stmt]   ;; for perhaps multi-line
+                                              [funcdef-stmt]  ;; statements
+                                              [if-stmt]
+                                              [try-except-stmt]
+                                              [try-finally-stmt]
+                                              [while-stmt] ))
+                                    nil)
+                                   (t t))
 			 (eval-print-ast ast)
 			 (setf acc nil)))
 		     (return-from handle-as-python-code t)))))
 	     
 	     (handle-as-lisp-code (total &optional print-error)
                ;; Returns whether actually handled
-	       (let ((lisp-form
-		      (ignore-errors (with-standard-io-syntax
-                                       ;; Bind package, so symbols _, __, ___ are present.
-				       (let ((*package* #.*package*))
-					 (read-from-string total nil nil))))))
+	       (multiple-value-bind (lisp-form error)
+                   (ignore-errors (with-standard-io-syntax
+                                    ;; Bind package, so symbols _, __, ___ are present.
+                                    (let ((*package* #.*package*))
+                                      (read-from-string total nil nil))))
 		 
 		 (cond ((null lisp-form)
                         ;; could not parse as lisp
+                        (when print-error
+                          (format t ";; Lisp parse failed:  ~A~%" error))
                         nil)
 		       
 		       ((member lisp-form '(nil def class for while if try))
@@ -283,8 +290,8 @@ KIND can be :ptime, :time, :space, :pspace or NIL."
 		      (t (push (concatenate 'string x (string #\Newline)) acc)
 			 (let* ((total (apply #'concatenate 'string (reverse acc))))
                            (ecase (handle-as-python-code total)
-                             (t ) ;; handled)
-                             (nil (handle-as-lisp-code total))
+                             ((t) ) ;; handled)
+                             ((nil) (handle-as-lisp-code total))
                              (:syntax-error (unless (handle-as-lisp-code total)
                                               (handle-as-python-code total t) ;; print py error
                                               (handle-as-lisp-code total t) ;; print lisp error
