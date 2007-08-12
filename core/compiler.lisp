@@ -26,10 +26,7 @@
 ;; In the macro expansions, lexical variables that keep context state
 ;; have a name like +NAME+.
 
-(defvar *compiler-verbose* nil
-  "Whether to print Python compiler messages, e.g. inlining decisions")
-
-;;; Compiler optimization and debugging options.
+;;; Language Semantics
 
 (defvar *allow-indirect-special-call* nil
   "Whether `eval', `locals' and `globals' can be called indirectly, like:
@@ -42,11 +39,61 @@ such indirect special calls.")
 (defvar *mangle-private-variables-in-class* nil
   "In class definitions, replace __foo by _CLASSNAME__foo, like CPython does")
 
+(defmacro with-complete-python-semantics (&body body)
+  `(let ((*allow-indirect-special-call* t)
+	 (*mangle-private-variables*    t))
+     ,@body))
+
+(defvar *__debug__* t
+  "The ASSERT-STMT uses the value of *__debug__* to determine whether
+or not to include the assertion code.")
+
+(defconstant +standard-module-globals+ '({__name__} {__debug__})
+  "Names of global variables automatically created for every module")
+
+;;; Compiler warnings
+
 (defvar *warn-unused-function-vars* t
   "Controls insertion of IGNORABLE declaration around function variables.")
 
 (defvar *warn-bogus-global-declarations* t
-  "Controls insertion of IGNORABLE declaration around function variables.")
+  "Signal warnings for bogus `global' declarations at toplevel.")
+
+;;; Compiler optimizations
+
+(defvar *inline-fixnum-arithmetic* t
+  "For common arithmetic operations (+,-,*,/) the (often common) two-fixnum case is inlined")
+
+(defvar *inline-builtin-methods* t
+  "Inline method calls to common builtin methods (with a run-time check) for method calls
+like .join (string.join), .sort (list.sort), etc")
+
+(defvar *inline-getattr-call* t
+  "Inline getattr(x,y).(zzz) calls, which usually saves creation of a temporary bound method.")
+
+(defconstant +optimize-std+     '(optimize (speed 3) (safety 1) (debug 1)))
+(defconstant +optimize-fast+    '(optimize (speed 3)))
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (defconstant +optimize-fastest+ '(optimize (speed 3) (safety 0) (debug 0))))
+
+(defmacro fast (&body body)
+  `(locally (declare ,+optimize-fastest+)
+     ,@body))
+
+;;; `Exex' statement handling
+
+(eval-when (:compile-toplevel :load-toplevel :execute)
+(defvar *exec-early-parse-constant-string* t
+  "Whether a constant string argument to the `exec' statement is parsed at compile time already.")
+)
+
+(defvar *exec-stmt-compile-before-run* t
+  "The code in the `exec' statement is translated into a function, that is
+then (optionally) compiled and called. Should it be compiled before running?")
+
+(defvar *exec-stmt-result-handler* nil)
+
+;;; Line number handling
 
 (defvar *include-line-number-hook-calls* nil
   "Include calls to *runtime-line-number-hook* in generated code?")
@@ -58,16 +105,6 @@ such indirect special calls.")
   "Function to call at compile time, when a line number token is encountered.
 Only has effect when *include-line-number-hook-calls* is true.")
 
-(defvar *inline-fixnum-arithmetic* t
-  "For common arithmetic operations (+,-,*,/) the (often common) two-fixnum case is inlined")
-
-(defvar *inline-builtin-methods* t
-  "Inline method calls to common builtin methods (with a run-time check) for calls
-to 'join (string.join), 'sort (list.sort)")
-
-(defvar *inline-getattr-call* t
-  "Inline getattr(x,y).(zzz) calls, which often optimizes away building bound method.")
-
 (defmacro with-line-numbers ((&key compile-hook runtime-hook) &body body)
   ;; You have to set *runtime-line-number-hook* yourself.
   `(let ((*include-line-number-hook-calls* t)
@@ -76,18 +113,17 @@ to 'join (string.join), 'sort (list.sort)")
 	 ,@(when compile-hook `((*compile-line-number-hook* ,compile-hook))))
      ,@body))
 
-(defmacro with-complete-python-semantics (&body body)
-  `(let ((*allow-indirect-special-call* t)
-	 (*mangle-private-variables*    t))
-     ,@body))
+;;; Compiler Progress Messages
 
-;; Various settings
+(defvar *compiler-verbose* nil
+  "Whether to print Python compiler messages, e.g. inlining decisions")
 
-(defvar *__debug__* t
-  "The ASSERT-STMT uses the value of *__debug__* to determine whether
-or not to include the assertion code.
- 
-XXX Currently there is not way to set *__debug__* to False.")
+(defun compiler-message (&rest args)
+  (when *compiler-verbose*
+    (format t "CLPython compiler: ")
+    (apply #'format t args)))
+
+;;; Compiler State
 
 (defvar *current-module-name* "__main__"
   "The name of the module now being compiled; module.__name__ is set to it.")
@@ -96,24 +132,7 @@ XXX Currently there is not way to set *__debug__* to False.")
   "The path of the Python file being compiled; saved in module's `filepath' slot.")
 
 
-(defconstant +standard-module-globals+ '({__name__} {__debug__})
-  "Names of global variables automatically created for every module")
-
-(defconstant +optimize-std+     '(optimize (speed 3) (safety 1) (debug 1)))
-(defconstant +optimize-fast+    '(optimize (speed 3)))
-(eval-when (compile load eval)
-  (defconstant +optimize-fastest+ '(optimize (speed 3) (safety 0) (debug 0))))
-
-(defmacro fast (&body body)
-  `(locally (declare ,+optimize-fastest+)
-     ,@body))
-
-(defun compiler-message (&rest args)
-  (when *compiler-verbose*
-    (format t "CLPython compiler: ")
-    (apply #'format t args)))
-
-;; Gensym handling
+;;; Gensym handling
 
 (defmacro with-gensyms (list &body body)
   `(let ,(loop for x in list
@@ -130,6 +149,8 @@ XXX Currently there is not way to set *__debug__* to False.")
          t)
         (t
          nil)))
+
+;;; AST Templates
 
 (eval-when (compile load eval)
 (defun wildcard-sym-p (x)
@@ -241,8 +262,10 @@ differs in structure from the template for ~A ast nodes, which is: ~A"
 				    (format nil "Failing test: ~A"
 					    (with-output-to-string (s)
 					      (py-pprint test-ast s))))))))
-  
+
 (defmacro [assert-stmt] (test raise-arg)
+  ;; The decision whether or not to execute `assert' statements
+  ;; is taken at compile-time.
   (when *__debug__*
     `(assert-stmt-1 ,test ',test ,raise-arg)))
 
@@ -272,18 +295,18 @@ differs in structure from the template for ~A ast nodes, which is: ~A"
     `(let ((,assign-val ,value))
        ,@(loop for tg in targets collect `(setf ,tg ,assign-val)))))
 
-(define-compiler-macro [assign-stmt] (&whole whole value targets &environment e)
-  (declare (ignore e))
-  (if (and (listp value) (member (car value) '([tuple-expr] [list-expr]))
-	   (= (length targets) 1) (member (caar targets) '([tuple-expr] [list-expr]))
-	   (= (length (second value)) (length (second (car targets)))))
+(define-compiler-macro [assign-stmt] (&whole whole value targets)
+  ;; Shortcut the case "a,b,.. = 1,2,.." where left and right same number of
+  ;; items. This saves creation of a tuple for RHS.
+  (if (and (or (match-p value '([tuple-expr] ?items))
+               (match-p value '([list-expr] ?items)))
+           (or (match-p targets '(([tuple-expr] ?items)))
+               (match-p targets '(([list-expr] ?items))))
+           (= (length (second value)) (length (second (car targets)))))
       
-      ;; Shortcut the case "a,b,.. = 1,2,.." where left and right same
-      ;; number of items. This saves creation of a tuple for RHS.
-      ;; 
-      ;; Note that all RHS values are evaluated before assignment to
-      ;; LHS places takes place.
+      ;; Note that by using RHS, we force values to be evaluated before targets.
       `(psetf ,@(mapcan #'list (second (car targets)) (second value)))
+    
     whole))
 
 (defmacro [attributeref-expr] (item attr)
@@ -582,20 +605,6 @@ differs in structure from the template for ~A ast nodes, which is: ~A"
 (defmacro [dict-expr] (alist)
   `(make-dict-unevaled-list ,alist))
 
-
-;;; `Exec' statement
-
-(eval-when (:compile-toplevel :load-toplevel :execute)
-(defvar *exec-early-parse-constant-string* t
-  "Whether a constant string argument to the `exec' statement may be
-parsed at compile time already.")
-)
-
-(defvar *exec-stmt-compile-before-run* t
-  "The code in the `exec' statement is translated into a function, that is
-then (optionally) compiled and called. Should it be compiled before running?")
-
-(defvar *exec-stmt-result-handler* nil)
 
 (defmacro [exec-stmt] (code-string globals locals &key (allowed-stmts t) &environment e)
   ;; TODO:
@@ -1006,11 +1015,11 @@ input arguments."
 				    `(load-time-value
 				      (error "Bug: DEL for lexically safe variable `~A'" name))
 				  `(progn (unless ,name
-					    (unbound-variable-error ',name))
+					    (unbound-variable-error ',name nil))
 					  (setf ,name ,(when (builtin-value name)
 							 `(builtin-value ',name))))))	      
 			    (class-del `(unless (py-del-subs +cls-namespace+ ,name)
-					  (unbound-variable-error ',name))))
+					  (unbound-variable-error ',name nil))))
 	    (let ((del-form 
 		   (ecase (get-pydecl :context e)
 		     (:module   module-del)
@@ -1031,7 +1040,7 @@ input arguments."
 
 (defmacro [identifier-expr] (name &environment e)
   ;; The identifier is used for its value; it is not an assignent
-  ;; target (as the latter case is handled by ASSIGN-STMT).
+  ;; target (as the latter case is handled by the setf expander for ID..-EXPR.
   (assert (symbolp name) () "Identifier name should be a symbol: ~S" name)
   (unless e
     (break "no env: id-expr ~A ~A" name e))
@@ -1040,7 +1049,7 @@ input arguments."
 	   (let ((ix (position name (get-pydecl :mod-globals-names e))))
 	     (if ix
 		 `(or (fast (svref +mod-static-globals-values+ ,ix))
-		      (unbound-variable-error ',name t))
+		      (unbound-variable-error ',name))
 	       `(identifier-expr-module-lookup-dyn ',name +mod-dyn-globals+))))
 	 
 	 (local-lookup ()
@@ -1048,7 +1057,7 @@ input arguments."
 	       (progn #+(or)(warn "safe: ~A" name)
 		      name)
 	     `(or ,name
-		  (unbound-variable-error ',name t)))))
+		  (unbound-variable-error ',name)))))
     
     (ecase (get-pydecl :context e)
       
@@ -1198,24 +1207,26 @@ input arguments."
   `(module-make-globals-dict +mod+
 			     +mod-static-globals-names+ +mod-static-globals-values+ +mod-dyn-globals+))
 
-(defun unbound-variable-error (name &optional resumable)
+(defun unbound-variable-error (name &optional (resumable t))
   (declare (special *py-signal-conditions*))
   (if resumable
+    
       (restart-case
-	  (py-raise '{NameError} "Variable '~A' is unbound" name)
-	(cl:use-value (val)
+	  (py-raise '{NameError} "Variable `~A' is unbound" name)
+        (cl:use-value (val)
 	    :report (lambda (stream)
-		      (format stream "Enter a value to use for '~A'" name))
+		      (format stream "Enter a value to use for `~A'." name))
 	    :interactive (lambda () 
-			   (format t "Enter new value for '~A': " name)
+			   (format t "Enter new value for `~A': " name)
 			   (multiple-value-list (eval (read))))
 	  (return-from unbound-variable-error val)))
-    (py-raise '{NameError} "Variable '~A' is unbound" name)))
+    
+    (py-raise '{NameError} "Variable `~A' is unbound" name)))
 
 (defun identifier-expr-module-lookup-dyn (name +mod-dyn-globals+)
   (or (gethash name +mod-dyn-globals+)
       (builtin-value name)
-      (unbound-variable-error name t)))
+      (unbound-variable-error name)))
 
 (defun delete-identifier-at-module-level (name ix +mod+)
   ;; Reset module-level vars with built-in names to their built-in value
@@ -1225,7 +1236,7 @@ input arguments."
 		       (svref globals-values ix) 
 		     (remhash name dyn-globals))))
       (unless old-val
-	(unbound-variable-error name))
+	(unbound-variable-error name nil))
       (cond (ix  (setf (svref globals-values ix) biv))
 	    (biv (setf (gethash name dyn-globals) biv))
 	    (t   (remhash name dyn-globals))))))
@@ -1379,6 +1390,8 @@ input arguments."
 				 (return-from try-except-stmt nil))))
 		   
 		     ((eq (car exc) '[tuple-expr])
+                      ;; Because the names in EXC may be any variable that is bound to an exception
+                      ;; class, not possible to use `(typep ,the-exc (or ,@names))
 		      `((some ,@(loop for cls in (second exc)
 				    collect `(typep ,the-exc ,cls)))
 			(progn ,@(when var `(([assign-stmt] ,the-exc (,var))))
