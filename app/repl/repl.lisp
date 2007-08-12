@@ -129,8 +129,8 @@ KIND can be :ptime, :time, :space, :pspace or NIL."
 	       (format t *repl-doc*))
 	     
 	     (remember-value (val)
-	       ;; Make last three return values available as _, __, ___
-	       ;; for both Python (repl module namespace) and Lisp (dynamic vars).
+               ;; Make last three return values available as _, __, ___
+               ;; for both Python (repl module namespace) and Lisp (dynamic vars).
                (when val ;; don't save NIL (which can be return value for Lisp eval)
                  (shiftf ___ __ _ val)
                  (shiftf (gethash '{___} dyn-globals)
@@ -177,16 +177,19 @@ KIND can be :ptime, :time, :space, :pspace or NIL."
                                 (write-char #\Newline)))
                        (return-from :repr))))))
 	     
-	     (handle-as-python-code (total)
-	       ;; Return T if this \"succeeded\" somehow, i.e. parsing as Lisp
-	       ;; should not be attempted.
-	       ;; When first char is a space, always treat it as Lisp code
+	     (handle-as-python-code (total &optional print-error)
+               ;; Return T if this \"succeeded\" somehow, i.e. parsing as Lisp
+               ;; should not be attempted.
+               ;; When first char is a space, always treat it as Lisp code
 	       (unless (and (> (length total) 0)
 			    (char= (char total 0) #\Space))
 		 
 		 (let ((ast (handler-case (parse-python-string total)
 			      ({UnexpectedEofError} () (return-from handle-as-python-code t))
-			      ({SyntaxError} () nil))))
+			      ({SyntaxError} (err) 
+                                (when print-error
+                                  (format t ";; Python eval failed:  ~A~%" err))
+                                (return-from handle-as-python-code :syntax-error)))))
 		   
 		   (when ast
 		     (destructuring-bind (module-stmt (suite-stmt items)) ast
@@ -207,34 +210,42 @@ KIND can be :ptime, :time, :space, :pspace or NIL."
 			 (setf acc nil)))
 		     (return-from handle-as-python-code t)))))
 	     
-	     (handle-as-lisp-code (total)
+	     (handle-as-lisp-code (total &optional print-error)
+               ;; Returns whether actually handled
 	       (let ((lisp-form
 		      (ignore-errors (with-standard-io-syntax
-				       ;; Bind package, so symbols _, __, ___ are present.
+                                       ;; Bind package, so symbols _, __, ___ are present.
 				       (let ((*package* #.*package*))
 					 (read-from-string total nil nil))))))
 		 
-		 (cond ((null lisp-form) ) ;; could not parse as lisp
+		 (cond ((null lisp-form)
+                        ;; could not parse as lisp
+                        nil)
 		       
-		       ((member lisp-form '(nil def class for while if try)) )
-		       ;; ignore, it's a multiline python code
-					  
+		       ((member lisp-form '(nil def class for while if try))
+                        ;; ignore, it's a multiline python code
+                        nil)
+                       					  
 		       ((and (symbolp lisp-form)
 			     (> (length (symbol-name lisp-form)) 1)
-			     (char= (aref (symbol-name lisp-form) 0) #\@)) )
-		       ;; Reading function decorator
+			     (char= (aref (symbol-name lisp-form) 0) #\@))
+                        ;; Reading function decorator
+                        nil)
 		       
 		       (t (multiple-value-bind (res err) 
 			      (ignore-errors (multiple-value-list (eval lisp-form)))
 			    (if (and (null res)
 				     (typep err 'condition))
-				(format t ";; Eval as Lisp failed: ~A~%" err)
+				(progn (when print-error
+                                         (format t ";; Lisp eval failed:  ~A~%" err))
+                                       nil)
 			      (progn
 				(remember-value (car res))
 				(dolist (r res)
 				  (write r)
 				  (write-char #\Newline))
-				(setf acc nil)))))))))
+				(setf acc nil)
+                                t))))))))
       
       (loop
 	  initially (format t "[CLPython -- type `:q' to quit, `:help' for help]~%")
@@ -271,6 +282,12 @@ KIND can be :ptime, :time, :space, :pspace or NIL."
 		      
 		      (t (push (concatenate 'string x (string #\Newline)) acc)
 			 (let* ((total (apply #'concatenate 'string (reverse acc))))
-			   (or (handle-as-python-code total)
-			       (handle-as-lisp-code total)))))))))))))
+                           (ecase (handle-as-python-code total)
+                             (t ) ;; handled)
+                             (nil (handle-as-lisp-code total))
+                             (:syntax-error (unless (handle-as-lisp-code total)
+                                              (handle-as-python-code total t) ;; print py error
+                                              (handle-as-lisp-code total t) ;; print lisp error
+                                              (format t ";; Current input is therefore ignored.~%")
+                                              (setf acc nil)))))))))))))))
   
