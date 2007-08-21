@@ -54,8 +54,8 @@ def fact(n):
   else:
     return n * fact(n-1)
 
-fact(6)
-
+fact(6)")
+  (profile-source-string "
 def magic():
   for c in 'abracadabra':
     if c == 'a':
