@@ -200,27 +200,29 @@ def f():
   (run-code-test "a = 3; TEST" (test-equal () #1#))
   (run-code-test "TEST; a = 3" (test-equal () #1#))
   
-  (run-code-test "def f(): TEST"             (test-true (seq-equal '({f}) #1#)))
-  (run-code-test "def f(x): TEST"            (test-true (seq-equal '({f} {x}) #1#)))
-  (run-code-test "def f(x,y,z=3): TEST"      (test-true (seq-equal '({f} {x} {y} {z}) #1#)))
-  (run-code-test "def f(x,*y,**z): TEST"     (test-true (seq-equal '({f} {x} {y} {z}) #1#)))
-  (run-code-test "def f( (x,y,z), *a): TEST" (test-true (seq-equal '({f} {x} {y} {z} {a}) #1#)))
+  (run-code-test "def f(): TEST"             (test-true (seq-equal '() #1#)))
+  (run-code-test "def f(x): TEST"            (test-true (seq-equal '({x}) #1#)))
+  (run-code-test "def f(x,y,z=3): TEST"      (test-true (seq-equal '({x} {y} {z}) #1#)))
+  (run-code-test "def f(x,*y,**z): TEST"     (test-true (seq-equal '({x} {y} {z}) #1#)))
+  (run-code-test "def f( (x,y,z), *a): TEST" (test-true (seq-equal '({x} {y} {z} {a}) #1#)))
   
   (run-code-test "
 def f( (x,y) ):
   def g(a,**b):
-    TEST"        (test-true (seq-equal '({x} {y} {a} {b} {f} {g}) #1#)))
+    TEST"        (test-true (seq-equal '({x} {y} {a} {b} {g}) #1#)
+                            :fail-info "G is a local variable in F, therefore visible."))
 
   (run-code-test "
 def f( (x,y) ):
   def g( x=3,**y):
-    TEST"        (test-true (seq-equal '({x} {y} {f} {g}) #1#)))
+    TEST"        (test-true (seq-equal '({x} {y} {g}) #1#)))
 
   (run-code-test "
 def f( (x,y) ):
   def g(z):
     pass
-  TEST"        (test-true (seq-equal '({f} {g} {x} {y}) #1#)))
+  TEST"        (test-true (seq-equal '({x} {y} {g}) #1#)
+                          :fail-info "G is a local variable in F."))
   
   (run-code-test "
 class C(D):
@@ -238,8 +240,22 @@ def g():
   class C(D):
     pass
   TEST"
-		 (test-equal '({g} {C}) #1#))
-  
+		 (test-equal '({C}) #1#))
+  (run-code-test "
+def f():
+  class C:
+    def g(self):
+      TEST"
+                 (test-true (seq-equal '({self} {C}) #1#)
+                            :fail-info "C is local var in F."))
+  (run-code-test "
+def f():
+  class C:
+    def g(self):
+      def h():
+        TEST"
+                 (test-true (seq-equal '({C} {self} {h}) #1#)
+                            :fail-info "H local var in G"))
   (run-code-test "
 aaa = 4
 class C(D):
@@ -248,7 +264,7 @@ class C(D):
       bbb = 23
       def g(z):
         TEST"
-		 (test-true (seq-equal '({f} {x} {Q} {g} {z}) #1#)
+		 (test-true (seq-equal '({x} {Q} {z}) #1#)
                             :fail-info "The class C is not lex-vis"))
   )
 

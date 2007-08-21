@@ -893,9 +893,19 @@ input arguments."
 				   (:context-stack ,new-context-stack)
 				   (:inside-function-p t)
 				   (:lexically-visible-vars
-				    ,(cons fname
-                                           (append all-nontuple-func-locals
-                                                   (get-pydecl :lexically-visible-vars e))))
+                                    ,(let ((sum (append all-nontuple-func-locals
+                                                        (get-pydecl :lexically-visible-vars e))))
+                                       ;; def f(x):
+                                       ;;   def g(y):
+                                       ;;     <Here G is locally visibe because it is a /local variable/
+                                       ;;      in F. In general the name of a function is not visible
+                                       ;;      in its body.>
+                                       ;; 
+                                       ;; See also the testcases for the :LEXICALLY-VISIBLE-VARS declaration.
+                                       (when (eq (get-pydecl :context e) :function)
+                                         (assert (get-pydecl :inside-function-p e))
+                                         (pushnew fname sum))
+                                       sum))
 				   (:safe-lex-visible-vars
 				    ,(nset-difference
 				      (append nontuple-arg-names

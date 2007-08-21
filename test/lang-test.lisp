@@ -311,7 +311,11 @@ assert x == [1,2,3,4,(5,6),{}], 'x = %s' % x"
 def f(a, b, c=13, d=14, *e, **f): return [a,b,c,d,e,f]
 x = f(a=1,b=2,c=3,d=4,e=5,f=6)
 assert x == [1,2,3,4,(),{'e': 5, 'f': 6}], 'x = %s' % x"
-))
+                )
+  (run-no-error "
+def f(): return f
+f()
+assert f() == f"))
 
 (defmethod test-lang ((kind (eql :generator-expr)))
   )
