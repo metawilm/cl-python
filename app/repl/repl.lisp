@@ -187,7 +187,6 @@ KIND can be :ptime, :time, :space, :pspace or NIL."
 		     (destructuring-bind (module-stmt (suite-stmt items)) ast
 		       (assert (eq module-stmt '[module-stmt]))
 		       (assert (eq suite-stmt '[suite-stmt]))
-                       (warn "items: ~A" items)
                        (when (cond #+(or) ;; think first clause can't happen
                                    ((/= (length items) 1)
                                     nil)
