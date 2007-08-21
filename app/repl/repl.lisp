@@ -12,7 +12,8 @@
 (defpackage :clpython.app.repl
   (:documentation "Python read-eval-print loop")
   (:use :common-lisp :clpython :clpython.parser )
-  (:export #:repl #:*repl-compile* #:*repl-prof*))
+  (:export #:repl #:*repl-compile* #:*repl-prof*)
+  (:import-from :clpython #:with-matching #:with-perhaps-matching))
 
 (in-package :clpython.app.repl)
 (in-syntax *ast-user-readtable*)
@@ -61,6 +62,10 @@ Possible values: :time :ptime :space :pspace nil")
 (defvar *repl-compile* nil
   "Whether code typed in the REPL is compiled before running.")
 
+(defvar *ignore-copied-prompts* t
+  "Whether to remove initial `>>>' and `...' on the input line.
+If true, previous input can be copy-pasted as new input easily.")
+                                
 (defvar *repl-doc* "
 In the Python interpreter:
      :help          => print (this) help
@@ -132,7 +137,6 @@ KIND can be :ptime, :time, :space, :pspace or NIL."
                          val)))
 
 	     (run-ast-func (suite)
-	       #+(or)(warn "AST: ~S" suite)
                (let ((f `(lambda ()
                            (clpython::with-this-module-context (,repl-mod)
                              ,suite))))
@@ -141,66 +145,109 @@ KIND can be :ptime, :time, :space, :pspace or NIL."
                  f))
 	     
 	     (eval-print-ast (ast)
-	       (destructuring-bind (module-stmt suite) ast
-		 (assert (eq module-stmt '[module-stmt]))
-		 (assert (eq (car suite) '[suite-stmt]))
-
+               (with-matching (ast ([module-stmt] ?suite))
+		 (assert (eq (car ?suite) '[suite-stmt]))
 		 (let ((vals (multiple-value-list
                               (block :val
                                 (loop
-                                  (let ((helper-func (run-ast-func suite)))
+                                  (let ((helper-func (run-ast-func ?suite)))
                                     (loop
                                       (with-simple-restart
                                           (retry-repl-eval
                                            "Retry the execution the compiled REPL command. [:re]")
                                         (return-from :val
                                           (profile helper-func *repl-prof*))))))))))
-                   (remember-value (car vals))
-                   (block :repr
-                     (loop
-                       (with-simple-restart
-                           (:continue "Retry printing the object.")
-                         ;; Write string with quotes around it; convert other objects
-                         ;; using __str__ and print without quotes.
-                         (loop for val in vals
-                             do (if (stringp val)
-                                    (write-string (py-repr val)) 
-                                  (let ((str-val (py-str-string val)))
-                                    (write-string (py-val->string str-val)))) 
-                                (write-char #\Newline)))
-                       (return-from :repr))))))
+                   (when (car vals) ;; skip NIL
+                     (remember-value (car vals))
+                     (block :repr
+                       (loop
+                         (with-simple-restart
+                             (:continue "Retry printing the object.")
+                           ;; Write string with quotes around it; convert other objects
+                           ;; using __str__ and print without quotes.
+                           (loop for val in vals
+                               do (if (stringp val)
+                                      (write-string (py-repr val)) 
+                                    (let ((str-val (py-str-string val)))
+                                      (write-string (py-val->string str-val)))) 
+                                  (write-char #\Newline)))
+                         (return-from :repr)))))))
 	     
-	     (handle-as-python-code (total &optional print-error)
-               ;; Return T if this \"succeeded\" somehow, i.e. parsing as Lisp
+	     (handle-as-python-code (total &key print-error ast-finished)
+               ;; Return T if this succeeded somehow, i.e. parsing as Lisp
                ;; should not be attempted.
                ;; When first char is a space, always treat it as Lisp code
-	       (unless (and (> (length total) 0)
-			    (char= (char total 0) #\Space))
-		 
-		 (let ((ast (handler-case (parse-python-string total)
-			      ({UnexpectedEofError} () (return-from handle-as-python-code t))
-			      ({SyntaxError} (err) 
-                                (when print-error
-                                  (format t ";; Python parse failed:  ~A~%" err))
-                                (return-from handle-as-python-code :syntax-error)))))
-		   (when ast
-		     (destructuring-bind (module-stmt (suite-stmt items)) ast
-		       (assert (eq module-stmt '[module-stmt]))
-		       (assert (eq suite-stmt '[suite-stmt]))
-                       (when (cond #+(or) ;; think first clause can't happen
-                                   ((/= (length items) 1)
-                                    nil)
-                                   ((not (listp (car items)))
+               (when (or (zerop (length total))
+                         (char= (char total 0) #\Space))
+                 (return-from handle-as-python-code nil))
+               
+               (flet ((remove-prompts (str)
+                        (let ((new (concatenate 'string (format nil "~A" #\Newline) str))
+                              changed)
+                          (dolist (eol-ch '(#\Newline #\Return))
+                            (dolist (p '(">>> " "... "))
+                              (let ((prompt (format nil "~A~A" eol-ch p)))
+                                (loop for ix = (search prompt new :test 'string=)
+                                    while ix
+                                    do (setf changed t)
+                                       (replace new new :start1 (1+ ix) :start2 (+ ix (length prompt)))
+                                       (setf new (subseq new 0 (- (length new) (length prompt))))))))
+                          (values new changed)))
+                      
+                      (return-syntax-error (err)
+                        (when print-error
+                          (format t ";; Python parse failed:  ~A~%" err))
+                        (return-from handle-as-python-code :syntax-error)))
+                 
+                 (let ((ast (handler-case (parse-python-string total)
+                              ({UnexpectedEofError} () (return-from handle-as-python-code t))
+			      ({SyntaxError} (err)
+                                (or (when *ignore-copied-prompts*
+                                      (multiple-value-bind (new-str changed)
+                                          (remove-prompts total)
+                                        (when changed
+                                          (handler-case (parse-python-string new-str)
+                                            ({UnexpectedEofError} ()
+                                              (return-from handle-as-python-code t))
+                                            (error (err2)
+                                              (return-syntax-error err2))))))
+                                    (return-syntax-error err))))))
+                   (when ast
+                     (with-matching (ast ([module-stmt] ?suite-stmt))
+                       (with-matching (?suite-stmt ([suite-stmt] ?items))
+                         (when (cond (ast-finished 
+                                      t)
+                                     
+                                     ((not (listp (car ?items)))
+                                      t)
+                                   
+                                   ((> (length ?items) 1)
+                                    nil) ;; todo?
+
+                                   ;; Special A.I. to recognize these common cases:
+                                   ;;  1. def f(): ...; return 42
+                                   ;;     (`return' at the end of function body)
+                                   ;;  2. def f(): if c: return X; else: return Y
+                                   ;;     (`return' in every `if' clause; as in `fact')
+                                   ((with-perhaps-matching
+                                        ((car ?items)
+                                         ([funcdef-stmt] ?decorators ([identifier-expr] ?fname)
+                                                         ?fargs
+                                                         ([suite-stmt] ?stmts)))
+                                      (or (eq (caar (last ?stmts)) '[return-stmt]) ;; 1.
+                                          (with-perhaps-matching ;; 2.
+                                              ((car (last ?stmts))
+                                               ([if-stmt] ?if-clauses ?else-clause))
+                                            (and (every (lambda (c)
+                                                          (with-perhaps-matching (c (?cond ([suite-stmt] ?stmts)))
+                                                            (eq (caar (last ?stmts)) '[return-stmt])))
+                                                        ?if-clauses)
+                                                 ?else-clause ;; otherwise stmt perhaps not finished
+                                                 (with-perhaps-matching (?else-clause ([suite-stmt] ?stmts))
+                                                   (eq (caar (last ?stmts)) '[return-stmt]))))))
                                     t)
-                                   ((and (eq (caar items) '[funcdef-stmt])
-                                         (clpython::with-perhaps-matching
-                                             ((cdar items)
-                                              (?decorators ([identifier-expr] ?fname)
-                                                           ?fargs
-                                                           ([suite-stmt] ?stmts)))
-                                           (eq (caar (last ?stmts)) '[return-stmt])))
-                                    t)
-                                   ((member (caar items)
+                                   
+                                   ((member (caar ?items)
                                             '([classdef-stmt] ;; Wait for empty line
                                               [for-in-stmt]   ;; for perhaps multi-line
                                               [funcdef-stmt]  ;; statements
@@ -210,28 +257,29 @@ KIND can be :ptime, :time, :space, :pspace or NIL."
                                               [while-stmt] ))
                                     nil)
                                    (t t))
-			 (eval-print-ast ast)
-			 (setf acc nil)))
-		     (return-from handle-as-python-code t)))))
+                           
+                           (eval-print-ast ast)
+                           (setf acc nil))))
+                     
+                     (return-from handle-as-python-code t)))))
 	     
-	     (handle-as-lisp-code (total &optional print-error)
+	     (handle-as-lisp-code (total &key print-error)
                ;; Returns whether actually handled
 	       (multiple-value-bind (lisp-form error)
                    (ignore-errors (with-standard-io-syntax
                                     ;; Bind package, so symbols _, __, ___ are present.
                                     (let ((*package* #.*package*))
                                       (read-from-string total nil nil))))
-		 
-		 (cond ((null lisp-form)
-                        ;; could not parse as lisp
+                 (cond ((null lisp-form)
+                        ;; Could not parse as lisp
                         (when print-error
                           (format t ";; Lisp parse failed:  ~A~%" error))
                         nil)
-		       
+                       
 		       ((member lisp-form '(nil def class for while if try))
-                        ;; ignore, it's a multiline python code
+                        ;; Multi-line Python form
                         nil)
-                       					  
+                       
 		       ((and (symbolp lisp-form)
 			     (> (length (symbol-name lisp-form)) 1)
 			     (char= (aref (symbol-name lisp-form) 0) #\@))
@@ -276,13 +324,13 @@ KIND can be :ptime, :time, :space, :pspace or NIL."
 			   (t      (warn "Unknown command: ~S" cmd)))))
 		      
 		      ((string= x "")
-		       (let ((total (apply #'concatenate 'string (nreverse acc))))
+                       (let ((total (apply #'concatenate 'string (nreverse acc))))
 			 (setf acc ())
 			 (loop
 			   (restart-case
-			       (let ((ast (parse-python-string total)))
-				 (eval-print-ast ast)
-				 (return))
+                               (progn (or (eq t (handle-as-python-code total :print-error t :ast-finished t))
+                                          (handle-as-lisp-code total :print-error t))
+                                      (return))
 			     (try-parse-again ()
 				 :report "Parse string again into AST")))))
 		      
@@ -292,8 +340,8 @@ KIND can be :ptime, :time, :space, :pspace or NIL."
                              ((t) ) ;; handled)
                              ((nil) (handle-as-lisp-code total))
                              (:syntax-error (unless (handle-as-lisp-code total)
-                                              (handle-as-python-code total t) ;; print py error
-                                              (handle-as-lisp-code total t) ;; print lisp error
+                                              (handle-as-python-code total :print-error t) ;; print python error
+                                              (handle-as-lisp-code total :print-error t) ;; print lisp error
                                               (format t ";; Current input is therefore ignored.~%")
                                               (setf acc nil)))))))))))))))
   
