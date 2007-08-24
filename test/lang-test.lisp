@@ -116,7 +116,9 @@ assert `x` == 'r'"))
   (run-no-error "assert 1 + 2 == 3")
   (run-no-error "assert 1 - 2 * 3 == -5")
   (run-no-error "assert 1 ^ 3 == 2")
-  (run-no-error "assert 1 | 2 == 3"))
+  (run-no-error "assert 1 | 2 == 3")
+  (run-no-error "assert 4 * 'ax' == 'axaxaxax'")
+  (run-no-error "assert -4 * 'ax' == ''"))
 
 (defmethod test-lang ((kind (eql :binary-lazy-expr)))
   (run-no-error "assert not (0 or 0)")
@@ -259,6 +261,10 @@ assert d[y] == 42
 assert d['b'] == 42"))
 
 (defmethod test-lang ((kind (eql :exec-stmt)))
+  (run-no-error "
+def f():
+  x = (1,2)
+  exec 'print x'" :fail-info "Make sure tuple `(1 2) is quoted in code generated for `exec'")
   )
 
 (defmethod test-lang ((kind (eql :for-in-stmt)))
@@ -418,7 +424,7 @@ assert f(1, lambda: 2) == 1 + 2")
   )
 
 (defmethod test-lang ((kind (eql :tuple-expr)))
-  )
+  (run-no-error "assert (1,2,3)[0:1] == (1,)"))
 
 (defmethod test-lang ((kind (eql :unary-expr)))
   (run-no-error "x = 3; +x; -x")
