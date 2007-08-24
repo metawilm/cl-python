@@ -2221,6 +2221,12 @@ But if RELATIVE-TO package name is given, result may contains dots."
   "2's complement inverse"
   (1- (- x)))
 
+(def-py-method py-int.__mul__ (x^ y^)
+  (typecase y
+    (string (cond ((<= x 0) "")
+                  (t (apply #'concatenate 'string (loop repeat x collect y)))))
+    (t (py-number.__mul__ x y))))
+  
 ;; Bool
 
 (def-proxy-class py-bool (py-int))
@@ -3017,7 +3023,9 @@ But if RELATIVE-TO package name is given, result may contains dots."
 		   (t (py-raise '{IndexError}
 				"Attempt to retrieve element ~A from tuple of size ~A: ~:A."
 				item (length x) x))))
-    (py-slice (error :todo-tuple-getitem-slice))))
+    (py-slice (let ((vec (coerce x 'array))) ;; Use slice handling in vector-getitem
+                (vector-getitem vec item (lambda (item/s single-p)
+                                           (make-tuple-from-list (if single-p (list item/s) item/s))))))))
 
 (def-py-method py-tuple.__iter__ (x^)
   (make-iterator-from-function
