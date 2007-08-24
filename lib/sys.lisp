@@ -11,7 +11,8 @@
 	   #:|maxunicode| #:|modules| #:|path| #:|platform|
 	   #:|prefix| #:|ps1| #:|ps2| #:|stdin| #:|stdout| #:|stderr|
 	   #:|__stdin__| #:|__stdout__| #:|__stderr__|
-	   #:|api_version| #:|version_info| #:|version| ))
+	   #:|api_version| #:|version_info| #:|version| )
+  (:import-from :clpython #:*try-except-currently-handled-exception*))
 
 (in-package :clpython.module.sys)
 
@@ -31,11 +32,11 @@
 ;;  tracebacklimit, warnoptions
 
 (defun |exc_info| ()
-  (declare (special *try-except-current-handled-exception*))
+  (declare (special *try-except-currently-handled-exception*))
   (clpython::make-tuple-from-list 
-   (if *try-except-current-handled-exception*
-       (list (clpython::py-class-of *try-except-current-handled-exception*)
-	     *try-except-current-handled-exception*
+   (if *try-except-currently-handled-exception*
+       (list (clpython::py-class-of *try-except-currently-handled-exception*)
+	     *try-except-currently-handled-exception*
 	     *the-none*) ;; traceback object
      (list *the-none* *the-none* *the-none*))))
 (set-impl-status '|exc_info| :incomplete "No traceback objects (yet).")

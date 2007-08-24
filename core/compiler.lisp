@@ -1106,7 +1106,7 @@ input arguments."
 			       `module-obj))))))
 
 (defmacro [import-from-stmt] (mod-name-as-list items)
-  `(let ((mod-obj (py-import ',mod-name-as-list)))
+  `(whereas ((mod-obj (py-import ',mod-name-as-list)))
      ,@(if (eq items '[*])
 
 	  `((let ((src-items (py-module-get-items mod-obj :import-* t)))
@@ -1378,7 +1378,9 @@ input arguments."
     (warn "Raising string exceptions not supported (got: 'raise ~S')" exc))
   `(raise-stmt-1 ,exc ,var ,tb))
 
-(defparameter *try-except-current-handled-exception* nil)
+(defparameter *try-except-currently-handled-exception* *the-none*
+  "Information about the currently handled exception. This is only not-None
+inside an `except' clause.")
 
 (defmacro [try-except-stmt] (suite except-clauses else-suite)
   ;; The Exception class in a clause is evaluated only after an
@@ -1391,8 +1393,8 @@ input arguments."
 	       ;; Every handler should store the exception, so it can be returned
 	       ;; in sys.exc_info().
 	       (setq handler-suite
-		 `(progn (setf *try-except-current-handled-exception* ,the-exc)
-			 ,handler-suite))
+		 `(progn (let ((*try-except-currently-handled-exception* ,the-exc))
+                           ,handler-suite)))
 	       
 	       (cond ((null exc)
 		      `(t (progn ,handler-suite
@@ -1401,8 +1403,8 @@ input arguments."
 		     ((eq (car exc) '[tuple-expr])
                       ;; Because the names in EXC may be any variable that is bound to an exception
                       ;; class, not possible to use `(typep ,the-exc (or ,@names))
-		      `((some ,@(loop for cls in (second exc)
-				    collect `(typep ,the-exc ,cls)))
+		      `((or ,@(loop for cls in (second exc)
+                                  collect `(typep ,the-exc ,cls)))
 			(progn ,@(when var `(([assign-stmt] ,the-exc (,var))))
 			       ,handler-suite
 			       (return-from try-except-stmt nil))))
