@@ -669,8 +669,7 @@ differs in structure from the template for ~A ast nodes, which is: ~A"
 
 (defun exec-stmt-ast (ast globals locals)
   (let ((f `(with-module-context (#() #() (let ((ht (make-py-hash-table)))
-                                            (dict-map (lambda (k v) (setf (gethash k ht) v))
-                                                      ,globals)
+                                            (dict-map ,globals (lambda (k v) (setf (gethash k ht) v)))
                                             ht)
                                   :create-mod t)
               ,([make-suite-stmt*]
@@ -692,7 +691,7 @@ differs in structure from the template for ~A ast nodes, which is: ~A"
                                         (assert (not (null v)) () 
                                           "Local var `~A' (passed as EXEC local) is NIL." k)
                                         (push ([make-assign-stmt*]
-                                               :value v
+                                               :value `',v
                                                :target ([make-identifier-expr*]
                                                         (py-string->symbol k)))
                                               res)))
@@ -1619,13 +1618,14 @@ input arguments."
   ;; keys by corresponding symbols.
   (:method ((x py-dict))
 	   (let ((new (make-dict))) ;; WB was: class-dict
-             (dikt-map x (lambda (k v)
-                           (unless (typep k '(or string symbol))
-                             (py-raise
-                              '{TypeError}
-                              "Cannot use ~A as namespace dict, because non-string key: ~A"
-                              x k))
-                           (sub/dict-set new k v)))
+             (dikt-map (py-dict-dikt x)
+                       (lambda (k v)
+                         (unless (typep k '(or string symbol))
+                           (py-raise
+                            '{TypeError}
+                            "Cannot use ~A as namespace dict, because non-string key: ~A"
+                            x k))
+                         (sub/dict-set new k v)))
              new)))
 
 (defun py-**-mapping->lisp-arg-list (**-arg)
