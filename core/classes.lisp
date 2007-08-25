@@ -2251,6 +2251,10 @@ But if RELATIVE-TO package name is given, result may contains dots."
 	f
       (make-instance 'cls :lisp-object f))))
 
+(def-py-method py-float.__str__ (x)
+  ;; To ensure the `d0' suffix is removed.
+  (py-float.__repr__ x))
+
 (def-py-method py-float.__repr__ (x^)
   (let* ((s (format nil "~F" x))
 	 (s.len (length s)))
@@ -2429,7 +2433,7 @@ But if RELATIVE-TO package name is given, result may contains dots."
         (unless k
           (return))
         (push (make-tuple-from-list (list (convert-if-symbol k) v)) res)))
-    res))
+    (make-py-list-from-list res)))
 
 (def-py-method py-dict.keys (x)
   (make-py-list-from-list (loop with f = (dikt-iter-keys-func (py-dict-dikt x))
