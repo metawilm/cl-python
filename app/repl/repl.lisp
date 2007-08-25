@@ -270,7 +270,8 @@ KIND can be :ptime, :time, :space, :pspace or NIL."
                                     ;; Bind package, so symbols _, __, ___ are present.
                                     (let ((*package* #.*package*))
                                       (read-from-string total nil nil))))
-                 (cond ((null lisp-form)
+                 (cond ((and (null lisp-form)
+                             (typep error 'error))
                         ;; Could not parse as lisp
                         (when print-error
                           (format t ";; Lisp parse failed:  ~A~%" error))
