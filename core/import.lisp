@@ -35,7 +35,8 @@
   "Get a list of possible source file names, given module name."
   (check-type modname string)
   (mapcar (lambda (filetype)
-	    (derive-pathname filepath :name (pathname-name modname :case :common) :type filetype))
+	    (derive-pathname filepath
+                             :name (pathname-name modname :case :common) :type filetype))
           *py-source-file-types*))
 
 (defun py-pkg-source-file-names (modname filepath)
@@ -56,12 +57,14 @@ The returned pathnames lead tot <modname>/__init__.{py/lisp/..}"
                    :name (pathname-name modname :case :common)
                    :type *py-compiled-file-type* ))
 
-(defun py-pkg-compiled-file-name (pkgname filepath)
+(defun py-pkg-compiled-file-name (pkgname filepath &key (include-dir t))
   "Get file name for compiled package __init__ file"
   (check-type pkgname string)
   (merge-pathnames
-   (make-pathname :directory `(:relative ,(pathname-name pkgname :case :common))
-		  :case      :common)
+   (if include-dir
+       (make-pathname :directory `(:relative ,(pathname-name pkgname :case :common))
+                      :case      :common)
+     pkgname)
    (derive-pathname filepath
                     :type *py-compiled-file-type* 
                     :name *package-indicator-filename*)))
@@ -92,9 +95,12 @@ Returns NIL if nothing found."
       else if (or pkg-src-path pkg-bin-path)
       return (values :package pkg-src-path pkg-bin-path)))
 
-(defun compile-py-file (filename &key (force-recompile nil)
-				      (verbose t)
-				      (output-file (error "required")))
+(defparameter *import-force-recompile* nil)
+(defparameter *import-force-reload*    nil)
+(defparameter *import-compile-verbose* t)
+(defparameter *import-load-verbose*    t)
+
+(defun compile-py-file (filename &key (output-file (error "required")))
   "Compile Python source file into FASL. Source file must exist."
   (check-type filename pathname)
   (assert (probe-file filename) (filename)
@@ -103,19 +109,19 @@ Returns NIL if nothing found."
   (let* ((*current-module-path* filename)) ;; used by compiler
     (declare (special *current-module-path*))
     
-    (with-auto-mode-recompile (:verbose verbose)
+    (with-auto-mode-recompile (:verbose *import-compile-verbose*)
       (with-python-code-reader ()
 	(compile-file filename
 		      :output-file output-file
-		      :if-newer (not force-recompile)
-		      :verbose verbose)))))
+		      :if-newer (not *import-force-recompile*)
+		      :verbose *import-compile-verbose*)))))
 
 (defun load-compiled-python-file (filename
-				  &key (mod-name (pathname-name filename))
+				  &key (mod-name (error "mod-name required"))
+                                       #+(or)(dotted-name (error "dotted-name required")) 
 				       (context-mod-name mod-name)
-				       (verbose t)
-				       within-mod
-				       habitat
+                                       within-mod
+				       (habitat (error "habitat required"))
 				       (update-existing-mod t)
 				  &allow-other-keys)
   
@@ -126,22 +132,26 @@ Returns the loaded module, or NIL on error."
   (check-type context-mod-name (or symbol string))
   (assert (probe-file filename) (filename)
     "Compiled Python file ~A does not exist" filename)
-  
+    
+  (when (get-loaded-module mod-name habitat)
+    (break "Module ~A already known, but imported again (file ~A)" mod-name filename))
+         
   (let* ((old-module (when habitat (get-known-module mod-name habitat))))
     (flet ((do-loading ()
 	     (let* ((new-module nil)
 		    (*module-hook* (lambda (mod)
 				     (setf new-module mod)
-				     ;; Need to register module before it is fully loaded,
+                                     ;; Need to register module before it is fully loaded,
 				     ;; otherwise infinite recursion if two modules import
 				     ;; each other.
-				     (when habitat
-				       (add-known-module mod habitat)))))
+                                     #+(or)(warn "Register module ~A as ~A in habitat ~A"
+                                                 mod (module-name mod) habitat)
+                                     (add-loaded-module mod habitat))))
 	       (declare (special *module-hook*))
-               (with-auto-mode-recompile (:verbose verbose)
+               (with-auto-mode-recompile (:verbose *import-load-verbose*)
 		 (let ((*current-module-name* mod-name))
 		   (declare (special *current-module-name*))
-		   (load filename :verbose verbose)))
+		   (load filename :verbose *import-load-verbose*)))
                (assert new-module ()
 		 "CLPython bug: module ~A did not call *module-hook* upon loading"
 		 mod-name)
@@ -155,12 +165,11 @@ Returns the loaded module, or NIL on error."
             (progn
 	      (multiple-value-setq (new-module success) (do-loading))
 	      (assert success () "Loading went OK, but no success status?")
-	      (return-from load-compiled-python-file new-module))
+              (return-from load-compiled-python-file new-module))
           (unless success
 	    (warn "Loading of module \"~A\" aborted~@[ (within ~A)~]."
 		  mod-name within-mod)
-	    (when habitat
-	      (remove-known-module mod-name habitat))
+            (remove-loaded-module mod-name habitat)
 	    (return-from load-compiled-python-file nil)))))))
 
 (defun parent-package-local-search-path (mod-name-as-list &rest import-options)
@@ -190,19 +199,16 @@ Returns the loaded module, or NIL on error."
 
 (defun py-import (mod-name-as-list 
 		  &rest options
-		  &key (habitat (or *habitat*
-				    (progn (warn "PY-IMPORT creating habitat; probably a bug.")
-					   (make-habitat :search-paths '(".")))))
-		       force-reload
-		       (verbose t)
-		       within-mod
-		       (search-paths (when habitat (habitat-search-paths habitat)))
-		       (add-to-habitat-loaded t))
+		  &key (habitat (or *habitat* (error "PY-IMPORT called without habitat")))
+		       (force-reload *import-force-reload*)
+                       within-mod
+		       (search-paths (when habitat (habitat-search-paths habitat))))
   "Returns the module, which may have been imported before."
+  
   ;; If WITHIN-MOD is supplied, then the directory of that
   ;; module's .py file is the first directory in the search path.
-  (declare (special *habitat* *py-import-force-reload*)
-	   (optimize (debug 3)))
+  (declare (special *habitat*)
+           (optimize (debug 3)))
   (check-type mod-name-as-list list)
   (check-type habitat habitat)
 
@@ -211,65 +217,59 @@ Returns the loaded module, or NIL on error."
     (whereas ((pkg (lisp-package-as-py-module (car mod-name-as-list))))
       (return-from py-import pkg)))
   
-  (unless search-paths
-    ;; Use current directory and `sys.path' as search paths
-    (setf search-paths '("."))
-    ;; XXX sys.path is now shared between all habitats; should perhaps be habitat-specific
-    (when (find-package :clpython.module.sys)
-      (setf search-paths (nconc (reverse (py-iterate->lisp-list 
-                                          (symbol-value
-                                           (find-symbol "path" :clpython.module.sys))))
-                                search-paths))))
-  
   (let* ((just-mod-name (string (car (last mod-name-as-list))))
-	 (dotted-name (module-dotted-name mod-name-as-list)))
-
-    ;; 2. (Dotted) Module already imported into habitat
-    (unless force-reload
-      (when habitat
-	(whereas ((m (get-loaded-module dotted-name habitat)))
-	  (return-from py-import m))))
+         (dotted-name (module-dotted-name mod-name-as-list)))
     
-    ;; Reloading built-in module?
-    #+(or) ;; todo
-    (when force-reload
-      (whereas ((im (get-loaded-module dotted-name habitat))
-		(bm (builtin-module mod-name-as-list)))
-	;; For now, does not remove user-set attributes
-	;;  (import sys; sys.a = 3; reload(sys); sys.a == 3)
-	(return-from py-import bm)))
-
+    ;; 2. (Dotted) Module already imported into habitat
+    (unless (and nil force-reload)
+      (whereas ((m (get-loaded-module dotted-name habitat)))
+        (return-from py-import m)))
+    
+    (unless search-paths
+      ;; Use current directory and `sys.path' as search paths
+      (setf search-paths '("."))
+      ;; XXX sys.path is now shared between all habitats; should perhaps be habitat-specific
+      (when (find-package :clpython.module.sys)
+        (setf search-paths (nconc (reverse (py-iterate->lisp-list 
+                                            (symbol-value
+                                             (find-symbol "path" :clpython.module.sys))))
+                                  search-paths))))
+    
     ;; In case of a dotted import ("import a.b"), search only in parent ("a") directory.
     (when (> (length mod-name-as-list) 1)
-      (unless (apply #'py-import (butlast mod-name-as-list)
-		     :add-to-habitat-loaded nil options)
-	(py-raise '{ImportError}
-		  "Could not import module `~A', as importing `~A' failed."
-		  dotted-name (module-dotted-name (butlast mod-name-as-list))))
+      (unless (apply #'py-import (butlast mod-name-as-list) options)
+        (py-raise '{ImportError}
+                  "Could not import module `~A', as importing `~A' failed."
+                  dotted-name (module-dotted-name (butlast mod-name-as-list))))
       (setf search-paths (list (parent-package-local-search-path mod-name-as-list))))
     
     ;; 3. Find a source or binary file somewhere in the collection of search paths
     (multiple-value-bind (kind src-file bin-file)
-	(find-py-file just-mod-name search-paths)
+        (let ((find-paths search-paths))
+          (when within-mod
+            (if (module-filepath within-mod)
+                (push (module-filepath within-mod) find-paths)
+              ;; Module __main__ is allowed to not have a module path. (Fix?)
+              (assert (string= (module-name within-mod) "__main__"))))
+          (find-py-file just-mod-name find-paths))
       (unless kind
-	(py-raise '{ImportError}
-		  "Could not find module `~A'. Search paths tried: ~{~S~^, ~}"
-		  just-mod-name search-paths))
+        (py-raise '{ImportError}
+                  "Could not find module `~A'. Search paths tried: ~{~S~^, ~}"
+                  just-mod-name search-paths))
       (assert (member kind '(:module :package)))
       (assert (or src-file bin-file))
-      (when src-file
-	(let ((output-file (py-compiled-file-name just-mod-name src-file)))
-	  (compile-py-file src-file :verbose verbose :output-file output-file)
-	  (setf bin-file output-file)))
-      (assert bin-file)
-      (whereas ((new-module (load-compiled-python-file bin-file
-                                                       :mod-name just-mod-name
-                                                       :verbose verbose
-                                                       :within-mod within-mod
-                                                       :habitat habitat)))
-	(when (and habitat add-to-habitat-loaded)
-	  (add-loaded-module new-module habitat))
-	(return-from py-import new-module)))))
+
+      (let ((bin-file (ecase kind
+                        (:module (py-compiled-file-name just-mod-name src-file))
+                        (:package (py-pkg-compiled-file-name just-mod-name src-file :include-dir nil)))))
+        (compile-py-file src-file :output-file bin-file)
+        (let ((new-module (load-compiled-python-file bin-file
+                                                     :mod-name dotted-name
+                                                     :within-mod within-mod
+                                                     :habitat habitat)))
+          (when new-module ;; Maybe loading failed (which already gave a warning)
+            (add-loaded-module new-module habitat)
+            (return-from py-import new-module)))))))
 
 (defun path-kind (path)
   "The file kind, which is either :FILE, :DIRECTORY or NIL"

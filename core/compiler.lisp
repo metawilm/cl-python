@@ -1091,8 +1091,9 @@ input arguments."
 (defmacro [import-stmt] (items)
   `(values ,@(loop for (mod-name-as-list bind-name) in items append
 		   (loop for m in mod-name-as-list
+                       for toplevel = t then nil ;; Ensure topleve module is imported relative to +mod+
 		       for res = (list m) then (append res (list m)) collect
-			 `(let ((module-obj (py-import ',res)))
+			 `(let ((module-obj (py-import ',res ,@(when toplevel `(:within-mod +mod+)))))
 			    (declare (ignorable module-obj))
 			    ,(cond ((= (length res) 1)
 				    (if (= 1 (length mod-name-as-list))
@@ -1106,16 +1107,18 @@ input arguments."
 			       `module-obj))))))
 
 (defmacro [import-from-stmt] (mod-name-as-list items)
-  `(whereas ((mod-obj (py-import ',mod-name-as-list)))
-     ,@(if (eq items '[*])
-
-	  `((let ((src-items (py-module-get-items mod-obj :import-* t)))
-	     (loop for (k . v) in src-items
-		 do (py-module-set-kv +mod+ k v))))
-	
-	 (loop for (item bind-name) in items
-	     collect `([assign-stmt] ([attributeref-expr] mod-obj ([identifier-expr] ,item))
-				     (([identifier-expr] ,(or bind-name item))))))))
+  `(let ((m (py-import '(,(car mod-name-as-list)) :within-mod +mod+)))
+     (declare (ignorable m)) ;; Ensure topleve module is imported relative to +mod+
+     (whereas ((mod-obj ,(if (= (length mod-name-as-list) 1)
+                             `m
+                           `(py-import ',mod-name-as-list))))
+       ,@(cond ((eq items '[*])
+                `((let ((src-items (py-module-get-items mod-obj :import-* t)))
+                    (loop for (k . v) in src-items
+                        do (py-module-set-kv +mod+ k v)))))
+               (t (loop for (item bind-name) in items
+                      collect `([assign-stmt] ([attributeref-expr] mod-obj ([identifier-expr] ,item))
+                                              (([identifier-expr] ,(or bind-name item))))))))))
        
 (defmacro [lambda-expr] (args expr)
   ;; XXX Treating lambda as a funcdef-stmt results in way more
@@ -1158,7 +1161,7 @@ input arguments."
   (assert (or create-mod existing-mod))
   (assert (not (and create-mod existing-mod)))
 
-  `(let* ((*habitat* (or *habitat* (make-habitat :search-paths '("."))))
+  `(let* ((clpython::*habitat* (or clpython::*habitat* (make-habitat :search-paths '("."))))
           (+mod-static-globals-names+  ,glob-names)
           (+mod-static-globals-values+ ,glob-values)
           (+mod-static-globals-builtin-values+
@@ -1178,7 +1181,8 @@ input arguments."
                          +mod-static-globals-values+
                          +mod-static-globals-builtin-values+
                          +mod-dyn-globals+
-                         +mod+))
+                         +mod+)
+              (optimize (debug 3))) ;; WB
      
      (progn ;; Initialize global value arrays
        ,@(when set-builtins
