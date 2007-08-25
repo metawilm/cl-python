@@ -404,7 +404,7 @@ Non-{string,symbol} names never have a magic ix."
 (defun dikt-count (d)
   (if (dikt-hash-table d)
       (hash-table-count (dikt-hash-table d))
-    (loop for k in (dikt-vector-key d) count k)))
+    (loop for k across (dikt-vector-key d) count k)))
 
 
 
