@@ -54,7 +54,13 @@
     ;; variables
     (test-equal '([assign-stmt] 3 (([identifier-expr] {y} ))) (ps "y = 3" nil))
     (test-equal '([assign-stmt] 3 (([identifier-expr] {len}))) (ps "len = 3" nil))
-      
+
+    ;; floating point (complex) numbers
+    (test-equal 0.5d0 (ps "0.5" nil))
+    (test-equal 0.5d0 (ps ".5" nil))
+    (test-equal #C(0.0 0.5d0) (ps "0.5j" nil))
+    (test-equal #C(0.0 0.5d0) (ps ".5j" nil))
+    
     ;; suffix operations
     (test-equal '([attributeref-expr]
 		  ([call-expr]
