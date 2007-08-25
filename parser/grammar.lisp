@@ -365,6 +365,16 @@
        (( [`] testlist1     [`]  ) . ( `([backticks-expr] ,$2)  ))
        (( [identifier]           ) . ( `([identifier-expr] ,$1) ))
        (( [number]               ) . ( $1                       ))
+       (( [.] [number]           ) . ((cond ;; little hack for floats starting with dot, like ".5"
+                                       ((integerp $2)
+                                        (let ((str (format nil "0.~Ad0" $2)))
+                                          (with-standard-io-syntax (read-from-string str))))
+                                       ((and (complexp $2)
+                                             (zerop (realpart $2))
+                                             (integerp (imagpart $2)))
+                                        (let ((str (format nil "0.~Ad0" (imagpart $2))))
+                                          (complex 0 (with-standard-io-syntax (read-from-string str)))))
+                                       (t (raise-syntax-error "Invalid format for number starting with dot: .~G" $2)))))
        (( string+                ) . ( $1                       )))
 
  ;; consecutive string literals are joined: "s" "b" => "sb"
