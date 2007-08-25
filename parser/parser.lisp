@@ -36,6 +36,7 @@
 			() "CLPython: Strange: Parser raises EXCL.YACC:GRAMMAR-PARSE-ERROR ~
                               with a SyntaxError enclosed, without first signalling that ~
                               SyntaxError (~A)." c))
+
 		  (raise-syntax-error
 		   (format nil "Parse error at line ~A~@[, at token `~S'~].~%[inner error: ~A]"
 			   line token encl-error)))
@@ -50,12 +51,18 @@
 			     line token))
 		    (assert nil () "unreachable")))))))
 
+(defparameter *catch-yacc-conditions* t
+  "Whether to catch YACC conditions, and translate them into Python exceptions.
+Disable to debug the grammar rules.")
+    
 (defun parse-python-with-lexer (&rest lex-options)
   (let* ((lexer (apply #'make-py-lexer lex-options))
 	 (grammar (make-instance 'python-grammar :lexer lexer)))
     
-    (handler-bind 
-	((condition #'handle-parser-condition))
+    (if *catch-yacc-conditions*
+        (handler-bind 
+            ((condition #'handle-parser-condition))
+          (excl.yacc:parse grammar))
       (excl.yacc:parse grammar))))
 
 (defun parse-python-file (file &rest options)
