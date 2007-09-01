@@ -90,7 +90,6 @@
 	   "make-subscription-expr" "make-tuple-expr" "make-unary-expr"
            
            "make-identifier-expr*" "make-suite-stmt*" "make-assign-stmt*" ;; shortcuts
-           
            ))
 
 (defpackage :clpython.ast
