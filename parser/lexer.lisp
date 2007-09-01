@@ -43,203 +43,204 @@ READ-CHR."
 	(curr-src-line 1)
 	(curr-char 0)) 
 
-    (lambda (grammar &optional op)
-      (declare (ignore grammar))
-      (block lexer
+    (excl:named-function (make-py-lexer closure)
+      (lambda (grammar &optional op)
+        (declare (ignore grammar))
+        (block lexer
 	
-	(when (eq op :report-location)  ;; used when GRAMMAR-PARSE-ERROR occurs
-	  (return-from lexer `((:line-no ,curr-src-line)
-                               (:eof-seen ,(member 'excl.yacc:eof tokens-todo :key #'second)))))
+          (when (eq op :report-location)  ;; used when GRAMMAR-PARSE-ERROR occurs
+            (return-from lexer `((:line-no ,curr-src-line)
+                                 (:eof-seen ,(member 'excl.yacc:eof tokens-todo :key #'second)))))
 
-	;; The lexer does not currently detect leading whitespace on the first line (with
-	;; some non-whitespace after it), which can hide syntax errors. As hack, we act as
-	;; if the first character is a #\Newline. That explains *lex-[un]read-char*.
+          ;; The lexer does not currently detect leading whitespace on the first line (with
+          ;; some non-whitespace after it), which can hide syntax errors. As hack, we act as
+          ;; if the first character is a #\Newline. That explains *lex-[un]read-char*.
 	
-	(let ((*lex-read-char* (lambda () (let ((ch (funcall read-chr)))
-                                            (incf curr-char)
-                                            (when (and ch (char= ch #\Newline))
-                                              (incf curr-src-line))
-                                            ch)))
+          (let ((*lex-read-char* (lambda () (let ((ch (funcall read-chr)))
+                                              (incf curr-char)
+                                              (when (and ch (char= ch #\Newline))
+                                                (incf curr-src-line))
+                                              ch)))
 	      
-              (*lex-unread-char* (lambda (ch) (progn (assert ch)
-                                                     (funcall unread-chr ch)
-                                                     (decf curr-char)
-                                                     (when (char= ch #\Newline)
-                                                       (decf curr-src-line)))))
+                (*lex-unread-char* (lambda (ch) (progn (assert ch)
+                                                       (funcall unread-chr ch)
+                                                       (decf curr-char)
+                                                       (when (char= ch #\Newline)
+                                                         (decf curr-src-line)))))
 	      
-	      (*curr-src-line*    curr-src-line)
-	      (*tab-width-spaces* tab-width-spaces)
-	      (*lex-debug*        debug)
-	      (*include-line-numbers* include-line-numbers))
+                (*curr-src-line*    curr-src-line)
+                (*tab-width-spaces* tab-width-spaces)
+                (*lex-debug*        debug)
+                (*include-line-numbers* include-line-numbers))
 	  
-          (when (= curr-char 0)
-            ;; Detect leading whitespace. This will go unnoticed by the lexer otherwise.
-            (let ((ch (read-chr-nil)))
-              (if (char-member ch +whitespace+)
-                  (progn (unread-chr ch)
-                         (multiple-value-bind (newline new-indent eof-p)
-                             (read-whitespace)
-                           (declare (ignore newline))
-                           (unless eof-p
-                             (when (> new-indent 0)
-                               (restart-case
-                                   (raise-syntax-error
-                                    "Leading whitespace on first non-blank line.")
-                                 (cl-user::continue ()
-                                     :report "Continue parsing, ignoring ~@
+            (when (= curr-char 0)
+              ;; Detect leading whitespace. This will go unnoticed by the lexer otherwise.
+              (let ((ch (read-chr-nil)))
+                (if (char-member ch +whitespace+)
+                    (progn (unread-chr ch)
+                           (multiple-value-bind (newline new-indent eof-p)
+                               (read-whitespace)
+                             (declare (ignore newline))
+                             (unless eof-p
+                               (when (> new-indent 0)
+                                 (restart-case
+                                     (raise-syntax-error
+                                      "Leading whitespace on first non-blank line.")
+                                   (cl-user::continue ()
+                                       :report "Continue parsing, ignoring ~@
                                               the leading whitespace."))))))
-                (when ch (unread-chr ch)))))
+                  (when ch (unread-chr ch)))))
           
-	  (when tokens-todo
-	    (let ((item (pop tokens-todo)))
-	      (when *lex-debug*
-		(format t "lexer returns: ~s  (from todo)~%" (second item)))
-	      (return-from lexer (apply #'values item))))
+            (when tokens-todo
+              (let ((item (pop tokens-todo)))
+                (when *lex-debug*
+                  (format t "lexer returns: ~s  (from todo)~%" (second item)))
+                (return-from lexer (apply #'values item))))
 
-	  (excl.yacc:with-terminal-codes (python-grammar)
+            (excl.yacc:with-terminal-codes (python-grammar)
 	    
-	    (macrolet ((lex-todo (token-name value)
-			 `(let ((val ,value))
-			    (when *lex-debug*
-			      (format t "lexer todo: ~s~%" val))
-			    (push (list (excl.yacc:tcode ,token-name) val) tokens-todo)))
+              (macrolet ((lex-todo (token-name value)
+                           `(let ((val ,value))
+                              (when *lex-debug*
+                                (format t "lexer todo: ~s~%" val))
+                              (push (list (excl.yacc:tcode ,token-name) val) tokens-todo)))
 		       
-		       (lex-return (token-name value) ;; (lex-return name <value>)
-			 `(let ((val ,value))
-			    (when *lex-debug*
-			      (format t "lexer returns: ~s ~s~%" ',token-name val))
-			    (return-from lexer (values (excl.yacc:tcode ,token-name) val))))
+                         (lex-return (token-name value) ;; (lex-return name <value>)
+                           `(let ((val ,value))
+                              (when *lex-debug*
+                                (format t "lexer returns: ~s ~s~%" ',token-name val))
+                              (return-from lexer (values (excl.yacc:tcode ,token-name) val))))
 		       
-		       (find-token-code (token-name)
-			 `(excl.yacc:tcode-1 (load-time-value (find-class 'python-grammar))
-				   ,token-name)))
+                         (find-token-code (token-name)
+                           `(excl.yacc:tcode-1 (load-time-value (find-class 'python-grammar))
+                                               ,token-name)))
 
-	      (tagbody next-char
-		(let ((c (read-chr-nil)))
-		  (cond
+                (tagbody next-char
+                  (let ((c (read-chr-nil)))
+                    (cond
 
-		   ((not c)
-		    ;; Before returning EOF, return DEDENT for every open INDENT.
-		    (lex-todo excl.yacc:eof 'excl.yacc:eof)
-		    (loop while (> (pop indentation-stack) 0)
-			do (lex-todo [dedent] '[dedent]))
-		    (lex-return [newline] 
-				(if *include-line-numbers* *curr-src-line* '[newline])))
+                     ((not c)
+                      ;; Before returning EOF, return DEDENT for every open INDENT.
+                      (lex-todo excl.yacc:eof 'excl.yacc:eof)
+                      (loop while (> (pop indentation-stack) 0)
+                          do (lex-todo [dedent] '[dedent]))
+                      (lex-return [newline] 
+                                  (if *include-line-numbers* *curr-src-line* '[newline])))
 		   		   
-		   ((digit-char-p c 10)
-		    (lex-return [number] (read-number c)))
+                     ((digit-char-p c 10)
+                      (lex-return [number] (read-number c)))
 
-		   ((identifier-char1-p c)
-		    (let ((token (read-identifier c)))
-		      (assert (symbolp token))
+                     ((identifier-char1-p c)
+                      (let ((token (read-identifier c)))
+                        (assert (symbolp token))
 		      
-		      ;; u"abc"    : `u' stands for `Unicode string'
-		      ;; u + b     : `u' is an identifier
-		      ;; r"s/f\af" : `r' stands for `raw string'
-		      ;; r + b     : `r' is an identifier
-		      ;; ur"asdf"  : `ur' stands for `raw unicode string'
-		      ;; ur + a    : `ur' is identifier
-		      ;; `u' must appear before `r' if both are string prefix
-		      (when (and (<= (length (symbol-name token)) 2)
-				 (member (symbol-name token) '("u" "r" "ur")
-					 :test 'string-equal))
-			(let ((ch (read-chr-nil)))
-			  (if (and ch (char-member ch '(#\' #\")))
-			      (let* ((sn      (symbol-name token))
-				     (unicode (position #\u sn :test 'char-equal))
-				     (raw     (position #\r sn :test 'char-equal)))
-				(lex-return [string]
-					    (read-string ch :unicode unicode :raw raw)))
-			    (when ch (unread-chr ch)))))
+                        ;; u"abc"    : `u' stands for `Unicode string'
+                        ;; u + b     : `u' is an identifier
+                        ;; r"s/f\af" : `r' stands for `raw string'
+                        ;; r + b     : `r' is an identifier
+                        ;; ur"asdf"  : `ur' stands for `raw unicode string'
+                        ;; ur + a    : `ur' is identifier
+                        ;; `u' must appear before `r' if both are string prefix
+                        (when (and (<= (length (symbol-name token)) 2)
+                                   (member (symbol-name token) '("u" "r" "ur")
+                                           :test 'string-equal))
+                          (let ((ch (read-chr-nil)))
+                            (if (and ch (char-member ch '(#\' #\")))
+                                (let* ((sn      (symbol-name token))
+                                       (unicode (position #\u sn :test 'char-equal))
+                                       (raw     (position #\r sn :test 'char-equal)))
+                                  (lex-return [string]
+                                              (read-string ch :unicode unicode :raw raw)))
+                              (when ch (unread-chr ch)))))
 		      
-		      (when (reserved-word-p token)
-			(when *lex-debug*
-			  (format t "lexer returns: reserved word ~s~%" token))
-			(return-from lexer
-			  (values (find-token-code token) token)))
+                        (when (reserved-word-p token)
+                          (when *lex-debug*
+                            (format t "lexer returns: reserved word ~s~%" token))
+                          (return-from lexer
+                            (values (find-token-code token) token)))
 		      
-		      (lex-return [identifier] token)))
+                        (lex-return [identifier] token)))
 
-		   ((char-member c '(#\' #\"))
-		    (lex-return [string] (read-string c)))
+                     ((char-member c '(#\' #\"))
+                      (lex-return [string] (read-string c)))
 
-		   ((or (punct-char1-p c)
-			(punct-char-not-punct-char1-p c))
-		    (let ((token (read-punctuation c)))
+                     ((or (punct-char1-p c)
+                          (punct-char-not-punct-char1-p c))
+                      (let ((token (read-punctuation c)))
 		      
-		      ;; Keep track of whether we are in a bracketed
-		      ;; expression (list, tuple or dict), because in
-		      ;; that case newlines are ignored. (Note that
-		      ;; READ-STRING handles multi-line strings itself.)
-		      ;; 
-		      ;; There is no check for matching brackets here:
-		      ;; left to the grammar.
+                        ;; Keep track of whether we are in a bracketed
+                        ;; expression (list, tuple or dict), because in
+                        ;; that case newlines are ignored. (Note that
+                        ;; READ-STRING handles multi-line strings itself.)
+                        ;; 
+                        ;; There is no check for matching brackets here:
+                        ;; left to the grammar.
 		      
-		      (case token
-			(( [[]  [{] [(] ) (push token open-brackets))
-			(( [\]] [}] [)] ) (pop open-brackets)))
+                        (case token
+                          (( [[]  [{] [(] ) (push token open-brackets))
+                           (( [\]] [}] [)] ) (pop open-brackets)))
 		      
-		      (when *lex-debug*
-			(format t "lexer returns: punctuation-token ~s~%" token))
-		      (return-from lexer 
-			(values (find-token-code token) token))))
+                        (when *lex-debug*
+                          (format t "lexer returns: punctuation-token ~s~%" token))
+                        (return-from lexer 
+                          (values (find-token-code token) token))))
 
-		   ((char-member c +whitespace+)
-		    (unread-chr c)
-		    (multiple-value-bind (newline new-indent eof-p)
-			(read-whitespace)
-		      (declare (ignore eof-p))
-		      (when (or (not newline) open-brackets)
-			(go next-char))
+                     ((char-member c +whitespace+)
+                      (unread-chr c)
+                      (multiple-value-bind (newline new-indent eof-p)
+                          (read-whitespace)
+                        (declare (ignore eof-p))
+                        (when (or (not newline) open-brackets)
+                          (go next-char))
 
-		      ;; Return Newline now, but also determine if
-		      ;; there are any indents or dedents to be
-		      ;; returned in next calls.
+                        ;; Return Newline now, but also determine if
+                        ;; there are any indents or dedents to be
+                        ;; returned in next calls.
 
-		      (cond
-		       ((= (car indentation-stack) new-indent)) ; same level
+                        (cond
+                         ((= (car indentation-stack) new-indent)) ; same level
 
-		       ((< (car indentation-stack) new-indent) ; one indent
-			(push new-indent indentation-stack)
-			(lex-todo [indent] '[indent]))
+                         ((< (car indentation-stack) new-indent) ; one indent
+                          (push new-indent indentation-stack)
+                          (lex-todo [indent] '[indent]))
 
-		       ((> (car indentation-stack) new-indent) ; dedent(s)
-			(loop while (> (car indentation-stack) new-indent)
-			    do (pop indentation-stack)
-			       (lex-todo [dedent] '[dedent]))
+                         ((> (car indentation-stack) new-indent) ; dedent(s)
+                          (loop while (> (car indentation-stack) new-indent)
+                              do (pop indentation-stack)
+                                 (lex-todo [dedent] '[dedent]))
 			
-			(unless (= (car indentation-stack) new-indent)
-			  (raise-syntax-error 
-			   "Dedent did not arrive at a previous indentation level (line ~A)."
-			   *curr-src-line*))))
+                          (unless (= (car indentation-stack) new-indent)
+                            (raise-syntax-error 
+                             "Dedent did not arrive at a previous indentation level (line ~A)."
+                             *curr-src-line*))))
 		      
-		      (lex-return [newline] 
-				  (if *include-line-numbers* *curr-src-line* '[newline]))))
+                        (lex-return [newline] 
+                                    (if *include-line-numbers* *curr-src-line* '[newline]))))
 		   
-		   ((char= c #\#)
-		    (read-comment-line c)
-		    (go next-char))
+                     ((char= c #\#)
+                      (read-comment-line c)
+                      (go next-char))
 
-		   ((char= c #\\) ;; next line is continuation of this one
-		    (let ((c2 (read-chr-error)))
-		      (cond ((char= c2 #\Newline))
-			    ((char= c2 #\Return)
-			     (let ((c3 (read-chr-nil)))
-			       (unless (char= c3 #\Newline) ;; \r\n
-				 (unread-char c3))))
-			    (t 
-			     (raise-syntax-error
-			      "Continuation character '\\' must be followed by Newline, ~
+                     ((char= c #\\) ;; next line is continuation of this one
+                      (let ((c2 (read-chr-error)))
+                        (cond ((char= c2 #\Newline))
+                              ((char= c2 #\Return)
+                               (let ((c3 (read-chr-nil)))
+                                 (unless (char= c3 #\Newline) ;; \r\n
+                                   (unread-char c3))))
+                              (t 
+                               (raise-syntax-error
+                                "Continuation character '\\' must be followed by Newline, ~
                                but got: '~A' (~S) (line ~A)." c2 c2 *curr-src-line*))))
-		    (incf *curr-src-line*)
-		    (go next-char))
+                      (incf *curr-src-line*)
+                      (go next-char))
 		   
-		   (t (with-simple-restart 
-			  (:continue "Discard the character and continue parsing.")
-			(raise-syntax-error
-			 "Nobody expected this character: '~A' (~S) (line ~A)."
-			 c c *curr-src-line*))
-		      (go next-char))))))))))))
+                     (t (with-simple-restart 
+                            (:continue "Discard the character `~A' and continue parsing." c)
+                          (raise-syntax-error
+                           "Nobody expected this character: `~A' (line ~A)."
+                           c *curr-src-line*))
+                        (go next-char)))))))))))))
 
 
 (defun read-chr-nil ()
