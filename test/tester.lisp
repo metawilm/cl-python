@@ -28,7 +28,7 @@
 ;;;; from the original ACL 6.1 sources:
 ;; Id: tester.cl,v 2.2.12.1 2001/06/05 18:45:10 layer Exp
 
-;; $Id: tester.lisp,v 1.2 2007/04/12 06:02:32 willem Exp $
+;; $Id: tester.lisp,v 1.3 2007/09/01 11:52:02 willem Exp $
 
 (defpackage :util.test
   (:use :common-lisp :excl)
@@ -483,13 +483,14 @@ Reason: the format-arguments were incorrect.~%")
 	 (format *error-output* "Begin ~a test~%" ,g-name)
 	 (if* *break-on-test-failures*
 	    then (doit)
-	    else (handler-case (doit)
-		   (error (c)
-		     (format
-		      *error-output*
-		      "~
+	    else (handler-bind 
+		   ((error (lambda (c)
+                             (format
+                              *error-output*
+                              "~
 ~&Test ~a aborted by signalling an uncaught error:~%~a~%"
-		      ,g-name c))))
+                              ,g-name c))))
+                   (doit)))
 	 (let ((state (sys:gsgc-switch :print)))
 	   (setf (sys:gsgc-switch :print) nil)
 	   (format t "~&**********************************~%" ,g-name)
