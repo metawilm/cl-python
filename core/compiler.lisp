@@ -605,7 +605,6 @@ differs in structure from the template for ~A ast nodes, which is: ~A"
 (defmacro [dict-expr] (alist)
   `(make-dict-unevaled-list ,alist))
 
-
 (defmacro [exec-stmt] (code-string globals locals &key (allowed-stmts t) &environment e)
   ;; TODO:
   ;;   - allow code object etc as CODE
@@ -618,46 +617,71 @@ differs in structure from the template for ~A ast nodes, which is: ~A"
   ;;                   NIL:    allow no statements
   ;;  (not evaluated)
 
-  (let ((locals-ht  `(convert-to-namespace-ht 
-                      ,(or locals
-                           (if (eq (get-pydecl :context e) :module)
-                               `(create-module-globals-dict)
-                             `(.locals.)))))
-        (globals-ht `(convert-to-namespace-ht
-                      ,(or globals
-                           `(create-module-globals-dict)))))
-    
-    `(exec-stmt-string ,code-string ,globals-ht ,locals-ht ,allowed-stmts)))
+  `(multiple-value-bind (glo loc)
+       ,(cond ((and globals locals) `(values ,globals ,locals))
+              (globals              `(let ((.x ,globals))
+                                       (values .x .x))) ;; globals also used for locals
+              (t                    `(let ((.g (create-module-globals-dict)))
+                                       (values .g
+                                               ,(if (eq (get-pydecl :context e) :module)
+                                                    `.g
+                                                  `(.locals.))))))
+     (exec-stmt-check-namespaces glo loc)
+     (exec-stmt-string ,code-string glo loc ',allowed-stmts)))
+
+(defun exec-stmt-check-namespaces (globals locals)
+  (check-type globals py-dict) ;; todo: support any mapping for globals, locals
+  (check-type locals py-dict)
+  (flet ((check-is-namespace-dict (d)
+           ;; Ensure dict has only string keys.
+           (check-type d py-dict)
+           (dikt-map (py-dict-dikt d)
+                     (lambda (k v)
+                       (declare (ignore v))
+                       (unless (typep k '(or string symbol))
+                         (py-raise
+                          '{TypeError}
+                          "Cannot use ~A as namespace dict for `exec', due to non-string key: ~A."
+                          d k))))))
+    (check-is-namespace-dict globals)
+    (unless (eq globals locals)
+      (check-is-namespace-dict locals))))
 
 (defun exec-stmt-string (code-string globals locals allowed-stmts)
+  (check-type code-string string)
   (let ((ast (parse-python-string code-string)))
-    (exec-stmt-check-ast ast allowed-stmts)
+    (exec-stmt-check-ast code-string ast allowed-stmts)
     (exec-stmt-ast ast globals locals)))
 
 (define-compiler-macro exec-stmt-string (&whole whole code-string globals locals allowed-stmts)
+  (assert (and (listp allowed-stmts)
+               (eq (car allowed-stmts) 'quote)))
   ;; Move compilation of string to compile-time. Warn if string contains errors.
-  (when (and *exec-early-parse-constant-string*
-             (stringp code-string))
-    (multiple-value-bind (ast error)
-        (ignore-errors (parse-python-string code-string))
-      (if error
-          (warn "Constant string for `exec' contains syntax errors: ~A~_(String: ~S)"
-                error (if (> (length code-string) 40)
-                          (concatenate 'string (subseq code-string 0 40) "...")
-                        code-string))
-        (multiple-value-bind (ok error)
-            (ignore-errors (exec-stmt-check-ast ast allowed-stmts))
-          (declare (ignore ok))
-          (if error
-              (warn "Constant string for `exec' contains errors: ~A" error)
-            (return-from exec-stmt-string
-              `(exec-stmt-ast ',ast ,globals ,locals)))))))
-  whole)
+  (labels ((warn-static-error (error)
+             (let ((nice-code (if (> (length code-string) 40)
+                                  (concatenate 'string (subseq code-string 0 40) "...")
+                                code-string)))
+               (warn "Invalid argument for `exec': parsing ~S will raise [~A]."
+                     nice-code error))))
+    (when (and *exec-early-parse-constant-string*
+               (stringp code-string))
+      (multiple-value-bind (ast error)
+          (ignore-errors (parse-python-string code-string))
+        (if error
+            (warn-static-error error)
+          (multiple-value-bind (ok error)
+              (ignore-errors (exec-stmt-check-ast code-string ast (second allowed-stmts)))
+            (declare (ignore ok))
+            (if error
+                (warn-static-error error)
+              (return-from exec-stmt-string
+                `(exec-stmt-ast ',ast ,globals ,locals)))))))
+    whole))
 
-(defun exec-stmt-check-ast (ast allowed-stmts)
-  (when (ast-contains-stmt-p ast :allowed-stmts allowed-stmts)
+(defun exec-stmt-check-ast (string ast allowed-stmts)
+  (whereas ((s (ast-contains-stmt-p ast :allowed-stmts allowed-stmts)))
     (py-raise '{TypeError}
-              "Statements are not allowed in Python code string"))
+              "Statements are not allowed in this Python code string (string `~A' contains a `~A')." string s))
   
   (with-py-ast (form ast :into-nested-namespaces nil)
     (case (car form)
@@ -721,8 +745,18 @@ differs in structure from the template for ~A ast nodes, which is: ~A"
     (when *exec-stmt-compile-before-run*
       (setf f (compile nil f)))
     
-    (funcall f)))
-
+    (handler-bind ((error (lambda (c)
+                            ;; Only print header line if condition not handled in outer scope.
+                            (format t "WB condition: ~A" c) 
+                            (signal c)
+                            (format t "[Error occured inside an `exec' statement:]"))))
+      (block run-exec-body
+        (restart-case
+            (funcall f)
+          (return-from-exec ()
+              :report "Abort evaluation of the `exec' statement, but continue execution."
+            (warn "Evaluation of `exec' body was aborted.")
+            (return-from run-exec-body)))))))
 
 ;;; `Call' expression
 
@@ -741,7 +775,7 @@ differs in structure from the template for ~A ast nodes, which is: ~A"
     (let* ((res nil)
 	   (*exec-stmt-result-handler* (lambda (val) (setf res val))))
       (declare (special *exec-stmt-result-handler*))
-      ([exec-stmt] string glob-d loc-d :allowed-stmts '([module-stmt] [suite-stmt]))
+      ([exec-stmt] string glob-d loc-d :allowed-stmts ([module-stmt] [suite-stmt]))
       res)))
 
 (defmacro [for-in-stmt] (target source suite else-suite)
@@ -1212,8 +1246,8 @@ input arguments."
           (:mod-futures        :todo-parse-module-ast-future-imports))
        
        
-       (with-py-errors
-           ,@body))))
+       (with-py-errors (:name (python-module ,(or module-name '__main__)))
+         ,@body))))
 
 (defmacro create-module-globals-dict ()
   ;; Updating this dict really modifies the globals.
@@ -1404,7 +1438,8 @@ inside an `except' clause.")
 		      `(t (progn ,handler-suite
 				 (return-from try-except-stmt nil))))
 		   
-		     ((eq (car exc) '[tuple-expr])
+		     ((and (listp exc)
+                           (eq (car exc) '[tuple-expr]))
                       ;; Because the names in EXC may be any variable that is bound to an exception
                       ;; class, not possible to use `(typep ,the-exc (or ,@names))
 		      `((or ,@(loop for cls in (second exc)
@@ -1414,9 +1449,7 @@ inside an `except' clause.")
 			       (return-from try-except-stmt nil))))
 				
 		     (t
-		      `((progn (assert (typep ,exc 'class) ()
-				 "try/except: except clause should select a class (got: ~A)"
-				 ,exc)
+		      `((progn (try-except-ensure-valid-exception-class ,exc)
 			       (typep ,the-exc ,exc))
 			(progn ,@(when var `(([assign-stmt] ,the-exc (,var))))
 			       ,handler-suite
@@ -1430,12 +1463,16 @@ inside an `except' clause.")
 	   (tagbody
 	     (handler-bind (({Exception} ,handler-form))
 	       
-	       (progn (with-py-errors ,suite)
+	       (progn (with-py-errors (:name try-except-function) ,suite)
 		      ,@(when else-suite `((go :else)))))
 	     
 	     ,@(when else-suite
 		 `(:else ,else-suite))))))))
 
+(defun try-except-ensure-valid-exception-class (exc)
+  (unless (and (typep exc 'class)
+               (subtypep exc '{Exception}))
+    (py-raise '{TypeError} "The `except' argument must be a subclass of `Exception' (got: ~A)." exc)))
 
 (defmacro [try-finally-stmt] (try-suite finally-suite)
   `(unwind-protect
@@ -1505,20 +1542,20 @@ inside an `except' clause.")
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defun ast-contains-stmt-p (ast &key allowed-stmts)
+  "Returns the forbidden statement, or NIL"
   (when (eq allowed-stmts t)
     (return-from ast-contains-stmt-p nil))
   (labels ((is-stmt-sym (s)
 	     (let ((s.name (symbol-name s)))
 	       (cond ((<= (length s.name) 5) nil)
-		     ((string-equal (subseq s.name (- (length s.name) 5)) "-stmt") t)
+		     ((string-equal (subseq s.name (- (length s.name) 5)) "-stmt") s)
 		     (t nil))))
-	   
-	   (test (ast)
+           (test (ast)
 	     (typecase ast
-	       (list (loop for x in ast when (test x) return t finally (return nil)))
+	       (list (loop for x in ast when (test x) return it finally (return nil)))
 	       (symbol (unless (member ast allowed-stmts :test #'eq)
-			 (when (is-stmt-sym ast)
-			   (return-from test t))))
+			 (whereas ((s (is-stmt-sym ast)))
+			   (return-from test s))))
 	       (t    nil))))
     (test ast)))
 
@@ -1618,21 +1655,6 @@ inside an `except' clause.")
 		       collect (cons k v))))))
     (change-class d 'py-dict-moduledictproxy :module mod)
     d))
-
-(defgeneric convert-to-namespace-ht (x)
-  ;; Convert a Python dict to a namespace, by replacing all string
-  ;; keys by corresponding symbols.
-  (:method ((x py-dict))
-	   (let ((new (make-dict))) ;; WB was: class-dict
-             (dikt-map (py-dict-dikt x)
-                       (lambda (k v)
-                         (unless (typep k '(or string symbol))
-                           (py-raise
-                            '{TypeError}
-                            "Cannot use ~A as namespace dict, because non-string key: ~A"
-                            x k))
-                         (sub/dict-set new k v)))
-             new)))
 
 (defun py-**-mapping->lisp-arg-list (**-arg)
   ;; Return list: ( :|key1| <val1> :|key2| <val2> ... )
@@ -2041,8 +2063,9 @@ Non-negative integer denoting the number of args otherwise."
    (when (> (the fixnum *with-py-error-level*) (the fixnum *max-py-error-level*))
      (py-raise '{RuntimeError} "Stack overflow (~A)" *max-py-error-level*))))
 
-(defmacro with-py-errors (&body body)
-  `(let ((f (lambda () ,@body)))
+(defmacro with-py-errors ((&key (name 'with-py-errors-funcx)) &body body)
+  `(let ((f (excl:named-function ,name
+              (lambda () ,@body))))
      (declare (dynamic-extent f))
      (call-with-py-errors f)))
 

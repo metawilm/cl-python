@@ -2451,25 +2451,8 @@ But if RELATIVE-TO package name is given, result may contains dots."
   ((module :initarg :module :accessor mdp-module))
   (:metaclass py-core-type))
 
-(defvar *module-dict-ht* (make-hash-table :test #'eq :weak-keys t)
-  "Mapping from dict to list of py-dict-moduledictproxy instances")
-			  
-#+(or)
-(defmethod initialize-instance :after ((x py-dict-moduledictproxy) &key module &allow-other-keys)
-  (assert module)
-  (push x (gethash module *module-dict-ht*)))
-
-#+(or)
-(defmethod py-dict-setitem :after ((x py-dict-moduledictproxy) key val)
-  (mapc (lambda (mdp)
-	  (py-module-set-kv mdp (py-string->symbol key) val))
-	(gethash (mdp-module x) *module-dict-ht*)))
-
-#+(or)
-(defmethod py-dict-delitem :after ((x py-dict-moduledictproxy) key)
-  (mapc (lambda (mdp)
-	  (py-module-set-kv mdp (py-string->symbol key) nil))
-	(gethash (mdp-module x) *module-dict-ht*)))
+(defmethod (setf py-subs) :after (val (x py-dict-moduledictproxy) key)
+  (py-module-set-kv (mdp-module x) (py-string->symbol key) val))
 
 ;; List (Lisp object: adjustable array)
 
