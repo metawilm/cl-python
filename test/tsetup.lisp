@@ -81,4 +81,5 @@
     (run-compiler-test)
     (run-code-walker-test)
     (run-pretty-printer-test)
-    (run-lang-test)))
+    (run-lang-test)
+    (run-builtin-test)))

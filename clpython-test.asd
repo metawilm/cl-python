@@ -16,9 +16,10 @@
     :description "CLPython tests"
     :depends-on (:clpython)
     :components ((:module "test"
-			  :serial t
-			  :components ((:file "tester")
-				       (:file "tsetup")
-				       (:file "parser-test")
-				       (:file "compiler-test")
-				       (:file "lang-test")))))
+                          :serial t
+                          :components ((:file "tester")
+                                       (:file "tsetup")
+                                       (:file "parser-test")
+                                       (:file "compiler-test")
+                                       (:file "lang-test")
+                                       (:file "mod-builtins-test")))))

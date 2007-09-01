@@ -51,7 +51,7 @@
 (defgeneric test-lang (kind))
 
 (defmethod test-lang :around (kind)
-  (with-subtest (:name (format nil "CLPython-Lang-~S" kind))
+  (with-subtest (:name (format nil "CLPython-Lang-~A" kind))
     (let ((*warn-unused-function-vars* nil))
       (call-next-method))))
 
@@ -265,6 +265,35 @@ assert d['b'] == 42"))
 def f():
   x = (1,2)
   exec 'print x'" :fail-info "Make sure tuple `(1 2) is quoted in code generated for `exec'")
+  (run-no-error "exec 'assert x == 3' in {'x': 3}")
+  (run-no-error "
+glo = {'x': 3}
+loc = {'x': 4}
+exec 'assert x == 4' in glo, loc" :fail-info "Locals higher priority than globals.")
+  (run-no-error "
+exec \"
+try:
+  1/0
+  assert 0
+except ZeroDivisionError:
+  'ok'\"")
+  (run-no-error "
+x = 3
+exec 'assert x == 3'")
+  (run-no-error "
+x = 3
+def f():
+  x = 4
+  exec 'assert x == 4'
+f()")
+  (run-no-error "
+x = 3
+def f():
+  x = 4
+  def g():
+    exec 'assert x == 3'
+  g()
+f()")
   )
 
 (defmethod test-lang ((kind (eql :for-in-stmt)))
