@@ -691,6 +691,8 @@ differs in structure from the template for ~A ast nodes, which is: ~A"
   
   t)
 
+(defconstant exec-stmt-helper-func-name 'exec-stmt-helper-func)
+
 (defun exec-stmt-ast (ast globals locals)
   (let ((f `(with-module-context (#() #() (let ((ht (make-py-hash-table)))
                                             (dict-map ,globals (lambda (k v) (setf (gethash k ht) v)))
@@ -700,7 +702,7 @@ differs in structure from the template for ~A ast nodes, which is: ~A"
 
                 ;; Define helper function
                 ([make-funcdef-stmt]
-                 :fname ([make-identifier-expr*] 'exec-stmt-helper-func)
+                 :fname ([make-identifier-expr*] exec-stmt-helper-func-name)
                  :args '(() () nil nil)
                  :suite
                  ([make-suite-stmt*]
@@ -731,7 +733,12 @@ differs in structure from the template for ~A ast nodes, which is: ~A"
                 
                 ;; Call helper function
                 ([make-call-expr] :primary ([make-identifier-expr*] 'exec-stmt-helper-func)
-                                  :all-args '(() () nil nil))))))
+                                  :all-args '(() () nil nil)))
+
+              ;; Update `globals'
+              (loop for (k . v) in (py-module-get-items +mod+)
+                  unless (eq k exec-stmt-helper-func-name)
+                  do (setf (py-subs ,globals k) v)))))
     
     #+(or)(warn "EXEC-STMT: lambda-body: ~A" f)
     
@@ -747,7 +754,6 @@ differs in structure from the template for ~A ast nodes, which is: ~A"
     
     (handler-bind ((error (lambda (c)
                             ;; Only print header line if condition not handled in outer scope.
-                            (format t "WB condition: ~A" c) 
                             (signal c)
                             (format t "[Error occured inside an `exec' statement:]"))))
       (block run-exec-body
@@ -966,7 +972,8 @@ input arguments."
 					   (make-locals-dict 
 					    ',all-nontuple-func-locals
 					    (list ,@all-nontuple-func-locals))))))
-			
+			,@(when (funcdef-should-save-locals-p suite e)
+                            `((declare (ignorable #'.locals.))))
 			(with-pydecl ,body-decls
 			  ,tuples-destruct-form
 			  ,(if (generator-ast-p suite)
@@ -1195,7 +1202,8 @@ input arguments."
   (assert (or create-mod existing-mod))
   (assert (not (and create-mod existing-mod)))
 
-  `(let* ((clpython::*habitat* (or clpython::*habitat* (make-habitat :search-paths '("."))))
+  `(let* ((clpython::*habitat* (or clpython::*habitat*
+                                   (make-habitat :search-paths '("."))))
           (+mod-static-globals-names+  ,glob-names)
           (+mod-static-globals-values+ ,glob-values)
           (+mod-static-globals-builtin-values+
@@ -1210,7 +1218,7 @@ input arguments."
                                     :name ,module-name
                                     :path ,module-path)
                     existing-mod)))
-
+     (declare (special clpython::*habitat*))
      (declare (ignorable +mod-static-globals-names+
                          +mod-static-globals-values+
                          +mod-static-globals-builtin-values+
@@ -1310,6 +1318,7 @@ input arguments."
 			   :call-hook t
 			   :module-name *current-module-name* ;; load time
 			   :module-path ,*current-module-path*) ;; compile time
+       (declare (optimize (debug 3)))
        ,suite)))
 
 (defmacro [pass-stmt] ()
