@@ -1385,10 +1385,9 @@ but the latter two classes are not in CPython.")
       full-list))))
 
 (defun py-module-set-kv (x k v)
+  ;; V may be null, to remove item
   (check-type x py-module)
   (check-type k symbol)
-  (assert v)
-  
   (with-slots (globals-names globals-values dyn-globals) x
     (loop for kn across globals-names and i from 0
 	when (eq k kn) 
@@ -2445,14 +2444,60 @@ But if RELATIVE-TO package name is given, result may contains dots."
                               for val = (funcall f)
                               while val collect val)))
 
+(defun clear-dict (x)
+  (check-type x py-dict)
+  (dict-map x (lambda (k v)
+                (declare (ignore v))
+                (sub/dict-del x k)))
+  x)
+
 ;; Dictionaries that act as proxy for module can be accessed using
 ;; "globals()"; apply changes to module too.
 (defclass py-dict-moduledictproxy (py-dict)
-  ((module :initarg :module :accessor mdp-module))
+  ((module :initarg :module :accessor mdp-module)
+   (updater :initarg :updater :accessor mdp-updater))
   (:metaclass py-core-type))
 
 (defmethod (setf py-subs) :after (val (x py-dict-moduledictproxy) key)
+  ;; Modifying this dict modifies the module globals.
   (py-module-set-kv (mdp-module x) (py-string->symbol key) val))
+
+;; The dict returned by globals should reflect the current global module
+;; variables. This is enforced by triggering an update of globals dicts
+;; every time they are accessed. The assumption is that all accesses
+;; call at some point a py-dict.xxx function.
+
+(defvar *module-dict-update-level* 0)
+
+(defmethod py-repr ((x py-dict-moduledictproxy))
+  (with-output-to-string (s)
+    (print-unreadable-object (x s :identity t)
+      (format s "dict-proxy for the globals of module `~A'" (module-name (mdp-module x))))))
+
+(defun update-dict-and-call-func (original-method args)
+  (let* ((check-upd (= *module-dict-update-level* 0))
+         (*module-dict-update-level* (1+ *module-dict-update-level*)))
+    (when check-upd
+      (dolist (a args)
+        (when (typep a 'py-dict-moduledictproxy)
+          (funcall (mdp-updater a)))))
+    (apply #'py-call original-method args)))
+
+(defun set-py-moduledictproxy-methods ()
+  (let ((py-dict.d (dict (find-class 'py-dict)))
+        (py-m-dict.d (dict (find-class 'py-dict-moduledictproxy))))
+    
+    (loop for method-name being the hash-key in (dikt-hash-table (py-dict-dikt py-dict.d))
+        using (hash-value method-func)
+        do (assert method-func () "Method-func for key ~A is NIL" method-name)
+        when (typep method-func 'function)
+        do (sub/dict-set py-m-dict.d method-name (let ((method-func method-func))
+                                                   (lambda (&rest args)
+                                                     (update-dict-and-call-func method-func args)))))))
+
+(eval-when (:load-toplevel :execute)
+  (set-py-moduledictproxy-methods))
+
 
 ;; List (Lisp object: adjustable array)
 

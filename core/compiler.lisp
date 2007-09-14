@@ -723,7 +723,7 @@ differs in structure from the template for ~A ast nodes, which is: ~A"
                                               res)))
                             res))
                          
-                       `(progn ;; execute exec suite
+                       `(progn ;; Execute exec suite, save result
                           (let ((res ,(with-matching (ast ([module-stmt] ?suite))
                                         (assert (match-p ?suite '([suite-stmt] ?stmts)))
                                         ?suite)))
@@ -745,7 +745,6 @@ differs in structure from the template for ~A ast nodes, which is: ~A"
     (setf f `(lambda ()
                (locally (declare (optimize (debug 3)))
                  ;; When this is compiled, the environment object is NIL.
-                 ;; 
                  (with-pydecl ((:function-must-save-locals t))
                    ,f))))
     
@@ -1657,13 +1656,22 @@ inside an `except' clause.")
    (delete nil (mapcar #'cons name-list value-list) :key #'cdr)))
 
 (defun module-make-globals-dict (mod names-vec values-vec dyn-globals-ht)
-  (let ((d (make-dict-from-symbol-alist
+  (flet ((make-regular-dict ()
+           (make-dict-from-symbol-alist
 	    (nconc (loop for name across names-vec and val across values-vec
 		       unless (null val) collect (cons name val))
 		   (loop for k being the hash-key in dyn-globals-ht using (hash-value v)
 		       collect (cons k v))))))
-    (change-class d 'py-dict-moduledictproxy :module mod)
-    d))
+    
+  (let* ((d (make-regular-dict))
+         (updater (lambda () 
+                    (let ((new-d (make-regular-dict)))
+                      (clear-dict d) ;; closes over D itself
+                      (dict-map new-d (lambda (k v)
+                                        (sub/dict-set d k v)))
+                      d))))
+    (change-class d 'py-dict-moduledictproxy :module mod :updater updater)
+    d)))
 
 (defun py-**-mapping->lisp-arg-list (**-arg)
   ;; Return list: ( :|key1| <val1> :|key2| <val2> ... )

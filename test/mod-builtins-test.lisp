@@ -27,4 +27,12 @@
   (run-no-error "
 g = globals()
 g['x'] = 3
-assert x == 3"))
+assert x == 3")
+  (run-no-error "
+g = globals()
+for s in ('a = 3', 'print a'):
+  exec s in g")
+  (run-no-error "
+g = globals()
+a = 3
+assert g['a'] == 3"))
