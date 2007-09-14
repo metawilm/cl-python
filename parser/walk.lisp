@@ -431,7 +431,7 @@ VALUE and TARGET context."
   (apply #'walk-py-ast
 	 ast
 	 (lambda (ast &key value target)
-	   (format t "> ~A ~@[:value(~A)~] ~@[:target(~A)~]~%" ast value target)
+	   (format t "> ~A ~@[:value(~S) ~]~@[:target(~S)~]~%" ast value target)
 	   ast)
 	 walk-options))
 
