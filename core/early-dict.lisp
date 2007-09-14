@@ -130,12 +130,12 @@ Non-{string,symbol} names never have a magic ix."
   (cond ((dikt-hash-table x) ;; use hash-table
          
          ;; Work around Allegro 8.0 bug: sometimes wrong return value for REMHASH.
-         #+allegro
+         #+(and allegro-version>= (not (version>= 8 1)))
          (let ((count-before (hash-table-count (dikt-hash-table x))))
            (remhash key (dikt-hash-table x))
            (let ((count-after (hash-table-count (dikt-hash-table x))))
              (return-from dikt-del (< count-after count-before))))
-         #-allegro
+         #-(and allegro-version>= (not (version>= 8 1)))
          (return-from dikt-del (remhash key (dikt-hash-table x))))
         
         (t ;; use vector
