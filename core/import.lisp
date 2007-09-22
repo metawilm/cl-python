@@ -30,45 +30,59 @@
                                       (version   (pathname-version pathname)))
   (make-pathname :type type :name name :host host :device device
                  :directory directory :version version :case :common))
+
+(defun source-file-names (kind modname filepath)
+  (check-type modname string)
+  (loop for file-type in *py-source-file-types*
+      collect (ecase kind
+                (:module (derive-pathname
+                          filepath
+                          :name (pathname-name modname :case :common) :type file-type))
+                (:package (merge-pathnames
+                           (make-pathname :directory `(:relative ,(pathname-name modname :case :common))
+                                          :case :common)
+                           (derive-pathname filepath
+                                            :type file-type
+                                            :name *package-indicator-filename*))))))
+
+(defparameter *use-asdf-binary-locations* t
+  "Whether to store fasl files in directory determined by asdf-binary-locations.
+Does not work correctly yet.")
+
+(defgeneric compiled-file-name (kind modname filepath &key include-dir)
+  (:method :around (kind modname filepath &key include-dir)
+           (declare (ignore include-dir filepath kind))
+           (check-type modname string)
+           (let ((bin-path (call-next-method))
+                 bin-path-2)
+             (when *use-asdf-binary-locations*
+               (setf bin-path-2 
+                 (ignore-errors
+                  (let ((new-path (car (asdf:output-files
+                                        (make-instance 'asdf:compile-op)
+                                        (make-instance 'asdf:cl-source-file
+                                          :parent (asdf:find-system :clpython)
+                                          :pathname bin-path)))))
+                    (when new-path
+                      (setf new-path (ensure-directories-exist new-path)))))))
+             (or bin-path-2 bin-path)))
   
-(defun py-source-file-names (modname filepath)
-  "Get a list of possible source file names, given module name."
-  (check-type modname string)
-  (mapcar (lambda (filetype)
-	    (derive-pathname filepath
-                             :name (pathname-name modname :case :common) :type filetype))
-          *py-source-file-types*))
-
-(defun py-pkg-source-file-names (modname filepath)
-  "Get a list of possible package directory names, given module name.
-The returned pathnames lead tot <modname>/__init__.{py/lisp/..}"
-  (check-type modname string)
-  (mapcar (lambda (filetype)
-	    (merge-pathnames
-	     (make-pathname :directory `(:relative ,(pathname-name modname :case :common))
-			    :case      :common)
-             (derive-pathname filepath :type filetype :name *package-indicator-filename*)))
-	  *py-source-file-types*))
-
-(defun py-compiled-file-name (modname filepath)
-  "Get file name for compiled source file"
-  (check-type modname string)
-  (derive-pathname filepath
-                   :name (pathname-name modname :case :common)
-                   :type *py-compiled-file-type* ))
-
-(defun py-pkg-compiled-file-name (pkgname filepath &key (include-dir t))
-  "Get file name for compiled package __init__ file"
-  (check-type pkgname string)
-  (merge-pathnames
-   (if include-dir
-       (make-pathname :directory `(:relative ,(pathname-name pkgname :case :common))
-                      :case      :common)
-     pkgname)
-   (derive-pathname filepath
-                    :type *py-compiled-file-type* 
-                    :name *package-indicator-filename*)))
-
+  (:method ((kind (eql :module)) modname filepath &key include-dir)
+           (declare (ignore include-dir))
+           (derive-pathname filepath
+                            :name (pathname-name modname :case :common)
+                            :type *py-compiled-file-type* ))
+  
+  (:method ((kind (eql :package)) modname filepath &key (include-dir t))
+           (merge-pathnames
+            (if include-dir
+                (make-pathname :directory `(:relative ,(pathname-name modname :case :common))
+                               :case :common)
+              modname)
+            (derive-pathname filepath
+                             :type *py-compiled-file-type* 
+                             :name *package-indicator-filename*))))
+  
 (defun lisp-package-as-py-module (modname)
   "Return Lisp package with given name, that is a package-child of :clpython.module
 This function builds upon Allegro's 'relative package names'."
@@ -85,10 +99,10 @@ Returns (values KIND SRC-PATH BIN-PATH), where KIND one of :module, :package.
 Returns NIL if nothing found."
   (loop for path in search-paths
 		    
-      for src-path = (find-if #'probe-file (py-source-file-names name path))
-      for bin-path = (find-if #'probe-file (list (py-compiled-file-name name path)))
-      for pkg-src-path = (find-if #'probe-file (py-pkg-source-file-names name path))
-      for pkg-bin-path = (find-if #'probe-file (list (py-pkg-compiled-file-name name path)))
+      for src-path = (find-if #'probe-file (source-file-names :module name path))
+      for bin-path = (find-if #'probe-file (list (compiled-file-name :module name path)))
+      for pkg-src-path = (find-if #'probe-file (source-file-names :package name path))
+      for pkg-bin-path = (find-if #'probe-file (list (compiled-file-name :package name path)))
 			 
       if (or src-path bin-path)
       return (values :module src-path bin-path)
@@ -259,9 +273,7 @@ Returns the loaded module, or NIL on error."
       (assert (member kind '(:module :package)))
       (assert (or src-file bin-file))
 
-      (let ((bin-file (ecase kind
-                        (:module (py-compiled-file-name just-mod-name src-file))
-                        (:package (py-pkg-compiled-file-name just-mod-name src-file :include-dir nil)))))
+      (let ((bin-file (compiled-file-name kind just-mod-name src-file :include-dir nil)))
         (compile-py-file src-file :output-file bin-file)
         (let ((new-module (load-compiled-python-file bin-file
                                                      :mod-name dotted-name
