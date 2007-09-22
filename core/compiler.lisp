@@ -326,6 +326,10 @@ differs in structure from the template for ~A ast nodes, which is: ~A"
                  (setf (py-attr ,prim ',?name) nil))))))
 
 (defmacro [augassign-stmt] (&whole whole op place val &environment env)
+  (unless (listp place)
+    (py-raise '{SyntaxError}
+              "Augmented assignment to a literal is not possible (got: \"~A ~A ..\")."
+              place op)) 
   (case (car place)
     
     (([attributeref-expr] [subscription-expr] [identifier-expr])
@@ -627,6 +631,10 @@ differs in structure from the template for ~A ast nodes, which is: ~A"
                                                     `.g
                                                   `(.locals.))))))
      (exec-stmt-check-namespaces glo loc)
+     ;; ensure dicts reflect current namespace
+     (dolist (x (list glo loc))
+       (when (typep x 'py-dict-moduledictproxy)
+         (funcall (mdp-updater x))))
      (exec-stmt-string ,code-string glo loc ',allowed-stmts)))
 
 (defun exec-stmt-check-namespaces (globals locals)
