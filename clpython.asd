@@ -56,11 +56,13 @@
     :depends-on (:clpython.package)
     :components ((:module "parser"
 			  :components ((:file "psetup"  )
-				       (:file "grammar" :depends-on ("psetup"))
-				       (:file "lexer"   :depends-on ("grammar"))
-				       (:file "parser"  :depends-on ("grammar" "lexer"))
-				       (:file "walk"    )
-				       (:file "pprint"  )))))
+				       (:file "grammar"  :depends-on ("psetup"))
+				       (:file "lexer"    :depends-on ("grammar"))
+				       (:file "parser"   :depends-on ("grammar" "lexer"))
+                                       (:file "ast-match")
+                                       (:file "ast-util" :depends-on ("ast-match"))
+                                       (:file "walk"     )
+				       (:file "pprint"   )))))
 
 (asdf:defsystem :clpython.core
     :description "Python semantics and compiler"
