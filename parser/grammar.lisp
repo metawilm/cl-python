@@ -553,8 +553,8 @@
                        (defstruct (,ast-node
                                    :named
                                    (:type list)
-                                   (:constructor ,(intern (format nil "make-~A" ast-node)
-                                                          :clpython.ast)))
+                                   (:constructor ,(intern (format nil "make-~A" ast-node) :clpython.ast))
+                                   (:predicate ,(intern (format nil "~A-p" ast-node) :clpython.ast)))
                          ,@args))))
     
     (rp [assert-stmt] test raise-arg)
@@ -609,3 +609,5 @@
     ([make-assign-stmt] :value value :targets (list target))))
 
 (reg-patterns)
+
+
