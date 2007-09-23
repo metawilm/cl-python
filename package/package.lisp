@@ -71,7 +71,7 @@
 	   "subscription-expr" "tuple-expr" "unary-expr"
 	   
 	   "for-in-clause" "if-clause" ;; not really nodes
-	   )
+           )
   (:intern "clpython-stmt" ;; internal state
 	   ))
 
@@ -90,12 +90,25 @@
 	   "make-subscription-expr" "make-tuple-expr" "make-unary-expr"
            
            "make-identifier-expr*" "make-suite-stmt*" "make-assign-stmt*" ;; shortcuts
+           
+           ;; Predicates
+           "assert-stmt-p" "assign-stmt-p" "augassign-stmt-p" "break-stmt-p" "classdef-stmt-p"
+	   "continue-stmt-p" "del-stmt-p" "exec-stmt-p" "for-in-p-stmt" "funcdef-stmt-p"
+	   "global-stmt-p" "if-stmt-p" "import-stmt-p" "import-from-p-stmt" "module-stmt-p"
+	   "pass-stmt-p" "print-stmt-p" "raise-stmt-p" "return-stmt-p" "suite-stmt-p"
+	   "try-except-p-stmt" "try-finally-p-stmt" "while-stmt-p" "yield-stmt-p"
+           
+           "attributeref-expr-p" "backticks-expr-p" "binary-expr-p" "binary-lazy-p-expr"
+	   "call-expr-p" "comparison-expr-p" "dict-expr-p" "generator-expr-p"
+	   "identifier-expr-p" "lambda-expr-p" "listcompr-expr-p" "list-expr-p" "slice-expr-p"
+	   "subscription-expr-p" "tuple-expr-p" "unary-expr-p"
            ))
 
 (defpackage :clpython.ast
   (:documentation "Python abstract syntax tree representation")
   (:use :clpython.ast.reserved :clpython.ast.node :clpython.ast.punctuation
 	:clpython.ast.operator :clpython.ast.token :clpython.ast.makenode)
+  
   (:import-from :clpython.ast.operator "/t/" "<divmod>")
   (:import-from :clpython.ast.reserved "is not" "not in")
   (:import-from :clpython.ast.node     "clpython-stmt"))
@@ -193,8 +206,11 @@
 (defpackage :clpython.parser
   (:documentation "Parser and lexer for Python code")
   (:use :common-lisp :clpython.package)
-  (:export #:parse-python-file #:parse-python-string #:with-python-code-reader
-	   
+  (:export #:parse-python-file #:parse-python-string #:with-python-code-reader ;; Parser
+           #:ast-complete-p
+           
+           #:match-p #:with-matching #:with-perhaps-matching ;; AST pattern matcher
+           
            #:walk-py-ast #:with-py-ast ;; code walker
 	   #:+normal-target+ #:+delete-target+ #:+augassign-target+ #:+no-target+
 	   #:+normal-value+ #:+augassign-value+ #:+no-value+
