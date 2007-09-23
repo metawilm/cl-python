@@ -52,10 +52,6 @@ READ-CHR."
             (return-from lexer `((:line-no ,curr-src-line)
                                  (:eof-seen ,(member 'excl.yacc:eof tokens-todo :key #'second)))))
 
-          ;; The lexer does not currently detect leading whitespace on the first line (with
-          ;; some non-whitespace after it), which can hide syntax errors. As hack, we act as
-          ;; if the first character is a #\Newline. That explains *lex-[un]read-char*.
-	
           (let ((*lex-read-char* (lambda () (let ((ch (funcall read-chr)))
                                               (incf curr-char)
                                               (when (and ch (char= ch #\Newline))
@@ -88,7 +84,7 @@ READ-CHR."
                                       "Leading whitespace on first non-blank line.")
                                    (cl-user::continue ()
                                        :report "Continue parsing, ignoring ~@
-                                              the leading whitespace."))))))
+                                                the leading whitespace."))))))
                   (when ch (unread-chr ch)))))
           
             (when tokens-todo
@@ -167,7 +163,6 @@ READ-CHR."
                      ((or (punct-char1-p c)
                           (punct-char-not-punct-char1-p c))
                       (let ((token (read-punctuation c)))
-		      
                         ;; Keep track of whether we are in a bracketed
                         ;; expression (list, tuple or dict), because in
                         ;; that case newlines are ignored. (Note that
@@ -175,7 +170,6 @@ READ-CHR."
                         ;; 
                         ;; There is no check for matching brackets here:
                         ;; left to the grammar.
-		      
                         (case token
                           (( [[]  [{] [(] ) (push token open-brackets))
                            (( [\]] [}] [)] ) (pop open-brackets)))
@@ -231,14 +225,13 @@ READ-CHR."
                               (t 
                                (raise-syntax-error
                                 "Continuation character '\\' must be followed by Newline, ~
-                               but got: '~A' (~S) (line ~A)." c2 c2 *curr-src-line*))))
+                                 but got: '~A' (~S) (line ~A)." c2 c2 *curr-src-line*))))
                       (incf *curr-src-line*)
                       (go next-char))
 		   
                      (t (with-simple-restart 
                             (:continue "Discard the character `~A' and continue parsing." c)
-                          (raise-syntax-error
-                           "Nobody expected this character: `~A' (line ~A)."
+                          (raise-syntax-error "Nobody expected this character: `~A' (line ~A)."
                            c *curr-src-line*))
                         (go next-char)))))))))))))
 
@@ -331,7 +324,7 @@ C must be either a character or NIL."
       (find-symbol sym pkg)
     (when sym
       (assert (eq kind :external) ()
-	"As package ~A does not support (internal) symbol ~S. ~
+	"Package ~A does not support (internal) symbol ~S. ~
          Therefore that symbol should not be in the package at all." pkg sym))
     sym))
 
@@ -488,7 +481,8 @@ C must be either a character or NIL."
 			   #+(or)(break "Charname: ~S" vec)
 			   (vector-push-extend (name-char vec) res)))
 		   
-		 (progn (warn "Unicode escape  \\N{..}  found in non-unicode string")
+		 (progn (warn "Unicode escape \"\\N{..}\" found in non-unicode string (line ~A)."
+                              *curr-src-line*)
 			(vector-push-extend #\\ res)
 			(vector-push-extend #\N res))))
 		
@@ -506,7 +500,7 @@ C must be either a character or NIL."
 				 finally (vector-push-extend (code-char code) res))
 			     
 			   (progn (warn
-				   "Unicode escape \\~A... found in non-unicode string (line ~A)"
+				   "Unicode escape \"\\~A...\" found in non-unicode string (line ~A)."
 				   c *curr-src-line*)
 				  (vector-push-extend #\\ res)
 				  (vector-push-extend c res))))
