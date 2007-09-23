@@ -60,7 +60,7 @@
 				       (:file "lexer"    :depends-on ("grammar"))
 				       (:file "parser"   :depends-on ("grammar" "lexer"))
                                        (:file "ast-match")
-                                       (:file "ast-util" :depends-on ("ast-match"))
+                                       (:file "ast-util" :depends-on ("ast-match" "grammar"))
                                        (:file "walk"     )
 				       (:file "pprint"   )))))
 
@@ -74,6 +74,7 @@
                                        (:file "formatstring" )
                                        (:file "early-dict"   )
                                        (:file "classes"      )
+                                       (:file "file"         )
                                        (:file "exceptions"   )
                                        (:file "compiler"     )
                                        (:file "optimize"     )
