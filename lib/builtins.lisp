@@ -419,10 +419,14 @@ None, use identity function (multiple sequences -> list of tuples)."
 
 (defun {reload} (m &optional (verbose 1))
   ;; VERBOSE is not a CPython argument
-  (funcall 'py-import
-	   (list (py-string-val->symbol (slot-value m 'name)))
-	   :force-reload t
-	   :verbose (when verbose (py-val->lisp-bool verbose)))
+  ;; remove from habitat loaded-modules ?
+  (let* ((*import-force-recompile* t)
+         (*import-force-reload* t)
+         (v (py-val->lisp-bool verbose))
+         (*import-compile-verbose* v)
+         (*import-load-verbose*    v)
+         (mod-name-as-symbol-list (list (py-string-val->symbol (slot-value m 'name)))))
+    (funcall 'py-import mod-name-as-symbol-list))
   m)
 
 (defun {repr} (x)
