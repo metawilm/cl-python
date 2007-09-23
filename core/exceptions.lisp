@@ -106,8 +106,10 @@
 	     (slot-value x 'args))
     (destructuring-bind (string . format-args)
         (slot-value x 'args)
-      (format stream ": ")
-      (apply #'format stream string format-args))))
+      #+(or) ;; old
+      (progn (format stream ": ")
+             (apply #'format stream string format-args))
+      (format stream ": ~@<~@;~A~:>" (apply #'format nil string format-args)))))
 
 (def-py-method {Exception.__repr__} (x)
   (with-output-to-string (s)
