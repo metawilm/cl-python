@@ -1171,7 +1171,6 @@ input arguments."
 (defun unbound-variable-error (name &optional (resumable t))
   (declare (special *py-signal-conditions*))
   (if resumable
-    
       (restart-case
 	  (py-raise '{NameError} "Variable `~A' is unbound" name)
         (cl:use-value (val)
@@ -1181,7 +1180,6 @@ input arguments."
 			   (format t "Enter new value for `~A': " name)
 			   (multiple-value-list (eval (read))))
 	  (return-from unbound-variable-error val)))
-    
     (py-raise '{NameError} "Variable `~A' is unbound" name)))
 
 (defun identifier-expr-module-lookup-dyn (name +mod-dyn-globals+)
@@ -1988,6 +1986,7 @@ Non-negative integer denoting the number of args otherwise."
      (py-raise '{RuntimeError} "Stack overflow (~A)" *max-py-error-level*))))
 
 (defmacro with-py-errors ((&key (name 'with-py-errors-funcx)) &body body)
+  (check-type name (or symbol list))
   `(let ((f (excl:named-function ,name
               (lambda () ,@body))))
      (declare (dynamic-extent f))
@@ -1996,39 +1995,31 @@ Non-negative integer denoting the number of args otherwise."
 (defun call-with-py-errors (f)
   (let ((*with-py-error-level* (fast (1+ (the fixnum *with-py-error-level*)))))
     (check-max-with-py-error-level)
-     
-     ;; Using handler-bind, so uncatched errors are shown in precisely
+    ;; Using handler-bind, so uncatched errors are shown in precisely
      ;; the context where they occur.
-     
-     (handler-bind
-	 
-	 ((division-by-zero (lambda (c) 
-			      (declare (ignore c))
-			      (py-raise '{ZeroDivisionError}
-					"Division or modulo by zero")))
-	  
-	  (storage-condition (lambda (c)
-			       (declare (ignore c))
-			       (py-raise-runtime-error)))
-	  
-	  (excl:synchronous-operating-system-signal
-	   (lambda (c)
-	     (if (string= (simple-condition-format-control c)
-			  "~1@<Stack overflow (signal 1000)~:@>")
-		 (py-raise '{RuntimeError} "Stack overflow")
-	       (py-raise '{RuntimeError} "Synchronous OS signal: ~A" c))))
-	  
-	  (excl:interrupt-signal
-	   (lambda (c)
-	     (let ((args (simple-condition-format-arguments c)))
-	       (when (string= (cadr args) "Keyboard interrupt")
-		 (py-raise '{KeyboardInterrupt} "Keyboard interrupt")))))
-       
-	  #+(or)
-	  (error (lambda (c)
-		   (warn "with-py-handlers passed on error: ~A" c))))
-       
-       (funcall f))))
+    (handler-bind
+        ((division-by-zero (lambda (c) 
+                             (declare (ignore c))
+                             (py-raise '{ZeroDivisionError}
+                                       "Division or modulo by zero")))
+         (storage-condition (lambda (c)
+                              (declare (ignore c))
+                              (py-raise-runtime-error)))
+         (excl:synchronous-operating-system-signal
+          (lambda (c)
+            (if (string= (simple-condition-format-control c)
+                         "~1@<Stack overflow (signal 1000)~:@>")
+                (py-raise '{RuntimeError} "Stack overflow")
+              (py-raise '{RuntimeError} "Synchronous OS signal: ~A" c))))
+         (excl:interrupt-signal
+          (lambda (c)
+            (let ((args (simple-condition-format-arguments c)))
+              (when (string= (cadr args) "Keyboard interrupt")
+                (py-raise '{KeyboardInterrupt} "Keyboard interrupt")))))
+         #+(or)
+         (error (lambda (c)
+                  (warn "with-py-handlers passed on error: ~A" c))))
+      (funcall f))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; 
