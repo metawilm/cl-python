@@ -55,10 +55,10 @@
       (ecase (aref str (1- len))
 
 	(#\+ `((defproduction (,name python-grammar) (,item) ($1))
-	       (defproduction (,name python-grammar) (,name [,] ,item) ((append $1 (list $3))))))
+	       (defproduction (,name python-grammar) (,name [,] ,item) ((nconc $1 (list $3))))))
 
 	(#\* `((defproduction (,name python-grammar) () ())
-	       (defproduction (,name python-grammar) (,name ,item) ((append $1 (list $2))))))
+	       (defproduction (,name python-grammar) (,name ,item) ((nconc $1 (list $2))))))
 
 	(#\? `((defproduction (,name python-grammar) ())
 	       (defproduction (,name python-grammar) (,item) ($1))))))))
@@ -145,7 +145,7 @@
  (parameter-list5 (                         **-ident   ) ((list nil nil  $1)))
 
  (defparameter+ (defparameter)                   ((list $1)))
- (defparameter+ (defparameter+ [,] defparameter) ((append $1 (list $3))))
+ (defparameter+ (defparameter+ [,] defparameter) ((nconc $1 (list $3))))
 
  (ni-*-ident  ( [,] *-ident      ) ($2))
  (*-ident     ( [*] [identifier] ) ($2))
@@ -301,14 +301,14 @@
  (except--suite ([except] test [,] test [:] suite) (`(,$2 ,$4 ,$6)))
 
  (except--suite+ (except--suite) ((list $1)))
- (except--suite+ (except--suite+ except--suite) ((append $1 (list $2))))
+ (except--suite+ (except--suite+ except--suite) ((nconc $1 (list $2))))
 
  (suite :or
 	((simple-stmt)                     . (`([suite-stmt] (,$1))))
 	(([newline] [indent] stmt+ [dedent]) . (`([suite-stmt] ,$3))))
 
  (stmt+ (stmt)       ((list $1)))
- (stmt+ (stmt+ stmt) ((append $1 (list $2))))
+ (stmt+ (stmt+ stmt) ((nconc $1 (list $2))))
 
  (expr (binop2-expr) ($1))
 
@@ -462,8 +462,8 @@
 	     (when a (if $1
 			 (setf (cdr (last $1)) (list a))
 		       (setf $1 (list a))))
-	     (let ((key-start (position :key $1 :key #'car))
-		   (pos-end   (position :pos $1 :key #'car :from-end t)))
+	     (let ((key-start (position :key $1 :key 'car))
+		   (pos-end   (position :pos $1 :key 'car :from-end t)))
 	       (multiple-value-bind (pos key)
 		   (cond ((and key-start pos-end)
 			  (when (< key-start pos-end)
@@ -477,8 +477,8 @@
 			 (key-start (values () $1))
 			 (pos-end   (values $1 ()))
 			 (t         (values () ())))
-		 (map-into pos #'second pos)
-		 (map-into key #'cdr key)
+		 (map-into pos 'second pos)
+		 (map-into key 'cdr key)
 		 (list pos key *-a **-a))))))
  (arglist-2 :or
 	    ((argument comma?)            . ((list  $1 nil nil)))
@@ -510,17 +510,17 @@
 
 (build-grammar python-grammar nil nil)
 
-
 (defun parse-trailers (ast)
   ;; foo[x].a => (trailers (id foo) ((subscription (id x)) (attributeref (id a))))
   ;;          => (attributeref (subscription (id foo) (id x)) (id a))
+  (declare (optimize speed))
   (assert (eq (car ast) 'trailers))
-  (destructuring-bind (primary trailers)
+  (destructuring-bind (x trailers)
       (cdr ast)
-    (loop for tr in trailers
-	with res = primary
-	do (setf res `(,(car tr) ,res ,@(cdr tr)))
-	finally (return res))))
+    (dolist (tr trailers)
+      (setf (cdr tr) (cons x (cdr tr))
+            x        tr))
+    x))
 
 (defun dotted-name-to-attribute-ref (dotted-name)
   (assert dotted-name)
