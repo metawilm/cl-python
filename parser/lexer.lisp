@@ -21,10 +21,53 @@
 
 (defconstant +whitespace+ '(#\Space #\Tab #\Newline #\Return #\Page))
 
-;; internal state
-(defvar *curr-src-line*)
+;; Internal
+
 (defvar *lex-read-char*)
 (defvar *lex-unread-char*)
+
+(deftype char-code-type ()
+  "CHAR-CODE return value type"
+  '(integer 0 #.char-code-limit))
+
+
+(defun read-chr-nil ()
+  "Returns a character, or NIL on eof/error"
+  (funcall *lex-read-char*))
+
+(define-compiler-macro read-chr-nil ()
+  `(locally (declare (optimize speed))
+     (funcall *lex-read-char*)))
+
+
+(defun read-chr-error ()
+  "Return a character, or raise a SyntaxError"
+  (or (read-chr-nil)
+      (raise-unexpected-eof *curr-src-line*)))
+
+(define-compiler-macro read-chr-error ()
+  `(locally (declare (optimize speed))
+     (or (read-chr-nil)
+         (raise-unexpected-eof *curr-src-line*))))
+
+
+(defun unread-chr (ch)
+  (funcall *lex-unread-char* ch))
+
+(define-compiler-macro unread-chr ()
+  `(locally (declare (optimize speed))
+     (funcall *lex-unread-char*)))
+
+
+(defun char-member (ch list)
+  (and ch (member ch list :test #'char=)))
+
+(define-compiler-macro char-member (ch list)
+  `(let ((.char ,ch))
+     (and .char (member .char ,list :test #'char=))))
+
+
+(defvar *curr-src-line*)
 
 (defun make-py-lexer (&key (read-chr    (lambda () (read-char *standard-input* nil nil t)))
 			   (unread-chr  (lambda (c) (unread-char c *standard-input*)))
@@ -108,8 +151,13 @@ READ-CHR."
                               (return-from lexer (values (excl.yacc:tcode ,token-name) val))))
 		       
                          (find-token-code (token-name)
-                           `(excl.yacc:tcode-1 (load-time-value (find-class 'python-grammar))
-                                               ,token-name)))
+                           ;; Cache token codes in the symbol
+                           `(let ((.tok ,token-name))
+                              (or (get .tok 'python-grammar-token-code)
+                                  (setf (get .tok 'python-grammar-token-code)
+                                    (excl.yacc:tcode-1
+                                     (load-time-value (find-class 'python-grammar))
+                                     .tok))))))
 
                 (tagbody next-char
                   (let ((c (read-chr-nil)))
@@ -146,7 +194,7 @@ READ-CHR."
                                        (unicode (position #\u sn :test 'char-equal))
                                        (raw     (position #\r sn :test 'char-equal)))
                                   (lex-return [string]
-                                              (read-string ch :unicode unicode :raw raw)))
+                                              (read-string (if raw :raw :non-raw) ch :unicode unicode)))
                               (when ch (unread-chr ch)))))
 		      
                         (when (reserved-word-p token)
@@ -158,7 +206,7 @@ READ-CHR."
                         (lex-return [identifier] token)))
 
                      ((char-member c '(#\' #\"))
-                      (lex-return [string] (read-string c)))
+                      (lex-return [string] (read-string :non-raw c)))
 
                      ((or (punct-char1-p c)
                           (punct-char-not-punct-char1-p c))
@@ -236,42 +284,7 @@ READ-CHR."
                         (go next-char)))))))))))))
 
 
-(defun read-chr-nil ()
-  "Returns a character, or NIL on eof/error"
-  (funcall *lex-read-char*))
 
-(define-compiler-macro read-chr-nil ()
-  `(locally (declare (optimize (speed 3) (safety 1) (debug 0)))
-     (funcall *lex-read-char*)))
-
-
-(defun read-chr-error ()
-  "Return a character, or raise a SyntaxError"
-  (or (read-chr-nil) (raise-unexpected-eof *curr-src-line*)))
-
-;; Used internally to /signal/ EOF of Python syntax.
-
-(define-compiler-macro read-chr-error ()
-  `(locally (declare (optimize (speed 3) (safety 1) (debug 0)))
-     (or (read-chr-nil) (raise-unexpected-eof *curr-src-line*))))
-
-
-(defun unread-chr (ch)
-  (funcall *lex-unread-char* ch))
-
-(define-compiler-macro unread-chr ()
-  `(locally (declare (optimize (speed 3) (safety 1) (debug 0)))
-     (funcall *lex-unread-char*)))
-
-
-(defun char-member (ch list)
-  (and ch
-       (member ch list :test #'char=)))
-
-(define-compiler-macro char-member (ch list)
-  (let ((char '#:char))
-    `(let ((,char ,ch))
-       (and ,char (member ,char ,list :test #'char=)))))
 
 (defun reserved-word-p (sym)
   (eq (symbol-package sym) (load-time-value (find-package :clpython.ast.reserved))))
@@ -282,80 +295,122 @@ READ-CHR."
 (defun identifier-char1-p (c)
   "Is C a character with which an identifier can start?
 C must be either a character or NIL."
-  (let ((arr #.(make-array 128
-			   :element-type 'bit 
-			   :initial-contents
-			   (loop for i from 0 below 128
-			       if (or (<= (char-code #\a) i (char-code #\z))
-				      (<= (char-code #\A) i (char-code #\Z))
-				      (= i (char-code #\_))) collect 1
-			       else collect 0))))
-    (and c
-	 (< (char-code c) 128)
-	 (when (= (sbit arr (char-code c)) 1)
-	   t))))
+  (declare (optimize speed))
+  (when c
+    (let ((code (char-code c)))
+      (declare (type char-code-type code))
+      ;; Cannot use alpha-char-p, as that is also true for o+" etc
+      (or (<= #.(char-code #\a) code #.(char-code #\z))
+          (<= #.(char-code #\A) code #.(char-code #\Z))
+          (= code #.(char-code #\_))))))
 
 (defun identifier-char2-p (c)
   "Can C occur in an identifier as second or later character?
 C must be either a character or NIL."
-  (and c
-       (or (alphanumericp c)
-	   (char= c #\_))))
-
-(define-compiler-macro identifier-char2-p (c)
-  (let ((ch '#:ch)
-	(code '#:code)
-	(arr #.(loop with arr = (make-array 128 :element-type 'bit :initial-element 0)
-		   for ch-code from 0 below 128
-		   for ch = (code-char ch-code)
-		   do (setf (sbit arr ch-code) (if (or (alphanumericp ch)
-						       (char= ch #\_))
-						   1 0))
-		   finally (return arr))))
-    `(let ((,ch ,c))
-       (and ,ch
-	    (let ((,code (char-code ,ch)))
-	      (and (< ,code 128)
-		   (= (sbit ,arr ,code) 1)))))))
-
+  (declare (optimize speed))
+  (when c
+    (let ((code (char-code c)))
+      (declare (type char-code-type code))
+      ;; Cannot use alpha-char-p, as that is also true for o+" etc
+      (or (<= #.(char-code #\a) code #.(char-code #\z))
+          (<= #.(char-code #\A) code #.(char-code #\Z))
+          (= code #.(char-code #\_))
+          (<= #.(char-code #\0) code #.(char-code #\9))))))
+        
 (defun lookup-external-symbol (sym pkg)
   (check-type sym string)
+  (when (eq pkg #.(find-package :clpython.ast.reserved))
   (multiple-value-bind (sym kind)
       (find-symbol sym pkg)
     (when sym
       (assert (eq kind :external) ()
 	"Package ~A does not support (internal) symbol ~S. ~
          Therefore that symbol should not be in the package at all." pkg sym))
-    sym))
+    sym)))
+
+(defparameter *temp-string-arrays* ())
+(defparameter *temp-string-counter* 0)
+
+(defmacro with-temp-adjustable-string ((var) &body body)
+  `(progn 
+     (let* ((.num-arrays (length *temp-string-arrays*))
+            (*temp-string-counter* (1+ *temp-string-counter*)))
+       (assert (<= *temp-string-counter* (1+ .num-arrays)))
+       (let ((,var (if (< *temp-string-counter* .num-arrays)
+                       (nth (1- *temp-string-counter*) *temp-string-arrays*)
+                     (let ((new (make-array 10 :element-type 'character
+                                                :adjustable t :fill-pointer 0)))
+                       (prog1 new
+                         (setf *temp-string-arrays* 
+                           (nconc *temp-string-arrays* (list new))))))))
+         (setf (fill-pointer ,var) 0)
+         ,@body))))
+
+(defconstant +read-identifier-cache-size+ 4)
 
 (defun read-identifier (first-char)
-  "Returns the identifier read as string. ~@
-   Identifiers start start with an underscore or alphabetic character; ~@
-   second and further characters must be alphanumeric or underscore."
+  "Returns the identifier read as symbol."
+  (declare (optimize speed))
   (assert (identifier-char1-p first-char))
-  (let ((res (load-time-value
-	      (make-array 6 :element-type 'character
-			  :adjustable t
-			  :fill-pointer 0))))
-    (setf (fill-pointer res) 0)
-    (vector-push-extend first-char res)
-    
-    (loop
-	for c = (read-chr-nil)
-	while (identifier-char2-p c)
-	do (vector-push-extend c res)
-	finally (when c (unread-chr c)))
-    
-    ;; RES is either a reserved word like "def", or an identifier like "foo".
-    (let ((s (or (lookup-external-symbol res :clpython.ast.reserved)
-		 (find-symbol res :clpython.user))))
-      ;; Prevent case mismatches in Allegro ANSI mode
-      (when (and s (string= (symbol-name s) res))
-	(return-from read-identifier s)))
-    
-    (intern (simple-string-from-vec res) :clpython.user)
-    ;; Maybe make symbol extern?
-    ))
+  (flet ((lookup-reserved-word (str str.len)
+           ;; Keep the reserved words in a handy lookup table.
+           (let ((rw-vec (load-time-value 
+                          (loop with vec = (make-array 128)
+                              with pkg = (find-package :clpython.ast.reserved)
+                              for rw being the external-symbol in pkg
+                              for rw.name = (symbol-name rw)
+                              do (assert (>= (length rw.name) 2))
+                                 (let ((key (char-code (aref rw.name 0)))
+                                       (val (list (aref rw.name 1)
+                                                  (length rw.name)
+                                                  rw.name
+                                                  rw)))
+                                   (push val (svref vec key)))
+                              finally (return vec)))))
+             (dolist (rw (svref rw-vec (the char-code-type (char-code (aref str 0)))))
+               (when (and (char= (pop rw) (aref str 1))
+                          (= (pop rw) str.len))
+                 (let ((sym.name (pop rw)))
+                   (when (loop for i fixnum from 2 below str.len
+                             always (char= (aref str i) (aref sym.name i)))
+                     (return-from lookup-reserved-word (car rw)))))))))
+    (declare (dynamic-extent #'lookup-reserved-word))
+    ;; Keep a cache of the last identifiers seen for every starting char.
+    ;; This saves looking for symbol in package.
+    (with-temp-adjustable-string (res)
+      (let ((last-read-identifiers
+             (load-time-value (make-array (* +read-identifier-cache-size+ 128)))))
+        (vector-push-extend first-char res)
+        (loop for c = (read-chr-nil)
+            while (identifier-char2-p c)
+            do (vector-push-extend c res)
+            finally (when c (unread-chr c)))
+        
+        (let ((res.len (length res)))
+          (when (>= res.len 2)
+            (whereas ((s (lookup-reserved-word res res.len)))
+              (return-from read-identifier s)))
+          
+          (let ((ix (char-code (aref res 0))))
+            (declare (type char-code-type ix))
+            (dotimes (delta +read-identifier-cache-size+)
+              (declare (type (integer 0 10000) delta))
+              (whereas ((cached (svref last-read-identifiers (+ ix delta))))
+                (when (and (= res.len (car cached))
+                           (loop for i fixnum from 1 below res.len
+                               for cached.name = (symbol-name (cdr cached))
+                               always (char= (aref res i) (aref cached.name i))))
+                  (return-from read-identifier (cdr cached))))))
+          
+          (let ((sym (or (find-symbol res #.(find-package :clpython.user))
+                         (intern res #.(find-package :clpython.user)))))
+            ;; Store this symbol in a random entry.
+            (let ((cc0 (char-code (aref res 0))))
+              (declare (type char-code-type cc0))
+              (setf (svref last-read-identifiers (+ (* cc0 +read-identifier-cache-size+)
+                                                    (random +read-identifier-cache-size+)))
+                (cons res.len sym)))
+            sym))))))
 
 (defun simple-string-from-vec (vec)
   (make-array (length vec)
@@ -363,193 +418,115 @@ C must be either a character or NIL."
 	      :initial-contents vec))
 
 ;; String
-
-(defun read-string (first-char &key unicode raw)
-  "Returns string as a string"
-  (assert (char-member first-char '( #\' #\" )))
   
-  (when raw
-    ;; Include escapes literally in the resulting string.
-      
-    (loop with ch = (read-chr-error)
-	with res = (load-time-value
-		    (make-array 10 :element-type 'character
-				:adjustable t :fill-pointer 0))
-	with num-bs = 0
-	initially (setf (fill-pointer res) 0)
-		    
-	do (case ch
-	     (#\\  (progn (vector-push-extend ch res)
-			  (incf num-bs)))
-	       
-	     (#\u  (if (and unicode
-			    (oddp num-bs))
-			 
-		       (loop for i below 4
-			   with code = 0
-			   with ch = (read-chr-error)
-			   do (setf code (+ (* code 16)
-					    (or (digit-char-p ch 16)
-						(raise-syntax-error
-						 "Non-hex digit in \"\u...\": ~S (line ~A)."
-						 ch *curr-src-line*)))
-				    ch (read-chr-error))
-			   finally (vector-push-extend (code-char code) res))
-		       
-		     (vector-push-extend #\u res))
-		   (setf num-bs 0))
-	       
-	     ((#\' #\") (cond ((and (char= ch first-char) (> num-bs 0))         
-			       (vector-push-extend ch res)
-			       (setf num-bs 0))
-			      
-			      ((char= ch first-char)
-			       (return-from read-string (simple-string-from-vec res)))
-			      (t
-			       (vector-push-extend ch res)
-			       (setf num-bs 0))))
-	     
-	     (t (vector-push-extend ch res)
-		(setf num-bs 0)))
-	     
-	   (setf ch (read-chr-error))))
-    
-  (assert (not raw))
-    
-  (let* ((second (read-chr-error))
-	 (third (read-chr-nil)))
-    (cond 
-     ((and third
-	   (char= first-char second third))  ;; """ or ''': a probably long multi-line string
-      (loop
-	  with res = (load-time-value 
-		      (make-array 50 :element-type 'character :adjustable t :fill-pointer 0))
-	  with x = (read-chr-error) and y = (read-chr-error) and z = (read-chr-error)
-	  initially (setf (fill-pointer res) 0)
-		      
-	  until (char= first-char z y x)
-	  do (vector-push-extend (shiftf x y z (read-chr-error)) res)
-	       
-	  finally (return-from read-string (simple-string-from-vec res))))
-       
-     ((char= first-char second)  ;; "" or '', but not """ or ''' --> empty string
-      (when third
-	(unread-chr third))
-      (return-from read-string ""))
-       
-     (t ;; Non-empty string with one starting quote, possibly containing escapes
-      (unless third
-	(raise-syntax-error "Quoted string not finished (line ~A)." *curr-src-line*))
-      (let ((res (load-time-value
-		  (make-array 30 :element-type 'character :adjustable t :fill-pointer 0)))
-	    (c third)
-	    (prev-backslash (char= second #\\ )))
-	(setf (fill-pointer res) 0)
-	(unless (char= second #\\)
-	  (vector-push-extend second res))
-	(loop 
-	  (cond
-	   (prev-backslash
-	    (case c 
-	      (#\\ (vector-push-extend #\\ res))
-	      (#\' (vector-push-extend #\' res))
-	      (#\" (vector-push-extend #\" res))
-	      (#\a (vector-push-extend #\Bell res))
-	      (#\b (vector-push-extend #\Backspace res))
-	      (#\f (vector-push-extend #\Page res))
-	      (#\n (vector-push-extend #\Newline res))
-	      (#\Newline )  ;; ignore this newline; quoted string continues on next line
-	      (#\r (vector-push-extend #\Return res))
-	      (#\t (vector-push-extend #\Tab res))
-	      (#\v (vector-push-extend #\VT  res))
-		
-	      (#\N
-	       (if unicode  ;; unicode char by name: u"\N{latin capital letter l with stroke}"
-		     
-		   (let ((ch2 (read-chr-error))) 
-		     (unless (char= ch2 #\{)
-		       (raise-syntax-error
-			"In Unicode string: \N{...} expected, but got ~S after \N (line ~A)."
-			ch2 *curr-src-line*))
-		     (loop with ch = (read-chr-error)
-			 with vec = (make-array 10 :element-type 'character
-						:adjustable t :fill-pointer 0)
-			 while (char/= ch #\}) do
-			   (vector-push-extend (if (char= ch #\space) #\_ ch) vec)
-			   (setf ch (read-chr-error))
-			 finally
-			   #+(or)(break "Charname: ~S" vec)
-			   (vector-push-extend (name-char vec) res)))
-		   
-		 (progn (warn "Unicode escape \"\\N{..}\" found in non-unicode string (line ~A)."
-                              *curr-src-line*)
-			(vector-push-extend #\\ res)
-			(vector-push-extend #\N res))))
-		
-	      ((#\u #\U) (if unicode
-			     
-			     (loop for i below (if (char= c #\u) 4 8) ;; \uf7d6 \U12345678
-				 with code = 0
-				 with ch
-				 do (setf ch   (read-chr-error)
-					  code (+ (* 16 code) 
-						  (or (digit-char-p ch 16)
-						      (raise-syntax-error
-						       "Non-hex digit in \"\~A...\": ~S (line ~A)."
-						       c ch *curr-src-line*))))
-				 finally (vector-push-extend (code-char code) res))
-			     
-			   (progn (warn
-				   "Unicode escape \"\\~A...\" found in non-unicode string (line ~A)."
-				   c *curr-src-line*)
-				  (vector-push-extend #\\ res)
-				  (vector-push-extend c res))))
-	        
-	      ((#\0 #\1 #\2 #\3 #\4 #\5 #\6 #\7)  ;; char code: up to three octal digits
-	       (loop with code = 0
-		   with x = c
-		   for num from 1
-		   while (and (<= num 3) (digit-char-p x 8))
-		   do (setf code (+ (* code 8) (digit-char-p x 8))
-			    x (read-chr-error))
-		   finally (unread-chr x)
-			   (vector-push-extend (code-char code) res)))
-	      
-	      
-	      (#\x (let* ((a (read-chr-error)) ;; char code: up to two hex digits
-			  (b (read-chr-error)))
-		     
-		     (cond ((not (digit-char-p a 16))
-			    (raise-syntax-error "Non-hex digit found in \x..: ~S (line ~A)."
-						a *curr-src-line*))
-			   
-			   ((digit-char-p b 16)
-			    (vector-push-extend (code-char (+ (* 16 (digit-char-p a 16)) 
-							      (digit-char-p b 16)))
-						res))
-			   
-			   (t (vector-push-extend (digit-char-p a 16) res)
-			      (unread-chr b)))))
-	        
-	      (t 
-	       ;; Backslash is not used for escaping: collect both the backslash
-	       ;; itself and the character just read.
-	       (vector-push-extend #\\ res)
-	       (vector-push-extend c res)))
-		
-	    (setf prev-backslash nil))
-	       
-	   ((char= c #\\)
-	    (setf prev-backslash t))
-	   
-	   ((char= c first-char) ;; end quote of literal string
-	    (return-from read-string (simple-string-from-vec res)))
-	       
-	   (t 
-	    (vector-push-extend c res)))
-	      
-	  (setf c (read-chr-error))))))))
-
+(defun read-string (rawp ch1 &key unicode)
+  (assert (char-member ch1 '( #\' #\" )))
+  (flet ((read-unicode-char-n-hex-digits (n)
+           (loop for i below n
+               for ch = (read-chr-error) 
+               for ch.code = (or (digit-char-p ch 16) 
+                                 (raise-syntax-error
+                                  "Non-hex digit in \"\u...\": ~S (line ~A)."
+                                  ch *curr-src-line*))
+               sum (ash ch.code (- n i)) into unichar-code
+               finally (return (code-char unichar-code)))))
+    (ecase rawp
+      (:raw ;; Include escapes literally in the resulting string.
+       (with-temp-adjustable-string (res)
+         (loop for ch = (read-chr-error)
+             do (cond ((char= ch #\\)
+                       (if unicode
+                           (let ((ch.next (read-chr-error)))
+                             (if (char-member ch '(#\u #\U))
+                                 (vector-push-extend (read-unicode-char-n-hex-digits 4) res)
+                               (progn (vector-push-extend #\\ res)
+                                      (vector-push-extend ch.next res))))
+                         (vector-push-extend #\\ res)))
+                      ((char= ch ch1)
+                       (return-from read-string (simple-string-from-vec res)))
+                      (t (vector-push-extend ch res))))))
+      (:non-raw
+       (let* ((ch2 (read-chr-error))
+              (ch3 (read-chr-nil)))
+         
+         (cond ((and ch3 (char= ch1 ch2 ch3)) ;; """ or ''': multi-line string
+                (with-temp-adjustable-string (res)
+                  (loop with x = (read-chr-error) and y = (read-chr-error) and z = (read-chr-error)
+                      until (char= ch1 z y x)
+                      do (vector-push-extend (shiftf x y z (read-chr-error)) res)
+                      finally (return-from read-string (simple-string-from-vec res)))))
+               
+               ((char= ch1 ch2) ;; "" or '', but not """ or ''' --> empty string
+                (when ch3
+                  (unread-chr ch3))
+                (return-from read-string ""))
+               
+               (t ;; Non-empty string with one starting quote
+                (unless ch3
+                  (raise-syntax-error "Unfinished literal string (line ~A)." *curr-src-line*))
+                (with-temp-adjustable-string (res)
+                  (unless (char= ch2 #\\)
+                    (vector-push-extend ch2 res))
+                  (loop for c = ch3 then (read-chr-error)
+                      with prev-backslash = (char= ch2 #\\ )
+                      do (cond (prev-backslash
+                                (multiple-value-bind (ch.a ch.b)
+                                    (case c 
+                                      ((#\\ #\' #\" #\a #\b) c)
+                                      (#\f #\Page)
+                                      (#\n #\Newline)
+                                      (#\r #\Return)
+                                      (#\Newline nil) ;; ignore newline after backslash
+                                      (#\t #\Tab)
+                                      (#\v #\VT)
+                                      (#\N (if unicode  ;; unicode char by name: u"\N{latin capital letter l with stroke}"
+                                               (progn (let ((c.next (read-chr-error))) 
+                                                        (unless (char= c.next #\{)
+                                                          (raise-syntax-error
+                                                           "In Unicode string: \N{...} expected, but got ~S after \N (line ~A)."
+                                                           c.next *curr-src-line*)))
+                                                      (with-temp-adjustable-string (unichar-name)
+                                                        (loop for ch = (read-chr-error)
+                                                            until (char= ch #\})
+                                                            do (vector-push-extend (if (char= ch #\space) #\_ ch) unichar-name)
+                                                            finally (return (name-char unichar-name)))))
+                                             #1=(progn (warn "Unicode escape \"\\~A{..}\" found in non-unicode string (line ~A)."
+                                                             c *curr-src-line*)
+                                                       (values #\\ c))))
+                                      ((#\u #\U) (if unicode ;; \uf7d6 or \U1a3b5678
+                                                     (read-unicode-char-n-hex-digits (if (char= c #\u) 4 8))
+                                                   #1#))
+                                      ((#\0 #\1 #\2 #\3 #\4 #\5 #\6 #\7)  ;; char code: up to three octal digits
+                                       (loop with code = 0
+                                           for x = c then (read-chr-error)
+                                           for x.octal = (digit-char-p x 8)
+                                           repeat 3 while x.octal
+                                           do (setf code (+ (* code 8) x.octal))
+                                           finally (unless x.octal (unread-chr x))
+                                                   (return (code-char code))))
+                                      (#\x (let* ((a (read-chr-error)) ;; char code: up to two hex digits
+                                                  (b (read-chr-error))
+                                                  (a.hex (digit-char-p a 16))
+                                                  (b.hex (digit-char-p b 16)))
+                                             (unless a.hex (raise-syntax-error "Non-hex digit found in \x..: ~S (line ~A)."
+                                                                               a *curr-src-line*))
+                                             (if (digit-char-p b 16)
+                                                 (code-char (+ (* 16 a.hex) b.hex))
+                                               (prog1 a.hex 
+                                                 (unread-chr b)))))
+                                      (t (values #\\ c))) ;; Backslash not used for escaping.
+                                  
+                                  (when ch.a (vector-push-extend ch.a res))
+                                  (when ch.b (vector-push-extend ch.b res))
+                                  (setf prev-backslash nil)))
+                               
+                               ((char= c #\\)
+                                (setf prev-backslash t))
+                               
+                               ((char= c ch1) ;; end quote of literal string
+                                (return-from read-string (simple-string-from-vec res)))
+                               
+                               (t (vector-push-extend c res))))))))))))
 
 ;; Number
 
@@ -597,27 +574,19 @@ C must be either a character or NIL."
 
 (defun read-number (&optional (first-char (read-chr-error)))
   (assert (digit-char-p first-char 10))
-  (let ((base 10)
-	(res 0))
-	
+  (let ((base 10) (res 0))
     (flet ((read-int (&optional (res 0))
-	     
-	     ;;#+(or)
-	     ;; This version calls the Lisp reader on the string with digits
+             ;; Call the Lisp reader on the string with digits.
 	     (loop with vec = (make-array 5 :adjustable t :fill-pointer 0
 					  :element-type 'character)
-		 with ch = (read-chr-nil)
-		 initially 
-		   (when (/= 0 res)
-		     (vector-push-extend (code-char (+ (char-code #\0) res)) vec))
-		 
-		 while (and ch (digit-char-p ch base))
+		 for ch = (read-chr-nil)
+		 initially (unless (zerop res)
+                             (vector-push-extend (code-char (+ (char-code #\0) res)) vec))
+                 while (and ch (digit-char-p ch base))
 		 do (vector-push-extend ch vec)
-		    (setf ch (read-chr-nil))
-		    
-		 finally (when ch (unread-chr ch))
+                 finally (when ch (unread-chr ch))
 			 (return (parse-integer vec :radix base)))))
-	  
+      (declare (dynamic-extent #'read-int))
       (if (char= first-char #\0)
 
 	  (let ((second (read-chr-nil)))
@@ -813,15 +782,17 @@ C must be either a character or NIL."
 			*curr-src-line*))))))))
 
 (defun punct-char1-p (c)
-  (let ((arr (load-time-value
-	      (loop
-		  with arr = (make-array 128 :element-type 'bit :initial-element 0)
-		  for ch across "`=[]()<>{}.,:|^&%+-*/~;@"
-		  do (setf (sbit arr (char-code ch)) 1)
-		  finally (return arr)))))
-    (let ((cc (char-code c)))
-      (and (< cc 128) 
-	   (= (sbit arr cc) 1)))))
+  (declare (optimize speed))
+  (when c
+    (let ((code (char-code c)))
+      (declare (type char-code-type code))
+      (let ((arr (load-time-value
+                  (loop with arr = (make-array 128 :element-type 'bit :initial-element 0)
+                      for ch across "`=[]()<>{}.,:|^&%+-*/~;@"
+                      do (setf (sbit arr (char-code ch)) 1)
+                      finally (return arr)))))
+        (and (< code 128)
+             (= (sbit arr code) 1))))))
 
 (defun punct-char-not-punct-char1-p (c)
   "Punctuation  !  may only occur in the form  !=  "
