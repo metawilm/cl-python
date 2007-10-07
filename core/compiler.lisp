@@ -125,7 +125,9 @@ Only has effect when *include-line-number-hook-calls* is true.")
 
 ;;; Compiler State
 
-(defvar *current-module-name* "__main__"
+(defconstant +__main__-module-name+ "__main__")
+
+(defvar *current-module-name* +__main__-module-name+
   "The name of the module now being compiled; module.__name__ is set to it.")
 
 (defvar *current-module-path* ""
@@ -467,13 +469,8 @@ Only has effect when *include-line-number-hook-calls* is true.")
                                `(svref +mod-static-globals-values+ ,ix)
                              `(gethash '{__metaclass__} +mod-dyn-globals+))))))
              
-             ;; See comment for record-source-file at funcdef-stmt
-	     (excl:without-redefinition-warnings
-	      (excl:record-source-file ',context-cname :type :type)
-	      ,(let ((upcase-sym (ensure-user-symbol (string-upcase context-cname))))
-		 `(excl:record-source-file ',upcase-sym :type :type)))
-	     
-	     ([assign-stmt] ,cls (,name))))))))
+             (record-source-file-loc ',context-cname :type)
+             ([assign-stmt] ,cls (,name))))))))
 
 (defun mangle-suite-private-variables (cname suite)
   "Rename all attributes `__foo' to `_CNAME__foo'."
@@ -490,7 +487,7 @@ Only has effect when *include-line-number-hook-calls* is true.")
 
 (defmacro [comparison-expr] (cmp left right)
   (let ((py-@ (get-binary-comparison-func-name cmp)))
-    `(funcall (function ,py-@) ,left ,right)))
+    `(,py-@ ,left ,right)))
 
 (defmacro [continue-stmt] (&environment e)
   (if (get-pydecl :inside-loop-p e)
@@ -914,15 +911,8 @@ input arguments."
 				     ((([identifier-expr] ,fname)) nil nil nil))
 			(([identifier-expr] ,fname)))))
 		 
-		 ;; Make source location known to Allegro, using "fi:lisp-find-definition".
-		 ;; Also record upper case version, apparently otherwise lower
-		 ;; case names must be |escaped|.
-		 (excl:without-redefinition-warnings
-		  (excl:record-source-file ',context-fname :type :operator)
-		  ,(let ((upcase-sym (ensure-user-symbol (string-upcase context-fname))))
-		     `(excl:record-source-file ',upcase-sym :type :operator)))
-		 
-		 ;; return the function
+		 (record-source-file-loc ',context-fname :operator)
+                 ;; return the function
 		 ([identifier-expr] ,fname)))))))))
 
 
@@ -1450,11 +1440,8 @@ inside an `except' clause.")
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Helper functions for the compiler
 ;;
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Helper functions for the compiler
 
 (defun ast-contains-stmt-p (ast &key allowed-stmts)
   "Returns the forbidden statement, or NIL"
@@ -1846,10 +1833,11 @@ Non-negative integer denoting the number of args otherwise."
          `(excl:named-function ,name
             (lambda (,pa ,e)
               (declare ,+optimize-fastest+) ;; surpress default arg checking
-              (let ((f-body (lambda (,pa)
-                              (declare ,+optimize-fastest+) ;; surpress default arg checking
-                              (locally (declare ,+optimize-std+) ;; but run body with safety
-                                ,@body))))
+              (let ((f-body (excl:named-function ,name
+                              (lambda (,pa)
+                                (declare ,+optimize-fastest+) ;; surpress default arg checking
+                                (locally (declare ,+optimize-std+) ;; but run body with safety
+                                  ,@body)))))
                 (declare (dynamic-extent f-body))
                 (with-nof-args-supplied-as-mi (nargs-mi)
                   (unless (eq nargs-mi (excl::ll :fixnum-to-mi 1))
@@ -1987,7 +1975,7 @@ Non-negative integer denoting the number of args otherwise."
    (when (> (the fixnum *with-py-error-level*) (the fixnum *max-py-error-level*))
      (py-raise '{RuntimeError} "Stack overflow (~A)" *max-py-error-level*))))
 
-(defmacro with-py-errors ((&key (name 'with-py-errors-funcx)) &body body)
+(defmacro with-py-errors ((&key (name 'with-py-errors-func)) &body body)
   (check-type name (or symbol list))
   `(let ((f (excl:named-function ,name
               (lambda () ,@body))))
@@ -2446,6 +2434,61 @@ be bound."
 	
 	(t (loop for elm in form
 	       append (multiple-value-list (apply-splits elm))))))
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;  Source locations of classes and functions
+
+(defun record-source-file-loc (context-name kind)
+  ;; Make source location known to Allegro, using "fi:lisp-find-definition".
+  ;; Also record upper case version, apparently otherwise lower case names must
+  ;; be |escaped| in ANSI mode.
+  ;; Besides in :clpython.user, the sources are also recorded as symbols in
+  ;; the :clpython package. That eases the use.
+  (check-type context-name symbol)
+  (let ((syms (list context-name 
+                    (ensure-user-symbol (string-upcase context-name))
+                    (intern (string context-name) (load-time-value (find-package :clpython)))
+                    (intern (string-upcase context-name) (load-time-value (find-package :clpython))))))
+    
+    (excl:without-redefinition-warnings
+     (dolist (s syms)
+       (excl:record-source-file s :type kind)))))
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;  Compiler warnings, unused variables
+
+(defvar *comp-warning-dispatch* (copy-pprint-dispatch nil))
+
+(defgeneric pprint-compiler-warning (stream cond)
+  (:method (stream (c excl:compiler-inconsistent-name-usage-warning))
+           (write-string ";;; Warning: " stream)
+           (let ((mod (if (string= *current-module-name* +__main__-module-name+)
+                          nil
+                        *current-module-name*)))
+             (format stream "~Aunction `~A': unused variable `~A'."
+                     (if mod (format nil "Module `~A', f" *current-module-name*) "F")
+                     compiler::.function-spec.
+                     (car (simple-condition-format-arguments c))))))
+
+(set-pprint-dispatch 'excl:compiler-inconsistent-name-usage-warning 'pprint-compiler-warning 0 *comp-warning-dispatch*)
+
+(defun call-with-better-python-style-warnings (f)
+  ;; Old:  Warning: Variable clpython.user::x is never used.
+  ;; New:  Warning: Variable {x} is never used.
+  (let ((*print-pprint-dispatch* *comp-warning-dispatch*))
+    (handler-bind ((excl:compiler-inconsistent-name-usage-warning 
+                    (lambda (c)
+                      (format t "~A~%" c)
+                      (muffle-warning c))))
+      (funcall f))))
+
+(defmacro with-python-compiler-style-warnings (&body body)
+  `(flet ((.f () ,@body))
+     (declare (dynamic-extent #'.f))
+     (call-with-better-python-style-warnings #'.f)))
+
 
 ;; `global' in a class def leaks into the methods within:
 ;; 
