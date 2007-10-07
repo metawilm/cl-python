@@ -46,8 +46,7 @@
                                             :name *package-indicator-filename*))))))
 
 (defparameter *use-asdf-binary-locations* t
-  "Whether to store fasl files in directory determined by asdf-binary-locations.
-Does not work correctly yet.")
+  "Whether to store fasl files in directory determined by asdf-binary-locations.")
 
 (defgeneric compiled-file-name (kind modname filepath &key include-dir)
   (:method :around (kind modname filepath &key include-dir)
@@ -114,13 +113,15 @@ Returns NIL if nothing found."
 (defparameter *import-compile-verbose* t)
 (defparameter *import-load-verbose*    t)
 
-(defun compile-py-file (filename &key (output-file (error "required")))
+(defun compile-py-file (filename &key (mod-name (error ":mod-name required"))
+                                      (output-file (error ":output-file required")))
   "Compile Python source file into FASL. Source file must exist."
   (check-type filename pathname)
   (assert (probe-file filename) (filename)
     "Python source file ~A does not exist" filename)
   
-  (let* ((*current-module-path* filename)) ;; used by compiler
+  (let* ((*current-module-path* filename) ;; used by compiler
+         (*current-module-name* mod-name))
     (declare (special *current-module-path*))
     
     (with-auto-mode-recompile (:verbose *import-compile-verbose*)
@@ -131,8 +132,8 @@ Returns NIL if nothing found."
 		      :verbose *import-compile-verbose*)))))
 
 (defun load-compiled-python-file (filename
-				  &key (mod-name (error "mod-name required"))
-                                       #+(or)(dotted-name (error "dotted-name required")) 
+				  &key (mod-name (error ":mod-name required"))
+                                       #+(or)(dotted-name (error ":dotted-name required")) 
 				       (context-mod-name mod-name)
                                        within-mod
 				       (habitat (error "habitat required"))
@@ -275,7 +276,7 @@ Returns the loaded module, or NIL on error."
       (assert (or src-file bin-file))
 
       (let ((bin-file (compiled-file-name kind just-mod-name src-file :include-dir nil)))
-        (compile-py-file src-file :output-file bin-file)
+        (compile-py-file src-file :mod-name dotted-name :output-file bin-file)
         (let ((new-module (load-compiled-python-file bin-file
                                                      :mod-name dotted-name
                                                      :within-mod within-mod
