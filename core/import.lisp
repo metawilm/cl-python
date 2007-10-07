@@ -152,7 +152,8 @@ Returns the loaded module, or NIL on error."
          
   (let* ((old-module (when habitat (get-known-module mod-name habitat))))
     (flet ((do-loading ()
-	     (let* ((new-module nil)
+	     (let* (new-module
+                    loaded-okay
 		    (*module-hook* (lambda (mod)
 				     (setf new-module mod)
                                      ;; Need to register module before it is fully loaded,
@@ -165,26 +166,26 @@ Returns the loaded module, or NIL on error."
                (with-auto-mode-recompile (:verbose *import-load-verbose*)
 		 (let ((*current-module-name* mod-name))
 		   (declare (special *current-module-name*))
-		   (load filename :verbose *import-load-verbose*)))
-               (assert new-module ()
-		 "CLPython bug: module ~A did not call *module-hook* upon loading"
-		 mod-name)
+		   (setf loaded-okay (load filename :verbose *import-load-verbose*))))
+               (unless loaded-okay
+                 (return-from do-loading (values nil nil)))
+               (unless new-module
+		 (break "CLPython bug: module ~A did not call *module-hook* upon loading"
+                        mod-name))
                (when (and old-module update-existing-mod)
 		 (copy-module-contents :from new-module :to old-module)
 		 (setf new-module old-module))
                (values new-module t))))
       
       (let (new-module success)
-	(unwind-protect
-            (progn
-	      (multiple-value-setq (new-module success) (do-loading))
-	      (assert success () "Loading went OK, but no success status?")
-              (return-from load-compiled-python-file new-module))
-          (unless success
-	    (warn "Loading of module \"~A\" aborted~@[ (within ~A)~]."
-		  mod-name within-mod)
+        (multiple-value-setq (new-module success) (do-loading))
+        (if success
+            (return-from load-compiled-python-file new-module)
+          (progn
+            (warn "Loading of module \"~A\" failed~@[ (within ~A)~]."
+                  mod-name within-mod)
             (remove-loaded-module mod-name habitat)
-	    (return-from load-compiled-python-file nil)))))))
+            (return-from load-compiled-python-file nil)))))))
 
 (defun parent-package-local-search-path (mod-name-as-list &rest import-options)
   "Path of MOD-NAME-AS-LIST's parent package."
