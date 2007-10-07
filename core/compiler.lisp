@@ -1079,8 +1079,10 @@ input arguments."
 	    with res = `(push ,item ,list)
 	    for clause in (reverse for-in/if-clauses)
 	    do (setf res (ecase (car clause)
-			   ([for-in-clause] `([for-in-stmt] ,(second clause) ,(third clause) ,res nil))
-			   ([if-clause]     `([if-stmt] (,(second clause) ,res) nil))))
+			   ([for-in-clause] ([make-for-in-stmt] :target (second clause) :source (third clause)
+                                                                :suite res :else-suite nil))
+			   ([if-clause]     ([make-if-stmt] :if-clauses `((,(second clause) ,res))
+                                                            :else-clause nil))))
 	    finally (return res))
        (make-py-list-from-list (nreverse ,list)))))
 

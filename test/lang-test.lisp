@@ -420,7 +420,8 @@ assert f(1, lambda: 2) == 1 + 2")
   )
 
 (defmethod test-lang ((kind (eql :listcompr-expr)))
-  )
+  (run-no-error "assert [x for x in [1,2] if x > 1] == [2]")
+  (run-no-error "assert [(x,y) for x in [1,2] for y in [x]] == [(1,1), (2,2)]"))
 
 (defmethod test-lang ((kind (eql :list-expr)))
   )
