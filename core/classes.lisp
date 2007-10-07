@@ -2072,6 +2072,10 @@ But if RELATIVE-TO package name is given, result may contains dots."
 (def-py-method py-dict.__setitem__ (x key val)
   (sub/dict-set x key val))
 
+(def-py-method py-dict.clear (d)
+  (progn (setf (py-dict-dikt d) (make-dikt))
+         *the-none*))
+
 (def-py-method py-dict.copy (d1)
   (let* ((d2 (make-dict))
          (d2.dikt (py-dict-dikt d2))
@@ -2101,19 +2105,63 @@ But if RELATIVE-TO package name is given, result may contains dots."
 (def-py-method py-dict.items (x)
   (let ((kv-iter-func (dikt-iter-keys-values-func (py-dict-dikt x)))
         res)
-    (loop
-      (multiple-value-bind (k v)
+    (loop (multiple-value-bind (k v)
           (funcall kv-iter-func)
-        (unless k
-          (return))
-        (push (make-tuple-from-list (list (convert-if-symbol k) v)) res)))
+          (unless k (return))
+          (push (make-tuple-from-list (list (convert-if-symbol k) v)) res)))
     (make-py-list-from-list res)))
+
+(def-py-method py-dict.iteritems (x)
+  (make-iterator-from-function
+   :name :py-dict-iterator
+   :func (let ((f (dikt-iter-keys-values-func (py-dict-dikt x))))
+           (lambda ()
+             (multiple-value-bind (k v) (funcall f)
+               (and k (make-tuple-from-list (list k v))))))))
+
+(def-py-method py-dict.iterkeys (x)
+  (make-iterator-from-function
+   :name :py-dict-iterator
+   :func (dikt-iter-keys-func (py-dict-dikt x))))
+
+(def-py-method py-dict.itervalues (x)
+  (make-iterator-from-function
+   :name :py-dict-iterator
+   :func (dikt-iter-values-func (py-dict-dikt x))))
 
 (def-py-method py-dict.keys (x)
   (make-py-list-from-list (loop with f = (dikt-iter-keys-func (py-dict-dikt x))
                               for key = (funcall f)
                               while key collect (convert-if-symbol key))))
 
+(def-py-method py-dict.pop (x key &optional default)
+  (let* ((dikt (py-dict-dikt x))
+         (val (dikt-get dikt key)))
+    (if val
+        (prog1 val (dikt-del dikt key))
+      (or default (py-raise '{KeyError} "Dict has no key `~A' to pop()." key)))))
+
+(def-py-method py-dict.popitem (x)
+  (let ((dikt (py-dict-dikt x)))
+    (when (= (dikt-count dikt) 0)
+      (py-raise '{KeyError} "Dict is empty, can not popitem()."))
+    ;; XXX Only interested in first key/val pair, not whole mapping.
+    (dikt-map dikt
+              (lambda (k v)
+                (dikt-del dikt k)
+                (return-from py-dict.popitem (make-tuple-from-list (list k v)))))))
+
+(def-py-method py-dict.setdefault (x key &optional default)
+  (let ((dikt (py-dict-dikt x)))
+    (or (dikt-get dikt key)
+        (prog1 default (dikt-set dikt key default)))))
+
+(def-py-method py-dict.update (x y)
+  (let ((x.d (py-dict-dikt x))
+        (y.d (py-dict-dikt y)))
+    (dikt-map y.d (lambda (k v) (dikt-set x.d k v))))
+  *the-none*)
+   
 (def-py-method py-dict.values (x)
   (make-py-list-from-list (loop with f = (dikt-iter-values-func (py-dict-dikt x))
                               for val = (funcall f)
@@ -2583,12 +2631,26 @@ But if RELATIVE-TO package name is given, result may contains dots."
 
 (def-py-method py-string.__str__  (x^)  x)
 
+(def-py-method py-string.capitalize (x^)
+  (let ((y (copy-seq x)))
+    (when (> (length x) 0)
+      (setf (aref y 0) (char-upcase (aref y 0))))
+    y))
+
+(def-py-method py-string.center (x^ width &optional (fillchar " "))
+  (assert (= (length fillchar) 1))
+  (error :todo))
+   
 (def-py-method py-string.decode (x^ &optional encoding^ errors)
   (py-decode-unicode x encoding errors))
 
 (def-py-method py-string.encode (x^ &optional encoding^ errors)
   (py-encode-unicode x encoding errors))
 
+(def-py-method py-string.endswith (x^ suffix &optional start end)
+  (when (or start end) (error :todo))
+  (py-bool (string= (subseq x (- (length x) (length suffix))) suffix)))
+  
 (def-py-method py-string.find (x^ item &rest args)
   (declare (ignore x item args))
   (warn "todo :string.find")
@@ -2651,6 +2713,11 @@ But if RELATIVE-TO package name is given, result may contains dots."
 
 (def-py-method py-string.replace (x^ old new &optional count^)
   (substitute (py-val->string new) (py-val->string old) x :count count))
+
+(def-py-method py-string.startswith (x^ prefix &optional start end)
+  (when (or start end) (error :todo))
+  (py-bool (and (>= (length x) (length prefix))
+                (string= (subseq x 0 (length prefix)) prefix))))
 
 (def-py-method py-string.upper (x^)
   (string-upcase x))
