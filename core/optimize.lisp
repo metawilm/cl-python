@@ -171,10 +171,17 @@
 ;;; Comparison: ==
 
 (defun maybe-number-p (expr)
-  (not (stringp expr)))
+  (etypecase expr
+    (null   nil)
+    (list   t)
+    (string nil)
+    (number t)
+    (symbol t)))
 
 (define-compiler-macro py-== (&whole whole x y)
-  (if *inline-fixnum-arithmetic*
+  (if (and *inline-fixnum-arithmetic*
+           (maybe-number-p x)
+           (maybe-number-p y))
       `(let ((.x ,x)
 	     (.y ,y))
 	 (if (and (integerp .x) (integerp .y))
@@ -184,7 +191,9 @@
     whole))
 
 (define-compiler-macro py-!= (&whole whole x y)
-  (if *inline-fixnum-arithmetic*
+  (if (and *inline-fixnum-arithmetic*
+           (maybe-number-p x)
+           (maybe-number-p y))
       `(let ((.x ,x)
 	     (.y ,y))
 	 (if (and (integerp .x) (integerp .y))
@@ -237,7 +246,9 @@
     whole))
 
 (define-compiler-macro py-+ (&whole whole x y)
-  (if *inline-fixnum-arithmetic*
+  (if (and *inline-fixnum-arithmetic*
+           (maybe-number-p x)
+           (maybe-number-p y))
       `(let ((.x ,x)
 	     (.y ,y))
 	 (cond ((and (fixnump .x) (fixnump .y))
@@ -247,7 +258,9 @@
     whole))
 
 (define-compiler-macro py-* (&whole whole x y)
-  (if *inline-fixnum-arithmetic*
+  (if (and *inline-fixnum-arithmetic*
+           (maybe-number-p x)
+           (maybe-number-p y))
       `(let ((.x ,x)
 	     (.y ,y))
 	 (if (and (fixnump .x) (fixnump .y))
@@ -257,7 +270,9 @@
     whole))
 
 (define-compiler-macro py-- (&whole whole x y)
-  (if *inline-fixnum-arithmetic*
+  (if (and *inline-fixnum-arithmetic*
+           (maybe-number-p x)
+           (maybe-number-p y))
       `(let ((.x ,x)
 	     (.y ,y))
 	 (if (and (fixnump .x) (fixnump .y))
@@ -267,7 +282,9 @@
     whole))
 
 (define-compiler-macro py-// (&whole whole x y)
-  (if *inline-fixnum-arithmetic*
+  (if (and *inline-fixnum-arithmetic*
+           (maybe-number-p x)
+           (maybe-number-p y))
       `(let ((.x ,x)
 	     (.y ,y))
 	 (if (and (fixnump .x) (fixnump .y))
@@ -277,16 +294,18 @@
     whole))
 
 (define-compiler-macro py-% (&whole whole x y)
-  (if *inline-fixnum-arithmetic*
-      (if (stringp x)
-	  `(py-string.__mod__ ,x ,y)
-	`(let ((.x ,x)
-	       (.y ,y))
-	   (if (and (fixnump .x) (fixnump .y))
-	       (mod (the fixnum .x) (the fixnum .y))
-	     (locally (declare (notinline py-%))
-	       (py-% .x .y)))))
-    whole))
+  (cond ((stringp x)
+         `(py-string.__mod__ ,x ,y))
+        ((and  *inline-fixnum-arithmetic*
+               (maybe-number-p x)
+               (maybe-number-p y))
+         `(let ((.x ,x)
+                (.y ,y))
+            (if (and (fixnump .x) (fixnump .y))
+                (mod (the fixnum .x) (the fixnum .y))
+              (locally (declare (notinline py-%))
+                (py-% .x .y)))))
+        (t whole)))
 
 (defmethod py-% ((x fixnum) (y fixnum)) (mod x y))
 (defmethod py-% ((x string) y) (py-string.__mod__ x y))
