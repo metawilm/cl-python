@@ -62,8 +62,11 @@ http://groups.google.nl/group/comp.lang.lisp/msg/2520fe9bc7749328?dmode=source"
 (defgeneric slurp-file (file)
   (:documentation "Returns file/stream contents as string")
   (:method ((fname string))
-	   (with-open-file (f fname :direction :input :element-type '(unsigned-byte 8))
-	     (slurp-file f)))
+           #+allegro
+           (excl:file-contents fname)
+           #-allegro
+           (with-open-file (f fname :direction :input :element-type '(unsigned-byte 8))
+             (slurp-file f)))
   (:method ((s stream))
 	   (let ((vec (make-array (file-length s) :element-type '(unsigned-byte 8))))
 	     (read-sequence vec s)
