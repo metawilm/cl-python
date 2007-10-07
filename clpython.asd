@@ -47,9 +47,10 @@
 (asdf:defsystem :clpython.package
     :description "CLPython package and readtables"
     :components ((:module "package"
-			  :components ((:file "package")
-				       (:file "utils" :depends-on ("package"))
-				       (:file "readtable" :depends-on ("package"))))))
+                          :components ((:file "package")
+                                       (:file "utils" :depends-on ("package"))
+                                       (:file "readtable" :depends-on ("package"))
+                                       (:file "aupprint" :depends-on ("package"))))))
 
 (asdf:defsystem :clpython.parser
     :description "Python parser, code walker, and pretty printer"
