@@ -2638,6 +2638,7 @@ But if RELATIVE-TO package name is given, result may contains dots."
     y))
 
 (def-py-method py-string.center (x^ width &optional (fillchar " "))
+  (declare (ignorable x width))
   (assert (= (length fillchar) 1))
   (error :todo))
    
