@@ -2,12 +2,11 @@
   (:use :clpython :common-lisp)
   (:import-from :clpython
 		#:py-val->string #:py-core-object #:py-core-type #:def-py-method
-		#:py-iterate->lisp-list #:py-raise ))
+		#:py-iterate->lisp-list #:py-raise )
+  (:shadow #:|array|)
+  (:export #:|array|))
 
 (in-package :clpython.module.array)
-
-#+(or) ;; This module does not work yet, due to package handling in DEF-PY-METHOD.
-(progn
 
 (defclass |array| (py-core-object)
   ((kind    :type character :initarg :kind    :accessor py-array-kind)
@@ -60,7 +59,7 @@
 			      (file-length f)))))))
     (warn "code ~A = type ~A = ~A bytes per item" type-code lisp-type item-size)
     (flet ((create-array (&optional (size 0))
-	     (make-instance 'py-array 
+	     (make-instance 'array 
 	       :kind type-code
 	       :array (make-array size :element-type lisp-type :adjustable t :fill-pointer 0)
 	       :elmtype lisp-type
@@ -70,11 +69,11 @@
 	    ;; XXX how about user-defined subclasses?
 	    ((string vector)
 	     (let ((arr (create-array (length initializer))))
-	       (funcall (if (stringp initializer) #'py-array.fromstring #'py-array.fromlist)
+	       (funcall (if (stringp initializer) #'array.fromstring #'array.fromlist)
 			arr initializer)
 	       arr))
 	    (t
-	     (py-array.extend (create-array) initializer))) ;; XXX could take __len__
+	     (array.extend (create-array) initializer))) ;; XXX could take __len__
 	(create-array)))))
 
 (def-py-method |array.__repr__| (x)
@@ -95,11 +94,10 @@
   *the-none*)
 
 (def-py-method |array.fromlist| (py-arr list)
-  (py-array.fromstring py-arr list))
+  (array.fromstring py-arr list))
 
-(def-py-method |py-array.extend| (py-arr iterable)
+(def-py-method |array.extend| (py-arr iterable)
   (loop with vec = (py-array-array py-arr)
       for item in (py-iterate->lisp-list iterable)
       do (vector-push-extend item vec))
   *the-none*)
-)
