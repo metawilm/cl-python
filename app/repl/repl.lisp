@@ -112,8 +112,14 @@ KIND can be :ptime, :time, :space, :pspace or NIL."
              (terpri)
              (prof:show-call-graph))
     ((nil)   (funcall f))))
-    
+
+
 (defun repl ()
+  (clpython::with-python-compiler-style-warnings
+      (with-ast-user-readtable ()
+        (repl-1))))
+
+(defun repl-1 ()
   (let* ((repl-mod (make-module))
 	 (*repl-mod* repl-mod)
 	 (dyn-globals (slot-value repl-mod 'dyn-globals))
@@ -159,7 +165,7 @@ KIND can be :ptime, :time, :space, :pspace or NIL."
                                                   (profile helper-func *repl-prof*))))))))))
                    (when (car vals) ;; skip NIL
                      (remember-value (car vals))
-                     (block :repr
+                     (block repr
                        (loop
                          (with-simple-restart
                              (:continue "Retry printing the object.")
@@ -171,7 +177,7 @@ KIND can be :ptime, :time, :space, :pspace or NIL."
                                     (let ((str-val (py-str-string val)))
                                       (write-string (py-val->string str-val)))) 
                                   (write-char #\Newline)))
-                         (return-from :repr)))))))
+                         (return-from repr)))))))
 	     
 	     (handle-as-python-code (total &key print-error (ast-finished :maybe))
                ;; Return T if this succeeded somehow, i.e. parsing as Lisp
@@ -278,7 +284,7 @@ KIND can be :ptime, :time, :space, :pspace or NIL."
 			 (declare (ignore ix))
 			 (case cmd
 			   (:help (print-cmds))
-			   (:q    (return-from repl 'Bye))
+			   (:q    (return-from repl-1 (values)))
 			   (t     (warn "Unknown command: ~S" cmd)))))
 		      
 		      ((string= x "")
@@ -317,3 +323,20 @@ Useful when re-parsing copied interpreter input."
                           (replace new new :start1 (1+ ix) :start2 (+ ix (length prompt)))
                           (setf new (subseq new 0 (- (length new) (length prompt))))))))
     (values new changed)))
+
+
+;; Displaying stacktrace, todo
+#+(or) 
+(defun print-traceback ()
+  (let ((frames (loop for f = (debug:newest-break-frame) then (next-frame f)
+                    while f
+                    when (debugger:frame-visible-p f)
+                    collect f)))
+    (dolist (f frames)
+      (format t "~A ~S~%" (debugger:frame-type f) (debugger:frame-function f)))))
+
+#+(or)
+(defmacro with-stack-trace-restart (&body body)
+  `(restart-bind ((:stacktrace 'print-traceback))
+     ,@body))
+       
