@@ -195,11 +195,12 @@
 ;;; CLPYTHON.PACKAGE - Package and Readtables
 
 (defpackage :clpython.package
-  (:documentation "Package and readtables")
+  (:documentation "Package, readtables, ast/user symbol pretty printer")
   (:use :common-lisp)
   (:export #:in-syntax #:*ast-readtable* #:*user-readtable* #:*ast-user-readtable*
-	   #:setup-omnivore-readmacro #:with-auto-mode-recompile
-	   #:whereas #:sans))
+           #:with-ast-user-readtable #:with-ast-user-pprinter
+           #:setup-omnivore-readmacro
+           #:with-auto-mode-recompile #:whereas #:sans))
 
 ;;; CLPYTHON.PARSER - Parser and Lexer
 

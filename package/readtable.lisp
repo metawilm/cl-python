@@ -59,12 +59,12 @@ it will be interned if INTERN, otherwise an error is raised."
 			     :format-arguments (list name (find-package package))))))))
 
 (defun setup-ast-readmacro (&optional (readtable *readtable*))
-  (let ((read-[-func (read-package-symbol-func :clpython.ast #\[ #\] :intern nil)))
+  (let ((read-[-func (read-package-symbol-func (find-package :clpython.ast) #\[ #\] :intern nil)))
     (set-macro-character #\[ read-[-func t readtable))
   readtable)
 
 (defun setup-user-readmacro (&optional (readtable *readtable*))
-  (let ((read-{-func (read-package-symbol-func :clpython.user #\{ #\} :intern t)))
+  (let ((read-{-func (read-package-symbol-func (find-package :clpython.user) #\{ #\} :intern t)))
     (set-macro-character #\{ read-{-func t readtable))
   readtable)
 
@@ -98,3 +98,7 @@ it will be interned if INTERN, otherwise an error is raised."
     (dotimes (i 256) ;; use file encoding or char-code-limit?
       (set-macro-character (code-char i) read-func t readtable)))
   readtable)
+
+(defmacro with-ast-user-readtable (&body body)
+  `(let ((*readtable* *ast-user-readtable*))
+     ,@body))
