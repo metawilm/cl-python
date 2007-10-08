@@ -460,7 +460,7 @@
  (arglist (argument--comma* arglist-2)
 	  ((destructuring-bind (a *-a **-a) $2
 	     (when a (if $1
-			 (setf (cdr (last $1)) (list a))
+			 (nconc $1 (list a))
 		       (setf $1 (list a))))
 	     (let ((key-start (position :key $1 :key 'car))
 		   (pos-end   (position :pos $1 :key 'car :from-end t)))

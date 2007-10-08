@@ -1177,8 +1177,7 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 							(ltv-find-class 'py-object)
 							supers)))
 					(unless (member (ltv-find-class 'py-user-object) res :test #'eq)
-					  (setf (cdr (last res))
-					    (load-time-value (list (find-class 'py-user-object)))))
+					  (nconc res (load-time-value (list (find-class 'py-user-object)))))
 					res)
 				    (load-time-value (list (find-class 'py-user-object))))
 	     
@@ -1243,7 +1242,7 @@ but the latter two classes are not in CPython.")
 				   'py-type
 				 'py-object)))
 		 (unless (member base-cls res :key #'class-name)
-		   (setf (cdr (last res)) (list (find-class base-cls))))
+		   (nconc (last res) (list (find-class base-cls))))
 		 (return res)))))
 
 (def-py-method py-type.__subclasses__ (x)
