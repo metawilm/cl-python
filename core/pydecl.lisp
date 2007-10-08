@@ -98,8 +98,8 @@ use the CLTL-like environment accessors in this Lisp:~%  ~A ~A."
 
 #+(and :allegro :new-environments)
 (progn
-  ;; Because PYDECL declarations are (currently) ignored by Allegro in the
-  ;; interpreter environment, use the MACROLET way to keep state in those
+  ;; Because PYDECL declarations are ignored by Allegro (at least 8.0 and 8.1)
+  ;; in the interpreter environment, use the MACROLET way to keep state in those
   ;; environments.
  
   (defun use-fallback-env-accessors (env)
