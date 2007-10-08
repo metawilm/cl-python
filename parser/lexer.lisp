@@ -25,6 +25,7 @@
 
 (defvar *lex-read-char*)
 (defvar *lex-unread-char*)
+(defvar *curr-src-line*)
 
 (deftype char-code-type ()
   "CHAR-CODE return value type"
@@ -66,8 +67,6 @@
   `(let ((.char ,ch))
      (and .char (member .char ,list :test #'char=))))
 
-
-(defvar *curr-src-line*)
 
 (defun make-py-lexer (&key (read-chr    (lambda () (read-char *standard-input* nil nil t)))
 			   (unread-chr  (lambda (c) (unread-char c *standard-input*)))
