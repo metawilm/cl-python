@@ -679,7 +679,7 @@
 	(format s "function ~A" (py-function-name func))))))
 
 (def-py-method py-function.__name__ :attribute (func)
-	       (py-function-name func))
+  (py-function-name func))
 
 (defmethod py-function-name ((x function))
   (format nil "~A" (excl::func_name x)))
@@ -1006,6 +1006,10 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 (def-py-method py-none.__repr__ (x)
   (declare (ignore x))
   "None")
+
+(def-py-method py-none.__nonzero__ (x)
+  (declare (ignore x))
+  *the-false*)
    
 ;; Ellipsis
 
@@ -1576,6 +1580,14 @@ But if RELATIVE-TO package name is given, result may contains dots."
                       "module.math"))
 ||#
 
+(def-py-method lisp-package.__repr__ (pkg)
+  (with-output-to-string (s)
+    (print-unreadable-object (pkg s :identity t :type nil)
+      (format s "module ~A (package ~S with ~A external symbols)"
+              (relative-package-name pkg)
+              (package-name pkg)
+              (loop for s being the external-symbol in pkg count s)))))
+
 (def-py-method lisp-package.__getattribute__ (pkg name)
   (declare (optimize (speed 3) (safety 0) (debug 0)))
   (assert (stringp name))
@@ -1604,21 +1616,25 @@ But if RELATIVE-TO package name is given, result may contains dots."
 	       (warn "Attribute `~A' of module `~A' was accessed. ~
  The implementation of this attribute is still incomplete, therefore ~
  unexpected results may occur."
-		     name (relative-package-name pkg))))
-    
+		     name (relative-package-name pkg)))
+
+             (bound-in-some-way (sym)
+               (cond ((boundp sym)
+                      (symbol-value sym))
+                     ((fboundp sym)
+                      (symbol-function sym))
+                     (t nil))))
     ;(declare (dynamic-extent todo-error n/a-error unbound-error no-attr-error))
-    
     (multiple-value-bind (sym kind)
 	(find-symbol name pkg)
-
       (unless sym
 	(no-attr-error))
-
       (when (member kind '(:inherited :internal))
-	(cerror "Use the internal symbol as if it were a public module attribute."
-		"Module `~A' has no public attribute `~A', as that symbol ~x
- is not external in Lisp package `~A'."
-		(relative-package-name pkg) name (package-name pkg)))
+        (cerror (let ((*package* (find-package :common-lisp)))
+                  (format nil "Use the value of the internal symbol ~S: ~A."
+                          sym (or (bound-in-some-way sym) "<unbound>")))
+                "Package `~A' has no attribute `~A': symbol is not external."
+                (relative-package-name pkg) name))
 
       (ecase (impl-status sym)
 	((nil t) )
@@ -1628,11 +1644,7 @@ But if RELATIVE-TO package name is given, result may contains dots."
 			 (setf (get sym +impl-warned-prop+) t)
 			 (incomplete-warning))))
       
-      (let ((val (cond ((boundp sym)
-			(symbol-value sym))
-		       ((fboundp sym)
-			(symbol-function sym))
-		       (t (unbound-error)))))
+      (let ((val (or (bound-in-some-way sym) (unbound-error))))
 	val))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -2915,7 +2927,7 @@ But if RELATIVE-TO package name is given, result may contains dots."
       ;; Give up.
       (if via-getattr
 	  (throw :getattr-block :py-attr-not-found)
-	(py-raise '{AttributeError} "No such attribute: ~A `~A'" x (symbol-name attr.as_sym))))))
+	(py-raise '{AttributeError} "Object ~A has no attribute `~A'." x (symbol-name attr.as_sym))))))
 
 (defun try-calling-getattribute (ga x x.class attr.as_sym)
   (assert (symbolp attr.as_sym))
@@ -3817,8 +3829,53 @@ integer(defun py-val->number (x)
       (py-raise '{TypeError} "Expected a number; got: ~S" x))))
 
 
-(defun py-repr-string (x) (py-val->string (py-repr x)))
-(defun py-str-string  (x) (py-val->string (py-str x)))
+(defun py-repr-string (x &key circle) 
+  "Convert `repr(x)' to Lisp string."
+  (py-val->string (if circle (py-repr-circle x) (py-repr x))))
+
+(defun py-str-string (x &key circle)
+  "Convert `str(x)' to Lisp string."
+  (py-val->string (if circle (py-str-circle x) (py-str x))))
+
+;;; Printing with circle (recursion) detection
+
+(defvar *circle-print-ht* nil)
+(defvar *circle-print-max-occur* 3)
+(defvar *circle-print-max-num-objects* 100)
+(defvar *circle-print-abbrev* "...")
+
+(excl:def-fwrapper print-circle-wrapper (x)
+  (typecase x
+    ((string number) (excl:call-next-fwrapper)) ;; safe non-container types
+    ((vector list) (if (> (length x) *circle-print-max-num-objects*)
+                       *circle-print-abbrev*
+                     (excl:call-next-fwrapper)))
+    (t (if (or (> (incf (gethash x *circle-print-ht* 0)) *circle-print-max-occur*)
+               (>= (hash-table-count *circle-print-ht*) *circle-print-max-num-objects*))
+           *circle-print-abbrev*
+         (excl:call-next-fwrapper)))))
+
+(defmacro with-circle-detection (&body body)
+  `(let ((f (lambda () ,@body)))
+     (declare (dynamic-extent f))
+     (call-with-circle-detection f)))
+
+(defun call-with-circle-detection (f)
+  (declare (dynamic-extent f))
+  (if *circle-print-ht*
+      (funcall f)
+    (let ((*circle-print-ht* (make-hash-table :test 'eq)))
+      (unwind-protect
+          (progn (excl:fwrap #'py-repr :print-circle-wrapper 'print-circle-wrapper)
+                 (funcall f))
+        (excl:funwrap #'py-repr :print-circle-wrapper)))))
+  
+(defun py-repr-circle (x)
+  (with-circle-detection (py-repr x)))
+
+(defun py-str-circle (x)
+  (with-circle-detection (py-str x)))
+
 
 (defun py-string->symbol  (x &optional (package #.(find-package :clpython.user)))
   ;; {symbol,string} -> symbol
