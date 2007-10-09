@@ -68,7 +68,7 @@ starts a new top-level statement. Uses an extra heuristic if *use-ast-return-stm
                                        (with-matching (?else-clause ([suite-stmt] ?stmts))
                                          ([return-stmt-p] (car (last ?stmts))))))))))))
     (etypecase ast
-      ((string number) t)
+      ((or string number) t)
       (list (cond ((not (member (car ast) *multi-line-statements*))
                    t)
                   ((and *use-ast-return-stmt-heuristic* ([funcdef-stmt-p] ast))
