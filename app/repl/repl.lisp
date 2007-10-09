@@ -119,11 +119,31 @@ KIND can be :ptime, :time, :space, :pspace or NIL."
       (with-ast-user-readtable ()
         (repl-1))))
 
+(defvar *object-repr-char-limit* 300
+  "At most this many characters are printed for an object represenation in the REPL (NIL = infinite)")
+(defvar *truncation-explain* t)
+
+(defun print-string-truncated (s)
+  (check-type s string)
+  (if (and (integerp *object-repr-char-limit*)
+           (> *object-repr-char-limit* 0)
+           (> (length s) *object-repr-char-limit*))
+      (progn (write-string (subseq s 0 *object-repr-char-limit*))
+             (write-string "...")
+             (when *truncation-explain*
+               (terpri)
+               (format t ";; String representation truncated after ~A characters (of ~A) due to ~S."
+                       *object-repr-char-limit* (length s) '*object-repr-char-limit*)
+               (setf *truncation-explain* nil)))
+    (write-string s))
+  (values))
+  
 (defun repl-1 ()
   (let* ((repl-mod (make-module))
 	 (*repl-mod* repl-mod)
 	 (dyn-globals (slot-value repl-mod 'dyn-globals))
 	 (clpython::*habitat* (clpython::make-habitat))
+         (*truncation-explain* t)
 	 acc)
     
     (setf (gethash '{_}        dyn-globals) *the-none*
@@ -173,9 +193,9 @@ KIND can be :ptime, :time, :space, :pspace or NIL."
                            ;; using __str__ and print without quotes.
                            (loop for val in vals
                                do (if (stringp val)
-                                      (write-string (py-repr val)) 
-                                    (let ((str-val (py-str-string val)))
-                                      (write-string (py-val->string str-val)))) 
+                                      (print-string-truncated (py-repr val))
+                                    (let ((str-val (py-str-string val :circle t)))
+                                      (print-string-truncated (py-val->string str-val)))) 
                                   (write-char #\Newline)))
                          (return-from repr)))))))
 	     
