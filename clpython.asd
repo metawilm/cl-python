@@ -93,7 +93,8 @@
 				       (:file "array")
 				       (:file "math")
                                        (:file "string")
-                                       (:file "re")))))
+                                       (:file "re")
+                                       (:file "gc")))))
 
 (asdf:defsystem :clpython
     :description "CLPython - an implementation of Python in Common Lisp"
