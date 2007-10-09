@@ -351,7 +351,10 @@
   (excl::fast
    (typecase x
      
-     (fixnum (excl::print-fixnum stream 10 x)
+     (fixnum (when (< x 0)
+               (write-char #\- stream)
+               (setf x (- x)))
+             (excl::print-fixnum stream 10 x) ;; only handles positive numbers!
 	     nil)
      
      (string (excl::write-string-nokey x stream)
