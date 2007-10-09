@@ -3845,15 +3845,16 @@ integer(defun py-val->number (x)
 (defvar *circle-print-abbrev* "...")
 
 (excl:def-fwrapper print-circle-wrapper (x)
-  (typecase x
-    ((string number) (excl:call-next-fwrapper)) ;; safe non-container types
-    ((vector list) (if (> (length x) *circle-print-max-num-objects*)
-                       *circle-print-abbrev*
-                     (excl:call-next-fwrapper)))
-    (t (if (or (> (incf (gethash x *circle-print-ht* 0)) *circle-print-max-occur*)
-               (>= (hash-table-count *circle-print-ht*) *circle-print-max-num-objects*))
-           *circle-print-abbrev*
-         (excl:call-next-fwrapper)))))
+  (cond ((typep x '(or string number))
+         (excl:call-next-fwrapper))
+        ((and (typep x '(vector list))
+              (> (length x) *circle-print-max-num-objects*))
+         *circle-print-abbrev*)
+        ((or (> (incf (gethash x *circle-print-ht* 0)) *circle-print-max-occur*)
+             (>= (hash-table-count *circle-print-ht*) *circle-print-max-num-objects*))
+         *circle-print-abbrev*)
+        (t 
+         (excl:call-next-fwrapper))))
 
 (defmacro with-circle-detection (&body body)
   `(let ((f (lambda () ,@body)))
@@ -3902,7 +3903,7 @@ the ~/.../ directive: ~/clpython:repr-fmt/"
     (error "Format string function py-repr-fmt does not support colon, ~
             at or parameters"))
   
-  (let ((s (py-repr-string argument)))
+  (let ((s (py-repr-string argument :circle t)))
     (write-string s stream)))
 
 
