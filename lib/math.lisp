@@ -4,32 +4,52 @@
            #:|pow| #:|exp| #:|log| #:|log10| #:|sqrt|
            #:|sin| #:|cos| #:|tan| #:|asin| #:|acos| #:|atan| #:|sinh| #:|cosh| #:|tanh| #:|atan2|
            #:|ceil| #:|floor| #:|degrees| #:|radians|
-           #:|fmod| #:|fabs| #:|modf| #:|frexp| #:|hypot| #:|ldexp| ))
+           #:|fmod| #:|fabs| #:|modf| #:|frexp| #:|hypot| #:|ldexp| )
+  (:shadow #:|sin| #:|cos| #:|tan| #:|asin| #:|acos| #:|atan| #:|sinh| #:|cosh| #:|tanh|))
 
 (in-package :clpython.module.math)
 
-(defconstant |e| (exp 1))
+(defgeneric conv (x)
+  (:method ((x number)) x)
+  (:method (x)          (clpython::py-float x)))
+   
+(defconstant |e| #.(exp 1))
 (set-impl-status '(|pi| |e|) t)
 
-(set-impl-status '(|pi| |sin| |cos| |tan| |asin| |acos| |atan| |sinh| |cosh| |tanh|) t)
+(set-impl-status '|pi| t)
+
+(defmacro def-unary-conv-func (math cl)
+  `(defun ,math (x) (,cl (conv x))))
+
+(def-unary-conv-func |sin| cl:sin)
+(def-unary-conv-func |cos| cl:cos)
+(def-unary-conv-func |tan| cl:tan)
+(def-unary-conv-func |asin| cl:asin)
+(def-unary-conv-func |acos| cl:acos)
+(def-unary-conv-func |atan| cl:atan)
+(def-unary-conv-func |sinh| cl:sinh)
+(def-unary-conv-func |cosh| cl:cosh)
+(def-unary-conv-func |tanh| cl:tanh)
+
+(set-impl-status '(|tan| |asin| |acos| |atan| |sinh| |cosh| |tanh|) t)
 (set-impl-status '|atan2| :todo "CL does not have it?")
 
-(defun |ceil| (x) (ceiling x))
+(defun |ceil| (x) (ceiling (conv x)))
 (set-impl-status '(|ceil| |floor|) t)
 
-(defun |pow| (x y) (expt x y))
-(defun |log10| (x) (log x 10))
+(defun |pow| (x y) (expt (conv x) (conv y)))
+(defun |log10| (x) (log (conv x) 10))
 (set-impl-status '(|pow| |exp| |log| |log10| |sqrt|) t)
                  
 (set-impl-status '(|degrees| |radians|) :todo)
 
-(defun |fmod| (x y) (mod x y))
-(defun |fabs| (x) (abs x))
-(defun |modf| (x) (make-tuple-from-list (multiple-value-list (truncate x))))
+(defun |fmod| (x y) (mod (conv x) (conv y)))
+(defun |fabs| (x) (abs (conv x)))
+(defun |modf| (x) (make-tuple-from-list (multiple-value-list (truncate (conv x)))))
 (set-impl-status '(|fmod| |fabs| |modf|) t)
 
 (set-impl-status '|frexp| :todo)
 
-(defun |hypot| (x y) (abs (complex x y)))
-(defun |ldexp| (x y) (* x (expt 2 y)))
+(defun |hypot| (x y) (abs (complex (conv x) (conv y))))
+(defun |ldexp| (x y) (* x (expt 2 (conv y))))
 (set-impl-status '(|hypot| |ldexp|) t)

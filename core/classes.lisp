@@ -1786,7 +1786,9 @@ But if RELATIVE-TO package name is given, result may contains dots."
   (if z
       (progn (setf z (py-val->integer z))
 	     (mod (expt x y) z))
-    (expt x y)))
+    (if (numberp y)
+        (expt x y)
+      *the-notimplemented*)))
 
 (def-py-method py-number.__repr__ (x^) (format nil "~A" (deproxy x)))
 (def-py-method py-number.__str__ (x^)  (py-number.__repr__ x))
@@ -3797,6 +3799,7 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
 (def-py-shortcut-func py-oct  {__oct__} )
 (def-py-shortcut-func py-len  {__len__} )
 (def-py-shortcut-func py-nonzero {__nonzero__} )
+(def-py-shortcut-func py-float {__float__})
 
 (excl:without-redefinition-warnings
  (fmakunbound 'py-hash)

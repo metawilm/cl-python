@@ -176,6 +176,7 @@
 	   "__xor__" "__rxor__" "__ixor__"  "__pow__" "__ipow__"
 	   ;; unary
 	   "__invert__" "__pos__" "__neg__" "__contains__" "__cmp__" "__abs__" "__len__"
+           "__float__"
 	   ;; comparison
 	   "__eq__" "__lt__" "__gt__" "__cmp__" 
 	   ;; representation
