@@ -62,6 +62,8 @@ http://groups.google.nl/group/comp.lang.lisp/msg/2520fe9bc7749328?dmode=source"
 (defgeneric slurp-file (file)
   (:documentation "Returns file/stream contents as string")
   (:method ((fname string))
+           (slurp-file (pathname fname)))
+  (:method ((fname pathname))
            #+allegro
            (excl:file-contents fname)
            #-allegro
