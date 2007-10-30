@@ -36,8 +36,8 @@
   (:use )
   (:export "and" "as" "assert" "break" "class" "continue" "def" "del" "elif" "else"
 	   "except" "exec" "finally" "for" "from" "global" "if" "import" "in" "is"
-	   "lambda" "not" "or" "pass" "print" "raise" "return" "try" "while" "yield")
-  (:intern "is not" "not in"))
+	   "lambda" "not" "or" "pass" "print" "raise" "return" "try" "while" "yield"
+           "is not" "not in"))
 
 (defpackage :clpython.ast.operator
   (:documentation "Unary and binary operators")
@@ -208,7 +208,7 @@
 (defpackage :clpython.parser
   (:documentation "Parser and lexer for Python code")
   (:use :common-lisp :clpython.package)
-  (:export #:parse-python-file #:parse-python-string #:with-python-code-reader ;; Parser
+  (:export #:parse ;; Parser
            #:ast-complete-p
            
            #:match-p #:with-matching #:with-perhaps-matching ;; AST pattern matcher
@@ -239,7 +239,7 @@
 	   #:*the-empty-tuple* #:make-tuple-from-list
 	   #:*py-modules* #:dyn-globals #:py-call #:py-class-of #:py-raise #:bind-val
 	   #:py-repr-string
-	   #:run-python-string #:run-python-file #:exception-args
+	   #:run #:exception-args
 	   ;; more to come...
 	   #:*exceptions-loaded*
 

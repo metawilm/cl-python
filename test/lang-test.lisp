@@ -37,15 +37,15 @@
 
 (defmacro run-error (string condtype &rest options)
   `(with-all-compiler-variants-tried
-       (test-error (run-python-string ,string) :condition-type ',condtype ,@options)))
+       (test-error (run ,string) :condition-type ',condtype ,@options)))
 
 (defmacro run-no-error (string &rest options)
   `(with-all-compiler-variants-tried
-       (test-no-error (run-python-string ,string) ,@options)))
+       (test-no-error (run ,string) ,@options)))
 
 (defmacro run-test (val string &rest options)
   `(with-all-compiler-variants-tried
-       (test ,val (run-python-string ,string) ,@options)))
+       (test ,val (run ,string) ,@options)))
 
 
 (defgeneric test-lang (kind))
@@ -68,7 +68,7 @@
   (run-no-error     "assert not False")
   
   (multiple-value-bind (x err) 
-      (ignore-errors (run-python-string "assert 0, 'abc'"))
+      (ignore-errors (run "assert 0, 'abc'"))
     (test-false x)
     (test-true err)
     (test-true (string= (pop (exception-args err)) "abc"))))
@@ -356,7 +356,7 @@ assert f() == f"))
   )
 
 (defmethod test-lang ((kind (eql :global-stmt)))
-  (test-warning (run-python-string "global x")) ;; useless at toplevel
+  (test-warning (run "global x")) ;; useless at toplevel
   (run-error "
 def f():
   x = 3
@@ -376,7 +376,7 @@ def f():
   return g
 f()(4)
 assert x == 4" :fail-info "Global decl is also valid for nested functions")
-  (test-warning (run-python-string "
+  (test-warning (run "
 global y  # bogus declaration; check it does not leak into f
 def f(a):
   y = a

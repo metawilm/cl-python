@@ -15,8 +15,8 @@
 	   
 (defun ps (s &optional (incl-module t))
   (if incl-module
-      (parse-python-string s :incl-module t)
-    (parse-python-one-expr s)))
+      (parse s :incl-module t)
+    (parse s :one-expr t)))
 
 (defun run-parser-test ()
   (with-subtest (:name "CLPython-Parser")
@@ -112,24 +112,24 @@ def f(): pass" nil))
     
     ;; Empty string is parsed as module without body
     (test-equal '([module-stmt] ([suite-stmt] () ))
-		(parse-python-string ""))
+		(parse ""))
 
     ;; 'y = yield x' is todo, currently raises SyntaxError
-    (test-error (parse-python-string "y = yield x")
+    (test-error (parse "y = yield x")
 		:condition-type '{SyntaxError})
     
     ;; parsing a file
     #+(and allegro unix) ;; no WITH-OPEN-TEMP-FILE on windows
-    (let ((fname (excl.osi:with-open-temp-file (s "clpython-ast-test")
+    (let ((fname (excl.osi:with-open-temp-file (s (format nil "_clpython-ast-test-~A" (gensym)))
 		   (format s "print 42"))))
       (test-equal '(([print-stmt] nil (42) nil))
-		  (..parser:parse-python-file fname :incl-module nil))
+		  (..parser:parse (pathname fname) :incl-module nil))
       (test t (excl.osi:unlink fname)))
     
     ;; handling eof
     (test-true (subtypep '{UnexpectedEofError} '{SyntaxError}))
     (flet ((try-parse (s)
-	     (handler-case (parse-python-string s)
+	     (handler-case (parse s)
 	       ({UnexpectedEofError} () :unexp-eof-error)
 	       ({SyntaxError}        () :syntax-error)
 	       (condition            () :condition))))
@@ -141,7 +141,7 @@ def f(): pass" nil))
       (test :syntax-error    (try-parse " 42") :fail-info "(Leading whitespace)"))
     (test-equal 42 (handler-bind (({SyntaxError} (lambda (c) (declare (ignore c))
                                                          (continue))))
-                     (parse-python-one-expr " 42")))
+                     (parse " 42" :one-expr t)))
     ))
 
 (defun run-code-walker-test ()
@@ -157,21 +157,21 @@ def f(): pass" nil))
     ;; Test  string -> ast -> string  and ast -> string -> ast
     (macrolet ((p (str &rest options)
 		 `(progn 
-		    (test ,str (py-pprint (parse-python-string ,str))
+		    (test ,str (py-pprint (parse ,str))
 			  :test 'string-strip-= ,@options)
-		    (when (string-strip-= ,str (py-pprint (parse-python-string ,str)))
-		      (test-equal (parse-python-string ,str)
-				  (parse-python-string (py-pprint (parse-python-string ,str)))
+		    (when (string-strip-= ,str (py-pprint (parse ,str)))
+		      (test-equal (parse ,str)
+				  (parse (py-pprint (parse ,str)))
 				  ,@options))))
 	       (pe (str &rest options)
 		 `(progn 
-		    (test ,str (py-pprint (parse-python-one-expr ,str))
+		    (test ,str (py-pprint (parse ,str :one-expr t))
 			  :test 'string-strip-= ,@options)
-		    (when (string-strip-= ,str (py-pprint (parse-python-one-expr ,str)))
-		      (test-equal (parse-python-string ,str)
-				  (parse-python-string (py-pprint (parse-python-one-expr ,str)))
+		    (when (string-strip-= ,str (py-pprint (parse ,str :one-expr t)))
+		      (test-equal (parse ,str)
+				  (parse (py-pprint (parse ,str :one-expr t)))
 				  ,@options)))))
-      (parse-python-string "")
+      (parse "")
       ;; number
       (pe "42")
       (pe "1.")
@@ -243,7 +243,7 @@ def f(): pass" nil))
       (p "x < y")
       (p "x <= y <= z")
       (p "a < b > c == d != e <= f >= g != h")
-      (test "x != y" (clpython::py-string.strip (py-pprint (parse-python-string "x <> y"))) :test 'string=)
+      (test "x != y" (clpython::py-string.strip (py-pprint (parse "x <> y"))) :test 'string=)
       ;; continue-stmt
       (p "continue")
       ;; del-stmt

@@ -28,18 +28,20 @@
     ;; Because not every line has a line-no token, we first initialize all
     ;; available line-nos to zero. In the final print-out, we show 0 for
     ;; lines not visited, and blank when no stats available.
-    (with-line-numbers (:compile-hook (lambda (n) (setf (gethash n count-ht) 0))
-				      :runtime-hook (lambda (n) (incf (gethash n count-ht 0))))
-      (clpython::run-python-ast (parse-python-string str)))
+    (with-line-numbers (:compile-hook (lambda (n) 
+                                        (setf (gethash n count-ht) 0))
+                                      :runtime-hook (lambda (n)
+                                                      (incf (gethash n count-ht 0))))
+      (clpython::run-python-ast (parse str)))
     
     ;; print file source with stats
     (terpri)
     (with-input-from-string (f str)
-      (loop for i from 0
+      (loop for i from 1
 	  for line = (read-line f nil nil)
 	  while line
 	  for count = (gethash i count-ht)
-	  do (format t "~4D | " (1+ i))
+	  do (format t "~4D | " i)
 	     (if count
 		 (format t "~8D | " count)
 	       (format t "~8A | " ""))

@@ -13,7 +13,7 @@
 (in-syntax *ast-user-readtable*)
 
 (defun parse-with-replacements (string replacements &key (warn-equal t))
-  (let ((ast (parse-python-string string)))
+  (let ((ast (parse string)))
     (if warn-equal
 	(loop for (old . new) in replacements
 	    do (let ((new-ast (subst new old ast :test 'equalp)))

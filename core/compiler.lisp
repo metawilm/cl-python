@@ -553,7 +553,7 @@ Only has effect when *include-line-number-hook-calls* is true.")
 
 (defun exec-stmt-string (code-string globals locals allowed-stmts)
   (check-type code-string string)
-  (let ((ast (parse-python-string code-string)))
+  (let ((ast (parse code-string)))
     (exec-stmt-check-ast code-string ast allowed-stmts)
     (exec-stmt-ast ast globals locals)))
 
@@ -570,7 +570,7 @@ Only has effect when *include-line-number-hook-calls* is true.")
     (when (and *exec-early-parse-constant-string*
                (stringp code-string))
       (multiple-value-bind (ast error)
-          (ignore-errors (parse-python-string code-string))
+          (ignore-errors (parse code-string))
         (if error
             (warn-static-error error)
           (multiple-value-bind (ok error)

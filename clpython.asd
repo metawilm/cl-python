@@ -15,32 +15,14 @@
   (error "This ASDF file should be run interpreted."))
 
 
-;;; Check ASDF version
+;;; Check for Allegro
 
-;; The ASDF version initially supplied with ACL 8.0 (in directory acl80/code/asdf.fasl)
-;; does not handle (:serial t) correctly (it does not load A before compiling B).
-;; That version has revision (1 88).
-;;
-;; On december 1, 2006, a patch was supplied, to be installed with (sys:update-allegro).
-;; That patch updates it to revision (1 102), which is current (2007.01.04).
-;; Here we verify that patching been done.
+#+(and allegro-version>= (not (version>= 8 1)))
+(warn "CLPython is being developed on Allegro Common Lisp 8.1, ~
+       but it might work in other environments too.")
 
-#-(and allegro-version>= (version>= 7 0))
-(cerror "Continue anyway"
-	"CLPython requires Allegro Common Lisp 8.0 (or perhaps 7.0)")
 
-#+(and allegro-version>= (version>= 7 0) (not (version>= 8 0)))
-(warn "CLPython is tested in Allegro Common Lisp 8.0, ~
-       but it might work in version 7.0 too.")
-
-#+allegro
-(destructuring-bind (maj min) asdf::*asdf-revision*
-  (unless (or (> maj 1)
-	      (and (= maj 1) (>= min 102)))
-    (cerror "Continue anyway, using outdated ASDF"
-	    "CLPython requires a newer version of ASDF. ~
-             You can upgrade automatically, using (sys:update-allegro)")))
-
+;;; If you want ot use
 
 ;;; Systems
 
@@ -58,12 +40,16 @@
     :components ((:module "parser"
 			  :components ((:file "psetup"  )
 				       (:file "grammar"  :depends-on ("psetup"))
-				       (:file "lexer"    :depends-on ("grammar"))
+                                       (:file "grammar-aclyacc" :depends-on ("grammar"))
+                                       (:file "lexer"    :depends-on ("grammar"))
 				       (:file "parser"   :depends-on ("grammar" "lexer"))
                                        (:file "ast-match")
                                        (:file "ast-util" :depends-on ("ast-match" "grammar"))
                                        (:file "walk"     )
-				       (:file "pprint"   )))))
+				       (:file "pprint"   )
+
+                                       
+                                       (:file "grammar-clyacc" :depends-on ("grammar")))))) ;; only loaded if CL-Yacc is available; see below.
 
 (asdf:defsystem :clpython.core
     :description "Python semantics and compiler"
@@ -106,17 +92,36 @@
 			 (funcall (find-symbol (string '#:run) :clpython.test))))
 
 (defmethod asdf:perform :after ((op asdf:test-op) (c (eql (asdf:find-system :clpython))))
-  (funcall (find-symbol (string '#:run) :clpython.test)))
+  (funcall (find-symbol (string '#:run-tests) :clpython.test)))
 
 (defmethod asdf:perform :after ((op asdf:load-op) (c (eql (asdf:find-system :clpython))))
   (terpri)
   (format t "CLPython quick start:~%")
-  (format t "  Run a Python file: (clpython:run-python-file \"~~/example/foo.py\").~%~%")
-  (format t "After loading ASDF system :CLPYTHON-APP you can:~%")
+  (format t "  Run a Python file: (clpython:run #p\"~~/example/foo.py\").~%~%")
+  (format t "After loading ASDF system `clpython-app' you can:~%")
   (format t "  Start the Python read-eval-print loop: (clpython.app.repl:repl)~%")
   (format t "  See the call count profiler: (clpython.app.profiler:profile-test).~%~%"))
 
+
+;; Check for presence of CL-Yacc
+(defvar *support-clyacc* nil
+  "Using CL-Yacc for CLPython is in progress.")
+
+(let ((cl-yacc-grammar (let* ((sys (asdf:find-system :clpython.parser))
+                              (mod (car (asdf:module-components sys))))
+                         (asdf:find-component mod "grammar-clyacc"))))
+  (defmethod asdf:perform :around ((op asdf:load-op) (c (eql cl-yacc-grammar)))
+    (when (and *support-clyacc* (asdf:find-system :yacc nil))
+      (call-next-method)
+      (format t "Note: The asdf system CL-Yacc was found. To use CL-Yacc as parser for CLPython, bind ~S to ~S.~%"
+              (find-symbol (string '#:*default-yacc-version*) (find-package '#:clpython.parser)) :cl-yacc)))
+  
+  (defmethod asdf:perform :around ((op asdf:compile-op) (c (eql cl-yacc-grammar)))
+    (when (and *support-clyacc* asdf:find-system :yacc nil)
+      (call-next-method))))
+
+
+;; Testing is never finished.
 (defmethod asdf:operation-done-p ((o asdf:test-op)
 				  (c (eql (asdf:find-system :clpython))))
-  ;; Testing is never finished.
   (values nil))

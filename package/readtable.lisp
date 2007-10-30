@@ -87,6 +87,7 @@ it will be interned if INTERN, otherwise an error is raised."
        (setf (excl:named-readtable :py-user-readtable) *user-readtable*)
        (setf (excl:named-readtable :py-ast-user-readtable) *ast-user-readtable*))
 
+
 ;;; Readtable that takes in everything available
 
 (defun setup-omnivore-readmacro (function &optional (readtable *readtable*))

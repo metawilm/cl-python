@@ -30,7 +30,8 @@
   (let ((msg (format nil "Unexpected end of file~@[ (line ~A)~]." line-no)))
     (if clpython:*exceptions-loaded*
 	(funcall 'clpython:py-raise '{UnexpectedEofError} msg)
-      (raise-syntax-error msg))))
+      (raise-syntax-error msg)))
+  (assert nil () "unreachable"))
 
 ;;; Depenency on Allegro's YACC
 

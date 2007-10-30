@@ -109,9 +109,6 @@ If COMPILE is true, the AST is compiled into a function before running."
                  (compile nil f)
                (coerce f 'function))))
     (funcall fc)))
-    
-(defun run-python-string (string &rest args)
-  (apply #'run-python-ast (parse-python-string string) args))
 
-(defun run-python-file (fname &rest args)
-  (apply #'run-python-ast (parse-python-file fname) args))
+(defun run (thing &rest args)
+  (apply #'run-python-ast (parse thing) args))

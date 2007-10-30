@@ -113,6 +113,11 @@ Returns NIL if nothing found."
 (defparameter *import-compile-verbose* t)
 (defparameter *import-load-verbose*    t)
 
+(defmacro with-python-code-reader (() &body body)
+  ;; The Python parser handles all reading.
+  `(let ((*readtable* (load-time-value (setup-omnivore-readmacro #'clpython.parser:parse (copy-readtable nil)))))
+     ,@body))
+
 (defun compile-py-file (filename &key (mod-name (error ":mod-name required"))
                                       (output-file (error ":output-file required")))
   "Compile Python source file into FASL. Source file must exist."

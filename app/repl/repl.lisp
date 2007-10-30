@@ -213,7 +213,7 @@ KIND can be :ptime, :time, :space, :pspace or NIL."
                           (format t ";; Python parse failed:  ~A~%" err))
                         (return-from handle-as-python-code :syntax-error)))
                  
-                 (let ((ast (handler-case (parse-python-string total)
+                 (let ((ast (handler-case (parse total)
                               ;; Try to parse input into AST 
                               ;;  - If that fails due to unexpected EOF, we still intend to parse
                               ;;    as Python code, therefore return T.
@@ -227,7 +227,7 @@ KIND can be :ptime, :time, :space, :pspace or NIL."
                                       (multiple-value-bind (new-str changed)
                                           (remove-interpreter-prompts total *prompts*)
                                         (when changed
-                                          (handler-case (parse-python-string new-str)
+                                          (handler-case (parse new-str)
                                             ({UnexpectedEofError} ()
                                               (return-from handle-as-python-code t))
                                             (error (err2)
@@ -353,7 +353,7 @@ Useful when re-parsing copied interpreter input."
                     when (debugger:frame-visible-p f)
                     collect f)))
     (dolist (f frames)
-      (format t "~A ~S~%" (debugger:frame-type f) (debugger:frame-function f)))))
+      (format t "tb> ~A ~S~%" (debugger:frame-type f) (debugger:frame-function f)))))
 
 #+(or)
 (defmacro with-stack-trace-restart (&body body)

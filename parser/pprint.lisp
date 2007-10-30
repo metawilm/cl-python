@@ -363,4 +363,4 @@ If STREAM is not supplied, output goes to a string."
 ;; Utils
 
 (defun parse-and-print (str)
-  (py-pprint (parse-python-string str)))
+  (py-pprint (parse str)))

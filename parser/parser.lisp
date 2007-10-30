@@ -12,103 +12,40 @@
 
 ;;;; Parser for Python code
 
-(defun handle-parser-condition (c)
-  ;; When a SyntaxError is thrown by us in the lexer, the parser
-  ;; first signals the SyntaxError, then it raises a GRAMMAR-PARSE-ERROR.
-  (declare (special clpython:*exceptions-loaded*))
-  (cond ((and clpython:*exceptions-loaded* (typep c '{SyntaxError}))
-	 (error c)) ;; Converting SIGNAL to ERROR
-	
-	((typep c 'excl.yacc:grammar-parse-error)
-	 (let* ((pos (excl.yacc:grammar-parse-error-position c))
-		(line (second (assoc :line-no pos)))
-                (eof-seen (second (assoc :eof-seen pos)))
-		(token (excl.yacc:grammar-parse-error-token c))
-		(encl-error (excl.yacc::grammar-parse-error-enclosed-error c)))
+(defvar *default-yacc-version* #+allegro :allegro-yacc #-allegro :cl-yacc)
 
-	   (when (and (integerp token)
-		      *include-line-numbers*)
-	     (setf token '[newline]))
-	   
-	   (cond (encl-error ;; Error in one of our grammar rules
-		  (when clpython:*exceptions-loaded*
-		    (assert (not (typep encl-error '{SyntaxError}))
-			() "CLPython: Strange: Parser raises EXCL.YACC:GRAMMAR-PARSE-ERROR ~
-                              with a SyntaxError enclosed, without first signalling that ~
-                              SyntaxError (~A)." c))
-
-		  (raise-syntax-error
-		   (format nil "Parse error at line ~A~@[, at token `~S'~].~%[inner error: ~A]"
-			   line token encl-error)))
-		 
-		 ((or (eq token 'excl.yacc:eof)
-                      eof-seen)
-		  (raise-unexpected-eof)
-		  (assert nil () "unreachable"))
-		 
-		 (t (raise-syntax-error
-		     (format nil "At line ~A, parser got unexpected token: `~A'."
-			     line token))
-		    (assert nil () "unreachable")))))))
-
-(defparameter *catch-yacc-conditions* t
-  "Whether to catch YACC conditions, and translate them into Python exceptions.
-Disable to debug the grammar rules.")
-    
-(defun parse-python-with-lexer (&rest lex-options)
-  (let* ((lexer (apply #'make-py-lexer lex-options))
-	 (grammar (make-instance 'python-grammar :lexer lexer)))
-    
-    (if *catch-yacc-conditions*
-        (handler-bind 
-            ((condition #'handle-parser-condition))
-          (excl.yacc:parse grammar))
-      (excl.yacc:parse grammar))))
-
-(defun parse-python-file (file &rest options)
-  "Parse given file (either path or stream), return AST."
-  (apply #'parse-python-string (clpython.package::slurp-file file) options))
-
-(defgeneric parse-python-string (string &rest options)
-  (:documentation "Parse given string, return AST.")
+(defgeneric parse (thing &rest options)
   
-  (:method :around ((s string) &rest options &key (incl-module t))
-	   (let ((res (apply #'call-next-method s (sans options :incl-module))))
-	     (if incl-module
-		 res
-	       (destructuring-bind (module-stmt (suite-stmt rest)) res
-		 (assert (eq module-stmt '[module-stmt]))
-		 (assert (eq suite-stmt '[suite-stmt]))
-		 rest))))
-	   
-  (:method ((s string) &rest options)
-	   (declare (ignore incl-module))
-	   (let ((next-i 0)
-		 (max-i (length s)))
-	     
-	     (apply #'parse-python-with-lexer
-		    :read-chr (lambda ()
-				(when (< next-i max-i)
-				  (prog1 (char s next-i) (incf next-i))))
-		    
-		    :unread-chr (lambda (c)
-				  (assert (and c (> next-i 0) (char= c (char s (1- next-i)))))
-				  (decf next-i))
-		    
-		    options))))
+  (:documentation "Parse THING (pathname or string); return AST.
+Most important options:
+  :YACC-VERSION -- :allegro-yacc (default) or :cl-yacc
+  :DEBUG        -- print debug output?
+  :INCL-MODULE  -- wrap AST in module statement?
+  :ONE-EXPR     -- only return first form read (implies :INCL-MODULE NIL)
+  :TAB-WIDTH    -- width of one tab character in spaces")
+  
+  (:method :around (x &rest options &key (incl-module t) (one-expr nil))
+           (let ((res (apply #'call-next-method x (sans options :incl-module :one-expr))))
+             (cond ((or one-expr (not incl-module))
+                    (destructuring-bind (module-stmt (suite-stmt suite-items)) res
+                      (assert (eq module-stmt '[module-stmt]))
+                      (assert (eq suite-stmt '[suite-stmt]))
+                      (if one-expr
+                          (prog1 (car suite-items)
+                            (unless (= (length suite-items) 1)
+                              (error "Wanted one, but got ~A values in AST for ~S."
+                                     (length suite-items) x)))
+                        suite-items)))
+                   (t res))))
+  
+  (:method ((x string) &rest options &key (yacc-version *default-yacc-version*))
+           (let ((lexer (apply #'make-lexer x :yacc-version yacc-version options)))
+             (parse-with-yacc yacc-version lexer)))
+  
+  (:method ((x pathname) &rest options)
+           (apply #'parse (clpython.package::slurp-file x) options)))
 
-(defun parse-python-one-expr (string)
-  (check-type string string)
-  (let ((res (parse-python-string string :incl-module nil)))
-    (case (length res)
-      (0 (error "String ~S cannot be parsed into a value" string))
-      (1 (car res))
-      (t (error "String ~S parses into multiple (~A) expressions: ~{~A~^, ~}."
-		string (length res) res)))))
-
-(defmacro with-python-code-reader (() &body body)
-  ;; The Python parser handles all reading.
-  `(let ((*readtable* (load-time-value
-                       (setup-omnivore-readmacro #'parse-python-file
-                                                 (copy-readtable nil)))))
-     ,@body))
+(defgeneric parse-with-yacc (yacc-version lexer)
+  (:method (v lexer)
+           (declare (ignore lexer))
+           (error "The parser ~S could not be found." v)))

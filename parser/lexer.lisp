@@ -12,10 +12,9 @@
 (in-package :clpython.parser)
 (in-syntax *ast-readtable*)
 
+(defvar *warn-indent* t "Warn if suspicious indentation")
 (defvar *lex-debug* nil "Print the tokens returned by the lexer")
-
 (defvar *include-line-numbers* nil "Include line number tokens in AST?")
-
 (defvar *tab-width-spaces* 8
   "One tab is equivalent to this many spaces, when it comes to indentation levels.")
 
@@ -23,42 +22,9 @@
 
 ;; Internal
 
-(defvar *lex-read-char*)
-(defvar *lex-unread-char*)
-(defvar *curr-src-line*)
-
 (deftype char-code-type ()
   "CHAR-CODE return value type"
   '(integer 0 #.char-code-limit))
-
-
-(defun read-chr-nil ()
-  "Returns a character, or NIL on eof/error"
-  (funcall *lex-read-char*))
-
-(define-compiler-macro read-chr-nil ()
-  `(locally (declare (optimize speed))
-     (funcall *lex-read-char*)))
-
-
-(defun read-chr-error ()
-  "Return a character, or raise a SyntaxError"
-  (or (read-chr-nil)
-      (raise-unexpected-eof *curr-src-line*)))
-
-(define-compiler-macro read-chr-error ()
-  `(locally (declare (optimize speed))
-     (or (read-chr-nil)
-         (raise-unexpected-eof *curr-src-line*))))
-
-
-(defun unread-chr (ch)
-  (funcall *lex-unread-char* ch))
-
-(define-compiler-macro unread-chr ()
-  `(locally (declare (optimize speed))
-     (funcall *lex-unread-char*)))
-
 
 (defun char-member (ch list)
   (and ch (member ch list :test #'char=)))
@@ -67,238 +33,210 @@
   `(let ((.char ,ch))
      (and .char (member .char ,list :test #'char=))))
 
+(defun make-lexer (string &rest options &key yacc-version)
+  (ecase yacc-version
+    (:allegro-yacc (let ((f (apply #'make-lexer-1 string 
+                                   :yacc-version yacc-version
+                                   :eof-token 'excl.yacc:eof
+                                   options))
+                         (grammar-class (find-class 'python-grammar)))
+                     (lambda (grammar &optional op)
+                       (declare (ignore grammar))
+                       (flet ((token-code (token)
+                                ;; Cache token codes in the symbol
+                                (or (get token 'python-grammar-token-code)
+                                    (setf (get token 'python-grammar-token-code)
+                                      (excl.yacc:tcode-1 grammar-class token)))))
+                         (declare (dynamic-extent #'token-code))
+                         (multiple-value-bind (token val) (funcall f op)
+                           (if (symbolp token)
+                               (values (token-code token) val)
+                             (values token val)))))))
+    (:cl-yacc (apply #'make-lexer-1 string :yacc-version yacc-version options))))
 
-(defun make-py-lexer (&key (read-chr    (lambda () (read-char *standard-input* nil nil t)))
-			   (unread-chr  (lambda (c) (unread-char c *standard-input*)))
-			   (tab-width-spaces     *tab-width-spaces*)
-			   (debug                *lex-debug*)
-			   (include-line-numbers *include-line-numbers*))
-  "Return a lexer for the Python grammar.
-READ-CHR is a function that returns either a character or NIL (it should not signal ~
-an error on eof).
-UNREAD-CHR is a function of one character that ensures the next call to READ-CHAR
-returns the given character. UNREAD-CHAR is called at most once after a call of
-READ-CHR."
-  (let ((tokens-todo ())
-	(indentation-stack (list 0))
-	(open-brackets ())
-	(curr-src-line 1)
-	(curr-char 0)) 
+(defvar *lex-state*)
 
-    (excl:named-function (make-py-lexer closure)
-      (lambda (grammar &optional op)
-        (declare (ignore grammar))
-        (block lexer
-	
-          (when (eq op :report-location)  ;; used when GRAMMAR-PARSE-ERROR occurs
-            (return-from lexer `((:line-no ,curr-src-line)
-                                 (:eof-seen ,(member 'excl.yacc:eof tokens-todo :key #'second)))))
+(defclass lexer-state ()
+  ((string        :initarg :string        :accessor ls-string                                     :type string)
+   (tab-width     :initarg :tab-width     :accessor ls-tab-width     :initform *tab-width-spaces* :type fixnum) 
+   (eof-token     :initarg :eof-token     :accessor ls-eof-token     :initform nil                :type symbol)
+   (incl-line-nos :initarg :incl-line-nos :accessor ls-incl-line-nos :initform *include-line-numbers*)
+   (yacc-version  :initarg :yacc-version  :accessor ls-yacc-version  :initform nil)
+   (last-read-char-ix :accessor ls-last-read-char-ix :initform -1  :type fixnum)
+   (curr-line-no  :accessor ls-curr-line-no  :initform 1  :type fixnum)
+   (tokens-todo   :accessor ls-tokens-todo   :initform () :type list)
+   (indent-stack  :accessor ls-indent-stack  :initform (list 0) :type list)
+   (bracket-level :accessor ls-bracket-level :initform 0  :type fixnum)
+   (debug         :accessor ls-debug         :initform nil :initarg :debug)
+   (warn-indent   :accessor ls-warn-indent   :initform *warn-indent*)))
 
-          (let ((*lex-read-char* (lambda () (let ((ch (funcall read-chr)))
-                                              (incf curr-char)
-                                              (when (and ch (char= ch #\Newline))
-                                                (incf curr-src-line))
-                                              ch)))
-	      
-                (*lex-unread-char* (lambda (ch) (progn (assert ch)
-                                                       (funcall unread-chr ch)
-                                                       (decf curr-char)
-                                                       (when (char= ch #\Newline)
-                                                         (decf curr-src-line)))))
-	      
-                (*curr-src-line*    curr-src-line)
-                (*tab-width-spaces* tab-width-spaces)
-                (*lex-debug*        debug)
-                (*include-line-numbers* include-line-numbers))
-	  
-            (when (= curr-char 0)
-              ;; Detect leading whitespace. This will go unnoticed by the lexer otherwise.
-              (let ((ch (read-chr-nil)))
-                (if (char-member ch +whitespace+)
-                    (progn (unread-chr ch)
-                           (multiple-value-bind (newline new-indent eof-p)
-                               (read-whitespace)
-                             (declare (ignore newline))
-                             (unless eof-p
-                               (when (> new-indent 0)
-                                 (restart-case
-                                     (raise-syntax-error
-                                      "Leading whitespace on first non-blank line.")
-                                   (cl-user::continue ()
-                                       :report "Continue parsing, ignoring ~@
-                                                the leading whitespace."))))))
-                  (when ch (unread-chr ch)))))
-          
-            (when tokens-todo
-              (let ((item (pop tokens-todo)))
-                (when *lex-debug*
-                  (format t "lexer returns: ~s  (from todo)~%" (second item)))
-                (return-from lexer (apply #'values item))))
+(define-symbol-macro %lex-last-read-char-ix%   (ls-last-read-char-ix *lex-state*))
+(define-symbol-macro %lex-next-unread-char-ix% (1+ (ls-last-read-char-ix *lex-state*)))
+(define-symbol-macro %lex-curr-line-no%        (ls-curr-line-no *lex-state*))
+(define-symbol-macro %lex-string%              (ls-string *lex-state*))
+(define-symbol-macro %lex-tab-width%           (ls-tab-width *lex-state*))
+(define-symbol-macro %lex-warn-indent%         (ls-warn-indent *lex-state*))
 
-            (excl.yacc:with-terminal-codes (python-grammar)
-	    
-              (macrolet ((lex-todo (token-name value)
-                           `(let ((val ,value))
-                              (when *lex-debug*
-                                (format t "lexer todo: ~s~%" val))
-                              (push (list (excl.yacc:tcode ,token-name) val) tokens-todo)))
-		       
-                         (lex-return (token-name value) ;; (lex-return name <value>)
-                           `(let ((val ,value))
-                              (when *lex-debug*
-                                (format t "lexer returns: ~s ~s~%" ',token-name val))
-                              (return-from lexer (values (excl.yacc:tcode ,token-name) val))))
-		       
-                         (find-token-code (token-name)
-                           ;; Cache token codes in the symbol
-                           `(let ((.tok ,token-name))
-                              (or (get .tok 'python-grammar-token-code)
-                                  (setf (get .tok 'python-grammar-token-code)
-                                    (excl.yacc:tcode-1
-                                     (load-time-value (find-class 'python-grammar))
-                                     .tok))))))
+(defun make-lexer-1 (string &rest options)
+  ;; A little hack to merge [not] + [in] into [not in], 
+  ;; and [is] + [not] into [is not].
+  ;; This evades precedence issues in the grammars.
+  (let ((lexer (apply #'make-lexer-2 string options))
+        (todo  nil))
+    (lambda (&optional op)
+      (block lexer
+        #+(or)(when (eq op :report-location)
+          (return-from lexer (funcall lexer op)))
+        (when todo
+          (let ((res todo))
+            (setf todo nil)
+            (return-from lexer (apply #'values res))))
+        (multiple-value-bind (x y) (funcall lexer op)
+          (case x
+            (([not] [is])
+             (multiple-value-bind (p q)
+                 (funcall lexer op)
+               (cond ((and (eq x '[not]) (eq p '[in]))
+                      (values '[not in] '[not in]))
+                     ((and (eq x '[is]) (eq p '[not]))
+                      (values '[is not] '[is not]))
+                     (t (setf todo (list p q))
+                        (values x y)))))
+            (t (values x y))))))))
+        
+(defun make-lexer-2 (string &rest options)
+  "Return a lexer for the given string of Python code.
+Will return two value each time: TYPE, VALUE.
+On EOF returns: eof-token, eof-token (default: NIL, NIL)."
+  (check-type string string)
+  (let ((lex-state (apply #'make-instance 'lexer-state :string string options)))
+    
+    (excl:named-function lexer
+      (lambda (op)
+        (let ((*lex-state* lex-state))
+          (block lexer
+            (with-slots (string eof-token incl-line-nos last-read-char-ix
+                         curr-line-no tokens-todo indent-stack bracket-level debug) lex-state
+              (when (eq op :report-location) ;; used when GRAMMAR-PARSE-ERROR occurs (Allegro CL Yacc)
+                (return-from lexer `((:line-no ,curr-line-no)
+                                     (:eof-seen ,(member eof-token tokens-todo :key #'second)))))
+              (when (= last-read-char-ix -1)
+                ;; Check leading whitespace. This will go unnoticed by the lexer otherwise.
+                (multiple-value-bind (newline-p new-indent eof-p)
+                    (read-whitespace)
+                  (declare (ignore newline-p))
+                  (when (and (not eof-p) (plusp new-indent))
+                    (restart-case
+                        (raise-syntax-error "Leading whitespace on first non-blank line.")
+                      (cl-user::continue () :report "Continue parsing, ignoring the leading whitespace.")))))
+              (flet ((lex-return (token value &optional msg)
+                       (when debug (format t "Lexer returns: ~S ~S~@[ ~A~]~%" token value msg))
+                       (return-from lexer (values token value)))
+                     (lex-todo (token value)
+                       (when debug (format t "Lexer todo: ~S ~S~%" token value))
+                       (push (list token value) tokens-todo)))
+                (when tokens-todo
+                  (destructuring-bind (token value) (pop tokens-todo)
+                    (lex-return token value "(from todo)")))
+                (loop 
+                  (let ((c (lex-read-char :eof-error nil)))
+                    (cond ((not c)
+                           (lex-todo eof-token eof-token)
+                           (loop while (plusp (pop indent-stack))
+                               do (lex-todo '[dedent] '[dedent]))
+                           (lex-return '[newline] (if incl-line-nos curr-line-no '[newline])))
+                            
+                          ((digit-char-p c 10)
+                           (lex-return '[number] (read-number c)))
+                            
+                          ((identifier-char1-p c)
+                           (let ((token (read-identifier c)))
+                             ;; u"abc"    : `u' stands for `Unicode string'
+                             ;; u + b     : `u' is an identifier
+                             ;; r"s/f\af" : `r' stands for `raw string'
+                             ;; r + b     : `r' is an identifier
+                             ;; ur"asdf"  : `ur' stands for `raw unicode string'
+                             ;; ur + a    : `ur' is identifier
+                             ;; `u' must appear before `r' if both are string prefix
+                             (when (and (<= (length (symbol-name token)) 2)
+                                        (member (symbol-name token) '("u" "r" "ur") :test 'string-equal))
+                               (let ((ch (lex-read-char :eof-error nil)))
+                                 (if (and ch (char-member ch '(#\' #\")))
+                                     (let* ((sn      (symbol-name token))
+                                            (unicode (position #\u sn :test 'char-equal))
+                                            (raw     (position #\r sn :test 'char-equal)))
+                                       (lex-return '[string] (read-string ch :raw raw :unicode unicode)))
+                                   (when ch (lex-unread-char ch)))))
+                             (lex-return (if (eq (symbol-package token)
+                                                 (load-time-value (find-package :clpython.ast.reserved)))
+                                             token
+                                           '[identifier]) 
+                                         token)))
 
-                (tagbody next-char
-                  (let ((c (read-chr-nil)))
-                    (cond
+                          ((char-member c '(#\' #\"))
+                           (lex-return '[string] (read-string c)))
 
-                     ((not c)
-                      ;; Before returning EOF, return DEDENT for every open INDENT.
-                      (lex-todo excl.yacc:eof 'excl.yacc:eof)
-                      (loop while (> (pop indentation-stack) 0)
-                          do (lex-todo [dedent] '[dedent]))
-                      (lex-return [newline] 
-                                  (if *include-line-numbers* *curr-src-line* '[newline])))
-		   		   
-                     ((digit-char-p c 10)
-                      (lex-return [number] (read-number c)))
+                          ((or (punct-char1-p c)
+                               (punct-char-not-punct-char1-p c))
+                           (let ((token (read-punctuation c)))
+                             ;; Keep track of whether we are in a bracketed
+                             ;; expression (list, tuple or dict), because in
+                             ;; that case newlines are ignored.
+                             ;; (Check on matching brackets is in grammar.)
+                             (case token
+                               (( [[]  [{] [\(] ) (incf bracket-level))
+                               (( [\]] [}] [\)] ) (decf bracket-level)))
+                             (lex-return token token)))
 
-                     ((identifier-char1-p c)
-                      (let ((token (read-identifier c)))
-                        (assert (symbolp token))
-		      
-                        ;; u"abc"    : `u' stands for `Unicode string'
-                        ;; u + b     : `u' is an identifier
-                        ;; r"s/f\af" : `r' stands for `raw string'
-                        ;; r + b     : `r' is an identifier
-                        ;; ur"asdf"  : `ur' stands for `raw unicode string'
-                        ;; ur + a    : `ur' is identifier
-                        ;; `u' must appear before `r' if both are string prefix
-                        (when (and (<= (length (symbol-name token)) 2)
-                                   (member (symbol-name token) '("u" "r" "ur")
-                                           :test 'string-equal))
-                          (let ((ch (read-chr-nil)))
-                            (if (and ch (char-member ch '(#\' #\")))
-                                (let* ((sn      (symbol-name token))
-                                       (unicode (position #\u sn :test 'char-equal))
-                                       (raw     (position #\r sn :test 'char-equal)))
-                                  (lex-return [string]
-                                              (read-string (if raw :raw :non-raw) ch :unicode unicode)))
-                              (when ch (unread-chr ch)))))
-		      
-                        (when (reserved-word-p token)
-                          (when *lex-debug*
-                            (format t "lexer returns: reserved word ~s~%" token))
-                          (return-from lexer
-                            (values (find-token-code token) token)))
-		      
-                        (lex-return [identifier] token)))
-
-                     ((char-member c '(#\' #\"))
-                      (lex-return [string] (read-string :non-raw c)))
-
-                     ((or (punct-char1-p c)
-                          (punct-char-not-punct-char1-p c))
-                      (let ((token (read-punctuation c)))
-                        ;; Keep track of whether we are in a bracketed
-                        ;; expression (list, tuple or dict), because in
-                        ;; that case newlines are ignored. (Note that
-                        ;; READ-STRING handles multi-line strings itself.)
-                        ;; 
-                        ;; There is no check for matching brackets here:
-                        ;; left to the grammar.
-                        (case token
-                          (( [[]  [{] [(] ) (push token open-brackets))
-                           (( [\]] [}] [)] ) (pop open-brackets)))
-		      
-                        (when *lex-debug*
-                          (format t "lexer returns: punctuation-token ~s~%" token))
-                        (return-from lexer 
-                          (values (find-token-code token) token))))
-
-                     ((char-member c +whitespace+)
-                      (unread-chr c)
-                      (multiple-value-bind (newline new-indent eof-p)
-                          (read-whitespace)
-                        (declare (ignore eof-p))
-                        (when (or (not newline) open-brackets)
-                          (go next-char))
-
-                        ;; Return Newline now, but also determine if
-                        ;; there are any indents or dedents to be
-                        ;; returned in next calls.
-
-                        (cond
-                         ((= (car indentation-stack) new-indent)) ; same level
-
-                         ((< (car indentation-stack) new-indent) ; one indent
-                          (push new-indent indentation-stack)
-                          (lex-todo [indent] '[indent]))
-
-                         ((> (car indentation-stack) new-indent) ; dedent(s)
-                          (loop while (> (car indentation-stack) new-indent)
-                              do (pop indentation-stack)
-                                 (lex-todo [dedent] '[dedent]))
-			
-                          (unless (= (car indentation-stack) new-indent)
-                            (raise-syntax-error 
-                             "Dedent did not arrive at a previous indentation level (line ~A)."
-                             *curr-src-line*))))
-		      
-                        (lex-return [newline] 
-                                    (if *include-line-numbers* *curr-src-line* '[newline]))))
-		   
-                     ((char= c #\#)
-                      (read-comment-line c)
-                      (go next-char))
-
-                     ((char= c #\\) ;; next line is continuation of this one
-                      (let ((c2 (read-chr-error)))
-                        (cond ((char= c2 #\Newline))
-                              ((char= c2 #\Return)
-                               (let ((c3 (read-chr-nil)))
-                                 (unless (char= c3 #\Newline) ;; \r\n
-                                   (unread-char c3))))
-                              (t 
-                               (raise-syntax-error
-                                "Continuation character '\\' must be followed by Newline, ~
-                                 but got: '~A' (~S) (line ~A)." c2 c2 *curr-src-line*))))
-                      (incf *curr-src-line*)
-                      (go next-char))
-		   
-                     (t (with-simple-restart 
-                            (:continue "Discard the character `~A' and continue parsing." c)
-                          (raise-syntax-error "Nobody expected this character: `~A' (line ~A)."
-                           c *curr-src-line*))
-                        (go next-char)))))))))))))
-
-
-
-
-(defun reserved-word-p (sym)
-  (eq (symbol-package sym) (load-time-value (find-package :clpython.ast.reserved))))
-
+                          ((char-member c +whitespace+)
+                           (lex-unread-char c)
+                           (multiple-value-bind (newline-p new-indent eof-p) (read-whitespace)
+                             (declare (ignore eof-p))
+                             (when (and newline-p (zerop bracket-level))
+                               (cond ((< (car indent-stack) new-indent) ; one indent
+                                      (push new-indent indent-stack)
+                                      (lex-todo '[indent] '[indent]))
+                                     ((> (car indent-stack) new-indent) ; dedent(s)
+                                      (loop while (> (car indent-stack) new-indent)
+                                          do (pop indent-stack)
+                                             (lex-todo '[dedent] '[dedent]))
+                                      (unless (= (car indent-stack) new-indent)
+                                        (raise-syntax-error 
+                                         "Dedent did not arrive at a previous indentation level (line ~A)."
+                                         curr-line-no))))
+                               (lex-return '[newline] (if incl-line-nos curr-line-no '[newline])))))
+                            
+                          ((char= c #\#)
+                           (read-comment-line c))
+                            
+                          ((char= c #\\) ;; next line is continuation of this one
+                           (let ((c2 (lex-read-char t)))
+                             (case c2
+                               (#\Newline)
+                               (#\Return (let ((c3 (lex-read-char t)))
+                                           (unless (char= c3 #\Newline) ;; Windows: \r\n
+                                             (lex-unread-char c3))))
+                               (t (raise-syntax-error
+                                   "Continuation character '\\' must be followed by Newline, ~
+                                    but got: '~A' (~S) (line ~A)." c2 c2 curr-line-no))))
+                           (incf curr-line-no))
+                            
+                          (t (with-simple-restart 
+                                 (:continue "Discard the character `~A' and continue parsing." c)
+                               (raise-syntax-error "Nobody expected this character: `~A' (line ~A)."
+                                                   c curr-line-no))))))))))))))
 
 ;; Identifier
 
 (defun identifier-char1-p (c)
   "Is C a character with which an identifier can start?
 C must be either a character or NIL."
+  ;; Cannot use alpha-char-p in these functions, as that is also
+  ;; true for accented characters etc.
   (declare (optimize speed))
   (when c
     (let ((code (char-code c)))
       (declare (type char-code-type code))
-      ;; Cannot use alpha-char-p, as that is also true for o+" etc
       (or (<= #.(char-code #\a) code #.(char-code #\z))
           (<= #.(char-code #\A) code #.(char-code #\Z))
           (= code #.(char-code #\_))))))
@@ -310,7 +248,6 @@ C must be either a character or NIL."
   (when c
     (let ((code (char-code c)))
       (declare (type char-code-type code))
-      ;; Cannot use alpha-char-p, as that is also true for o+" etc
       (or (<= #.(char-code #\a) code #.(char-code #\z))
           (<= #.(char-code #\A) code #.(char-code #\Z))
           (= code #.(char-code #\_))
@@ -327,205 +264,199 @@ C must be either a character or NIL."
          Therefore that symbol should not be in the package at all." pkg sym))
     sym)))
 
-(defparameter *temp-string-arrays* ())
-(defparameter *temp-string-counter* 0)
+(defun lex-read-char (&key (eof-error t))
+  "Returns a character, or NIL on eof/error"
+  (cond ((< %lex-next-unread-char-ix% (length %lex-string%))
+         (let ((ch (aref %lex-string% (incf %lex-last-read-char-ix%))))
+           (when (char= ch #\Newline)
+             (incf %lex-curr-line-no%))
+           ch))
+        (eof-error
+         (raise-unexpected-eof %lex-curr-line-no%))))
 
-(defmacro with-temp-adjustable-string ((var) &body body)
-  `(progn 
-     (let* ((.num-arrays (length *temp-string-arrays*))
-            (*temp-string-counter* (1+ *temp-string-counter*)))
-       (assert (<= *temp-string-counter* (1+ .num-arrays)))
-       (let ((,var (if (< *temp-string-counter* .num-arrays)
-                       (nth (1- *temp-string-counter*) *temp-string-arrays*)
-                     (let ((new (make-array 10 :element-type 'character
-                                                :adjustable t :fill-pointer 0)))
-                       (prog1 new
-                         (setf *temp-string-arrays* 
-                           (nconc *temp-string-arrays* (list new))))))))
-         (setf (fill-pointer ,var) 0)
-         ,@body))))
+(defun lex-unread-char (&optional (ch nil))
+  "Unread last character read. If CH is supplied, it is checked."
+  (if (and (<= 0 %lex-last-read-char-ix% (1- (length %lex-string%)))
+           (or (null ch)
+               (char= ch (aref %lex-string% %lex-last-read-char-ix%))))
+      (progn (when (char= (aref %lex-string% %lex-last-read-char-ix%) #\Newline)
+               (decf %lex-curr-line-no%))
+             (decf %lex-last-read-char-ix%)
+             t)
+    (error "Lexer cannot unread char~@[: last character returned was not ~S~]."
+           ch)))
 
-(defconstant +read-identifier-cache-size+ 4)
+(defun lex-substring (start end)
+  (assert (<= start end) () "Lex-substring: start=~A which is not <= end=~A" start end)
+  (make-array (1+ (- end start))
+              :element-type 'character
+              :displaced-to %lex-string%
+              :displaced-index-offset start))
+
+(defvar *reserved-words-vector*
+    (loop with vec = (make-array 128)
+        with pkg = (find-package :clpython.ast.reserved)
+        for rw being the external-symbol in pkg
+        for rw.name = (symbol-name rw)
+        do (assert (>= (length rw.name) 2))
+           (let ((key (char-code (aref rw.name 0)))
+                 (val (list (aref rw.name 1)
+                            (length rw.name)
+                            rw.name
+                            rw)))
+             (push val (svref vec key)))
+        finally (return vec))
+  "Handy lookup table: indexed by first char; entries of the form (2nd char, length, string, symbol)")
 
 (defun read-identifier (first-char)
-  "Returns the identifier read as symbol."
+  "Returns the identifier (which might be a reserved word) as symbol."
   (declare (optimize speed))
   (assert (identifier-char1-p first-char))
-  (flet ((lookup-reserved-word (str str.len)
-           ;; Keep the reserved words in a handy lookup table.
-           (let ((rw-vec (load-time-value 
-                          (loop with vec = (make-array 128)
-                              with pkg = (find-package :clpython.ast.reserved)
-                              for rw being the external-symbol in pkg
-                              for rw.name = (symbol-name rw)
-                              do (assert (>= (length rw.name) 2))
-                                 (let ((key (char-code (aref rw.name 0)))
-                                       (val (list (aref rw.name 1)
-                                                  (length rw.name)
-                                                  rw.name
-                                                  rw)))
-                                   (push val (svref vec key)))
-                              finally (return vec)))))
-             (dolist (rw (svref rw-vec (the char-code-type (char-code (aref str 0)))))
-               (when (and (char= (pop rw) (aref str 1))
-                          (= (pop rw) str.len))
-                 (let ((sym.name (pop rw)))
-                   (when (loop for i fixnum from 2 below str.len
-                             always (char= (aref str i) (aref sym.name i)))
-                     (return-from lookup-reserved-word (car rw)))))))))
-    (declare (dynamic-extent #'lookup-reserved-word))
-    ;; Keep a cache of the last identifiers seen for every starting char.
-    ;; This saves looking for symbol in package.
-    (with-temp-adjustable-string (res)
-      (let ((last-read-identifiers
-             (load-time-value (make-array (* +read-identifier-cache-size+ 128)))))
-        (vector-push-extend first-char res)
-        (loop for c = (read-chr-nil)
-            while (identifier-char2-p c)
-            do (vector-push-extend c res)
-            finally (when c (unread-chr c)))
-        
-        (let ((res.len (length res)))
-          (when (>= res.len 2)
-            (whereas ((s (lookup-reserved-word res res.len)))
-              (return-from read-identifier s)))
-          
-          (let ((ix (char-code (aref res 0))))
-            (declare (type char-code-type ix))
-            (dotimes (delta +read-identifier-cache-size+)
-              (declare (type (integer 0 10000) delta))
-              (whereas ((cached (svref last-read-identifiers (+ ix delta))))
-                (when (and (= res.len (car cached))
-                           (loop for i fixnum from 1 below res.len
-                               for cached.name = (symbol-name (cdr cached))
-                               always (char= (aref res i) (aref cached.name i))))
-                  (return-from read-identifier (cdr cached))))))
-          
-          (let ((sym (or (find-symbol res #.(find-package :clpython.user))
-                         (intern res #.(find-package :clpython.user)))))
-            ;; Store this symbol in a random entry.
-            (let ((cc0 (char-code (aref res 0))))
-              (declare (type char-code-type cc0))
-              (setf (svref last-read-identifiers (+ (* cc0 +read-identifier-cache-size+)
-                                                    (random +read-identifier-cache-size+)))
-                (cons res.len sym)))
-            sym))))))
-
-(defun simple-string-from-vec (vec)
-  (make-array (length vec)
-	      :element-type 'character
-	      :initial-contents vec))
+    (let* ((start %lex-last-read-char-ix%)
+           (end   (loop for c = (lex-read-char :eof-error nil)
+                      while (identifier-char2-p c)
+                      finally (when c (lex-unread-char))
+                              (return %lex-last-read-char-ix%)))
+           (str   (lex-substring start end)))
+      (or (find-symbol str (load-time-value (find-package :clpython.ast.reserved)))
+          (intern str (load-time-value (find-package :clpython.user))))))
 
 ;; String
-  
-(defun read-string (rawp ch1 &key unicode)
+
+(defun read-string (ch1 &key raw unicode)
   (assert (char-member ch1 '( #\' #\" )))
-  (flet ((read-unicode-char-n-hex-digits (n)
-           (loop for i below n
-               for ch = (read-chr-error) 
-               for ch.code = (or (digit-char-p ch 16) 
-                                 (raise-syntax-error
-                                  "Non-hex digit in \"\u...\": ~S (line ~A)."
-                                  ch *curr-src-line*))
-               sum (ash ch.code (- n i)) into unichar-code
-               finally (return (code-char unichar-code)))))
-    (ecase rawp
-      (:raw ;; Include escapes literally in the resulting string.
-       (with-temp-adjustable-string (res)
-         (loop for ch = (read-chr-error)
-             do (cond ((char= ch #\\)
-                       (if unicode
-                           (let ((ch.next (read-chr-error)))
-                             (if (char-member ch '(#\u #\U))
-                                 (vector-push-extend (read-unicode-char-n-hex-digits 4) res)
-                               (progn (vector-push-extend #\\ res)
-                                      (vector-push-extend ch.next res))))
-                         (vector-push-extend #\\ res)))
-                      ((char= ch ch1)
-                       (return-from read-string (simple-string-from-vec res)))
-                      (t (vector-push-extend ch res))))))
-      (:non-raw
-       (let* ((ch2 (read-chr-error))
-              (ch3 (read-chr-nil)))
-         
-         (cond ((and ch3 (char= ch1 ch2 ch3)) ;; """ or ''': multi-line string
-                (with-temp-adjustable-string (res)
-                  (loop with x = (read-chr-error) and y = (read-chr-error) and z = (read-chr-error)
-                      until (char= ch1 z y x)
-                      do (vector-push-extend (shiftf x y z (read-chr-error)) res)
-                      finally (return-from read-string (simple-string-from-vec res)))))
-               
-               ((char= ch1 ch2) ;; "" or '', but not """ or ''' --> empty string
-                (when ch3
-                  (unread-chr ch3))
-                (return-from read-string ""))
-               
-               (t ;; Non-empty string with one starting quote
-                (unless ch3
-                  (raise-syntax-error "Unfinished literal string (line ~A)." *curr-src-line*))
-                (with-temp-adjustable-string (res)
-                  (unless (char= ch2 #\\)
-                    (vector-push-extend ch2 res))
-                  (loop for c = ch3 then (read-chr-error)
-                      with prev-backslash = (char= ch2 #\\ )
-                      do (cond (prev-backslash
-                                (multiple-value-bind (ch.a ch.b)
-                                    (case c 
-                                      ((#\\ #\' #\" #\a #\b) c)
-                                      (#\f #\Page)
-                                      (#\n #\Newline)
-                                      (#\r #\Return)
-                                      (#\Newline nil) ;; ignore newline after backslash
-                                      (#\t #\Tab)
-                                      (#\v #\VT)
-                                      (#\N (if unicode  ;; unicode char by name: u"\N{latin capital letter l with stroke}"
-                                               (progn (let ((c.next (read-chr-error))) 
-                                                        (unless (char= c.next #\{)
-                                                          (raise-syntax-error
-                                                           "In Unicode string: \N{...} expected, but got ~S after \N (line ~A)."
-                                                           c.next *curr-src-line*)))
-                                                      (with-temp-adjustable-string (unichar-name)
-                                                        (loop for ch = (read-chr-error)
-                                                            until (char= ch #\})
-                                                            do (vector-push-extend (if (char= ch #\space) #\_ ch) unichar-name)
-                                                            finally (return (name-char unichar-name)))))
-                                             #1=(progn (warn "Unicode escape \"\\~A{..}\" found in non-unicode string (line ~A)."
-                                                             c *curr-src-line*)
-                                                       (values #\\ c))))
-                                      ((#\u #\U) (if unicode ;; \uf7d6 or \U1a3b5678
-                                                     (read-unicode-char-n-hex-digits (if (char= c #\u) 4 8))
-                                                   #1#))
-                                      ((#\0 #\1 #\2 #\3 #\4 #\5 #\6 #\7)  ;; char code: up to three octal digits
-                                       (loop with code = 0
-                                           for x = c then (read-chr-error)
-                                           for x.octal = (digit-char-p x 8)
-                                           repeat 3 while x.octal
-                                           do (setf code (+ (* code 8) x.octal))
-                                           finally (unless x.octal (unread-chr x))
-                                                   (return (code-char code))))
-                                      (#\x (let* ((a (read-chr-error)) ;; char code: up to two hex digits
-                                                  (b (read-chr-error))
-                                                  (a.hex (digit-char-p a 16))
-                                                  (b.hex (digit-char-p b 16)))
-                                             (unless a.hex (raise-syntax-error "Non-hex digit found in \x..: ~S (line ~A)."
-                                                                               a *curr-src-line*))
-                                             (if (digit-char-p b 16)
-                                                 (code-char (+ (* 16 a.hex) b.hex))
-                                               (prog1 a.hex 
-                                                 (unread-chr b)))))
-                                      (t (values #\\ c))) ;; Backslash not used for escaping.
-                                  
-                                  (when ch.a (vector-push-extend ch.a res))
-                                  (when ch.b (vector-push-extend ch.b res))
-                                  (setf prev-backslash nil)))
-                               
-                               ((char= c #\\)
-                                (setf prev-backslash t))
-                               
-                               ((char= c ch1) ;; end quote of literal string
-                                (return-from read-string (simple-string-from-vec res)))
-                               
-                               (t (vector-push-extend c res))))))))))))
+  
+  (labels ((read-unicode-char (s s.ix num-hex-digits)
+             (check-type num-hex-digits (member 4 8))
+             (loop for i below num-hex-digits
+                 for ch = (aref s (+ s.ix i))
+                 for ch.code = (or (digit-char-p ch 16) 
+                                   (raise-syntax-error "Non-hex digit in \"\u...\": ~S (line ~A)."
+                                                       ch %lex-curr-line-no%))
+                 sum (ash ch.code (- num-hex-digits i)) into unichar-code
+                 finally (return (code-char unichar-code))))
+
+           (replace-unicode-hex-escapes (s)
+             (unless (loop for i fixnum from 0 below (1- (length s))
+                         for c across s
+                         thereis (and (char= c #\\)
+                                      (char-member (aref s (1+ i)) '(#\u #\U))))
+               (return-from replace-unicode-hex-escapes s))
+             (loop with res = (make-array (length s) :adjustable t :element-type 'character :fill-pointer 0)
+                 for ch = (lex-read-char)
+                 until (char= ch ch1)
+                 if (and unicode (char= ch #\\))
+                 do (let ((ch.next (lex-read-char)))
+                      (if (char-member ch.next '(#\u #\U))
+                          (vector-push-extend
+                           (read-unicode-char s %lex-last-read-char-ix% (if (char= ch.next #\u) 4 8)) res)
+                        (progn (vector-push-extend ch res)
+                               (vector-push-extend ch.next res))))
+                 else do (vector-push-extend ch res)
+                 finally (return res)))
+  
+           (replace-non-unicode-escapes (s)
+             (unless (find #\u s) 
+               (return-from replace-non-unicode-escapes s))
+             (loop with res = (make-array (length s) :adjustable t :element-type 'character :fill-pointer 0)
+                 with s.len fixnum = (length s)
+                 with s.ix fixnum = 0
+                 do (loop while (and (< s.ix s.len) (char\= #\\ (aref s s.ix)))
+                        do (vector-push-extend (aref s s.ix) res)
+                           (incf s.ix))
+                    (unless (= s.ix s.len)
+                      (return-from replace-non-unicode-escapes res))
+                    ;; Read one escaped char
+                    (assert (char= #\\ (aref s s.ix)))
+                    (assert (<= s.ix (- (length s) 2))) ;; last char of S cannot be a backslash
+                    (let ((c (aref s (incf s.ix))))
+                      (multiple-value-bind (ch.a ch.b)
+                          (case c 
+                            ;; These clauses must leave s.ix at last handled character
+                            ((#\\ #\' #\" #\a #\b) c)
+                            (#\f   #\Page)
+                            (#\n   #\Newline)
+                            (#\r   #\Return)
+                            (#\Newline nil) ;; ignore newline after backslash
+                            (#\t   #\Tab)
+                            (#\v   #\VT)
+                            (#\N (if unicode ;; unicode char by name: u"\N{latin capital letter l with stroke}"
+                                     (progn (let ((c.next (aref s (incf s.ix))))
+                                              (unless (char= c.next #\{)
+                                                (raise-syntax-error "Unicode escape `\N' must be followed by `{' ~
+                                                                       (line ~A)." %lex-curr-line-no%)))
+                                            (let* ((start (incf s.ix))
+                                                   (end (or (position #\} s :start s.ix)
+                                                            (raise-syntax-error
+                                                             "Unicode escape \N{...} misses closing `}' (line ~A)."
+                                                             %lex-curr-line-no%))))
+                                              (let ((name (nsubstitute #\_ #\Space (subseq s start end))))
+                                                (setf s.ix end)
+                                                (name-char name))))
+                                   (progn (warn "Unicode escape `\N' found in non-unicode string (line ~A)."
+                                                %lex-curr-line-no%)
+                                          (values #\\ c))))
+                            ((#\u #\U) (if unicode ;; \uf7d6 \U1a3b5678
+                                           (let ((n (if (char= c #\u) 4 8)))
+                                             (read-unicode-char s s.ix n)
+                                             (incf s.ix n))
+                                         (progn (warn "Unicode escape `\~A' found in non-unicode string (line ~A)."
+                                                      c %lex-curr-line-no%)
+                                                (values #\\ c))))
+                            ((#\0 #\1 #\2 #\3 #\4 #\5 #\6 #\7) ;; char code: up to three octal digits
+                             (loop with code = 0
+                                 for x = c then (aref s (incf s.ix))
+                                 for x.octal = (digit-char-p x 8)
+                                 repeat 3 while x.octal
+                                 do (setf code (+ (* code 8) x.octal))
+                                 finally (unless x.octal
+                                           (decf s.ix))
+                                         (return (code-char code))))
+                            
+                            (#\x (let* ((a (aref s (incf s.ix))) ;; char code: up to two hex digits
+                                        (b (when (< (incf s.ix) s.len)
+                                             (aref s s.ix)))
+                                        (a.hex (digit-char-p a 16))
+                                        (b.hex (and b (digit-char-p b 16))))
+                                   (unless a.hex (raise-syntax-error "Non-hex digit `~A' found after `\x' (line ~A)."
+                                                                     a %lex-curr-line-no%))
+                                   (if b.hex
+                                       (code-char (+ (* 16 a.hex) b.hex))
+                                     (prog1 a.hex
+                                       (decf s.ix)))))
+                            
+                            (t (values #\\ c))) ;; Backslash not used for escaping.
+                        (when ch.a (vector-push-extend ch.a res))
+                        (when ch.b (vector-push-extend ch.b res))
+                        (incf s.ix))))))
+    
+    (let* ((ch2 (lex-read-char))
+           (ch3 (lex-read-char :eof-error nil))
+           (string (cond ((and ch3 (char= ch1 ch2 ch3)) ;; string delimiter is """ or '''
+                          (let* ((start %lex-next-unread-char-ix%)
+                                 (end (loop with x = (lex-read-char) and y = (lex-read-char) and z = (lex-read-char)
+                                          for prev-bs = nil then (and (char= #\\ (shiftf x y z (lex-read-char)))
+                                                                      (not prev-bs))
+                                          until (and (char= z x y ch1) (not prev-bs))
+                                          finally (return (- %lex-last-read-char-ix% 3)))))
+                            (lex-substring start end)))
+                         ((char= ch1 ch2) ;; "" or '' but not """ or '''
+                          (when ch3 (lex-unread-char ch3))
+                          (return-from read-string ""))
+                         ((char= ch1 ch3) ;; "x"
+                          (return-from read-string (lex-substring (1- %lex-last-read-char-ix%) 
+                                                                  (1- %lex-last-read-char-ix%))))
+                         (t (let* ((start (- %lex-last-read-char-ix% 1))
+                                   (end   (loop with x = (lex-read-char)
+                                              for prev-bs = nil then (and (char= #\\ (shiftf x (lex-read-char)))
+                                                                          (not prev-bs))
+                                              until (and (char= x ch1) (not prev-bs))
+                                              finally (return (1- %lex-last-read-char-ix%)))))
+                              (lex-substring start end))))))
+      (setf string (replace-unicode-hex-escapes string))
+      (unless raw
+        (setf string (replace-non-unicode-escapes string)))
+      string)))
 
 ;; Number
 
@@ -571,159 +502,96 @@ C must be either a character or NIL."
 ;; convert the result to a long). We ignore any difference between
 ;; regular and long integers.
 
-(defun read-number (&optional (first-char (read-chr-error)))
+(defun read-number (&optional (first-char (lex-read-char)))
   (assert (digit-char-p first-char 10))
-  (let ((base 10) (res 0))
-    (flet ((read-int (&optional (res 0))
-             ;; Call the Lisp reader on the string with digits.
-	     (loop with vec = (make-array 5 :adjustable t :fill-pointer 0
-					  :element-type 'character)
-		 for ch = (read-chr-nil)
-		 initially (unless (zerop res)
-                             (vector-push-extend (code-char (+ (char-code #\0) res)) vec))
-                 while (and ch (digit-char-p ch base))
-		 do (vector-push-extend ch vec)
-                 finally (when ch (unread-chr ch))
-			 (return (parse-integer vec :radix base)))))
-      (declare (dynamic-extent #'read-int))
-      (if (char= first-char #\0)
-
-	  (let ((second (read-chr-nil)))
-	    (setf res (cond ((null second) 0) ;; eof
-			     
-			    ((char-member second '(#\x #\X))
-			     (setf base 16)
-			     (read-int))
-			    
-			    ((digit-char-p second 8)
-			     (setf base 8)
-			     (read-int (digit-char-p second 8)))
-			    
-			    ((char= second #\.)
-			     (unread-chr second)
-			     0)
-			    
-			    ((digit-char-p second 10) 
-			     (read-int (digit-char-p second 10)))
-			    
-			    ((char-member second '(#\j #\J))  (complex 0 0))
-			    ((char-member second '(#\l #\L))  0)
-			    
-			    (t (unread-chr second)
-			       0)))) ;; non-number, like `]' in `x[0]'
-	
-	(setf res (read-int (digit-char-p first-char 10))))
+  (flet ((read-int (base)
+           (multiple-value-bind (integer pos)
+               (parse-integer %lex-string% :radix base
+                              :start %lex-next-unread-char-ix% :junk-allowed t)
+             (prog1 integer
+               (setf %lex-last-read-char-ix% (1- pos))))))
+    (declare (dynamic-extent #'read-int))
+    (let* ((can-have-frac-exp t)
+           (res (if (char/= first-char #\0)
+                    (progn (lex-unread-char first-char)
+                           (read-int 10))
+                  (let ((second (lex-read-char :eof-error nil)))
+                    (cond ((null second)                   0)
+                          ((char-member second '(#\x #\X)) (setf can-have-frac-exp nil)
+                                                           (read-int 16))
+                          ((digit-char-p second 8)         (setf can-have-frac-exp nil)
+                                                           (lex-unread-char second)
+                                                           (read-int 8))
+                          ((char= second #\.)              (lex-unread-char second)
+                                                           0)
+                          ((digit-char-p second 10)        (lex-unread-char second)
+                                                           (read-int 10))
+                          (t                               (lex-unread-char second)
+                                                           ;; e.g. suffix `j' for `0j'
+                                                           ;;  or suffix 'L' for `0L'
+                                                           ;;  or syntax like `]' in `x[0]'
+                                                           ;;  or space like ` ' in `0 '.
+                                                           0))))))
+      (let (has-frac has-exp)
+        (when can-have-frac-exp
+          ;; Fraction
+          (case (lex-read-char :eof-error nil)
+            ((nil) )
+            (#\. (progn (setf has-frac t)
+                        (let* ((start %lex-next-unread-char-ix%)
+                               (end   (loop for ch = (lex-read-char :eof-error nil)
+                                          while (and ch (digit-char-p ch 10))
+                                          finally (when (and ch (not (digit-char-p ch 10)))
+                                                    (lex-unread-char ch))
+                                                  (return %lex-last-read-char-ix%)))
+                               (frac-value (if (<= start end)
+                                               (with-standard-io-syntax
+                                                 (read-from-string
+                                                  ;; Read as `long-float'; CPython uses 32-bit C `long'.
+                                                  (format nil "0.~A0L0" (lex-substring start end))))
+                                             0.0L0)))
+                          (incf res frac-value))))
+            (t (lex-unread-char)))
+          ;; Exponent marker
+          (case (lex-read-char :eof-error nil)
+            ((nil) )
+            ((#\e #\E) (let ((expo-value (read-int)))
+                         (setf has-exp t)
+                         (setf res (* res (expt 10 expo-value)))
+                         ;; CPython: 1e10 -> float, even though it's an int
+                         (setf res (coerce res 'double-float))))
+            (t (lex-unread-char))))
+          
+        ;; CPython allows `j' (imaginary) for decimal, not for hex (SyntaxError) or octal
+        ;; (becomes decimal!!?)
+        ;; and allows 'L' ("long integer") for decimal, hex, octal
+        (unless (or has-frac has-exp)
+          (let ((ch (lex-read-char :eof-error nil)))
+            (when (and ch (not (char-member ch '(#\l #\L))))
+              (lex-unread-char ch)))))
+            
+      ;; suffix `j' means imaginary
+      (let ((ch (lex-read-char :eof-error nil)))
+        (if (char-member ch '(#\j #\J))
+            (setf res (complex 0 res))
+          (when ch (lex-unread-char ch))))
       
-      (let ((has-frac nil) (has-exp nil))
-	
-	(when (= base 10)
-	  (let ((dot? (read-chr-nil)))
-	    (if (and dot? (char= dot? #\.))
-		
-		(progn
-		  (setf has-frac t)
-		  (incf res
-			(loop
-			    with ch = (read-chr-nil)
-			    with lst = ()
-			    while (and ch (digit-char-p ch 10))
-			    do (push ch lst)
-			       (setf ch (read-chr-nil))
-			       
-			    finally (push #\L lst) ;; use `long-float' (CPython uses 32-bit C `long')
-				    (push #\0 lst)
-				    (setf lst (nreverse lst))
-				    (push #\. lst)
-				    (push #\0 lst)
-				    (when ch
-				      (unread-chr ch))
-				    (return (with-standard-io-syntax
-					      (read-from-string 
-					       (coerce lst 'string)))))))
-		      
-	      (when dot? (unread-chr dot?)))))
-	
-	;; exponent marker
-	(when (= base 10)
-	  (let ((ch (read-chr-nil)))
-	    (if (char-member ch '(#\e #\E))
-		
-		(progn
-		  (setf has-exp t)
-		  (let ((ch2 (read-chr-error))
-			(exp 0)
-			(minus nil)
-			(got-num nil))
-		  
-		    (cond
-		     ((char= ch2 #\+))
-		     ((char= ch2 #\-)       (setf minus t))
-		     ((digit-char-p ch2 10) (setf exp (digit-char-p ch2 10)
-						  got-num t))
-		     (t (raise-syntax-error
-			 "Exponent for literal number invalid: ~A ~A (line ~A)."
-			 ch ch2 *curr-src-line*)))
-		  
-		    (unless got-num
-		      (let ((ch3 (read-chr-error)))
-			(if (digit-char-p ch3 10)
-			    (setf exp (+ (* 10 exp) (digit-char-p ch3 10)))
-			  (raise-syntax-error
-			   "Exponent for literal number invalid: ~A ~A ~A (line ~A)."
-			   ch ch2 ch3 *curr-src-line*))))
-		    
-		    (loop with ch
-			while (and (setf ch (read-chr-nil))
-				   (digit-char-p ch 10))
-			do (setf exp (+ (* 10 exp) (digit-char-p ch 10)))
-			finally (when ch (unread-chr ch)))
-		  
-		    (when minus
-		      (setf exp (* -1 exp)))
-		  
-		    (setf res (* res (expt 10 exp)))
-		    
-		    ;; CPython: 1e10 -> float, even though it's an int
-		    (setf res (coerce res 'double-float))))
-	      
-	      (when ch
-		(unread-chr ch)))))
-	
-	;; CPython allows `j', decimal, not for hex (SyntaxError) or
-	;; octal (becomes decimal!!?)  and allows 'L' for decimal,
-	;; hex, octal
-	
-	;; suffix `L' for `long integer'
-	(unless (or has-frac has-exp)
-	  (let ((ch (read-chr-nil)))
-	    (if (and ch 
-		     (not (char-member ch '(#\l #\L))))
-		(unread-chr ch))))
-		
-	;; suffix `j' means imaginary
-	(let ((ch (read-chr-nil)))
-	  (if (char-member ch '(#\j #\J))
-	      (setf res (complex 0 res))
-	    (when ch (unread-chr ch)))))
-		
       res)))
-		
+
 
 ;;; Punctuation
 
+
 (defun read-punctuation (c1)
   "Returns puncutation as symbol."
-  
   (assert (or (punct-char1-p c1)
 	      (punct-char-not-punct-char1-p c1)))
-  
   (flet ((lookup-3char (c1) (ecase c1
 			      (#\* '[**=])
 			      (#\< '[<<=])
 			      (#\> '[>>=])
 			      (#\/ '[//=])))
-	 
-	 (lookup-2char (c1 c2) (ecase c2
+         (lookup-2char (c1 c2) (ecase c2
 				 (#\= (ecase c1
 					(#\= '[==]) (#\> '[>=])
 					(#\< '[<=]) (#\+ '[+=])
@@ -732,11 +600,9 @@ C must be either a character or NIL."
 					(#\/ '[/=]) (#\| '[\|=])
 					(#\% '[%=]) (#\& '[&=])))
 				 (#\> (ecase c1
-					(#\< 
-					 ;; The comparison operator "<>" is synonym for "!=". There is some
-					 ;; freedom in where to conflate the two. Doing it here in the lexer
-					 ;; is the earliest possibility; it saves the need for a '<> symbol.
-					 '[!=])
+                                        ;; The comparison operator "<>" is synonym for "!=".
+                                        ;; Conflating the two in the lexer is earliest and easiest.
+					(#\< '[!=])
 					(#\> '[>>])))
 				 (#\< (ecase c1
 					(#\< '[<<])))
@@ -757,28 +623,28 @@ C must be either a character or NIL."
 	     (assert (< c.code 128))
 	     (svref vec c.code))))
     
-    (let ((c2 (read-chr-nil)))
+    (let ((c2 (lex-read-char :eof-error nil)))
       (if (and c2 (punct-char2-p c1 c2))
 	  
-	  (let ((c3 (read-chr-nil)))
+	  (let ((c3 (lex-read-char :eof-error nil)))
 	    (if (punct-char3-p c1 c2 c3)
 		(lookup-3char c1)
-	      (progn (when c3 (unread-chr c3))
+	      (progn (when c3 (lex-unread-char c3))
 		     (lookup-2char c1 c2))))
 	    
 	    ;; 1 char, or two of three dots
 	    (if (and c2 (char= #\. c1 c2))
-		(if (char= (read-chr-error) #\.)
+		(if (char= (lex-read-char) #\.)
 		    '[...]
 		  (raise-syntax-error "Dots `..' may only occur as part of a triple `...' (line ~A)."
-				      *curr-src-line*))
+				      %lex-curr-line-no%))
 	      (if (punct-char1-p c1)
-		  (progn (when c2 (unread-chr c2))
+		  (progn (when c2 (lex-unread-char c2))
 			 (lookup-1char c1))
 		(progn (assert (char= c1 #\!))
 		       (raise-syntax-error
 			"Character `!' may only occur as in `!=', not standalone (line ~A)."
-			*curr-src-line*))))))))
+			%lex-curr-line-no%))))))))
 
 (defun punct-char1-p (c)
   (declare (optimize speed))
@@ -795,8 +661,7 @@ C must be either a character or NIL."
 
 (defun punct-char-not-punct-char1-p (c)
   "Punctuation  !  may only occur in the form  !=  "
-  (and c 
-       (char= c #\! )))
+  (and c (char= c #\! )))
 
 (defun punct-char2-p (c1 c2)
   "Recognizes: // << >>  <> !=  <= >=
@@ -818,49 +683,35 @@ C must be either a character or NIL."
        (char= c1 c2)
        (char-member c1 '( #\* #\< #\> #\/ ))))
 
-
-
 (defun read-whitespace ()
   "Reads all whitespace and comments, until first non-whitespace character.
-
-If Newline was found inside whitespace, values returned are (t N) where N
-is the amount of whitespace after the Newline before the first
-non-whitespace character (in other words, the indentation of the first
-non-whitespace character) measured in spaces, where each Tab is equivalent
-to *tab-width-spaces* spaces - so N >= 0.
-
-If no Newline was encountered before a non-whitespace character then
-NIL, N are returned.
-
-If EOF was encountered then NIL, NIL, T are returned."
-
-  (loop
-      with found-newline = nil and n = 0
-      for c = (read-chr-nil)
+Returns NEWLINE-P, NEW-INDENT, EOF-P."
+  (loop with newline-p = nil and n-spaces = 0 and n-tabs = 0
+      for c = (lex-read-char :eof-error nil)
       do (case c
-	   ((nil)                  (return-from read-whitespace
-                                     (values nil nil t)))
-	   
-	   ((#\Newline #\Return)   (setf found-newline t
-					 n 0))
-	   
-	   ((#\Space #\Page)       (incf n))
-	   
-	   (#\Tab                  (incf n *tab-width-spaces*))
-	   
-	   (#\#                    (progn (read-comment-line c)
-					  (setf found-newline t
-						n 0)))
-	   
-	   (t                      (unread-chr c)
-				   (return-from read-whitespace
-				     (if found-newline
-                                         (values t n)
-                                       (values nil n)))))))
+	   ((nil)                (return-from read-whitespace
+                                   (values nil nil t)))
+           ((#\Newline #\Return) (setf newline-p t
+                                       n-spaces 0
+                                       n-tabs 0))
+           ((#\Space #\Page)     (incf n-spaces))
+           (#\Tab                (incf n-tabs))
+           (#\#                  (progn (read-comment-line c)
+                                        (setf newline-p t
+                                              n-spaces 0
+                                              n-tabs 0)))
+           (t                    (lex-unread-char c)
+                                 (when (and newline-p (plusp n-tabs) (plusp n-spaces)
+                                            %lex-warn-indent%)
+                                   (warn "Irregular indentation: both spaces and tabs (line ~A)."
+                                         %lex-curr-line-no%))
+				 (return-from read-whitespace
+                                   (values newline-p 
+                                           (+ n-spaces (* %lex-tab-width% n-tabs))))))))
 
 (defun read-comment-line (c)
   "Read until the end of the line, leaving the last #\Newline in the source."
   (assert (char= c #\#))
-  (loop
-      for c = (read-chr-nil) while (and c (char/= c #\Newline))
-      finally (when c (unread-chr c))))
+  (loop for c = (lex-read-char :eof-error nil)
+      while (and c (char/= c #\Newline))
+      finally (when c (lex-unread-char c))))

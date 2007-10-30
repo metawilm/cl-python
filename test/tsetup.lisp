@@ -12,7 +12,7 @@
 (defpackage :clpython.test
   (:use :common-lisp :clpython :util.test)
   (:import-from :clpython #:in-syntax)
-  (:import-from :clpython.parser #:parse-python-one-expr)
+  (:import-from :clpython.parser #:parse)
   (:export #:run))
 
 (in-package :clpython.test)
@@ -74,7 +74,7 @@
     (test-false (seq-member 'a #(b)))
     (test-false (seq-member 'a '(b)))))
 
-(defun run ()
+(defun run-tests ()
   (with-subtest (:name "CLPython")
     (test-comp-testfunc)
     (run-parser-test)
