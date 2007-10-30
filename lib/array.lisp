@@ -69,11 +69,11 @@
 	    ;; XXX how about user-defined subclasses?
 	    ((string vector)
 	     (let ((arr (create-array (length initializer))))
-	       (funcall (if (stringp initializer) #'array.fromstring #'array.fromlist)
+	       (funcall (if (stringp initializer) #'|array.fromstring| #'|array.fromlist|)
 			arr initializer)
 	       arr))
 	    (t
-	     (array.extend (create-array) initializer))) ;; XXX could take __len__
+	     (|array.extend| (create-array) initializer))) ;; XXX could take __len__
 	(create-array)))))
 
 (def-py-method |array.__repr__| (x)
@@ -94,7 +94,7 @@
   *the-none*)
 
 (def-py-method |array.fromlist| (py-arr list)
-  (array.fromstring py-arr list))
+  (|array.fromstring| py-arr list))
 
 (def-py-method |array.extend| (py-arr iterable)
   (loop with vec = (py-array-array py-arr)
