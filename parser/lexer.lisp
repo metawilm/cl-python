@@ -210,10 +210,10 @@ On EOF returns: eof-token, eof-token (default: NIL, NIL)."
                            (read-comment-line c))
                             
                           ((char= c #\\) ;; next line is continuation of this one
-                           (let ((c2 (lex-read-char t)))
+                           (let ((c2 (lex-read-char)))
                              (case c2
                                (#\Newline)
-                               (#\Return (let ((c3 (lex-read-char t)))
+                               (#\Return (let ((c3 (lex-read-char)))
                                            (unless (char= c3 #\Newline) ;; Windows: \r\n
                                              (lex-unread-char c3))))
                                (t (raise-syntax-error
@@ -326,14 +326,21 @@ C must be either a character or NIL."
 (defun read-string (ch1 &key raw unicode)
   (assert (char-member ch1 '( #\' #\" )))
   
-  (labels ((read-unicode-char (s s.ix num-hex-digits)
+  (labels ((read-unicode-char (uch s s.ix num-hex-digits)
              (check-type num-hex-digits (member 4 8))
+             (check-type uch (member #\u #\U))
+             (unless (<= (+ s.ix num-hex-digits) (length s))
+               (raise-syntax-error "Incomplete unicode escape character at end of string (line ~A)."
+                                   %lex-curr-line-no%))
              (loop for i below num-hex-digits
                  for ch = (aref s (+ s.ix i))
+                 for shift from (* 4 (1- num-hex-digits)) by -4
                  for ch.code = (or (digit-char-p ch 16) 
-                                   (raise-syntax-error "Non-hex digit in \"\u...\": ~S (line ~A)."
-                                                       ch %lex-curr-line-no%))
-                 sum (ash ch.code (- num-hex-digits i)) into unichar-code
+                                   (raise-syntax-error "Invalid unicode escape: `\\~A' should be ~
+                                                        followed by ~A hex digits, but got non-hex ~
+                                                        character `~A' (line ~A)."
+                                                       uch num-hex-digits ch %lex-curr-line-no%))
+                 sum (ash ch.code shift) into unichar-code
                  finally (return (code-char unichar-code))))
 
            (replace-unicode-hex-escapes (s)
@@ -342,29 +349,41 @@ C must be either a character or NIL."
                          thereis (and (char= c #\\)
                                       (char-member (aref s (1+ i)) '(#\u #\U))))
                (return-from replace-unicode-hex-escapes s))
-             (loop with res = (make-array (length s) :adjustable t :element-type 'character :fill-pointer 0)
-                 for ch = (lex-read-char)
-                 until (char= ch ch1)
-                 if (and unicode (char= ch #\\))
-                 do (let ((ch.next (lex-read-char)))
-                      (if (char-member ch.next '(#\u #\U))
-                          (vector-push-extend
-                           (read-unicode-char s %lex-last-read-char-ix% (if (char= ch.next #\u) 4 8)) res)
-                        (progn (vector-push-extend ch res)
-                               (vector-push-extend ch.next res))))
-                 else do (vector-push-extend ch res)
+             (loop with res = (make-array (length s) :element-type 'character 
+                                          :adjustable t :fill-pointer 0)
+                 with s.len = (length s)
+                 with s.ix = 0
+                 do (loop while (and (< s.ix s.len) (char/= #\\ (aref s s.ix)))
+                        do (vector-push-extend (aref s s.ix) res)
+                           (incf s.ix))
+                    (when (= s.ix s.len)
+                      (return-from replace-unicode-hex-escapes res))
+                    (assert (char= #\\ (aref s s.ix)))
+                    (assert (<= s.ix (- (length s) 2)))
+                    (let* ((c (aref s (incf s.ix)))
+                           (uni-len (case c 
+                                      (#\u 4)
+                                      (#\U 8)
+                                      (t nil))))
+                      (if uni-len
+                          (progn (vector-push-extend (read-unicode-char c s (incf s.ix) uni-len) res)
+                                 (incf s.ix uni-len))
+                        (progn (vector-push-extend #\\ res)
+                               (vector-push-extend c res)
+                               (incf s.ix))))
                  finally (return res)))
   
            (replace-non-unicode-escapes (s)
-             (unless (find #\u s) 
+             (unless (find #\\ s)
                (return-from replace-non-unicode-escapes s))
-             (loop with res = (make-array (length s) :adjustable t :element-type 'character :fill-pointer 0)
+             (loop with res = (make-array (length s) :element-type 'character
+                                          :adjustable t :fill-pointer 0)
                  with s.len fixnum = (length s)
                  with s.ix fixnum = 0
-                 do (loop while (and (< s.ix s.len) (char\= #\\ (aref s s.ix)))
+                 do (loop while (and (< s.ix s.len) (char/= #\\ (aref s s.ix)))
                         do (vector-push-extend (aref s s.ix) res)
                            (incf s.ix))
-                    (unless (= s.ix s.len)
+                    (when (= s.ix s.len)
                       (return-from replace-non-unicode-escapes res))
                     ;; Read one escaped char
                     (assert (char= #\\ (aref s s.ix)))
@@ -398,7 +417,7 @@ C must be either a character or NIL."
                                           (values #\\ c))))
                             ((#\u #\U) (if unicode ;; \uf7d6 \U1a3b5678
                                            (let ((n (if (char= c #\u) 4 8)))
-                                             (read-unicode-char s s.ix n)
+                                             (read-unicode-char c s s.ix n)
                                              (incf s.ix n))
                                          (progn (warn "Unicode escape `\~A' found in non-unicode string (line ~A)."
                                                       c %lex-curr-line-no%)
@@ -428,7 +447,8 @@ C must be either a character or NIL."
                             (t (values #\\ c))) ;; Backslash not used for escaping.
                         (when ch.a (vector-push-extend ch.a res))
                         (when ch.b (vector-push-extend ch.b res))
-                        (incf s.ix))))))
+                        (incf s.ix)))
+                    finally (return res))))
     
     (let* ((ch2 (lex-read-char))
            (ch3 (lex-read-char :eof-error nil))
@@ -443,7 +463,8 @@ C must be either a character or NIL."
                          ((char= ch1 ch2) ;; "" or '' but not """ or '''
                           (when ch3 (lex-unread-char ch3))
                           (return-from read-string ""))
-                         ((char= ch1 ch3) ;; "x"
+                         ((and (char= ch1 ch3) ;; "x"
+                               (char/= ch2 #\\))
                           (return-from read-string (lex-substring (1- %lex-last-read-char-ix%) 
                                                                   (1- %lex-last-read-char-ix%))))
                          (t (let* ((start (- %lex-last-read-char-ix% 1))
@@ -555,7 +576,7 @@ C must be either a character or NIL."
           ;; Exponent marker
           (case (lex-read-char :eof-error nil)
             ((nil) )
-            ((#\e #\E) (let ((expo-value (read-int)))
+            ((#\e #\E) (let ((expo-value (read-int 10)))
                          (setf has-exp t)
                          (setf res (* res (expt 10 expo-value)))
                          ;; CPython: 1e10 -> float, even though it's an int
