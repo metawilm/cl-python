@@ -69,8 +69,8 @@
                               SyntaxError (~A)." c))
 
                     (raise-syntax-error
-                     (format nil "Parse error at line ~A~@[, at token `~S'~].~%[inner error: ~A]"
-                             line token encl-error)))
+                     (format nil "Parse error at line ~A~@[, at token `~S'~].~%[Internal error: ~A~_(catched due to ~S)]"
+                             line token encl-error '*catch-yacc-conditions*)))
                    
                    ((or (eq token 'excl.yacc:eof) eof-seen)
                     (raise-unexpected-eof))
