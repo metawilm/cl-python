@@ -2324,7 +2324,7 @@ be bound."
 		  ([yield-stmt]
 		   (let ((tag (new-tag :yield)))
 		     (values `(:split (setf .state. ,tag)
-				      (return-from function-body ,(second form)) 
+				      (return-from function-body ,(or (second form) '*the-none*))
 				      ,tag)
 			     t)))
 		  
