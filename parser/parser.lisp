@@ -43,7 +43,12 @@ Most important options:
              (parse-with-yacc yacc-version lexer)))
   
   (:method ((x pathname) &rest options)
-           (apply #'parse (clpython.package::slurp-file x) options)))
+           (apply #'parse (clpython.package::slurp-file x) options))
+
+  (:method ((x stream) &rest options)
+           (let ((seq (make-string (file-length x))))
+             (read-sequence seq x)
+             (parse seq))))
 
 (defgeneric parse-with-yacc (yacc-version lexer)
   (:method (v lexer)
