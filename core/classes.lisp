@@ -2334,7 +2334,7 @@ But if RELATIVE-TO package name is given, result may contains dots."
 	       (incf item (length x)))
 	     (unless (<= 0 item (1- (length x)))
 	       (py-raise '{ValueError}
-			 "<string>[i] : i outside range (got ~A, length string = ~A)"
+			 "String subscript outside range (got ~A, length string = ~A)"
 			 item (length x)))
 	     (funcall make-seq-func (aref x item) t))
     
@@ -2611,7 +2611,7 @@ But if RELATIVE-TO package name is given, result may contains dots."
 			       :func (let ((i 0)) (lambda ()
 						    (when (< i (length x))
 						      (prog1
-							  (py-string-from-char (schar x i))
+							  (py-string-from-char (char x i))
 							(incf i)))))))
 
 (def-py-method py-string.__getitem__ (x^ item^)

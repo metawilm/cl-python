@@ -132,7 +132,7 @@
   (let* ((x.len (length x))
 	 (i2 (if (< item 0) (+ item x.len) item)))
     (if (<= 0 i2 (1- x.len))
-	(string (schar x i2))
+	(string (char x i2))
       (call-next-method))))
 
 (defmethod py-subs ((x list) (item fixnum)) ;; tuple
