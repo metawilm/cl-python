@@ -30,12 +30,12 @@ Most important options:
                     (destructuring-bind (module-stmt (suite-stmt suite-items)) res
                       (assert (eq module-stmt '[module-stmt]))
                       (assert (eq suite-stmt '[suite-stmt]))
-                      (if one-expr
-                          (prog1 (car suite-items)
-                            (unless (= (length suite-items) 1)
-                              (error "Wanted one, but got ~A values in AST for ~S."
-                                     (length suite-items) x)))
-                        suite-items)))
+                      (cond ((and one-expr (/= (length suite-items) 1))
+                             (error "Wanted one (due to :one-expr arg) but got ~A values, in AST for ~S."
+                                    (length suite-items) x))
+                            ((or one-expr (= (length suite-items) 1))
+                             (car suite-items))
+                            (t `([suite-stmt] ,suite-items)))))
                    (t res))))
   
   (:method ((x string) &rest options &key (yacc-version *default-yacc-version*))
@@ -54,3 +54,21 @@ Most important options:
   (:method (v lexer)
            (declare (ignore lexer))
            (error "The parser ~S could not be found." v)))
+
+(defun parse-with-replacements (string replacements &key (warn-unused t) parse-options)
+  "Parse STRING, but replace certain tokens in the resulting AST.
+Used to parse a template string, then fill in certain \"gaps\".
+REPLACEMENTS is list: ((old . new) ...)
+E.g. to replace identifier 'foo' with 'bar', use this replacement:
+ ( ([identifier-expr] {foo}) . ([identifier-expr] {foo}) )"
+  (let ((ast (apply #'parse string parse-options)))
+    (if warn-unused
+	(loop for (old . new) in replacements
+	    do (let ((new-ast (subst new old ast :test 'equalp)))
+		 (when (tree-equal ast new-ast)
+		   (warn "[parse-with-replacements] This replacement is unused: ~S => ~S."
+                         old new))
+		 (setf ast new-ast)))
+      (loop for (old . new) in replacements
+	  do (setf ast (nsubst new old ast :test 'equalp))))
+    ast))

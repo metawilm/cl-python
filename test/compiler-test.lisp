@@ -12,23 +12,8 @@
 (in-package :clpython.test)
 (in-syntax *ast-user-readtable*)
 
-(defun parse-with-replacements (string replacements &key (warn-equal t))
-  (let ((ast (parse string)))
-    (if warn-equal
-	(loop for (old . new) in replacements
-	    do (let ((new-ast (subst new old ast :test 'equalp)))
-		 (when (tree-equal ast new-ast)
-		   (cerror "Continue"
-			   "In tree~_ ~S ~_no replacement~_ [~S => ~S] ~_possible."
-			    ast old new))
-		 (setf ast new-ast)))
-      (loop for (old . new) in replacements
-	  do (setf ast (nsubst new old ast :test 'equalp))))
-    ast))
-      
-
 (defun parse-with-tests (string test-replacements)
-  (parse-with-replacements
+  (clpython.parser::parse-with-replacements
    string
    (loop for (id . test) in test-replacements
        collect `(([identifier-expr] ,id)

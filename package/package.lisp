@@ -36,7 +36,8 @@
   (:use )
   (:export "and" "as" "assert" "break" "class" "continue" "def" "del" "elif" "else"
 	   "except" "exec" "finally" "for" "from" "global" "if" "import" "in" "is"
-	   "lambda" "not" "or" "pass" "print" "raise" "return" "try" "while" "yield"
+	   "lambda" "not" "or" "pass" "print" "raise" "return" "try" "while" "with"
+           "yield"
            "is not" "not in"))
 
 (defpackage :clpython.ast.operator
@@ -63,7 +64,7 @@
 	   "continue-stmt" "del-stmt" "exec-stmt" "for-in-stmt" "funcdef-stmt"
 	   "global-stmt" "if-stmt" "import-stmt" "import-from-stmt" "module-stmt"
 	   "pass-stmt" "print-stmt" "raise-stmt" "return-stmt" "suite-stmt"
-	   "try-except-stmt" "try-finally-stmt" "while-stmt" "yield-stmt"
+	   "try-except-stmt" "try-finally-stmt" "while-stmt" "with-stmt" "yield-stmt"
 	   
 	   "attributeref-expr" "backticks-expr" "binary-expr" "binary-lazy-expr"
 	   "call-expr" "comparison-expr" "dict-expr" "generator-expr"
@@ -182,7 +183,9 @@
 	   ;; representation
 	   "__repr__" "__str__" "__hex__" "__oct__"
            ;; iterator
-           "next"))
+           "next"
+           ;; with-stmt
+           "__enter__" "__exit__"))
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (cascade-external-symbols :clpython.user.builtin.type))

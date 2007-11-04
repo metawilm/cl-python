@@ -18,19 +18,18 @@
 (defvar *walk-warn-unknown-form* t)
 
 ;; These constants are used to indicate the "value" and/or "target" context of a
-;; part of the AST. You can rely on them having a "false" (nil) value when the AST
-;; is not used in that context, and a "true" value if it is, but these constants
-;; provide exact information.
+;; part of the AST. You can rely on them having a "false" value (nil) when the AST
+;; is not used in that context, and a "true" value (not necessarily 't) if it is.
 
-(defconstant +normal-target+    t              "A place that is assigned to.")
-(defconstant +delete-target+    :delete        "A place that is a deletion target.")
-(defconstant +augassign-target+ :augassign     "A place that is an augmented assignment value and target.")
+(defconstant +normal-target+      t            "A place that is assigned to.")
+(defconstant +delete-target+      :delete      "A place that is a deletion target.")
+(defconstant +augassign-target+   :augassign   "A place that is an augmented assignment value and target.")
 (defconstant +global-decl-target+ :global-decl "A place that is declared global.")
-(defconstant +no-target+        nil            "Not an assignment or deletion target.")
+(defconstant +no-target+           nil         "Not an assignment or deletion target.")
 
-(defconstant +normal-value+    t           "An expression that is used for its value.")
-(defconstant +augassign-value+ :augassign  "A place that is an augmented assignment value and target.")
-(defconstant +no-value+        nil         "An expression that is not used for its value.")
+(defconstant +normal-value+    t          "An expression that is used for its value.")
+(defconstant +augassign-value+ :augassign "A place that is an augmented assignment value and target.")
+(defconstant +no-value+        nil        "An expression that is not used for its value.")
 
 (defvar *walk-debug* nil
   "Print every walk step")
@@ -357,7 +356,13 @@ VALUE and TARGET context."
 	 (make `([while-stmt] ,(funcall f test :value +normal-value+)
 			      ,(funcall f suite)
 			      ,(when else-suite (funcall f else-suite))))))
-    
+
+      ([with-stmt]
+       (destructuring-bind (test var suite) (cdr form)
+         (make `([with-stmt] ,(funcall f test :value +normal-value+)
+                             ,(when var (funcall f var :target +normal-target+))
+                             ,(funcall f suite)))))
+       
       ([yield-stmt]
        (make `([yield-stmt] ,(when (second form)
                                (funcall f (second form) :value +normal-value+)))))
@@ -367,7 +372,6 @@ VALUE and TARGET context."
                   (not (fboundp (car form)))
 		  *walk-warn-unknown-form*)
 	 (warn "WALK: assuming ~S is a Lisp form: not walked into." form))
-        
        form))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -428,6 +432,7 @@ VALUE and TARGET context."
 
 ;;;; Printing walker, for debugging
 
+#+(or)
 (defun walk-print (ast &rest walk-options)
   (apply #'walk-py-ast
 	 ast
@@ -435,6 +440,3 @@ VALUE and TARGET context."
 	   (format t "> ~A ~@[:value(~S) ~]~@[:target(~S)~]~%" ast value target)
 	   ast)
 	 walk-options))
-
-(defun walk-time (ast &rest walk-options)
-  (time (apply #'walk-py-ast ast (lambda (x &rest args) x) walk-options)))

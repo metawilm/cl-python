@@ -152,6 +152,28 @@ Only has effect when *include-line-number-hook-calls* is true.")
         (t
          nil)))
 
+;;; Python code templates
+
+(defmacro def-py-macro (name params &key code gensyms)
+  "CODE (a string) forms the template. All uppercase identifiers in CODE equal to
+a parameter name are replaced by that PARAM's value. The identifiers given in
+GENSYMS are made gensym'd Lisp vars."
+  (check-type name symbol)
+  (check-type params list)
+  (check-type gensyms list)
+  `(defmacro ,name ,params
+     (let* ((param-repl (list ,@(loop for p in params
+                                    collect `(cons ',([make-identifier-expr] :name (intern (string-upcase p) :clpython.user))
+                                                   ,p))))
+            (gensym-repl (list ,@(loop for g in gensyms
+                                     collect `(cons ',([make-identifier-expr] :name (intern g :clpython.user))
+                                                    (gensym ,(symbol-name g))))))
+            (ast (clpython.parser::parse-with-replacements ,code (nconc param-repl gensym-repl) 
+                                                           :warn-unused nil
+                                                           :parse-options '(:incl-module nil))))
+       `(let ,(mapcar #'cdr gensym-repl)
+          ,ast))))
+                   
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; 
 ;;;  The macros corresponding to AST nodes
@@ -181,15 +203,16 @@ Only has effect when *include-line-number-hook-calls* is true.")
 (defun assign-stmt-get-bound-vars (ass-stmt)
   (with-matching (ass-stmt ([assign-stmt] ?value ?targets))
     (declare (ignore ?value))
-    (let* ((todo ?targets) res)
-      (loop for x = (pop todo)
-	  while x do
-	    (ecase (first x)
-	      ([attributeref-expr] )
-	      ([subscription-expr] )
-	      ([identifier-expr]          (push (second x) res))
-	      (([list-expr] [tuple-expr]) (setf todo (append todo (second x))))))
-      res)))
+    (loop with todo = ?targets and res
+        for x = (pop todo)
+        while x do
+          (when (listp x) ;; Usually true, but not in [with-stmt] expansion.
+            (ecase (first x)
+              ([attributeref-expr] )
+              ([subscription-expr] )
+              ([identifier-expr]          (push (second x) res))
+              (([list-expr] [tuple-expr]) (setf todo (append todo (second x))))))
+        finally (return res))))
 
 (defmacro [assign-stmt] (value targets)
   (with-gensyms (assign-val)
@@ -1251,19 +1274,12 @@ input arguments."
     `(progn ,@stmts)))
 
 (define-compiler-macro [suite-stmt] (&whole whole stmts &environment e)
-  ;; Insert declarations in the suite body indicating the lexical variables that
-  ;; are certainly bound. The compiler will skip checks for bound-ness.
-  ;; 
-  ;; KISS: if there is a del-stmt somewhere in the suite, skip this optimization.
-  ;; This should be more nuanced.
-  
+  ;; Skip checks for bound-ness, when a lexical variable is certainly bound.
   (cond ((and (some (lambda (s) (match-p s '([assign-stmt] ?value ?targets)))
 		    (butlast stmts))
-	      (not (ast-deleted-variables whole)))
-	 
-	 ;; Collect the stmts before the assignment, and those after
-	 
-	 (multiple-value-bind (before-stmts ass-stmt after-stmts)
+	      (not (ast-deleted-variables whole))) ; XXX this should be more nuanced
+         ;; Collect the stmts before the assignment, and those after
+         (multiple-value-bind (before-stmts ass-stmt after-stmts)
 	     (loop for sublist on stmts
 		 for s = (car sublist)
 		 until (match-p s '([assign-stmt] ?value ?targets))
@@ -1433,6 +1449,28 @@ inside an `except' clause.")
      (go .break) ;; prevent warning
     .break
      ))
+
+(def-py-macro [with-stmt] (expr var block)
+  :code (format nil "
+mgr = (EXPR)
+exit = mgr.__exit__  # Not calling it yet
+value = mgr.__enter__()
+exc = True
+try:
+  try: ~@[
+    VAR = value ~]  # Only if 'as VAR' is present
+    BLOCK
+  except:
+    # The exceptional case is handled here
+    exc = False
+    if not exit(*sys.exc_info()):
+      raise
+    # The exception is swallowed if exit() returns true
+finally:
+  # The normal and non-local-goto cases are handled here
+  if exc:
+    exit(None, None, None)" var)
+  :gensyms (mgr exit value exc))
 
 (defmacro [yield-stmt] (val)
   (declare (ignore val))

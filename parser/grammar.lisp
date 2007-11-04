@@ -293,6 +293,7 @@
    ((while-stmt) $1)
    ((for-stmt) $1)
    ((try-stmt) $1)
+   ((with-stmt) $1)
    ((funcdef) $1)
    ((classdef) $1))
 
@@ -319,6 +320,9 @@
 
 (p except--suite+ (except--suite) (list $1))
 (p except--suite+ (except--suite+ except--suite) (nconc $1 (list $2)))
+
+(p with-stmt ([with] test           [:] suite) `([with-stmt] ,$2 nil ,$4))
+(p with-stmt ([with] test [as] expr [:] suite) `([with-stmt] ,$2 ,$4 ,$6))
 
 (p suite :or
    ((simple-stmt)                       `([suite-stmt] (,$1)))
@@ -609,10 +613,12 @@
     (rp [tuple-expr] items)
     (rp [unary-expr] op item)
     (rp [while-stmt] test suite else-suite)
+    (rp [with-stmt] test var suite)
     (rp [yield-stmt] val))
     
   ;; Some shortcuts
   (defun [make-identifier-expr*] (name)
+    (check-type name symbol)
     ([make-identifier-expr] :name name))
   
   (defun [make-suite-stmt*] (&rest args)

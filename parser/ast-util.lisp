@@ -14,7 +14,7 @@
 
 (defvar *multi-line-statements* '([classdef-stmt] [for-in-stmt] [funcdef-stmt]
                                   [if-stmt] [try-except-stmt] [try-finally-stmt]
-                                  [while-stmt])
+                                  [while-stmt] [with-stmt])
   "Statements that can occupy several lines.")
 
 (defvar *use-ast-return-stmt-heuristic* t

@@ -122,7 +122,7 @@ def f(): pass" nil))
     #+(and allegro unix) ;; no WITH-OPEN-TEMP-FILE on windows
     (let ((fname (excl.osi:with-open-temp-file (s (format nil "_clpython-ast-test-~A" (gensym)))
 		   (format s "print 42"))))
-      (test-equal '(([print-stmt] nil (42) nil))
+      (test-equal '([print-stmt] nil (42) nil)
 		  (..parser:parse (pathname fname) :incl-module nil))
       (test t (excl.osi:unlink fname)))
     
