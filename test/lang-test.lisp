@@ -23,7 +23,8 @@
                     :list-expr :module-stmt :print-stmt :return-stmt :slice-expr
                     :subscription-expr :suite-stmt :return-stmt :raise-stmt
                     :try-except-stmt :try-finally-stmt :tuple-expr :unary-expr
-                    :while-stmt :yield-stmt))
+                    :while-stmt :with-stmt :yield-stmt
+                    :attribute-semantics))
       (test-lang node))))
 
 (defmacro with-all-compiler-variants-tried (&body body)
@@ -53,6 +54,7 @@
 (defmethod test-lang :around (kind)
   (with-subtest (:name (format nil "CLPython-Lang-~A" kind))
     (let ((*warn-unused-function-vars* nil))
+      (assert (next-method-p))
       (call-next-method))))
 
 (defmethod test-lang ((kind (eql :assert-stmt)))
@@ -400,7 +402,7 @@ assert sys" :fail-info "Should work in both ANSI and Modern mode.")
   )
 
 (defmethod test-lang ((kind (eql :import-from-stmt)))
-  (run-no-error "from sys import path; path.append('/foo')"))
+  (run-no-error "from sys import path; path.append('/foo'); del path[-1]"))
 
 (defmethod test-lang ((kind (eql :lambda-expr)))
   (run-no-error "lambda: None")
@@ -515,5 +517,47 @@ def f():
 g = f()
 assert g.next() == 42"))
 
+(defmethod test-lang ((kind (eql :with-stmt)))
+  (run-no-error "
+x = []
+class C:
+  def __enter__(self):
+    x.append('enter')
+    return 42
+  def __exit__(self, x,y,z):
+    x.append('exit')
+
+with C() as x:
+  x.append(x)
+assert x == ['enter', 42, 'exit']"))
+
 (defmethod test-lang ((kind (eql :yield-stmt)))
   )
+
+(defmethod test-lang ((kind (eql :attribute-semantics)))
+  (run-no-error "
+class C: pass
+x = C()
+x.a = 3
+assert x.a == 3")
+  (run-no-error "
+class mystring(str):
+  def __eq__(self, other):
+    return False
+myx = mystring('x')
+mystring.x = 3
+setattr(mystring, myx, 4)
+assert mystring.x == 3
+assert getattr(mystring, myx) == 4")
+  (run-no-error "
+class C:
+  pass
+setattr(C, 'a', 3)
+try:
+  setattr(C, 1, 2)
+  assert 0
+except TypeError:
+  None
+"))
+
+   
