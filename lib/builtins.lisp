@@ -117,7 +117,8 @@ POS-ARGS is any iterable object; KW-DICT must be of type PY-DICT."
   (error "todo: py-compile"))
 
 (defun {delattr} (x attr)
-  (assert (stringp attr))
+  (unless (stringp attr)
+    (py-raise '{TypeError} "Attribute (for delattr) must be string (got: ~S)" attr))
   (let ((attr.sym (ensure-user-symbol attr)))
     (setf (py-attr x attr.sym) nil)))
 
@@ -192,7 +193,8 @@ POS-ARGS is any iterable object; KW-DICT must be of type PY-DICT."
   ;; This interns the ATTR in the :clpython.user package - probably a
   ;; small price to pay for using symbols in attribute lookup everywhere
   ;; else.
-  (assert (stringp attr))
+  (unless (stringp attr)
+    (py-raise '{TypeError} "Attribute (for getattr) must be string (got: ~S)" attr))
   (let* ((attr.sym (ensure-user-symbol attr))
 	 (val (catch :getattr-block
 		(handler-case
@@ -455,8 +457,8 @@ None, use identity function (multiple sequences -> list of tuples)."
       (coerce x-rounded 'double-float))))
 
 (defun {setattr} (x attr val)
-  ;; XXX attr symbol/string
-  (assert (stringp attr))
+  (unless (stringp attr)
+    (py-raise '{TypeError} "Attribute (for getattr) must be string (got: ~S)" attr))
   (let ((attr.sym (ensure-user-symbol attr)))
     (setf (py-attr x attr.sym) val)))
 
