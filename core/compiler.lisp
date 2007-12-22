@@ -965,7 +965,7 @@ input arguments."
 				`(setf (svref +mod-static-globals-values+ ,glob-ix) ,val)
 			      `(setf (gethash ',name +mod-dyn-globals+) ,val)))
 			(local-set `(setf ,name ,val))
-			(class-set `(sub/dict-set +cls-namespace+ ,(symbol-name name) ,val)))
+			(class-set `(sub/dict-set +cls-namespace+ ',name ,val)))
 	(let ((store-form
 	       (ecase (get-pydecl :context e)
 		 (:module    module-set)
@@ -1452,6 +1452,7 @@ inside an `except' clause.")
 
 (def-py-macro [with-stmt] (expr var block)
   :code (format nil "
+#import sys as __clpy_sys ## ugly
 mgr = (EXPR)
 exit = mgr.__exit__  # Not calling it yet
 value = mgr.__enter__()
@@ -1463,7 +1464,7 @@ try:
   except:
     # The exceptional case is handled here
     exc = False
-    if not exit(*sys.exc_info()):
+    if not exit(*__clpy_sys.exc_info()):
       raise
     # The exception is swallowed if exit() returns true
 finally:
