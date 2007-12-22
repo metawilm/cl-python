@@ -458,7 +458,7 @@ None, use identity function (multiple sequences -> list of tuples)."
 
 (defun {setattr} (x attr val)
   (unless (stringp attr)
-    (py-raise '{TypeError} "Attribute (for getattr) must be string (got: ~S)" attr))
+    (py-raise '{TypeError} "Attribute (for setattr) must be string (got: ~S)" attr))
   (let ((attr.sym (ensure-user-symbol attr)))
     (setf (py-attr x attr.sym) val)))
 
