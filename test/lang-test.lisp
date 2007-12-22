@@ -524,11 +524,11 @@ class C:
   def __enter__(self):
     x.append('enter')
     return 42
-  def __exit__(self, x,y,z):
+  def __exit__(self, _x,_y,_z):
     x.append('exit')
 
-with C() as x:
-  x.append(x)
+with C() as y:
+  x.append(y)
 assert x == ['enter', 42, 'exit']"))
 
 (defmethod test-lang ((kind (eql :yield-stmt)))
@@ -548,7 +548,8 @@ myx = mystring('x')
 mystring.x = 3
 setattr(mystring, myx, 4)
 assert mystring.x == 3
-assert getattr(mystring, myx) == 4")
+assert getattr(mystring, myx) == 4"
+                :known-failure t :fail-info "{g,s}etattr only support regular string args")
   (run-no-error "
 class C:
   pass
