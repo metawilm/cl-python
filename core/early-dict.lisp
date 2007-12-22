@@ -7,18 +7,15 @@
 ;; (http://opensource.franz.com/preamble.html),
 ;; known as the LLGPL.
 
-;;;; Python dictionary - early definition
+;;;; Python dictionary
 
 (in-package :clpython)
-
-
-;;; Special handling of `magic methods'
 
 (defparameter *magic-methods*
     '#.(sort (loop for s being the external-symbol in :clpython.user
                  for sn = (symbol-name s)
                  when (and (> (length sn) 0)
-                           (or (char= (schar sn 0) #\_)
+                           (or (char= (char sn 0) #\_)
                                (string= sn "next")))
                  collect s)
              #'string<
@@ -27,58 +24,65 @@
 meaning in the language, plus the (oddly named) method name `next'.
 All these symbols are in the clpython.user package.")
 
-(defconstant +num-dynamic-magic-methods+ 25)
-(defparameter *num-magic-methods* 
-    (+ (length *magic-methods*) +num-dynamic-magic-methods+))
-(defparameter *next-vacant-magic-method-ix* (length *magic-methods*))
+(defconstant +attr-cache-ix-property+ 'attr-cache-ix)
 
-(defconstant +magic-ix-prop+ 'magic-ix)
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (defconstant +dikt-hash-vector-size+ 32))
 
-(defun set-magic-method-props ()
-  (loop for s in *magic-methods*
-      for i from 0
-      do (setf (get s +magic-ix-prop+) i)))
+(deftype attr-hash-type () '(integer 0 #.+dikt-hash-vector-size+))
 
-(set-magic-method-props)
+(defparameter *attr-cache-iter* -1)
+(declaim (type fixnum *attr-cache-iter*))
 
-(defun get-magic-method-index (meth)
-  "Returns: index.
-For unseen symbols, might create index.
-Non-{string,symbol} names never have a magic ix."
-  (typecase meth
-    (symbol (or (get meth +magic-ix-prop+)
-                ;; If vacant method ix available: use for this symbol
-                (when *next-vacant-magic-method-ix*
-                  (prog1 
-                      (setf (get meth +magic-ix-prop+) *next-vacant-magic-method-ix*)
-                    #+(or)(warn "Making ~A next magic method (~A)" 
-                                meth *next-vacant-magic-method-ix*)
-                    (when (>= (incf *next-vacant-magic-method-ix*) *num-magic-methods*)
-                      (setf *next-vacant-magic-method-ix* nil))))))
-    (string (let ((x (find-symbol meth :clpython.user)))
-              (and x (get x +magic-ix-prop+))))))
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (defparameter *dict-optimize-settings* 
+      '(optimize (speed 3) (safety 1) (debug 0))))
 
+(defun get-sym-attr-hash (x)
+  (declare #.*dict-optimize-settings*
+           (symbol x))
+  (let ((plist (symbol-plist (the symbol x))))
+    (if (eq (pop plist) +attr-cache-ix-property+)
+        (pop plist)
+      ;; Not set as first property, or not set at all
+      (or (get x +attr-cache-ix-property+)
+          (setf (get x +attr-cache-ix-property+)
+            (mod (the fixnum (incf (the fixnum *attr-cache-iter*))) +dikt-hash-vector-size+))))))
+
+(defun set-magic-methods-attr-hashes ()
+  (mapcar #'get-sym-attr-hash *magic-methods*)
+  (let ((sym '{__init__})
+        (hash 14)) ;; hardcoded, yeah
+    (assert (= (get-sym-attr-hash sym) hash) ()
+      "Sanity check for attribute hash codes failed: hash of ~S is ~A, expected ~A."
+      sym (get-sym-attr-hash sym) hash)))
+
+(set-magic-methods-attr-hashes)
+
+(defun get-attr-hash (x)
+  "X either symbol, string, or user-defined subclass of string"
+  (declare #.*dict-optimize-settings*)
+  (typecase x
+    (symbol (get-sym-attr-hash x))
+    (string (let ((s (find-symbol x :clpython.user)))
+              (and s (get-sym-attr-hash s))))
+    (t (mod (py-hash x) +dikt-hash-vector-size+))))
 
 ;;; Py-dict 
 
-(defconstant +dikt-vector-size+ 4)
-
 (defstruct (dikt (:type vector))
-  (vector-key (make-array +dikt-vector-size+))
-  (vector-val (make-array +dikt-vector-size+))
-  (hash-table nil)
-  (magic-methods-bitarr (make-array *num-magic-methods* :element-type 'bit
-                                    :initial-element 0)))
+  (vector (make-array +dikt-hash-vector-size+))
+  (hash-table nil))
 
-;; Invariants:
-;;  VECTOR is NIL if HASH-TABLE is used.
-;;  HASH-TABLE is used if more than 
+;; Invariant:
+;;  VECTOR is NIL <=> HASH-TABLE is used.
+;;  VECTOR not NIL => all keys are symbols (representing Python strings)
 
 (defclass py-dict ()
   ((dikt :accessor py-dict-dikt :initform (make-dikt))))
 
 (defun make-dict ()
-  (declare (optimize (speed 3) (safety 0) (debug 0)))
+  (declare #.*dict-optimize-settings*)
   (make-instance 'py-dict))
 
 (defun dict-map (x func)
@@ -87,7 +91,7 @@ Non-{string,symbol} names never have a magic ix."
   (dikt-map (py-dict-dikt x) func))
 
 (defun py-==->lisp-val (x y)
-  (declare (optimize (speed 3) (safety 1) (debug 0))
+  (declare #.*dict-optimize-settings*
            (notinline py-==))
   (if (and (stringp x) (stringp y))
       (if (and (char= (aref x 0) (aref y 0))
@@ -121,156 +125,157 @@ Non-{string,symbol} names never have a magic ix."
     #+(or)(warn "old py-== ~A ~A" x y)
     (if (equalp x y) 1 0)))
 
-
-;;; DIKT functions
-
-(defun dikt-del (x key)
-  ;; Returns whether found
-  (declare (optimize (safety 3) (debug 3)))
-  (cond ((dikt-hash-table x) ;; use hash-table
-         
-         ;; Work around Allegro 8.0 bug: sometimes wrong return value for REMHASH.
-         #+(and allegro-version>= (not (version>= 8 1)))
-         (let ((count-before (hash-table-count (dikt-hash-table x))))
-           (remhash key (dikt-hash-table x))
-           (let ((count-after (hash-table-count (dikt-hash-table x))))
-             (return-from dikt-del (< count-after count-before))))
-         #-(and allegro-version>= (not (version>= 8 1)))
-         (return-from dikt-del (remhash key (dikt-hash-table x))))
-        
-        (t ;; use vector
-         (let ((c0 (typecase key
-                     (string (when (> (length key) 0)
-                               (schar key 0)))
-                     (symbol (setf key (symbol-name key))
-                             (schar key 0)))))
-           (do ((i 0 (1+ i)))
-               ((>= i +dikt-vector-size+) (return-from dikt-del nil))
-             (let ((k (svref (dikt-vector-key x) i)))
-               (when (and k
-                          (if c0
-                              (and (char= (schar k 0) (schar key 0))
-                                   (string= k key))
-                            (or (eq k key)
-                                (py-val->lisp-bool (py-== k key)))))
-                 (setf (svref (dikt-vector-key x) i) nil
-                       (svref (dikt-vector-val x) i) nil)
-                 (return-from dikt-del t))))))))
-
 (defun make-py-hash-table ()
   (make-hash-table :test 'py-==->lisp-val :hash-function 'py-hash))
 
 (defun convert-dikt (x)
-  (declare (optimize (speed 3) (safety 1) (debug 0)))
-  (do* ((d (make-py-hash-table))
-        (i 0 (1+ i)))
-      ((>= i +dikt-vector-size+) d)
-    (let ((k (svref (dikt-vector-key x) i)))
-      (when k
-        (setf (gethash k d) (svref (dikt-vector-val x) i)
-              (svref (dikt-vector-key x) i) nil
-              (svref (dikt-vector-val x) i) nil)))
-    (setf (dikt-hash-table x) d)))
+  (declare #.*dict-optimize-settings*)
+  #+(or)(break "converting dikt")
+  (do ((d (make-py-hash-table))
+       (i 0 (1+ i)))
+      ((= i +dikt-hash-vector-size+)
+       (setf (dikt-hash-table x) d
+             (dikt-vector x) nil)
+       x)
+    (let ((entries (svref (dikt-vector x) i)))
+      (do ((entry (pop entries) (pop entries)))
+          ((null entry) )
+        (setf (gethash (car entry) d) (cdr entry))))))
 
-(defun dikt-set (x key val) ;; &optional magic-ix)
-  (declare (optimize (speed 3) (safety 1) (debug 0)))
+;;; DIKT functions
 
-  ;; Update bitarr, in case of string/symbol
-  (whereas ((bitarr (dikt-magic-methods-bitarr x))
-            (magic-ix (or (get-magic-method-index key)
-                          (setf (dikt-magic-methods-bitarr x) nil))))
-    (setf (sbit bitarr magic-ix) 1))
-  
-  #+(or)
-  (typecase key
-    (string (get-magic-method-index key))
-    (symbol (get key +magic-ix-prop+))
-    (t      ;; remove bitarr upon insertion of non-string key
-     (setf (dikt-magic-methods-bitarr x) nil)))
-
+(defun dikt-del (x key)
+  ;; Returns whether found.
+  (declare #.*dict-optimize-settings*)
   (cond ((dikt-hash-table x) ;; use hash-table
-         (return-from dikt-set (setf (gethash key (dikt-hash-table x)) val)))
+         (remhash key (dikt-hash-table x)))
+        ((symbolp key)
+         (dikt-del-sym-with-hash x key (get-sym-attr-hash key)))
+        (t
+         (dikt-del (convert-dikt x) key))))
 
-        ((not (or (stringp key) (symbolp key)))
-         (progn (convert-dikt x)
-                (dikt-set x key val))) ;;(setf (gethash key (dikt-hash-table x)) val)))
-        
-        (t ;; use vector, if enough room left
-         (let ((c0 (typecase key
-                     (string (when (> (length key) 0)
-                               (schar key 0)))
-                     (symbol (setf key (symbol-name key))
-                             (schar key 0)))))
-           (do ((i 0 (1+ i))
-                (ins-pos nil))
-               
-               ((>= i +dikt-vector-size+)
-                (if ins-pos
-                    (setf (svref (dikt-vector-key x) ins-pos) key
-                          (svref (dikt-vector-val x) ins-pos) val)
-                  (progn (convert-dikt x)
-                         (setf (gethash key (dikt-hash-table x)) val)))
-                (return-from dikt-set nil))
-             
-             (let ((k (svref (dikt-vector-key x) i)))
-               (cond (k
-                      (when (if c0
-                                (and (char= (schar k 0) (schar key 0))
-                                     (string= k key))
-                              (or (eq k key)
-                                  (py-val->lisp-bool (py-== k key))))
-                        (setf (svref (dikt-vector-val x) i) val)
-                        (return-from dikt-set)))
-                     (t
-                      (unless ins-pos
-                        (setf ins-pos i))))))))))
+(defun dikt-del-sym-with-hash (x key-sym hash)
+  ;; Assumes: HASH == (get-sym-attr-hash KEY-SYM)
+  (declare #.*dict-optimize-settings*
+           (symbol key-sym)
+           (type attr-hash-type hash))
+  (if (dikt-hash-table x)
+      (dikt-del x key-sym)
+    (let ((entries (svref (dikt-vector x) hash)))
+      (do ((entry (pop entries) (pop entries))
+           (prev-entry nil entry))
+          ((null entry) nil)
+        (when (eq (car entry) key-sym)
+          (if prev-entry
+              (setf (cdr prev-entry) entries)
+            (setf (svref (dikt-vector x) hash) entries))
+          (return-from dikt-del-sym-with-hash t))))))
 
-(defun dikt-get (x key) ;; &optional (magic-ix (get-magic-method-index key)))
-  (declare (optimize (speed 3) (safety 1) (debug 0)))
+(define-compiler-macro dikt-del (&whole whole x key)
+  ;; Try to move lookup of symbol hash code to compile time or load time.
+  (let ((key.sym (cond ((stringp key) (intern key :clpython.user))
+                       ((and (listp key) 
+                             (eq (car key) 'quote)
+                             (symbolp (second key)))
+                        (second key)))))
+    (cond ((null key.sym) 
+           whole)
+          ((member key.sym *magic-methods*)
+           `(dikt-del-sym-with-hash ,x ',key.sym ,(get-sym-attr-hash key.sym)))
+          (t
+           `(dikt-del-sym-with-hash ,x ',key.sym (load-time-value (get-sym-attr-hash ',key.sym)))))))
 
-  ;; Only in case of symbols
-  (when (symbolp key)
-    (whereas ((bitarr (dikt-magic-methods-bitarr x))
-              (magic-ix (get key +magic-ix-prop+)))
-      (declare (type (integer 0 10000) magic-ix))
-      (when (zerop (sbit bitarr magic-ix))
-        (return-from dikt-get nil))))
-  
+;;; DIKT-SET
+
+(defun dikt-set (x key val)
+  (declare #.*dict-optimize-settings*)
   (cond ((dikt-hash-table x) ;; use hash-table
-         (return-from dikt-get (gethash key (dikt-hash-table x))))
-        
-        (t ;; use vector
-         (let ((c0 (typecase key
-                     (string (when (> (length (the string key)) 0)
-                               (schar key 0)))
-                     (symbol (setf key (symbol-name key))
-                             (schar key 0)))))
-           (do ((i 0 (1+ i)))
-               ((>= i +dikt-vector-size+) (return-from dikt-get nil))
-             (declare (fixnum i))
-             (whereas ((k (svref (dikt-vector-key x) i)))
-               (when (if c0
-                         (and (char= (schar k 0) (schar key 0))
-                              (string= k key))
-                       (or (eq k key)
-                           (py-==->lisp-val k key)))
-                 (return-from dikt-get
-                   (svref (dikt-vector-val x) i)))))))))
+         (setf (gethash key (dikt-hash-table x)) val))
+        ((symbolp key)
+         (dikt-set-sym-with-hash x key (get-sym-attr-hash key) val))
+        (t
+         (dikt-set (convert-dikt x) key val))))
 
-#+(or)
-(define-compiler-macro dikt-get (&whole whole x key &optional (magic-ix nil magic-ix-p))
-  ;; Calculate magic-ix at compile time.
-  (declare (ignore magic-ix))
-  (if (and (typep key '(or string symbol))
-           (not magic-ix-p))
-      `(dikt-get ,x ,key ,(get-magic-method-index key))
-    whole))
+(defun dikt-set-sym-with-hash (x key-sym hash val)
+  ;; Assumes: HASH == (get-sym-attr-hash KEY-SYM)
+  (declare #.*dict-optimize-settings*
+           (symbol key-sym)
+           (type attr-hash-type hash))
+  (if (dikt-hash-table x)
+      (dikt-set x key-sym val)
+    (let ((entries (svref (dikt-vector x) hash)))
+      (do ((entry (pop entries) (pop entries)))
+          ((null entry) (push (cons key-sym val) (svref (dikt-vector x) hash)))
+        (when (eq key-sym (car entry))
+          (setf (cdr entry) val)
+          (return-from dikt-set-sym-with-hash))))))
 
+(define-compiler-macro dikt-set (&whole whole x key val)
+  ;; Try to move lookup of symbol hash code to compile time or load time.
+  (let ((key.sym (cond ((stringp key) (intern key :clpython.user))
+                       ((and (listp key) 
+                             (eq (car key) 'quote)
+                             (symbolp (second key)))
+                        (second key)))))
+    (cond ((null key.sym) 
+           whole)
+          ((member key.sym *magic-methods*)
+           `(dikt-set-sym-with-hash ,x ',key.sym ,(get-sym-attr-hash key.sym) ,val))
+          (t
+           `(dikt-set-sym-with-hash ,x ',key.sym (load-time-value (get-sym-attr-hash ',key.sym)) ,val)))))
+  
+;;; DIKT-GET
+
+(defun dikt-get (x key)
+  "Returns value or NIL"
+  (declare #.*dict-optimize-settings*)
+  (cond ((dikt-hash-table x) ;; use hash-table
+         (gethash key (dikt-hash-table x)))
+        ((symbolp key)
+         (dikt-get-sym-with-hash x key (get-sym-attr-hash key)))
+        (t 
+         (let ((user-sym (and (stringp key)
+                              (find-symbol key #.(find-package :clpython.user)))))
+           (when user-sym
+             (return-from dikt-get (dikt-get-sym-with-hash x user-sym (get-sym-attr-hash user-sym)))))
+         (warn "dikt-get: non-{symbol,string} lookup key ~S for symbol-only dikt?" key)
+         (dikt-get (convert-dikt x) key))))
+
+(defun dikt-get-sym-with-hash (x key-sym hash)
+  ;; Assumes: HASH == (get-sym-attr-hash KEY-SYM)
+  (declare #.*dict-optimize-settings*
+           (symbol key-sym)
+           (type attr-hash-type hash))
+  (if (dikt-hash-table x)
+      (dikt-get x key-sym)
+    (let ((entries (svref (dikt-vector x) hash)))
+      (do ((entry (pop entries) (pop entries)))
+          ((null entry) )
+        (when (eq key-sym (car entry))
+          (return-from dikt-get-sym-with-hash (cdr entry)))))))
+
+(define-compiler-macro dikt-get (&whole whole x key)
+  ;; Try to move lookup of symbol hash code to compile time or load time.
+  (let ((key.sym (cond ((stringp key) (intern key :clpython.user))
+                       ((and (listp key) 
+                             (eq (car key) 'quote)
+                             (symbolp (second key)))
+                        (second key)))))
+    (cond ((null key.sym) 
+           whole)
+          ((member key.sym *magic-methods*)
+           `(dikt-get-sym-with-hash ,x ',key.sym ,(get-sym-attr-hash key.sym)))
+          (t
+           `(dikt-get-sym-with-hash ,x ',key.sym (load-time-value (get-sym-attr-hash ',key.sym)))))))
+
+;;; Other methods
 
 (defun dikt-equal (d1 d2)
-  (declare (optimize (speed 3) (safety 1) (debug 0))
+  (declare #.*dict-optimize-settings*
            (notinline py-==))
-  (cond ((eq d1 d2) (return-from dikt-equal t))
+  (cond ((eq d1 d2) 
+         t)
+        
         ((and (dikt-hash-table d1)
               (dikt-hash-table d2))
          (let ((ht1 (dikt-hash-table d1))
@@ -278,133 +283,102 @@ Non-{string,symbol} names never have a magic ix."
            (and (= (the fixnum (hash-table-count ht1)) (the fixnum (hash-table-count ht2)))
                 (loop for d1.k being the hash-key in ht1 using (hash-value d1.v)
                     for d2.v = (gethash d1.k ht2)
+                    when (not d2.v) return nil
                     when (py-val->lisp-bool (py-!= d1.v d2.v)) return nil
-                    finally (return-from dikt-equal t)))))
-
+                    finally (return t)))))
+        
         ((not (or (dikt-hash-table d1) (dikt-hash-table d2)))
-         (unless (= (loop for k across (dikt-vector-key d1) count k)
-                    (loop for k across (dikt-vector-key d2) count k))
-           (return-from dikt-equal nil))
-         (loop with d1.count fixnum = 0
-             with d1.keys = (dikt-vector-key d1)
-             with d1.vals = (dikt-vector-val d1)
-             for i from 0 below +dikt-vector-size+
-             for d1.key = (svref d1.keys i)
-             when d1.key
-             do (incf d1.count)
-                (loop with d1.val = (svref d1.vals i)
-                    with d2.keys = (dikt-vector-key d2)
-                    with d2.vals = (dikt-vector-key d2)
-                    for j from 0 below +dikt-vector-size+
-                    for d2.key = (svref d2.keys i)
-                    for d2.val = (svref d2.vals i)
-                    when (or (eq d1.key d2.key)
-                             (py-val->lisp-bool (py-== d1.key d2.key)))
-                    unless (or (eq d1.val d2.val)
-                               (py-val->lisp-bool (py-== d1.val d2.val)))
-                    do (return-from dikt-equal nil))
-             finally (return-from dikt-equal t)))
+         (do ((i 0 (1+ i)))
+             ((= i +dikt-hash-vector-size+) t)
+           (let ((entries.1 (svref (dikt-vector d1) i))
+                 (entries.2 (svref (dikt-vector d2) i)))
+             (unless (= (length entries.1) (length entries.2))
+               (return-from dikt-equal nil))
+             (do* ((entry.1 (pop entries.1) (pop entries.1))
+                   (entry.2 (and entry.1 (assoc (car entry.1) entries.2 :test 'eq))))
+                 ((null entry.1) )
+               (unless (eq (cdr entry.2) (cdr entry.1))
+                 (return-from dikt-equal nil))))))
         
         (t (unless (dikt-hash-table d1)
              (rotatef d1 d2))
-           ;; D1 is the HASH-TABLE
-           ;; D2 is the vector
-           (cond ((/= (loop for k across (dikt-vector-key d2) count k)
-                      (the fixnum (hash-table-count (dikt-hash-table d1))))
-                  (return-from dikt-equal nil))
-                 ((= (hash-table-count (dikt-hash-table d1))
-                     0
-                     (loop for i from 0 below +dikt-vector-size+
-                         count (svref (dikt-vector-key d2) i)))
-                  (return-from dikt-equal t)))
-           (loop for d1.key being the hash-key in (dikt-hash-table d1)
-               using (hash-value d1.val)
-               do (loop
-                      with d2.keys = (dikt-vector-key d2)
-                      with d2.vals = (dikt-vector-val d2)
-                      with d2-matching-key-found
-                      for i from 0 below +dikt-vector-size+
-                      for d2.key = (svref d2.keys i)
-                      for d2.val = (svref d2.vals i)
-                      when d2.key
-                      when (or (eq d1.key d2.key)
-                               (py-val->lisp-bool (py-== d1.key d2.key)))
-                      do (setf d2-matching-key-found t)
-                      unless (or (eq d1.val d2.val)
-                                 (py-val->lisp-bool (py-== d1.val d2.val)))
-                      do (return-from dikt-equal nil)
-                      finally (if d2-matching-key-found
-                                  (return-from dikt-equal t)
-                                (return-from dikt-equal nil)))))))
+           ;; Now d1 is the hash-table; d2 is the vector
+           (and (= (dikt-count d2) (dikt-count d1))
+                (loop for d1.k being the hash-key in (dikt-hash-table d1)
+                    always (or (symbolp d1.k) (stringp d1.k)))
+                (loop for d1.k being the hash-key in (dikt-hash-table d1)
+                    using (hash-value d1.v)
+                    always (py-== (dikt-get d2 d1.k) d1.v))))))
 
-(defun dikt-iter-keys-func (d)
-  "Returns the keys one by one, and NIL when finished."
-  (if (dikt-hash-table d)
-      (with-hash-table-iterator (next-func (dikt-hash-table d))
-        (lambda () (multiple-value-bind (ret key val) 
-                       (next-func)
-                     (declare (ignore val))
-                     (when ret key))))
-    (let ((i -1))
-      (lambda ()
-        (loop with keys = (dikt-vector-key d)
-            for j fixnum from (1+ i) below +dikt-vector-size+
-            for key = (svref keys j)
-            when key
-            do (setf i j)
-            return key)))))
+(defmacro def-dikt-iter-func (name args doc key-var val-var action-form)
+  ;; BLOCK is named 'iter.
+  ;; Modifying the value of the most recently returned item by the iterator
+  ;; should be okay; removing it is not yet supported.
+  `(defun ,name (.d ,@args)
+     ,doc
+     (if (dikt-hash-table .d)
+         (with-hash-table-iterator (.next-func (dikt-hash-table .d))
+           (lambda ()
+             (block iter
+               (multiple-value-bind (.ret ,(or key-var '.key) ,(or val-var '.val)) 
+                   (.next-func)
+                 ,@(unless key-var `((declare (ignore .key))))
+                 ,@(unless val-var `((declare (ignore .val))))
+                 (when .ret
+                   ,action-form)))))
+       (let ((.hash-ix 0)
+             (.nth-item 0))
+         (lambda ()
+           (loop named iter
+               do (let* ((.entries (svref (dikt-vector .d) .hash-ix))
+                         (.entry-var (nth .nth-item .entries)))
+                    (cond (.entry-var
+                           (incf .nth-item)
+                           (let (,@(when key-var `((,key-var (car .entry-var))))
+                                 ,@(when val-var `((,val-var (cdr .entry-var)))))
+                             ,action-form))
+                          ((< (incf .hash-ix) +dikt-hash-vector-size+)
+                           (setf .nth-item 0))
+                          (t (return-from iter nil))))))))))
 
-(defun dikt-iter-values-func (d)
-  "Returns the keys one by one, and NIL when finished."
-  (if (dikt-hash-table d)
-      (with-hash-table-iterator (next-func (dikt-hash-table d))
-        (lambda () (multiple-value-bind (ret key val) 
-                       (next-func)
-                     (declare (ignore key))
-                     (when ret val))))
-    (let ((i -1))
-      (lambda ()
-        (loop with keys = (dikt-vector-key d)
-            for j fixnum from (1+ i) below +dikt-vector-size+
-            for key = (svref keys j)
-            when key
-            do (setf i j)
-            return (svref (dikt-vector-val d) j))))))
+(def-dikt-iter-func dikt-iter-keys-func ()
+    "Returns the keys one by one, and NIL when finished."
+  key nil (return-from iter key))
 
-(defun dikt-iter-keys-values-func (d)
-  "Returns key, value as two values, and NIL when finished."
-  (if (dikt-hash-table d)
-      (with-hash-table-iterator (next-func (dikt-hash-table d))
-        (lambda () (multiple-value-bind (ret key val) 
-                       (next-func)
-                     (when ret
-                       (values key val)))))
-    (let ((i -1))
-      (lambda ()
-        (loop with keys = (dikt-vector-key d)
-            for j fixnum from (1+ i) below +dikt-vector-size+
-            for key = (svref keys j)
-            when key
-            do (setf i j)
-            return (values key (svref (dikt-vector-val d) j)))))))
+(def-dikt-iter-func dikt-iter-values-func ()
+    "Returns the keys one by one, and NIL when finished."
+  nil val (return-from iter val))
+
+(def-dikt-iter-func dikt-iter-keys-values-func ()
+    "Returns the key, value as two values; and NIL when finished."
+  key val (return-from iter (values key val)))
 
 (defun dikt-map (d func)
-  "Returns the keys one by one, and NIL when finished."
-  (check-type func function)
-  (if (dikt-hash-table d)
-      (loop for key being the hash-key in (dikt-hash-table d)
-          using (hash-value val)
-          do (funcall func key val))
-    (loop with keys = (dikt-vector-key d)
-        for j fixnum from 0 below +dikt-vector-size+
-        for key = (svref keys j)
-        when key
-        do (funcall func key (svref (dikt-vector-val d) j)))))
+  (let ((mapper (dikt-map-func d func)))
+    (loop while (funcall mapper))))
+   
+(def-dikt-iter-func dikt-map-func (func)
+  "Func, a function of two args, is called for every key-value pair."
+  key val (progn (funcall func key val)
+                 t))
+    
 
 (defun dikt-count (d)
   (if (dikt-hash-table d)
       (hash-table-count (dikt-hash-table d))
-    (loop for k across (dikt-vector-key d) count k)))
+    (do ((i 0 (1+ i))
+         (count 0))
+        ((= i +dikt-hash-vector-size+) count)
+      (incf count (length (svref (dikt-vector d) i))))))
 
-
-
+(defun dikt-clear (d)
+  (when (dikt-hash-table d)
+    (setf (dikt-hash-table d) nil))
+  (cond ((dikt-vector d)
+         (do ((i 0 (1+ i)))
+             ((= i +dikt-hash-vector-size+) )
+           (setf (svref d i) nil)))
+        (t (setf (dikt-vector d)
+             (make-array +dikt-hash-vector-size+))))
+  d)
+        

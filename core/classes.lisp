@@ -1124,6 +1124,7 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
   ;; Look for ATTR in class CLS and all its superclasses.
   ;; and finally (which is in this implementation not a superclass of a class).
   (assert (symbolp attr))
+  #+(or)(format t "recursive-class-dict-lookup: ~A ~A~%" attr cls)
   #+(or)(assert (typep cls 'class))
   (loop for c in (or cls-list (mop:class-precedence-list cls))
       until (or (eq c (ltv-find-class 'standard-class))
@@ -2182,10 +2183,7 @@ But if RELATIVE-TO package name is given, result may contains dots."
 
 (defun clear-dict (x)
   (check-type x py-dict)
-  (dict-map x (lambda (k v)
-                (declare (ignore v))
-                (sub/dict-del x k)))
-  x)
+  (dikt-clear (py-dict-dikt x)))
 
 ;; Dictionaries that act as proxy for module can be accessed using
 ;; "globals()"; apply changes to module too.
@@ -2222,14 +2220,14 @@ But if RELATIVE-TO package name is given, result may contains dots."
 (defun set-py-moduledictproxy-methods ()
   (let ((py-dict.d (dict (find-class 'py-dict)))
         (py-m-dict.d (dict (find-class 'py-dict-moduledictproxy))))
-    
-    (loop for method-name being the hash-key in (dikt-hash-table (py-dict-dikt py-dict.d))
-        using (hash-value method-func)
-        do (assert method-func () "Method-func for key ~A is NIL" method-name)
-        when (typep method-func 'function)
-        do (sub/dict-set py-m-dict.d method-name (let ((method-func method-func))
-                                                   (lambda (&rest args)
-                                                     (update-dict-and-call-func method-func args)))))))
+    (dict-map py-dict.d 
+              (lambda (meth-name meth-val)
+                (assert (and meth-name meth-val))
+                (when (typep meth-val 'function)
+                  (sub/dict-set py-m-dict.d meth-name
+                                (let ((meth-val meth-val))
+                                  (lambda (&rest args)
+                                    (update-dict-and-call-func meth-val args)))))))))
 
 (eval-when (:load-toplevel :execute)
   (set-py-moduledictproxy-methods))
@@ -2312,7 +2310,7 @@ But if RELATIVE-TO package name is given, result may contains dots."
 		(cond ((and (eq start *the-none*) (eq stop *the-none*) (eq step *the-none*)) ;; del x[:]
 		       (fill x nil)
 		       (setf (fill-pointer x) 0))
-		      (t (break "unexpected")))))))
+		      (t (break "Todo: del x[-2:] etc")))))))
 
 (def-py-method py-list.__eq__ (x^ y^)
   (py-bool (and (vectorp x)
