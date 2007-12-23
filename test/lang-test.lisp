@@ -240,7 +240,11 @@ try:
   z
   assert False
 except NameError:
-  pass"))
+  pass")
+  (run-no-error "
+def f():
+  global x,y,z
+  del x,y,z" :fail-info "Should not warn about unused local vars."))
 
 (defmethod test-lang ((kind (eql :dict-expr)))
   (run-no-error "{}")

@@ -201,19 +201,23 @@ GENSYMS are made gensym'd Lisp vars."
 		num-targets (length val-list)))
     val-list))
 
+(defun target-list-get-bound-vars (tg)
+  (loop with todo and res
+      for x = tg then (pop todo)
+      while x
+      do (when (listp x) ;; Usually true, but not in [with-stmt] expansion.
+           (ecase (first x)
+             ([attributeref-expr] )
+             ([subscription-expr] )
+             ([identifier-expr]          (push (second x) res))
+             (([list-expr] [tuple-expr]) (setf todo (append todo (second x))))))
+      finally (return res)))
+             
 (defun assign-stmt-get-bound-vars (ass-stmt)
+  ;; Valid for ASSIGN-STMT targets and DEL-STMT target.
   (with-matching (ass-stmt ([assign-stmt] ?value ?targets))
     (declare (ignore ?value))
-    (loop with todo = ?targets and res
-        for x = (pop todo)
-        while x do
-          (when (listp x) ;; Usually true, but not in [with-stmt] expansion.
-            (ecase (first x)
-              ([attributeref-expr] )
-              ([subscription-expr] )
-              ([identifier-expr]          (push (second x) res))
-              (([list-expr] [tuple-expr]) (setf todo (append todo (second x))))))
-        finally (return res))))
+    (mapcan #'target-list-get-bound-vars ?targets)))
 
 (defmacro [assign-stmt] (value targets)
   (with-gensyms (assign-val)
@@ -759,9 +763,9 @@ GENSYMS are made gensym'd Lisp vars."
 		(nreverse nested-vars))))))
 
 (defun funcdef-globals-locals (suite locals globals)
-  "Returns two lists, containing LOCALS and GLOBALS of function. Locals are the
-variables assigned to within the function body. Both share tail structure with
-input arguments."
+  "Returns three lists: LOCALS, NEW-LOCALS, GLOBALS.
+Locals are the variables assigned to within the function body.
+LOCALS shares share tail structure with input arg locals."
   (declare (optimize (debug 3)))
   (assert (match-p suite '([suite-stmt] ?items)))
   (let (new-locals)
@@ -811,7 +815,12 @@ input arguments."
                          "Variable(s) ~{`~A'~^, ~} may not be declared `global'." erroneous))
              (setf globals (nconc sym-list globals)))
            (values nil t)))
-	
+
+        ([del-stmt]
+         ;; Local variables are determined by looking at assignments.
+         ;; Deletions play no role, so don't walk into them.
+         (values nil t))
+              
 	(t form)))
   
     (values locals new-locals globals)))
