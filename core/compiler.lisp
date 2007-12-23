@@ -1184,19 +1184,20 @@ input arguments."
   `(module-make-globals-dict +mod+
 			     +mod-static-globals-names+ +mod-static-globals-values+ +mod-dyn-globals+))
 
-(defun unbound-variable-error (name &optional (resumable t))
+(defun unbound-variable-error (name &optional (expect-value t))
   (declare (special *py-signal-conditions*))
-  (if resumable
+  (if expect-value
       (restart-case
-	  (py-raise '{NameError} "Variable `~A' is unbound" name)
+	  (py-raise '{NameError} "Variable `~A' is unbound." name)
         (cl:use-value (val)
 	    :report (lambda (stream)
-		      (format stream "Enter a value to use for `~A'." name))
+		      (format stream "Enter a Lisp value to use for `~A'." name))
 	    :interactive (lambda () 
-			   (format t "Enter new value for `~A': " name)
+			   (format t "Enter new Lisp value for `~A': " name)
 			   (multiple-value-list (eval (read))))
 	  (return-from unbound-variable-error val)))
-    (py-raise '{NameError} "Variable `~A' is unbound" name)))
+    (with-simple-restart (continue "Continue as if `~A' is currently bound." name)
+      (py-raise '{NameError} "Variable `~A' is unbound." name))))
 
 (defun identifier-expr-module-lookup-dyn (name +mod-dyn-globals+)
   (or (gethash name +mod-dyn-globals+)

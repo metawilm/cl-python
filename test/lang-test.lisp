@@ -233,7 +233,14 @@ assert i == 3"))
   (run-error "x = 3; del x; x" {NameError})
   (run-no-error "x,y,z = 3,4,5; del x,y; z")
   (run-error "x,y,z = 3,4,5; del x,y; y" {NameError})
-  )
+  (run-no-error "
+x,y,z = 3,4,5
+del x,y,z
+try:
+  z
+  assert False
+except NameError:
+  pass"))
 
 (defmethod test-lang ((kind (eql :dict-expr)))
   (run-no-error "{}")

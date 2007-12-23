@@ -429,12 +429,14 @@
 (p sliceop ([:] test?) $2)
 (gp test?)
 
-(p exprlist (expr exprlist2) (if $2 `([tuple-expr] (,$1 ,@(butlast $2))) $1))
- 
+(p exprlist (expr exprlist2) (if (not (equal $2 '(nil)))
+                                 `([tuple-expr] (,$1 ,@(butlast $2)))
+                               $1))
+
 (p exprlist2 :or
-           (()                    nil        )
+           (()                    `(nil)     )
            (([,])                 `(t)       )
-           (([,] expr exprlist2)  `(,$2 ,$3) ))
+           (([,] expr exprlist2)  `(,$2 ,@$3)))
 
 (p testlist (test testlist2) (if $2
                                  `([tuple-expr] ,(cons $1 (if (eq (car (last $2)) :dummy)
