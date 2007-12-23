@@ -166,8 +166,9 @@ GENSYMS are made gensym'd Lisp vars."
                                     collect `(cons ',([make-identifier-expr] :name (intern (string-upcase p) :clpython.user))
                                                    ,p))))
             (gensym-repl (list ,@(loop for g in gensyms
+                                     do (check-type g string)
                                      collect `(cons ',([make-identifier-expr] :name (intern g :clpython.user))
-                                                    (gensym ,(symbol-name g))))))
+                                                    (gensym ,g)))))
             (ast (clpython.parser::parse-with-replacements ,code (nconc param-repl gensym-repl) 
                                                            :warn-unused nil
                                                            :parse-options '(:incl-module nil))))
@@ -1471,7 +1472,7 @@ finally:
   # The normal and non-local-goto cases are handled here
   if exc:
     exit(None, None, None)" var)
-  :gensyms (mgr exit value exc))
+  :gensyms ("mgr" "exit" "value" "exc"))
 
 (defmacro [yield-stmt] (val)
   (declare (ignore val))
