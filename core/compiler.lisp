@@ -609,7 +609,7 @@ GENSYMS are made gensym'd Lisp vars."
 (defun exec-stmt-check-ast (string ast allowed-stmts)
   (whereas ((s (ast-contains-stmt-p ast :allowed-stmts allowed-stmts)))
     (py-raise '{TypeError}
-              "Statements are not allowed in this Python code string (found `~A' in \"~A\")." string s))
+              "Statements are not allowed in this Python code string (found `~A' in \"~A\")." s string))
   
   (with-py-ast (form ast :into-nested-namespaces nil)
     (case (car form)
