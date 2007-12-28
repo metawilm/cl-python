@@ -46,7 +46,7 @@ Most important options:
            (apply #'parse (clpython.package::slurp-file x) options))
 
   (:method ((x stream) &rest options)
-           (let ((seq (make-string (file-length x))))
+           (let ((seq (make-string (file-length x) :initial-element #\Space)))
              (read-sequence seq x)
              (parse seq))))
 
