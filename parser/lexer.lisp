@@ -67,7 +67,7 @@
    (tokens-todo   :accessor ls-tokens-todo   :initform () :type list)
    (indent-stack  :accessor ls-indent-stack  :initform (list 0) :type list)
    (bracket-level :accessor ls-bracket-level :initform 0  :type fixnum)
-   (debug         :accessor ls-debug         :initform nil :initarg :debug)
+   (debug         :accessor ls-debug         :initform *lex-debug* :initarg :debug)
    (warn-indent   :accessor ls-warn-indent   :initform *warn-indent*)))
 
 (define-symbol-macro %lex-last-read-char-ix%   (ls-last-read-char-ix *lex-state*))
