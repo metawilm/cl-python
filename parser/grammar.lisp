@@ -52,15 +52,73 @@
   "Hashtable containing all grammar rules")
 
 (defmacro p (name &rest rules)
+  ;; Abbreviated rule rewriting:
+  ;;  (p myrule (x y? z) (list $1 $2 $3))  =>  (x z) or (x y z)
+  ;;  (p myrule (x y* z) (list $1 $2 $3))  =>  (x y+ z) or (x z)
   (if (eq (car rules) :or)
       `(progn ,@(loop for rule in (cdr rules)
                     collect `(p ,name ,@rule)))
-    (destructuring-bind (terms outcome &optional options) rules
-      `(add-rule ',name ',terms ',outcome ,@options))))
+    
+    (labels ((token-suffix (x)
+               (when (symbolp x)
+                 (unless (eq (symbol-package x) (find-package :clpython.ast.operator)) ;; skip "**" etc
+                   (let ((sn (symbol-name x)))
+                     (aref sn (- (length sn) 1))))))
+             (remove-token-suffix (x)
+               (check-type x symbol)
+               (let ((sn (symbol-name x)))
+                 (assert (member (aref sn (- (length sn) 1)) '(#\? #\*)))
+                 (intern (subseq sn 0 (- (length sn) 1)) #.*package*)))
+             (change-token-suffix (x suffix)
+               (check-type suffix character)
+               (let ((s (remove-token-suffix x)))
+                 (intern (format nil "~A~C" s suffix) #.*package*)))
+             (number-token-p (x)
+               (when (symbolp x)
+                 (let ((sn (symbol-name x)))
+                   (when (char= (aref sn 0) #\$)
+                     (parse-integer sn :start 1)))))
+             (make-number-token (n)
+               (check-type n (integer 1 #.most-positive-fixnum))
+               (intern (format nil "$~D" n) #.*package*)))
+      
+      (destructuring-bind (terms outcome &optional options) rules
+        (if (not (some (lambda (x) (member (token-suffix x) '(#\? #\*))) terms))
+            `(add-rule ',name ',terms ',outcome ,@options)
+
+          (labels ((find-suffix-token (suffix)
+                     (position suffix terms :test #'char= :key (lambda (x) (token-suffix x))))
+                   (shift-outcome (removed-n)
+                     (labels ((shift-tree (tree)
+                                (typecase tree
+                                  (list (loop for x in tree collect (shift-tree x)))
+                                  (symbol (let (($n (number-token-p tree)))
+                                            (cond ((not $n)         tree)
+                                                  ((= (1- $n) removed-n) nil)
+                                                  ((< (1- $n) removed-n) tree)
+                                                  ((> (1- $n) removed-n) (make-number-token (1- $n)))
+                                                  (t (assert nil)))))
+                                  (t tree))))
+                       (shift-tree outcome))))
+        
+            (let* ((?-token (find-suffix-token #\?))
+                   (*-token (unless ?-token (find-suffix-token #\*))))
+              (cond (?-token (let ((with-?-token (nconc (subseq terms 0 ?-token)
+                                                        (list (remove-token-suffix (nth ?-token terms)))
+                                                        (subseq terms (1+ ?-token))))
+                                   (without-?-token (nconc (subseq terms 0 ?-token) (subseq terms (1+ ?-token)))))
+                               `(progn (p ,name ,with-?-token ,outcome ,@options)
+                                       (p ,name ,without-?-token ,(shift-outcome ?-token) ,@options))))
+                    (*-token (let ((with-+-token (nconc (subseq terms 0 *-token)
+                                                        (list (change-token-suffix (nth *-token terms) #\+))
+                                                        (subseq terms (1+ *-token))))
+                                   (without-token (nconc (subseq terms 0 *-token) (subseq terms (1+ *-token)))))
+                               `(progn (p ,name ,with-+-token ,outcome ,@options)
+                                       (p ,name ,without-token ,(shift-outcome *-token) ,@options))))))))))))
 
 (defun add-rule (name terms outcome &rest options)
   (pushnew (list terms outcome options) (gethash name *python-prods*) :test 'equal))
-  
+
 (defmacro gp (name)
   "Generate a production rule:
  Y+ => ITEM [, ITEM [, ITEM [...]]
@@ -70,18 +128,17 @@
   (assert (eq (symbol-package name) #.*package*))
   (let* ((str  (symbol-name name))
          (len  (length str))
-         (item (intern (subseq str 0 (- len 1)) #.*package*)))
+         (item-name (subseq str 0 (- len 1)))
+         (item (or (find-symbol item-name :clpython.ast)
+                   (intern item-name #.*package*))))
     (ecase (aref str (1- len))
       (#\+ `(progn (add-rule ',name '(,item) '(list $1))
-                   (add-rule ',name '(,name [,] ,item) '(nconc $1 (list $3)))))
-      (#\* `(progn (add-rule ',name () ())
-                   (add-rule ',name '(,name ,item) '(nconc $1 (list $2)))))
-      (#\? `(progn (add-rule ',name ()      ())
-                   (add-rule ',name '(,item) '$1))))))
+                   (add-rule ',name '(,name ,item) '(nconc $1 (list $2))))))))
   
 ;; These rules, including most names, are taken from the CPython
 ;; grammar file from CPython CVS, file Python/Grammar/Grammar,
 ;; 20040827.
+;; Try/except/finally-stmt and with-stmt added later.
 
 (p python-grammar (file-input) `([module-stmt] ([suite-stmt] ,(nreverse $1))))
 
@@ -89,10 +146,10 @@
 (p file-input (file-input [newline]) $1)
 (p file-input (file-input stmt)      (cons $2 $1))
 
-(p decorator ([@] dotted-name [newline]) (dotted-name-to-attribute-ref $2))
+(p decorator ([@] dotted-name                 [newline]) (dotted-name-to-attribute-ref $2))
 (p decorator ([@] dotted-name [(] arglist [)] [newline]) `([call-expr] ,(dotted-name-to-attribute-ref $2) ,$4))
 
-(gp decorator*)
+(gp decorator+)
 
 (p funcdef (decorator* [def] [identifier] [(] parameters [)] [:] suite) 
    `([funcdef-stmt] ,$1 ([identifier-expr] ,$3) ,$5 ,$8))
@@ -120,7 +177,8 @@
 (p defparameter (fpdef) $1)
 (p defparameter (fpdef [=] test) `(:key ,$1 ,$3))
 
-(gp defparameter+)
+(p defparameter+ (defparameter) (list $1))
+(p defparameter+ (defparameter+ comma defparameter) (nconc $1 (list $3)))
 
 (p ni-*-ident ([,] *-ident     ) $2)
 (p    *-ident ([*] [identifier]) $2)
@@ -145,10 +203,9 @@
    (([(] fplist [)] ) `([tuple-expr] ,$2)))
 
 (p comma--fpdef ([,] fpdef) $2)
-(gp comma--fpdef*)
+(gp comma--fpdef+)
 (p fplist (fpdef comma--fpdef* comma?) (cons $1 $2))
 
-(gp comma?)
 (p comma ([,]) (list $1))
 
 (p stmt :or
@@ -156,9 +213,7 @@
    ((compound-stmt) $1))
 
 (p simple-stmt (small-stmt semi--small-stmt* semi? [newline])
-   (let ((ss (if $2
-                 `([suite-stmt] ,(cons $1 $2))
-               $1)))
+   (let ((ss (if $2 `([suite-stmt] ,(cons $1 $2)) $1)))
      (declare (special *include-line-numbers*))
      (if *include-line-numbers*
          `([suite-stmt] (([clpython-stmt] :line-no ,(1- $4))
@@ -166,8 +221,8 @@
        ss)))
 
 (p semi--small-stmt ([\;] small-stmt) $2)
-(gp semi--small-stmt*)
-(gp semi?)
+
+(gp semi--small-stmt+)
 (p semi ([\;]) $1)
 
 (p small-stmt :or
@@ -191,7 +246,7 @@
          ($2 `([augassign-stmt] ,(car $2) ,$1 ,(cdr $2)))
          (t $1)))
 
-(gp =--testlist*)
+(gp =--testlist+)
 (p =--testlist ([=] testlist) $2)
 
 (p expr-stmt2 (=--testlist*)       (when $1 `([=] ,$1)))
@@ -213,10 +268,10 @@
 
 (p print-stmt :or
    (([print])                             `([print-stmt] nil nil nil))
-   (([print] test |,--test*| comma?)      `([print-stmt] nil (,$2 . ,$3) ,(and $4 t)))
-   (([print] [>>] test |,--test*| comma?) `([print-stmt] ,$3 ,$4 ,(and $5 t))))
+   (([print] test |,--test*| comma?)      `([print-stmt] nil (,$2 . ,$3) ,$4))
+   (([print] [>>] test |,--test*| comma?)  `([print-stmt] ,$3 ,$4 ,$5)))
 
-(gp |,--test*|)
+(gp |,--test+|)
 (p |,--test| ([,] test) $2)
 
 (p del-stmt      ([del] exprlist)     `([del-stmt] ,$2))
@@ -232,8 +287,6 @@
    ((return-stmt)   $1)
    ((raise-stmt)    $1)
    ((yield-stmt)    $1))
-
-(gp testlist?)
 
 (p raise-stmt ([raise]                       ) `([raise-stmt] nil nil nil))
 (p raise-stmt ([raise] test                  ) `([raise-stmt] ,$2 nil nil))
@@ -253,7 +306,8 @@
    ((import-from)   $1))
 
 (p import-normal ([import] dotted-as-name comma--dotted-as-name*) `([import-stmt] (,$2 ,@$3)))
-(gp comma--dotted-as-name*)
+
+(gp comma--dotted-as-name+)
 (p comma--dotted-as-name ([,] dotted-as-name) $2)
 
 (p import-from ([from] dotted-name [import] import-from-2) `([import-from-stmt] ,$2 ,$4))
@@ -261,7 +315,7 @@
    (([*]) $1)
    ((import-as-name comma--import-as-name*) (cons $1 $2)))
 
-(gp comma--import-as-name*)
+(gp comma--import-as-name+)
 (p comma--import-as-name ([,] import-as-name) $2)
 
 (p import-as-name ([identifier])                   `(,$1 nil))
@@ -270,14 +324,14 @@
 (p dotted-as-name (dotted-name [as] [identifier] ) `(,$1 ,$3))
 
 (p dot--name ([.] [identifier]) $2)
-(gp dot--name*)
+(gp dot--name+)
 (p dotted-name ([identifier] dot--name*) `(,$1 ,@$2))
 
 (p global-stmt ([global] [identifier] comma--identifier*)
    `([global-stmt] ([tuple-expr] ,(let ((this `([identifier-expr] ,$2)))
-                                     (if $3 (cons this $3) (list this))))))
+                                    (cons this $3)))))
 
-(gp comma--identifier*)
+(gp comma--identifier+)
 (p comma--identifier ([,] [identifier]) `([identifier-expr] ,$2))
 
 (p exec-stmt ([exec] expr                   ) `([exec-stmt] ,$2 nil nil))
@@ -285,7 +339,6 @@
 (p exec-stmt ([exec] expr [in] test [,] test) `([exec-stmt] ,$2 ,$4 ,$6))
 
 (p assert-stmt ([assert] test comma--test?) `([assert-stmt] ,$2 ,$3))
-(gp comma--test?)
 (p comma--test ([,] test) $2)
 
 (p compound-stmt :or
@@ -298,11 +351,11 @@
    ((classdef) $1))
 
 (p if-stmt ([if] test [:] suite elif--test--suite* else--suite?) `([if-stmt] ((,$2 ,$4) ,@$5) ,$6))
-(gp elif--test--suite*)
+(gp elif--test--suite+)
 (p elif--test--suite ([elif] test [:] suite) (list $2 $4))
 (p else--suite ([else] [:] suite) $3)
 (p while-stmt ([while] test [:] suite else--suite?) `([while-stmt] ,$2 ,$4 ,$5))
-(gp else--suite?)
+
 (p for-stmt ([for] exprlist [in] testlist [:] suite else--suite?)
    `([for-in-stmt] ,$2 ,$4 ,$6 ,$7) #+(or)(:precedence high-prec))
 
@@ -318,8 +371,7 @@
 (p except--suite ([except] test          [:] suite) `(,$2 nil ,$4))
 (p except--suite ([except] test [,] test [:] suite) `(,$2 ,$4 ,$6))
 
-(p except--suite+ (except--suite) (list $1))
-(p except--suite+ (except--suite+ except--suite) (nconc $1 (list $2)))
+(gp except--suite+)
 
 (p with-stmt ([with] test           [:] suite) `([with-stmt] ,$2 nil ,$4))
 (p with-stmt ([with] test [as] expr [:] suite) `([with-stmt] ,$2 ,$4 ,$6))
@@ -328,8 +380,7 @@
    ((simple-stmt)                       `([suite-stmt] (,$1)))
    (([newline] [indent] stmt+ [dedent]) `([suite-stmt] ,$3)))
 
-(p stmt+ (stmt)       (list $1))
-(p stmt+ (stmt+ stmt) (nconc $1 (list $2)))
+(gp stmt+)
 
 (p expr (binop2-expr) $1)
 
@@ -355,8 +406,8 @@
 (p binop-expr (binop2-expr) $1)
 
 (p binop2-expr :or
-   ((atom) $1)
-   ((atom trailer+)                (parse-trailers `(trailers ,$1 ,$2)))
+   ;((atom) $1)
+   ((atom trailer*)                 (parse-trailers $1 $2))
    ((binop2-expr [+]  binop2-expr) `([binary-expr] ,$2 ,$1 ,$3))
    ((binop2-expr [-]  binop2-expr) `([binary-expr] ,$2 ,$1 ,$3))
    ((binop2-expr [*]  binop2-expr) `([binary-expr] ,$2 ,$1 ,$3))
@@ -395,61 +446,56 @@
                                    (complex 0 (with-standard-io-syntax (read-from-string str)))))
                                 (t (raise-syntax-error
                                     "Invalid format for number starting with dot: .~G" $2))))
-   (( string+                )  $1                       ))
+   (( string+ )
+    ;; consecutive string literals are joined: "s" "b" => "sb"
+    (apply #'concatenate 'string $1)))
 
-;; consecutive string literals are joined: "s" "b" => "sb"
-(p string+ ([string]) $1)
-(p string+ (string+ [string]) (concatenate 'string $1 $2))
+(gp string+)
 
 (p listmaker (test list-for) `([listcompr-expr] ,$1 ,$2))
 (p listmaker (test comma--test* comma?) `([list-expr] ,(cons $1 $2)))
-(gp comma--test*)
+
+(gp comma--test+)
 
 (p testlist-gexp (test gen-for) `([generator-expr] ,$1 ,$2))
 (p testlist-gexp (test comma--test* comma?) (if (or $2 $3) `([tuple-expr] (,$1 . ,$2)) $1))
  
 (p lambdef ([lambda] parameters [:] test) `([lambda-expr] ,$2 ,$4))
 
-(p trailer+ :or
-   (( [(] arglist      [)]            )  `(([call-expr] ,$2))                                     )
-   (( [[] subscriptlist [\]]          )  `(([subscription-expr] ,$2))                             )
-   (( [.] [identifier]                )  `(([attributeref-expr] ([identifier-expr] ,$2)))         )
-   (( trailer+ [(] arglist       [)]  )  `(,@$1 ([call-expr] ,$3))                                )
-   (( trailer+ [[] subscriptlist [\]] )  `(,@$1 ([subscription-expr] ,$3))                        )
-   (( trailer+ [.] [identifier]       )  `(,@$1 ([attributeref-expr] ([identifier-expr] ,$3))))   )
+(p trailer :or
+   (( [(] arglist [)]        )  `([call-expr] ,$2))
+   (( [[] subscriptlist [\]] )  `([subscription-expr] ,$2))
+   (( [.] [identifier]       )  `([attributeref-expr] ([identifier-expr] ,$2))))
+
+(gp trailer+)
 
 (p subscriptlist (subscript comma--subscript* comma?) (if (or $2 $3) `([tuple-expr] (,$1 . ,$2)) $1))
-(gp comma--subscript*)
+
+(gp comma--subscript+)
 (p comma--subscript ([,] subscript) $2)
+
 (p subscript :or
    (([...]) `([identifier-expr] clpython.user.builtin.value:|Ellipsis|)) ;; Ugly rule
    ((test)   $1)
    ((test? [:] test? sliceop?) `([slice-expr] ,$1 ,$3 ,$4)))
-(gp sliceop?)
 (p sliceop ([:] test?) $2)
-(gp test?)
 
 (p exprlist (expr exprlist2) (if (not (equal $2 '(nil)))
                                  `([tuple-expr] (,$1 ,@(butlast $2)))
                                $1))
-
 (p exprlist2 :or
            (()                    `(nil)     )
            (([,])                 `(t)       )
            (([,] expr exprlist2)  `(,$2 ,@$3)))
 
-(p testlist (test testlist2) (if $2
-                                 `([tuple-expr] ,(cons $1 (if (eq (car (last $2)) :dummy)
-                                                              (butlast $2)
-                                                            $2)))
+(p testlist (test testlist2) (if (not (equal $2 '(nil)))
+                                 `([tuple-expr] (,$1 ,@(butlast $2)))
                                $1))
  
 (p testlist2 :or
-           (()                   nil)
-           (([,])                (list :dummy))
-           (([,] test testlist2) (if (eq (car $3) :dummy)
-                                     $2
-                                   (cons $2 $3))))
+           (()                   `(nil))
+           (([,])                `(t))
+           (([,] test testlist2) `(,$2 ,@$3)))
 
 (p testlist-safe (test testlist-safe2) (if $2
                                            `([tuple-expr] ,(cons $1 (if (eq (car (last $2)) :dummy)
@@ -464,7 +510,7 @@
                                  (cons $2 $3))))
 
 (p dictmaker (test [:] test comma--test--\:--test* comma?) (cons (cons $1 $3) $4))
-(gp comma--test--\:--test*)
+(gp comma--test--\:--test+)
 (p comma--test--\:--test ([,] test [:] test) (cons $2 $4))
 
 (p classdef ([class] [identifier] inheritance [:] suite)
@@ -475,25 +521,23 @@
 (p inheritance ([(] testlist [)]) (if (eq (car $2) '[tuple-expr]) $2 `([tuple-expr] (,$2))))
 
 (p arglist () `(nil nil nil nil))
-(p arglist (argument--comma* arglist-2) 
+(p arglist (argument--comma* arglist-2)
    (destructuring-bind (a *-a **-a) $2
-     (when a (if $1
-                 (nconc $1 (list a))
-               (setf $1 (list a))))
-     (let ((key-start (position :key $1 :key 'car))
-           (pos-end   (position :pos $1 :key 'car :from-end t)))
+     (let* ((all-pos/key (nconc $1 (when a (list a))))
+            (key-start (position :key all-pos/key :key 'car))
+            (pos-end   (position :pos all-pos/key :key 'car :from-end t)))
+       (when (and key-start pos-end (< key-start pos-end))
+         (raise-syntax-error
+          "Postional argument was found after keyword argument `~A = ...'."
+          (cadadr (nth key-start all-pos/key))))
        (multiple-value-bind (pos key)
            (cond ((and key-start pos-end)
-                  (when (< key-start pos-end)
-                    (raise-syntax-error
-                     "Postional argument was found after keyword argument `~A = ...'."
-                     (cadadr (nth key-start $1))))
-                  (let ((pos-args $1)
-                        (key-args (nthcdr key-start $1)))
-                    (setf (cdr (nthcdr pos-end $1)) nil)
+                  (let ((pos-args all-pos/key)
+                        (key-args (nthcdr key-start all-pos/key)))
+                    (setf (cdr (nthcdr pos-end all-pos/key)) nil)
                     (values pos-args key-args)))
-                 (key-start (values () $1))
-                 (pos-end   (values $1 ()))
+                 (key-start (values () all-pos/key))
+                 (pos-end   (values all-pos/key ()))
                  (t         (values () ())))
          (map-into pos 'second pos)
          (map-into key 'cdr key)
@@ -503,9 +547,8 @@
    (([*]  test comma--**--test?) (list nil  $2  $3))
    (([**] test)                  (list nil nil  $2)))
  
-(gp argument--comma*)
+(gp argument--comma+)
 (p argument--comma (argument [,]) $1)
-(gp comma--**--test?)
 (p comma--**--test ([,] [**] test) $3)
 
 (p argument (test) `(:pos ,$1))
@@ -516,7 +559,6 @@
    ((list-for) $1) 
    ((list-if) $1))
 (p list-for ([for] exprlist [in] testlist-safe list-iter?) `(([for-in-clause] ,$2 ,$4) . ,$5))
-(gp list-iter?)
 (p list-if ([if] test list-iter?) `(([if-clause] ,$2) . ,$3))
  
 (p gen-iter :or
@@ -524,22 +566,18 @@
    ((gen-if) $1))
 (p gen-for ([for] exprlist [in] test gen-iter?) `(([for-in-clause] ,$2 ,$4) . ,$5))
 (p gen-if  ([if]  test               gen-iter?) `(([if-clause] ,$2) . ,$3))
-(gp gen-iter?)
 
 (p testlist1 (test |,--test*|) (if $2 `([tuple-expr] (,$1 . ,$2)) $1))
 
 
-(defun parse-trailers (ast)
-  ;; foo[x].a => (trailers (id foo) ((subscription (id x)) (attributeref (id a))))
+(defun parse-trailers (item trailers)
+  ;; foo[x].a => (id foo) + ((subscription (id x)) (attributeref (id a)))
   ;;          => (attributeref (subscription (id foo) (id x)) (id a))
   (declare (optimize speed))
-  (assert (eq (car ast) 'trailers))
-  (destructuring-bind (x trailers)
-      (cdr ast)
-    (dolist (tr trailers)
-      (setf (cdr tr) (cons x (cdr tr))
-            x        tr))
-    x))
+  (dolist (tr trailers)
+    (setf (cdr tr) (cons item (cdr tr))
+          item     tr))
+  item)
 
 (defun dotted-name-to-attribute-ref (dotted-name)
   (assert dotted-name)
@@ -630,5 +668,3 @@
     ([make-assign-stmt] :value value :targets (list target))))
 
 (reg-patterns)
-
-
