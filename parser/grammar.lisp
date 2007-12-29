@@ -129,7 +129,7 @@
   (let* ((str  (symbol-name name))
          (len  (length str))
          (item-name (subseq str 0 (- len 1)))
-         (item (or (find-symbol item-name :clpython.ast)
+         (item (or (find-symbol (string-downcase item-name) :clpython.ast)
                    (intern item-name #.*package*))))
     (ecase (aref str (1- len))
       (#\+ `(progn (add-rule ',name '(,item) '(list $1))
