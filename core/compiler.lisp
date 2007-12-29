@@ -210,7 +210,7 @@ GENSYMS are made gensym'd Lisp vars."
              ([attributeref-expr] )
              ([subscription-expr] )
              ([identifier-expr]          (push (second x) res))
-             (([list-expr] [tuple-expr]) (setf todo (append todo (second x))))))
+             (([list-expr] [tuple-expr]) (setf todo (nconc todo (second x))))))
       finally (return res)))
              
 (defun assign-stmt-get-bound-vars (ass-stmt)
@@ -978,7 +978,6 @@ LOCALS shares share tail structure with input arg locals."
   ;; functionality here is the "store form" (fourth value).
   ;; As a bonus the "delete form" is given (sixth value).
   (let ((glob-ix (position name (get-pydecl :mod-globals-names e))))
-    (assert (not (eq name '{...})))
     (with-gensyms (val)
 
       ;; 1) Store form
@@ -1002,13 +1001,9 @@ LOCALS shares share tail structure with input arg locals."
 	  (symbol-macrolet ((module-del
 				`(delete-identifier-at-module-level ',name ,glob-ix +mod+))
 			    (local-del
-				(if (member name (get-pydecl :safe-lex-visible-vars e))
-				    `(load-time-value
-				      (error "Bug: DEL for lexically safe variable `~A'" name))
-				  `(progn (unless ,name
-					    (unbound-variable-error ',name nil))
-					  (setf ,name ,(when (builtin-value name)
-							 `(builtin-value ',name))))))	      
+                                `(progn (unless ,name
+                                          (unbound-variable-error ',name nil))
+                                        (setf ,name ,(when (builtin-value name) `(builtin-value ',name)))))
 			    (class-del `(unless (py-del-subs +cls-namespace+ ,name)
 					  (unbound-variable-error ',name nil))))
 	    (let ((del-form 
@@ -1032,10 +1027,7 @@ LOCALS shares share tail structure with input arg locals."
 (defmacro [identifier-expr] (name &environment e)
   ;; The identifier is used for its value; it is not an assignent
   ;; target (as the latter case is handled by the setf expander for ID..-EXPR.
-  (assert (symbolp name) () "Identifier name should be a symbol: ~S" name)
-  (unless e
-    (break "no env: id-expr ~A ~A" name e))
-  
+  (check-type name symbol)
   (flet ((module-lookup ()
 	   (let ((ix (position name (get-pydecl :mod-globals-names e))))
 	     (if ix
@@ -1071,10 +1063,10 @@ LOCALS shares share tail structure with input arg locals."
 	     `((t ,else-clause)))))
 
 (defmacro [import-stmt] (items)
-  `(values ,@(loop for (mod-name-as-list bind-name) in items append
+  `(values ,@(loop for (mod-name-as-list bind-name) in items nconc
 		   (loop for m in mod-name-as-list
                        for toplevel = t then nil ;; Ensure topleve module is imported relative to +mod+
-		       for res = (list m) then (append res (list m)) collect
+		       for res = (list m) then (nconc res (list m)) collect
 			 `(let ((module-obj (py-import ',res ,@(when toplevel `(:within-mod +mod+)))))
 			    (declare (ignorable module-obj))
 			    ,(cond ((= (length res) 1)
@@ -2422,27 +2414,22 @@ be bound."
 			(generator-finished)
 			
 			,final-tag
-			(return-from function-body nil)
-			#+(or)(raise-StopIteration)))))))))))))
+			(return-from function-body nil)))))))))))))
 
 
 (defun suite->generator (fname suite)
   (flet ((suite-walker (form &rest context)
 	   (declare (ignore context))
 	   (case (car form)
-	     
-	     (([funcdef-stmt] [classdef-stmt]) (values form t))
-	     
-	     ([return-stmt] (when (second form)
+             (([funcdef-stmt] [classdef-stmt]) (values form t))
+             ([return-stmt] (when (second form)
 			    (py-raise '{SyntaxError}
 				      "Inside generator, RETURN statement may ~
 				       not have an argument (got: ~S)" form))
 			  
 			  (values `(return-from function-body :explicit-return)
 				  t))
-	     
-	     (t form))))
-	     
+             (t form))))
     `(excl:named-function (:suite->generator ,fname)
        (lambda ()
 	 ,(rewrite-generator-funcdef-suite
@@ -2460,9 +2447,7 @@ be bound."
 
     (let ((first-for (pop for-in/if-clauses))
 	  (first-source (gensym "first-source")))
-      
       (assert (eq (car first-for) '[for-in-clause]))
-      
       (let ((iteration-stuff (loop with res = `([yield-stmt] ,item)
 				 for clause in (reverse for-in/if-clauses)
 				 do (setf res
@@ -2471,27 +2456,22 @@ be bound."
 							   ,(second clause) ,(third clause) ,res nil))
 					([if-clause]     `([if-stmt] ((,(second clause) ,res)) nil))))
 				 finally (return res))))
-	
-	`([call-expr] 
+        `([call-expr] 
 	  ([funcdef-stmt] nil ([identifier-expr] :generator-expr-helper-func)
 			  ((([identifier-expr] ,first-source)) nil nil nil)
 			  ([suite-stmt]
 			   (([for-in-stmt] ,(second first-for) ([identifier-expr] ,first-source)
 					   ,iteration-stuff nil))))
-	  
-	  ((,(third first-for)) nil nil nil))))))
+          ((,(third first-for)) nil nil nil))))))
 
 (defun apply-splits (form)
   (cond ((atom form)
-	 (values form))
-	
-	((eq (car form) :split)
+         (values form))
+        ((eq (car form) :split)
 	 (values-list (loop for elm in (cdr form)
-			  append (multiple-value-list (apply-splits elm)))))
-	
-	(t (loop for elm in form
-	       append (multiple-value-list (apply-splits elm))))))
-
+			  nconc (multiple-value-list (apply-splits elm)))))
+        (t (loop for elm in form
+	       nconc (multiple-value-list (apply-splits elm))))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;  Source locations of classes and functions
