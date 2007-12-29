@@ -470,7 +470,23 @@ assert f(1, lambda: 2) == 1 + 2")
   )
 
 (defmethod test-lang ((kind (eql :try-finally-stmt)))
-  )
+  (progn 
+    ;; These two test cases taken from Mike Stall,
+    ;;  http://blogs.msdn.com/jmstall/archive/2007/12/16/return-vs-finally-2.aspx
+    (run-no-error "
+def f1():
+  try:
+    return 10
+  finally:
+    return 5
+assert f1() == 5")
+    (run-no-error "
+def f2():
+  try:
+    raise Exception # like 'throw'
+  finally:
+    return 5
+assert f2() == 5")))
 
 (defmethod test-lang ((kind (eql :tuple-expr)))
   (run-no-error "assert (1,2,3)[0:1] == (1,)"))
