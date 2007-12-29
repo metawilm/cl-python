@@ -71,9 +71,9 @@ like .join (string.join), .sort (list.sort), etc")
 (defvar *inline-getattr-call* t
   "Inline getattr(x,y).(zzz) calls, which usually saves creation of a temporary bound method.")
 
-(defconstant +optimize-std+     '(optimize (speed 3) (safety 1) (debug 1)))
-(defconstant +optimize-fast+    '(optimize (speed 3)))
 (eval-when (:compile-toplevel :load-toplevel :execute)
+  (defconstant +optimize-std+     '(optimize (speed 3) (safety 1) (debug 1)))
+  (defconstant +optimize-fast+    '(optimize (speed 3) (safety 1)))
   (defconstant +optimize-fastest+ '(optimize (speed 3) (safety 0) (debug 0))))
 
 (defmacro fast (&body body)
@@ -732,7 +732,7 @@ GENSYMS are made gensym'd Lisp vars."
        (go .break) ;; prevent warning
       .break)))
 
-(defun lambda-args-and-destruct-form (funcdef-pos-args)
+(defun lambda-args-and-destruct-form (f-pos-args f-key-args)
   ;; Replace "def f( (x,y), z):  .." 
   ;; by "def f( |(x,y)|, z):  x, y = |(x,y)|; ..".
   (let (nested-vars)
@@ -742,29 +742,39 @@ GENSYMS are made gensym'd Lisp vars."
 	       (assert (match-p tup '([tuple-expr] ?items)))
 	       (labels ((rec (x)
 			  (ecase (car x)
-			    ([tuple-expr] (format nil "(~{~A~^, ~})"
+			    ([tuple-expr] (format nil "(~{~A~^,~})"
 						  (loop for v in (second x) collect (rec v))))
 			    ([identifier-expr] (push (second x) nested-vars)
 					       (symbol-name (second x))))))
-		 (ensure-user-symbol (rec tup)))))
-      (let (lambda-pos-args destructs normal-pos-args)
-	(dolist (pa funcdef-pos-args)
-	  (ecase (car pa)
-	    ([identifier-expr] (let ((name (second pa)))
-				 (push name lambda-pos-args)
-				 (push name normal-pos-args)))
-	    ([tuple-expr] (let ((tuple-var (sym-tuple-name pa)))
-			    (push tuple-var lambda-pos-args)
-			    (push `([assign-stmt] ,tuple-var (,pa)) destructs)))))
-	(values (nreverse lambda-pos-args)
-		(when destructs
-		  `(progn ,@(nreverse destructs)))
-		normal-pos-args
-		(nreverse nested-vars))))))
+		 (ensure-user-symbol (rec tup))))
+             (analyze-args (args)
+               (let (new-arglist normal-args destructs)
+                 (dolist (arg args)
+                   (ecase (car arg)
+                     ([identifier-expr] (let ((name (second arg)))
+                                          (push name new-arglist)
+                                          (push name normal-args)))
+                     ([tuple-expr] (let ((tuple-var (sym-tuple-name arg)))
+                                     (push tuple-var new-arglist)
+                                     (push `([assign-stmt] ,tuple-var (,arg)) destructs)))))
+                 (values (nreverse new-arglist)
+                         (nreverse normal-args)
+                         (nreverse destructs)))))
+      
+      (multiple-value-bind (lambda-pos-args normal-pos-args pos-destructs ) 
+          (analyze-args f-pos-args)
+        (multiple-value-bind (lambda-key-args normal-key-args key-destructs)
+            (analyze-args (mapcar #'car f-key-args))
+          (values lambda-pos-args ;; LAMBDA args
+                  lambda-key-args ;;  are in the same order as original lists
+                  (when (or pos-destructs key-destructs)
+                    `(progn ,@(nconc pos-destructs key-destructs)))
+                  (nconc normal-pos-args normal-key-args)
+                  (nreverse nested-vars)))))))
 
 (defun funcdef-globals-locals (suite locals globals)
   "Returns three lists: LOCALS, NEW-LOCALS, GLOBALS.
-Locals are the variables assigned to within the function body.
+LOCALS are the variables assigned to within the function body.
 LOCALS shares share tail structure with input arg locals."
   (declare (optimize (debug 3)))
   (assert (match-p suite '([suite-stmt] ?items)))
@@ -812,7 +822,9 @@ LOCALS shares share tail structure with input arg locals."
                ;; declaration before the first use. Let us signal an error; it's easy
                ;; for the user to fix this.
                (py-raise '{SyntaxError}
-                         "Variable(s) ~{`~A'~^, ~} may not be declared `global'." erroneous))
+                         "This `global' declaration for variable `~A' is not allowed: ~
+                          declaration must be given before first use in function body."
+                         (car erroneous)))
              (setf globals (nconc sym-list globals)))
            (values nil t)))
 
@@ -845,13 +857,11 @@ LOCALS shares share tail structure with input arg locals."
            t))
 	((break :unexpected) ))
   
-  (multiple-value-bind (lambda-pos-args tuples-destruct-form normal-pos-args destruct-nested-vars)
-      (lambda-args-and-destruct-form pos-args)
-        
-    (let ((nontuple-arg-names (append normal-pos-args destruct-nested-vars)))
-      (dolist (k key-args)
-        (with-matching (k (([identifier-expr] ?name) ?val))
-          (push ?name nontuple-arg-names)))
+  (multiple-value-bind (lambda-pos-args lambda-key-args tuples-destruct-form
+                        normal-pos-key-args destruct-nested-vars)
+      (lambda-args-and-destruct-form pos-args key-args)
+    
+    (let ((nontuple-arg-names (nconc normal-pos-key-args destruct-nested-vars)))
       (when *-arg (push (second *-arg) nontuple-arg-names))
       (when **-arg (push (second **-arg) nontuple-arg-names))
 
@@ -889,8 +899,10 @@ LOCALS shares share tail structure with input arg locals."
 	       (func-lambda
 		`(py-arg-function
                   ,context-fname
-		  (,lambda-pos-args ;; list of symbols
-		   ,(loop for ((nil name) val) in key-args collect `(,name ,val))
+		  (,lambda-pos-args
+		   ,(loop for lambda-key-arg in lambda-key-args
+                        for ((nil nil) key-default-arg) in key-args
+                        collect `(,lambda-key-arg ,key-default-arg))
 		   ,(when *-arg  (second *-arg))
 		   ,(when **-arg (second **-arg)))
 		  
@@ -1752,20 +1764,18 @@ Non-negative integer denoting the number of args otherwise."
   ;; 
   ;; XXX todo: the generated code can be cleaned up a bit when there
   ;; are no arguments (currently zero-length vectors are created).
-  (assert (symbolp name))
+  (declare #.+optimize-fast+)
   (let* ((num-pos-args (length pos-args))
 	 (num-key-args (length key-args))
 	 (num-pos-key-args  (+ num-pos-args num-key-args))
 	 (some-args-p (or pos-args key-args *-arg **-arg))
 	 (pos-key-arg-names (nconc (copy-list pos-args) (mapcar #'first key-args)))
 	 (key-arg-default-asts (mapcar #'second key-args))
-	 (arg-name-vec (make-array num-pos-key-args :initial-contents pos-key-arg-names))
-	 
-	 (arg-kwname-vec (make-array
+         (arg-kwname-vec (make-array
 			  num-pos-key-args
-			  :initial-contents (loop for x across arg-name-vec
+			  :initial-contents (loop for x in pos-key-arg-names
 						collect (intern x :keyword))))
-    
+         
 	 (fa (make-fa :func-name        name
 		      :num-pos-args     num-pos-args
 		      :num-key-args     num-key-args
@@ -1773,7 +1783,6 @@ Non-negative integer denoting the number of args otherwise."
 		      :pos-key-arg-names (make-array (length pos-key-arg-names)
 						     :initial-contents pos-key-arg-names)
 		      :key-arg-default-vals nil ;; If there are any key args, this will be filled at load time.
-		      :arg-name-vec     arg-name-vec
 		      :arg-kwname-vec   arg-kwname-vec
 		      :*-arg            *-arg
 		      :**-arg           **-arg)))
@@ -1786,9 +1795,8 @@ Non-negative integer denoting the number of args otherwise."
        (excl:named-function ,name
 	 (lambda (&rest %args)
 	   (declare (dynamic-extent %args)
-		    (optimize (speed 3) (safety 0) (debug 0)))
-	   
-	   (let (,@pos-key-arg-names ,@(when *-arg `(,*-arg)) ,@(when **-arg `(,**-arg))
+		    #.+optimize-std+)
+           (let (,@pos-key-arg-names ,@(when *-arg `(,*-arg)) ,@(when **-arg `(,**-arg))
 		 ,@(when (and some-args-p (not *-arg) (not **-arg))
 		     `((only-pos-args (only-pos-args %args)))))
 	     
@@ -1814,8 +1822,8 @@ Non-negative integer denoting the number of args otherwise."
 			,@(loop for p in pos-key-arg-names and i from 0
 			      collect `(setf ,p (svref arg-val-vec ,i)))
 			,@(when  *-arg
-			    `((setf  ,*-arg (svref arg-val-vec ,num-pos-key-args))))
-			    
+			    `((setf ,*-arg (svref arg-val-vec ,num-pos-key-args))))
+                        
 			,@(when **-arg
 			    `((setf ,**-arg (svref arg-val-vec ,(1+ num-pos-key-args)))))))
 		    
@@ -1824,7 +1832,7 @@ Non-negative integer denoting the number of args otherwise."
 		
 		(cond ((or *-arg **-arg)  the-array-way)
 		      (some-args-p        `(if (or (null only-pos-args)
-						   (/= only-pos-args ,num-pos-key-args))
+                                                   (/= (the fixnum only-pos-args) ,num-pos-key-args))
 					       ,the-array-way
 					     ,the-pop-way))
 		      (t `(when %args (raise-wrong-args-error)))))
@@ -1924,7 +1932,6 @@ Non-negative integer denoting the number of args otherwise."
   (num-pos-key-args     :type fixnum :read-only t)
   (pos-key-arg-names    :type vector :read-only t)
   (key-arg-default-vals :type vector :read-only nil) ;; filled at load time
-  (arg-name-vec         :type vector :read-only t)
   (arg-kwname-vec       :type vector :read-only t)
   (*-arg                :type symbol :read-only t)
   (**-arg               :type symbol :read-only t)
@@ -1973,7 +1980,7 @@ Non-negative integer denoting the number of args otherwise."
 	  ;; `key' is a keyword symbol
 	  (or (block find-key-index
 		(when (> (the fixnum (fa-num-pos-key-args fa)) 0)
-		  (loop with name-vec = (fa-arg-name-vec fa)
+		  (loop with name-vec = (fa-pos-key-arg-names fa)
 		      with kwname-vec = (fa-arg-kwname-vec fa)
 		      for i fixnum from num-filled-by-pos-args below
 			(the fixnum (fa-num-pos-key-args fa))

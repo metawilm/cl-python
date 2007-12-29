@@ -363,7 +363,13 @@ assert x == [1,2,3,4,(),{'e': 5, 'f': 6}], 'x = %s' % x"
   (run-no-error "
 def f(): return f
 f()
-assert f() == f"))
+assert f() == f")
+  (run-no-error "
+def f((x,y)=[1,2]): return x+y
+assert f() == 3
+assert f((1,2)) == 3
+x = (1,2)
+assert f(x) == 3"))
 
 (defmethod test-lang ((kind (eql :generator-expr)))
   )
