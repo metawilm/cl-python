@@ -117,7 +117,7 @@
               (find-symbol (string '#:*default-yacc-version*) (find-package '#:clpython.parser)) :cl-yacc)))
   
   (defmethod asdf:perform :around ((op asdf:compile-op) (c (eql cl-yacc-grammar)))
-    (when (and *support-clyacc* asdf:find-system :yacc nil)
+    (when (and *support-clyacc* (asdf:find-system :yacc nil))
       (call-next-method))))
 
 
