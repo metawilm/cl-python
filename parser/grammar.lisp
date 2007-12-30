@@ -248,9 +248,11 @@
 
 (gp =--testlist+)
 (p =--testlist ([=] testlist) $2)
+(p =--testlist ([=] yield-expr) $2)
 
 (p expr-stmt2 (=--testlist*)       (when $1 `([=] ,$1)))
 (p expr-stmt2 (augassign testlist) (cons $1 $2))
+(p expr-stmt2 (augassign yield-expr) (cons $1 $2))
 
 (p augassign :or
    (([+=])  $1)
@@ -279,7 +281,9 @@
 (p break-stmt    ([break])            `([break-stmt]))
 (p continue-stmt ([continue])         `([continue-stmt]))
 (p return-stmt   ([return] testlist?) `([return-stmt] ,$2))
-(p yield-stmt    ([yield]  testlist?) `([yield-stmt] ,$2))
+(p yield-stmt    (yield-expr)          $1)
+
+(p yield-expr ([yield] testlist?) `([yield-expr] ,$2))
 
 (p flow-stmt :or
    ((break-stmt)    $1)
@@ -387,7 +391,7 @@
 (p test :or
    ((lambdef) $1)
    ((binop-expr) $1)
-   ((binop-expr [if] binop-expr [else] test) `([if-expr] ,$1 ,$3 ,$5)))
+   ((binop-expr [if] binop-expr [else] test) `([if-expr] ,$3 ,$1 ,$5)))
 
 ;; These `old-' rules are named after corresponding CPython grammar rule (20071230).
 (p old-test :or 
@@ -432,6 +436,7 @@
 (p binop2-expr ([-] binop2-expr) `([unary-expr] ,$1 ,$2) (:precedence 'unary-plusmin))
 
 (p atom :or
+   (( [(] yield-expr    [)]  )  $2                       )
    (( [(] comma?        [)]  )  `([tuple-expr] nil)      )
    (( [(] testlist-gexp [)]  )  $2                       )
    (( [[]               [\]] )  `([list-expr] nil)       )
@@ -641,7 +646,7 @@
     (rp [generator-expr] item for-in/if-clauses)
     (rp [global-stmt] names)
     (rp [identifier-expr] name)
-    (rp [if-expr] true-outcome condition false-outcome)
+    (rp [if-expr] condition then else)
     (rp [if-stmt] if-clauses else-clause)
     (rp [import-stmt] items)
     (rp [import-from-stmt] mod-name-as-list items)
@@ -662,7 +667,7 @@
     (rp [unary-expr] op item)
     (rp [while-stmt] test suite else-suite)
     (rp [with-stmt] test var suite)
-    (rp [yield-stmt] val))
+    (rp [yield-expr] val))
     
   ;; Some shortcuts
   (defun [make-identifier-expr*] (name)

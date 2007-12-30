@@ -1056,10 +1056,8 @@ LOCALS shares share tail structure with input arg locals."
 			   (local-lookup)
 			 (module-lookup)))))))
 
-(defmacro [if-expr] (true-outcome condition false-outcome)
-  `(if (py-val->lisp-bool ,condition)
-       ,true-outcome
-     ,false-outcome))
+(defmacro [if-expr] (condition then else)
+  `(if (py-val->lisp-bool ,condition) ,then ,else))
        
 (defmacro [if-stmt] (if-clauses else-clause)
   `(cond ,@(loop for (cond body) in if-clauses
@@ -1493,9 +1491,9 @@ finally:
     exit(None, None, None)" var)
   :gensyms ("mgr" "exit" "value" "exc"))
 
-(defmacro [yield-stmt] (val)
+(defmacro [yield-expr] (val)
   (declare (ignore val))
-  (error "YIELD found outside function"))
+  (py-raise '{SyntaxError} "Statement `yield' found outside function."))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -2079,7 +2077,7 @@ Non-negative integer denoting the number of args otherwise."
   
   (with-py-ast (form ast)
     (case (car form)
-      ([yield-stmt]                     (return-from generator-ast-p t))
+      ([yield-expr]                     (return-from generator-ast-p t))
       (([classdef-stmt] [funcdef-stmt]) (values nil t))
       (t                                form)))
   
@@ -2375,7 +2373,7 @@ be bound."
 				 ,after-tag)
 			       t))))
 		  
-		  ([yield-stmt]
+		  ([yield-expr]
 		   (let ((tag (new-tag :yield)))
 		     (values `(:split (setf .state. ,tag)
 				      (return-from function-body ,(or (second form) '*the-none*))
@@ -2453,7 +2451,7 @@ be bound."
     (let ((first-for (pop for-in/if-clauses))
 	  (first-source (gensym "first-source")))
       (assert (eq (car first-for) '[for-in-clause]))
-      (let ((iteration-stuff (loop with res = `([yield-stmt] ,item)
+      (let ((iteration-stuff (loop with res = `([yield-expr] ,item)
 				 for clause in (reverse for-in/if-clauses)
 				 do (setf res
 				      (ecase (car clause)

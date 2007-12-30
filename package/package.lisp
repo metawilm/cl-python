@@ -64,12 +64,12 @@
 	   "continue-stmt" "del-stmt" "exec-stmt" "for-in-stmt" "funcdef-stmt"
 	   "global-stmt" "if-stmt" "import-stmt" "import-from-stmt" "module-stmt"
 	   "pass-stmt" "print-stmt" "raise-stmt" "return-stmt" "suite-stmt"
-	   "try-except-stmt" "try-finally-stmt" "while-stmt" "with-stmt" "yield-stmt"
+	   "try-except-stmt" "try-finally-stmt" "while-stmt" "with-stmt"
 	   
 	   "attributeref-expr" "backticks-expr" "binary-expr" "binary-lazy-expr"
 	   "call-expr" "comparison-expr" "dict-expr" "generator-expr"
 	   "identifier-expr" "if-expr" "lambda-expr" "listcompr-expr" "list-expr"
-           "slice-expr" "subscription-expr" "tuple-expr" "unary-expr"
+           "slice-expr" "subscription-expr" "tuple-expr" "unary-expr" "yield-expr"
 	   
 	   "for-in-clause" "if-clause" ;; not really nodes
            )

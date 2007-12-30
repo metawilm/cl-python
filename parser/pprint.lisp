@@ -14,6 +14,7 @@
 ;;
 ;; TODO: 
 ;;  - insert line breaks for too long lines
+;;  - yield statement is now always surrounded by brackets, even if on its own line
 
 (in-package :clpython.parser)
 (in-syntax *ast-user-readtable*)
@@ -212,6 +213,9 @@ If STREAM is not supplied, output goes to a string."
                              (format stream "...")
                            (format stream "~A" name))))
     
+    ([if-expr] (destructuring-bind (cond then else) (cdr x)
+                 (format stream "(~A if ~A else ~A)" then cond else)))
+                                                         
     ([if-stmt] (destructuring-bind (clauses else-suite) (cdr x)
  	       (let ((*suite-no-newline* t))
 		 (format stream "if ~{~A:~A~}~@[~:{~&elif ~A:~A~}~]~@[~&else:~A~]"
@@ -339,7 +343,7 @@ If STREAM is not supplied, output goes to a string."
 		  (let ((*suite-no-newline* t))
 		    (format stream "while ~A:~A~@[else: ~A~]" test suite else-suite))))
     
-    ([yield-stmt] (format stream "yield~@[ ~A~]" (second x)))
+    ([yield-expr] (format stream "(yield~@[ ~A~])" (second x)))
     
     (t (with-standard-io-syntax
 	 #+(or)(warn "uncatched in py-pprint-1: ~A" x)

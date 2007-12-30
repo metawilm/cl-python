@@ -45,8 +45,8 @@
 				       (:file "parser"   :depends-on ("grammar" "lexer"))
                                        (:file "ast-match")
                                        (:file "ast-util" :depends-on ("ast-match" "grammar"))
-                                       (:file "walk"     )
-				       (:file "pprint"   )
+                                       (:file "walk"     :depends-on ("psetup"))
+				       (:file "pprint"   :depends-on ("psetup"))
 
                                        
                                        (:file "grammar-clyacc" :depends-on ("grammar")))))) ;; only loaded if CL-Yacc is available; see below.

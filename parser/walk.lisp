@@ -263,6 +263,12 @@ VALUE and TARGET context."
       ([identifier-expr]
        form)
       
+      ([if-expr]
+       (destructuring-bind (condition then else) (cdr form)
+         (make `([if-expr] ,(funcall f condition :value +normal-value+)
+                           ,(funcall f then :value +normal-value+)
+                           ,(funcall f else :value +normal-value+)))))
+      
       ([if-stmt]
        (destructuring-bind
 	   (clauses else-suite) (cdr form)
@@ -363,8 +369,8 @@ VALUE and TARGET context."
                              ,(when var (funcall f var :target +normal-target+))
                              ,(funcall f suite)))))
        
-      ([yield-stmt]
-       (make `([yield-stmt] ,(when (second form)
+      ([yield-expr]
+       (make `([yield-expr] ,(when (second form)
                                (funcall f (second form) :value +normal-value+)))))
     
       (t
@@ -387,50 +393,22 @@ VALUE and TARGET context."
   ;; 
   ;; (with-sub-ast (form ast)
   ;;   ... form...)
-  
   (let ((context '#:context))
-    
     (when (symbolp subform)
       (setf subform `(,subform &rest ,context)))
-  
     `(walk-py-ast ,ast
 		  (excl:named-function :with-py-ast-function
 		    (lambda ,subform
 		      (declare (optimize (debug 3))
 			       (ignore ,context))
 		      ,@body))
-		  
 		  ;; user-supplied options take precedence...
 		  ,@options
 		  ;; but these are the defaults
 		  :build-result nil
 		  :lists-only t)))
 
-
-#+(or)
-(defmacro match-ast-nodes (ast &rest clauses)
-  ;; (match-ast-nodes ast
-  ;;	   (x   yield-stmt)           (... x...))
-  ;;	   (x   (if-stmt while-stmt)) (... x ..))
-  ;;       (nil (print-stmt))         (.....)))
-  
-  (let ((sub-ast '#:sub-ast))
-    
-    (flet ((make-cond-clause (c)
-	     (destructuring-bind (var nodenames &rest body) c
-	       `(,nodenames (let (,(when var
-				     `(,var ,sub-ast)))
-			      ,@body)))))
-      
-      `(walk-py-ast ,ast
-		    (lambda (,sub-ast)
-		      (case (car ,sub-ast)
-			,@(mapcar #'make-cond-clause clauses)
-			(t (values ,sub-ast))))
-		    :walk-lists-only t))))
-		    
-
-;;;; Printing walker, for debugging
+;;; Printing walker, for debugging
 
 #+(or)
 (defun walk-print (ast &rest walk-options)

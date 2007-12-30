@@ -114,9 +114,8 @@ def f(): pass" nil))
     (test-equal '([module-stmt] ([suite-stmt] () ))
 		(parse ""))
 
-    ;; 'y = yield x' is todo, currently raises SyntaxError
-    (test-error (parse "y = yield x")
-		:condition-type '{SyntaxError})
+    ;; yield expressions are implemented
+    (test-no-error (parse "y = yield x"))
     
     ;; parsing a file
     #+(and allegro unix) ;; no WITH-OPEN-TEMP-FILE on windows
@@ -287,6 +286,8 @@ def f(): pass" nil))
       (p "x")
       (p "x, y")
       (p "FooBar")
+      ;; if-expr
+      (p "(3 if 1 > 0 else 2)")
       ;; if-stmt
       (p "if a > 3:
     pass")
@@ -396,7 +397,7 @@ finally:
       (p "while x:
     y")
       ;; yield-stmt
-      (p "yield")
-      (p "yield x")
-      (p "yield x, y")
+      (p "(yield)")
+      (p "(yield x)")
+      (p "(yield x, y)")
       )))
