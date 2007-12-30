@@ -3181,22 +3181,33 @@ But if RELATIVE-TO package name is given, result may contains dots."
    (stopped-yet :initform nil))
   (:metaclass py-core-type))
 
-(defun make-iterator-from-function (&key func name)
+(defclass py-func-iterator-sendable (py-func-iterator)
+  ()
+  (:metaclass py-core-type))
+
+(defun make-iterator-from-function (&rest args &key func &allow-other-keys)
   "Create an iterator that calls f again and again. F somehow has
 to keep its own state. As soon as F returns NIL, it is considered
 finished; F will then not be called again."
   (check-type func function)
-  (make-instance 'py-func-iterator :func func :name name))
+  (apply #'make-instance 'py-func-iterator args))
 
 (def-py-method py-func-iterator.next (fi)
+  (py-func-iterator.next-or-send fi))
+
+(defun py-func-iterator.next-or-send (fi &rest args)
+  (declare (dynamic-extent args))
   (with-slots (stopped-yet func) fi
-    (let ((res (cond (stopped-yet nil)
-		     ((funcall func))
-		     (t (setf stopped-yet t)
-			nil))))
-      (if res
-	  (return-from py-func-iterator.next res)
-	(funcall 'raise-StopIteration)))))
+    (tagbody
+      (when stopped-yet (go stop))
+      (whereas ((val (apply func args)))
+        (return-from py-func-iterator.next-or-send val))
+      (setf stopped-yet t)
+     stop
+      (funcall 'raise-StopIteration))))
+
+(def-py-method py-func-iterator-sendable.send (fi val)
+  (py-func-iterator.next-or-send fi val))
 
 (def-py-method py-func-iterator.__repr__ (fi)
   (with-output-to-string (s)

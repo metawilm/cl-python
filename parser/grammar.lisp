@@ -281,7 +281,7 @@
 (p break-stmt    ([break])            `([break-stmt]))
 (p continue-stmt ([continue])         `([continue-stmt]))
 (p return-stmt   ([return] testlist?) `([return-stmt] ,$2))
-(p yield-stmt    (yield-expr)          $1)
+(p yield-stmt    (yield-expr)         `([yield-stmt] ,@(cdr $1)))
 
 (p yield-expr ([yield] testlist?) `([yield-expr] ,$2))
 
@@ -667,7 +667,8 @@
     (rp [unary-expr] op item)
     (rp [while-stmt] test suite else-suite)
     (rp [with-stmt] test var suite)
-    (rp [yield-expr] val))
+    (rp [yield-expr] val)
+    (rp [yield-stmt] val))
     
   ;; Some shortcuts
   (defun [make-identifier-expr*] (name)

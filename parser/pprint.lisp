@@ -14,7 +14,6 @@
 ;;
 ;; TODO: 
 ;;  - insert line breaks for too long lines
-;;  - yield statement is now always surrounded by brackets, even if on its own line
 
 (in-package :clpython.parser)
 (in-syntax *ast-user-readtable*)
@@ -344,6 +343,7 @@ If STREAM is not supplied, output goes to a string."
 		    (format stream "while ~A:~A~@[else: ~A~]" test suite else-suite))))
     
     ([yield-expr] (format stream "(yield~@[ ~A~])" (second x)))
+    ([yield-stmt] (format stream "yield~@[ ~A~]" (second x)))
     
     (t (with-standard-io-syntax
 	 #+(or)(warn "uncatched in py-pprint-1: ~A" x)

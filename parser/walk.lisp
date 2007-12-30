@@ -369,9 +369,9 @@ VALUE and TARGET context."
                              ,(when var (funcall f var :target +normal-target+))
                              ,(funcall f suite)))))
        
-      ([yield-expr]
-       (make `([yield-expr] ,(when (second form)
-                               (funcall f (second form) :value +normal-value+)))))
+      (([yield-expr] [yield-stmt])
+       (make `(,(car form) ,(when (second form)
+                              (funcall f (second form) :value +normal-value+)))))
     
       (t
        (when (and (symbolp (car form))

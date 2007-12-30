@@ -308,7 +308,7 @@ GENSYMS are made gensym'd Lisp vars."
 (defmacro [break-stmt] (&environment e)
   (if (get-pydecl :inside-loop-p e)
       `(go .break)
-    (py-raise '{SyntaxError} "BREAK was found outside loop")))
+    (py-raise '{SyntaxError} "Statement `break' was found outside loop.")))
 
 (defvar *special-calls* '({locals} {globals} {eval}))
 
@@ -520,7 +520,7 @@ GENSYMS are made gensym'd Lisp vars."
 (defmacro [continue-stmt] (&environment e)
   (if (get-pydecl :inside-loop-p e)
       `(go .continue)
-    (py-raise '{SyntaxError} "CONTINUE was found outside loop")))
+    (py-raise '{SyntaxError} "Statement `continue' was found outside loop.")))
 
 (defmacro [del-stmt] (item &environment e)
   (multiple-value-bind (temps values stores store-form read-form del-form)
@@ -617,8 +617,8 @@ GENSYMS are made gensym'd Lisp vars."
   
   (with-py-ast (form ast :into-nested-namespaces nil)
     (case (car form)
-      ([return-stmt] (py-raise '{TypeError}
-                               "`return' statement found outside function (in `exec')."))
+      ([return-stmt] (py-raise '{SyntaxError}
+                               "Statement `return' was found outside function (in `exec')."))
       (t form)))
   
   t)
@@ -1268,7 +1268,7 @@ LOCALS shares share tail structure with input arg locals."
 (defmacro [return-stmt] (val &environment e)
   (if (get-pydecl :inside-function-p e)
       `(return-from function-body ,(or val `(load-time-value *the-none*)))
-    (py-raise '{SyntaxError} "RETURN found outside function")))
+    (py-raise '{SyntaxError} "Statement `return' was found outside function.")))
 
 (defmacro [slice-expr] (start stop step)
   `(make-slice ,start ,stop ,step))
@@ -1493,7 +1493,11 @@ finally:
 
 (defmacro [yield-expr] (val)
   (declare (ignore val))
-  (py-raise '{SyntaxError} "Statement `yield' found outside function."))
+  (py-raise '{SyntaxError} "Expression `yield' was found outside function."))
+
+(defmacro [yield-stmt] (val)
+  (declare (ignore val))
+  (py-raise '{SyntaxError} "Statement `yield' was found outside function."))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -2069,18 +2073,14 @@ Non-negative integer denoting the number of args otherwise."
 
 (defun generator-ast-p (ast)
   "Is AST a function definition for a generator?"
-  
   ;; Note that LAMBDA-EXPR can't contain (yield) statements
-  
   (assert (not (match-p ast '([module-stmt] ?_))) ()
     "GENERATOR-AST-P called with a MODULE ast.")
-  
   (with-py-ast (form ast)
     (case (car form)
-      ([yield-expr]                     (return-from generator-ast-p t))
+      (([yield-expr] [yield-stmt])      (return-from generator-ast-p t))
       (([classdef-stmt] [funcdef-stmt]) (values nil t))
       (t                                form)))
-  
   nil)
 
 (defun ast-deleted-variables (ast)
@@ -2121,24 +2121,29 @@ be bound."
 
 (defun rewrite-generator-funcdef-suite (fname suite)
   ;; Returns the function body
-  (assert (symbolp fname))
+  (assert (or (symbolp fname) (listp fname)))
   (assert (match-p suite '([suite-stmt] ?_)) ()
     "CAR of SUITE must be SUITE-STMT, but got: ~S" (car suite))
   (assert (generator-ast-p suite))
-
+  
+  (with-py-ast (form suite)
+    (case (car form)
+      (([yield-expr])    (error "`Yield' expression not supported yet."))
+      (([classdef-stmt] [funcdef-stmt]) (values nil t))
+      (t                                form)))
+  
   (let ((yield-counter 0)
 	(other-counter 0)
 	(vars ()))
-    
     (flet ((new-tag (kind) (if (eq kind :yield)
 			       (incf yield-counter)
 			     (make-symbol (format nil "~A~A" kind (incf other-counter)))))
-	   (add-suites (list)
-	     ;; group multiple non-symbols s as (suite-stmt s1 s2 ...)
+	   (grouped-into-suites (list)
+             ;; Group sequences of expressions into [suite] statements,
+             ;; the goal of which is triggering the :safe-lex-visible-vars optimization.
 	     (let ((res      ())
 		   (non-tags ()))
-	       
-	       (dolist (x list)
+               (dolist (x list)
 		 (if (listp x)
 		     (push x non-tags)
 		   (progn
@@ -2146,12 +2151,9 @@ be bound."
 		       (push `([suite-stmt] ,(nreverse non-tags)) res)
 		       (setf non-tags nil))
 		     (push x res))))
-	       
-	       (when non-tags
+               (when non-tags
 		 (push `([suite-stmt] ,(nreverse non-tags)) res))
-	       
-	       (nreverse res))))
-      
+               (nreverse res))))
       (labels
 	  ((walk (form stack)
 	     (walk-py-ast
@@ -2161,14 +2163,14 @@ be bound."
 		(case (first form)
 		  
 		  ([break-stmt]
-		   (unless stack (break "BREAK outside loop"))
-		   (values `(go ,(cdr (car stack)))
-			   t))
+                   (if stack
+                       (values `(go ,(cdr (car stack))) t)
+                     (py-raise '{SyntaxError} "Statement `break' was found outside loop.")))
 		    
 		  ([continue-stmt]
-		   (unless stack (break "CONTINUE outside loop"))
-		   (values `(go ,(car (car stack)))
-			   t))
+                   (if stack
+                       (values `(go ,(car (car stack))) t)
+                     (py-raise '{SyntaxError} "Statement `continue' was found outside loop.")))
 		  
 		  ([for-in-stmt]
 		   (destructuring-bind (target source suite else-suite) (cdr form)
@@ -2185,17 +2187,17 @@ be bound."
 		       
 		       (values
 			`(:split
-			  #+(or)(warn "type of for-in in gen: ~A" (class-of ,source))
-			  (setf ,generator (get-py-iterate-fun ,source)
+                          ;; create generator; request first value
+                          (setf ,generator (get-py-iterate-fun ,source)
 				,loop-var  (funcall ,generator))
 			  (unless ,loop-var (go ,else-tag))
-			  
+			  ;; handle a value
 			  ,repeat-tag
 			  ([assign-stmt] ,loop-var (,target))
 			  (:split ,(walk suite stack2))
-			  
-			  (go ,continue-tag) ;; prevent warnings
+                          (go ,continue-tag) ;; prevent warnings
 			  ,continue-tag
+                          ;; request new value
 			  (setf ,loop-var (funcall ,generator))
 			  (if ,loop-var (go ,repeat-tag) (go ,end-tag))
 			  
@@ -2209,26 +2211,16 @@ be bound."
 			t))))
 		  
 		  ([if-stmt]
-		   
-		   ;; Rewriting of the IF-STMT used to be conditional on:
-		   ;; 
-		   ;;   (generator-ast-p form)
-		   ;; 
-		   ;; but it turns out that we always need to rewrite,
-		   ;; because of, for example:
+		   ;; E.g. in this example, the 'continue' must be rewritten
+		   ;; correspondingly to the rewritten 'while':
 		   ;; 
 		   ;;  def f():
 		   ;;    while test:
 		   ;;      yield 1
 		   ;;      if foo:
 		   ;;        continue
-		   ;; 
-		   ;; where the 'continue' must be rewritten
-		   ;; correspondingly to the rewritten 'while'.
-		   
 		   (destructuring-bind (clauses else-suite) (cdr form)
-		     (loop
-			 with else-tag = (new-tag :else) and after-tag = (new-tag :after)
+		     (loop with else-tag = (new-tag :else) and after-tag = (new-tag :after)
 									 
 			 for (expr suite) in clauses
 			 for then-tag = (new-tag :then)
@@ -2251,22 +2243,18 @@ be bound."
 		  ([return-stmt]
 		   (when (second form)
 		     (py-raise '{SyntaxError}
-			       "Inside generator, RETURN statement may not have ~
+			       "Inside generator, `return' statement may not have ~
                                 an argument (got: ~S)" form))
-		    
-		   ;; From now on, we will always return to this state
-		   (values `(generator-finished)
-			   t))
+                   ;; From now on, we will always return to this state
+		   (values `(generator-finished) t))
 
 		  ([suite-stmt]
 		   (values `(:split ,@(loop for stmt in (second form)
 					  collect (walk stmt stack)))
 			   t))
 
-		  
-		  ([try-except-stmt]
-
-		   ;; Three possibilities:
+                  ([try-except-stmt]
+                   ;; Three possibilities:
 		   ;;  1. YIELD-STMT or RETURN-STMT in TRY-SUITE 
 		   ;;  2. YIELD-STMT or RETURN-STMT in some EXCEPT-CLAUSES
 		   ;;  3. YIELD-STMT or RETURN-STMT in ELSE-SUITE
@@ -2274,13 +2262,12 @@ be bound."
 		   ;; We rewrite it once completely, such that all
 		   ;; cases are covered. Maybe there is more rewriting
 		   ;; going on than needed, but it doesn't hurt.
-		   
-		   (destructuring-bind (try-suite except-clauses else-suite) (cdr form)
+                   (destructuring-bind (try-suite except-clauses else-suite) (cdr form)
 		     (loop
 			 with try-tag = (new-tag :yield)
 			 with else-tag = (new-tag :else)
 			 with after-tag = (new-tag :after)
-			 with gen-maker = (gensym "helper-gen-maker") and gen = (gensym "helper-gen")
+			 with gen = (gensym "helper-gen")
 									
 			 initially (push gen vars)
 				   
@@ -2293,31 +2280,29 @@ be bound."
 			 finally
 			   (return
 			     (values
+                              ;; By creating a dummy function for the suite, and iterating over
+                              ;; the values that function yields, the suite itself does not have
+                              ;; to be analyzed and rewritten.
 			      `(:split
 				(setf ,gen (get-py-iterate-fun
-					    (funcall
-					     ,(suite->generator gen-maker try-suite))))
+					    (funcall ,(suite->generator `(,fname :try-suite) try-suite))))
 				(setf .state. ,try-tag)
 				
 				;; yield all values returned by helper function .gen.
 				,try-tag
 				([try-except-stmt]
-				 
-				 (let ((val (funcall ,gen))) ;; try-suite
+                                 (let ((val (funcall ,gen))) ;; try-suite
 				   (case val
 				     (:explicit-return (generator-finished))
 				     (:implicit-return (go ,else-tag))
 				     (t (return-from function-body val))))
-				 
-				 ,jumps ;; handlers
-				 
-				 nil) ;; else-suite
+                                 ,jumps ;; exception handlers
+                                 nil) ;; else-suite
 				
-				,@exc-bodies
+				,@exc-bodies ;; handler bodies
 				
 				,else-tag
-				,@(when else-suite
-				    `((:split ,(walk else-suite stack))))
+				,@(when else-suite `((:split ,(walk else-suite stack))))
 				
 				,after-tag
 				(setf ,gen nil))
@@ -2329,23 +2314,18 @@ be bound."
 		       (py-raise '{SyntaxError}
 				 "YIELD is not allowed in the TRY suite of ~
                                   a TRY/FINALLY statement (got: ~S)" form))
-		     
-		     (let ((fin-catched-exp (gensym "fin-catched-exc")))
-		       
-		       (pushnew fin-catched-exp vars)
+                     (let ((fin-catched-exp (gensym "fin-catched-exc")))
+                       (pushnew fin-catched-exp vars)
 		       (values
 			`(:split
 			  (multiple-value-bind (val cond)
 			      (ignore-errors ,try-suite ;; no need to walk
 					     (values))
 			    (setf ,fin-catched-exp cond))
-			  
-			  ,(walk finally-suite stack)
-			  
-			  (when ,fin-catched-exp
+                          ,(walk finally-suite stack)
+                          (when ,fin-catched-exp
 			    (error ,fin-catched-exp)))
-			
-			t))))
+                        t))))
 		  
 		  ([while-stmt]
 		   (destructuring-bind (test suite else-suite) (cdr form)
@@ -2373,67 +2353,59 @@ be bound."
 				 ,after-tag)
 			       t))))
 		  
-		  ([yield-expr]
+		  ([yield-stmt]
 		   (let ((tag (new-tag :yield)))
 		     (values `(:split (setf .state. ,tag)
 				      (return-from function-body ,(or (second form) '*the-none*))
 				      ,tag)
 			     t)))
-		  
-		  (t (values form
-			     t))))
+                  
+                  (t (values form t))))
 	      :build-result t)))
 
 	(let* ((walked-as-list (multiple-value-list (apply-splits (walk suite ()))))
-	       
-	       ;; Add SUITE-STMT, to trigger :safe-lex-visible-vars optimization
-	       (walked-list-with-suites (add-suites walked-as-list))
-	       
-	       (final-tag -1))
+               (walked-list-with-suites (grouped-into-suites walked-as-list))
+               (final-tag -1))
 	  
-	  `(let ((.state. 0)
-		 ,@(nreverse vars))
-	     
-	     (make-iterator-from-function 
+	  `(let ((.state. 0) ,@(nreverse vars))
+             (make-iterator-from-function 
 	      :name '(:iterator-from-function ,fname)
 	      :func
 	      (excl:named-function (:iterator-from-function ,fname)
 		(lambda ()
 		  ;; This is the function that will repeatedly be
 		  ;; called to return the values
-		  
-		  (macrolet ((generator-finished ()
+                  (macrolet ((generator-finished ()
 			       '(progn (setf .state. ,final-tag)
 				 (go ,final-tag))))
-		    
-		    (block function-body
+                    (block function-body
 		      (tagbody
 			(case .state.
 			  ,@(loop for i from -1 to yield-counter
 				collect `(,i (go ,i))))
 		       0
 			,@walked-list-with-suites
-
-			(generator-finished)
-			
-			,final-tag
+                        (generator-finished)
+                        ,final-tag
 			(return-from function-body nil)))))))))))))
 
 
 (defun suite->generator (fname suite)
+  "Wrap `suite' inside a function. Upon execution, besides `yield'-ing the
+values generated in the suite, the function will return :explicit-return or
+:implicit-return depending on whether the suite executed a `return' statement."
   (flet ((suite-walker (form &rest context)
 	   (declare (ignore context))
 	   (case (car form)
              (([funcdef-stmt] [classdef-stmt]) (values form t))
              ([return-stmt] (when (second form)
-			    (py-raise '{SyntaxError}
-				      "Inside generator, RETURN statement may ~
-				       not have an argument (got: ~S)" form))
-			  
-			  (values `(return-from function-body :explicit-return)
-				  t))
+                              (py-raise '{SyntaxError}
+                                        "Inside generator, `return' statement may ~
+				         not have an argument (got: ~S)" form))
+                            (values `(return-from function-body :explicit-return)
+                                    t))
              (t form))))
-    `(excl:named-function (:suite->generator ,fname)
+    `(excl:named-function ,fname
        (lambda ()
 	 ,(rewrite-generator-funcdef-suite
 	   fname
@@ -2451,7 +2423,7 @@ be bound."
     (let ((first-for (pop for-in/if-clauses))
 	  (first-source (gensym "first-source")))
       (assert (eq (car first-for) '[for-in-clause]))
-      (let ((iteration-stuff (loop with res = `([yield-expr] ,item)
+      (let ((iteration-stuff (loop with res = `([yield-stmt] ,item)
 				 for clause in (reverse for-in/if-clauses)
 				 do (setf res
 				      (ecase (car clause)
