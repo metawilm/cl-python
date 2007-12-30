@@ -1056,6 +1056,11 @@ LOCALS shares share tail structure with input arg locals."
 			   (local-lookup)
 			 (module-lookup)))))))
 
+(defmacro [if-expr] (true-outcome condition false-outcome)
+  `(if (py-val->lisp-bool ,condition)
+       ,true-outcome
+     ,false-outcome))
+       
 (defmacro [if-stmt] (if-clauses else-clause)
   `(cond ,@(loop for (cond body) in if-clauses
 	       collect `((py-val->lisp-bool ,cond) ,body))

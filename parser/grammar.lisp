@@ -386,8 +386,14 @@
 
 (p test :or
    ((lambdef) $1)
-   ((binop-expr) $1))
+   ((binop-expr) $1)
+   ((binop-expr [if] binop-expr [else] test) `([if-expr] ,$1 ,$3 ,$5)))
 
+;; These `old-' rules are named after corresponding CPython grammar rule (20071230).
+(p old-test :or 
+   ((binop-expr) $1)
+   ((old-lambdef) $1))
+   
 (p binop-expr :or
    ((binop-expr [and] binop-expr) `([binary-lazy-expr] ,$2 ,$1 ,$3))
    ((binop-expr [or]  binop-expr) `([binary-lazy-expr] ,$2 ,$1 ,$3))
@@ -460,7 +466,8 @@
 (p testlist-gexp (test gen-for) `([generator-expr] ,$1 ,$2))
 (p testlist-gexp (test comma--test* comma?) (if (or $2 $3) `([tuple-expr] (,$1 . ,$2)) $1))
  
-(p lambdef ([lambda] parameters [:] test) `([lambda-expr] ,$2 ,$4))
+(p lambdef ([lambda] parameters [:] test)         `([lambda-expr] ,$2 ,$4))
+(p old-lambdef ([lambda] parameters [:] old-test) `([lambda-expr] ,$2 ,$4))
 
 (p trailer :or
    (( [(] arglist [)]        )  `([call-expr] ,$2))
@@ -497,17 +504,17 @@
            (([,])                `(t))
            (([,] test testlist2) `(,$2 ,@$3)))
 
-(p testlist-safe (test testlist-safe2) (if $2
-                                           `([tuple-expr] ,(cons $1 (if (eq (car (last $2)) :dummy)
-                                                                        (butlast $2)
-                                                                      $2)))
-                                         $1))
+(p testlist-safe (old-test testlist-safe2) (if $2
+                                               `([tuple-expr] ,(cons $1 (if (eq (car (last $2)) :dummy)
+                                                                            (butlast $2)
+                                                                          $2)))
+                                             $1))
 (p testlist-safe2 :or
-   (()                         nil)
-   (([,])                      (list :dummy))
-   (([,] test testlist-safe2)  (if (eq (car $3) :dummy)
-                                   $2
-                                 (cons $2 $3))))
+   (()                            nil)
+   (([,])                         (list :dummy))
+   (([,] old-test testlist-safe2) (if (eq (car $3) :dummy)
+                                      $2
+                                    (cons $2 $3))))
 
 (p dictmaker (test [:] test comma--test--\:--test* comma?) (cons (cons $1 $3) $4))
 (gp comma--test--\:--test+)
@@ -559,13 +566,13 @@
    ((list-for) $1) 
    ((list-if) $1))
 (p list-for ([for] exprlist [in] testlist-safe list-iter?) `(([for-in-clause] ,$2 ,$4) . ,$5))
-(p list-if ([if] test list-iter?) `(([if-clause] ,$2) . ,$3))
+(p list-if ([if] old-test list-iter?) `(([if-clause] ,$2) . ,$3))
  
 (p gen-iter :or
    ((gen-for) $1)
    ((gen-if) $1))
-(p gen-for ([for] exprlist [in] test gen-iter?) `(([for-in-clause] ,$2 ,$4) . ,$5))
-(p gen-if  ([if]  test               gen-iter?) `(([if-clause] ,$2) . ,$3))
+(p gen-for ([for] exprlist [in] binop-expr gen-iter?) `(([for-in-clause] ,$2 ,$4) . ,$5))
+(p gen-if  ([if]  old-test                 gen-iter?) `(([if-clause] ,$2) . ,$3))
 
 (p testlist1 (test |,--test*|) (if $2 `([tuple-expr] (,$1 . ,$2)) $1))
 
@@ -634,6 +641,7 @@
     (rp [generator-expr] item for-in/if-clauses)
     (rp [global-stmt] names)
     (rp [identifier-expr] name)
+    (rp [if-expr] true-outcome condition false-outcome)
     (rp [if-stmt] if-clauses else-clause)
     (rp [import-stmt] items)
     (rp [import-from-stmt] mod-name-as-list items)

@@ -68,8 +68,8 @@
 	   
 	   "attributeref-expr" "backticks-expr" "binary-expr" "binary-lazy-expr"
 	   "call-expr" "comparison-expr" "dict-expr" "generator-expr"
-	   "identifier-expr" "lambda-expr" "listcompr-expr" "list-expr" "slice-expr"
-	   "subscription-expr" "tuple-expr" "unary-expr"
+	   "identifier-expr" "if-expr" "lambda-expr" "listcompr-expr" "list-expr"
+           "slice-expr" "subscription-expr" "tuple-expr" "unary-expr"
 	   
 	   "for-in-clause" "if-clause" ;; not really nodes
            )

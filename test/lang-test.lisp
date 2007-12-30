@@ -18,7 +18,7 @@
 		    :backticks-expr :binary-expr :binary-lazy-expr :break-stmt
 		    :call-expr :classdef-stmt :comparison-expr :continue-stmt
 		    :del-stmt :dict-expr :exec-stmt :for-in-stmt :funcdef-stmt
-		    :generator-expr :global-stmt :identifier-expr :if-stmt
+		    :generator-expr :global-stmt :identifier-expr :if-expr :if-stmt
 		    :import-stmt :import-from-stmt :lambda-expr :listcompr-expr
                     :list-expr :module-stmt :print-stmt :return-stmt :slice-expr
                     :subscription-expr :suite-stmt :return-stmt :raise-stmt
@@ -409,6 +409,29 @@ except NameError:
 
 (defmethod test-lang ((kind (eql :identifier-expr)))
   )
+
+(defmethod test-lang ((kind (eql :if-expr)))
+  (run-no-error "x = (1 if True else 0); assert x == 1")
+  (run-no-error "x = 1 if True else 0; assert x == 1")
+  (run-no-error "x = 1 if False else 0; assert x == 0")
+  (progn
+    ;; Grammar test cases from PEP http://www.python.org/dev/peps/pep-0308/.
+    (run-no-error "
+[a, b] = [f for f in (1, lambda x: x if x >= 0 else -1)]
+assert a == 1
+assert b(1) == 1
+assert b(-2) == -1")
+    (run-no-error "
+[a, b] = [f for f in 1, lambda x: (x if x >= 0 else -1)]
+assert a == 1
+assert b(1) == 1
+assert b(-2) == -1")
+    (run-no-error "
+[a, b] = [f for f in 1, (lambda x: x if x >= 0 else -1)]
+assert a == 1
+assert b(1) == 1
+assert b(-2) == -1")
+    (run-error "[f for f in 1, lambda x: x if x >= 0 else -1]" {SyntaxError})))
 
 (defmethod test-lang ((kind (eql :if-stmt)))
   )
