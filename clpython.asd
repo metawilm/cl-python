@@ -64,6 +64,7 @@
                                        (:file "file"         )
                                        (:file "exceptions"   )
                                        (:file "compiler"     )
+                                       (:file "generator"    )
                                        (:file "optimize"     )
                                        (:file "habitat"      )
                                        (:file "import"       )))))
