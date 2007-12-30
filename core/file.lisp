@@ -73,7 +73,7 @@
                                                           (:write           :create)
                                                           ((:append :read+) :create)))
                    (error (e)
-                     (py-raise '{IOError} "Opening file `~S' failed:~_~A" name e)))))
+                     (py-raise '{IOError} "Opening file `~A' failed: ~_~A" name e)))))
     (when (eq mode :read+)
       (unless (file-position stream :end)
 	(py-raise '{IOError} "Moving to end of file failed.")))
