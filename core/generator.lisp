@@ -21,8 +21,23 @@
   (assert (or (symbolp fname) (listp fname)))
   (assert (match-p suite '([suite-stmt] ?_)) ()
     "CAR of SUITE must be SUITE-STMT, but got: ~S" (car suite))
+  (let ((yield-found (generator-ast-p suite)))
+    (assert yield-found)
+    (let ((f (if (member '[yield-expr] yield-found)
+                 #'rewrite-generator-funcdef-also-yield-expr
+               #'rewrite-generator-funcdef-only-yield-stmt)))
+      (funcall f fname suite))))
+    
+(defun rewrite-generator-funcdef-also-yield-expr ()
+  (assert nil))
+
+(defun rewrite-generator-funcdef-only-yield-stmt (fname suite)
+  ;; Returns the function body
+  (assert (or (symbolp fname) (listp fname)))
+  (assert (match-p suite '([suite-stmt] ?_)) ()
+    "CAR of SUITE must be SUITE-STMT, but got: ~S" (car suite))
   (assert (generator-ast-p suite))
-  
+
   (with-py-ast (form suite)
     (case (car form)
       (([yield-expr])    (error "`Yield' expression not supported yet."))
@@ -338,15 +353,9 @@
 
 ;;; Processes
 
-#||
-
 (eval-when (:compile-top-level :load-top-level :execute) 
   (require :process))
 
-(defvar *caller->gen-val* (list nil))
-(defvar *gen->caller-val* (list nil))
-
-(defvar *generator-process* nil)
 (defvar *debug* t)
 
 (define-condition generator-yield (condition)
@@ -355,55 +364,66 @@
              (format s "Generator has yielded value ~A."
                      (generator-yield-value c)))))
 
-(defun start-generator ()
-  (setf *generator-process*
-    (mp:process-run-function "generator"
-      #'make-generator-wrapper #'generator mp:*current-process* *caller->gen-val* *gen->caller-val*)))
+(defstruct (generator-interface
+            (:conc-name "gi-")
+            (:constructor make-gi))
+  "Generator interface state"
+  process c->g g->c c-proc g-proc)
 
-(defun next (val)
-  "Request next value from the generator"
-  (setf (car *caller->gen-val*) val)
+(defun gen.start (func)
+  (check-type func function)
+  (let* ((caller->gen-val (list nil))
+         (gen->caller-val (list nil))
+         (gen-if (make-gi :c->g caller->gen-val
+                          :g->c gen->caller-val
+                          :c-proc mp:*current-process*
+                          :g-proc nil)))
+    (setf (gi-g-proc gen-if)
+      (mp:process-run-function (format nil "Generator ~A" func)
+        #'gen.wrap func gen-if))
+    gen-if))
+
+(defun gen.send (if val)
+  "Send value (for yield expr) to generator, waiting for next value."
+  (check-type if gen-if)
+  (setf (car (gi-c->g if)) val)
   (mp:without-scheduling
-    (mp:process-enable *generator-process*)
-    (mp:process-disable mp:*current-process*))
-  ;; Generator continues execution... we continue after new value available
+    (mp:process-enable (gi-g-proc if))
+    (mp:process-disable (gi-c-proc if)))
+  ;; Wait until we are enabled by the generator...
   (when *debug*
-    (format t "[USER] Got from generator: ~A" (car *gen->caller-val*))))
+    (format t "[USER] Got from generator: ~A" (car (gi-g->c if)))))
 
-(defun make-generator-wrapper (f caller-process caller->gen-val gen->caller-val)
-  (handler-bind ((generator-yield
-                  (lambda (c)
-                    (let ((r (find-restart :send-value)))
-                      (assert r)
-                      (when *debug*
-                        (format t "[WRAPPER] Wrapper receiving yielded value: ~A~%"
-                                (generator-yield-value c)))
-                      (setf (car gen->caller-val) (generator-yield-value c))
-                      (setf (car caller->gen-val) :bla)
-
-                      (mp:without-scheduling
-                        (mp:process-enable caller-process)
-                        (mp:process-disable mp:*current-process*))
-                      
-                      (assert (not (eq (car caller->gen-val) :bla)))
-                      (invoke-restart r (car caller->gen-val))))))
+(defun gen.wrap (f if)
+  (flet ((yield-wait-restart (c)
+           (let ((r (find-restart 'gen.send-value-restart)))
+             (assert r () "Generator wrapper misses `gen.send-value-restart' restart.")
+             (when *debug* (format t "[WRAPPER] Wrapper receiving yielded value: ~A.~%"
+                                   (generator-yield-value c)))
+             (setf (car (gi-g->c if)) (generator-yield-value c))
+             (setf (car (gi-c->g if)) :bla)
+             
+             (mp:without-scheduling
+               (mp:process-enable (gi-c-proc if))
+               (mp:process-disable (gi-g-proc if)))
+             
+             (assert (not (eq (car (gi-c->g if)) :bla)))
+             (invoke-restart r (car (gi-c->g if))))))
     
-    ;; Okay, function is executing, now wait for request for first value 
-    (mp:process-disable mp:*current-process*)
-    (when *debug*
-      (format t "[WRAPPER] Calling generator for the first time.~%"))
-    (funcall f)))
+    (handler-bind ((generator-yield #'yield-wait-restart))
+      (mp:process-disable (gi-g-proc if))
+      ;; Wait for initial `next' call...
+      (when *debug* (format t "[WRAPPER] Generator called for the first time.~%"))
+      (funcall f))))
 
-(defun generator ()
-  (let ((c (make-condition 'generator-yield)))
-    (flet ((yield (yield-val)
-             (restart-bind ((:send-value (lambda (sent-val) (throw :yield-catcher sent-val))))
-               (setf (generator-yield-value c) yield-val)
-               (error c))))
-      (when *debug* 
-        (format t "[GENERATOR] Starting...~%"))
-      (loop for i from 0
-          do (when *debug* (format t "[GENERATOR] Yielding ~A~%" i))
-             (let ((x (catch :yield-catcher (yield i))))
-               (when *debug* (format t "[GENERATOR] Got ~A from user~%" x)))))))
-||#
+(defun gen.yield (yield-val)
+  (let ((c (load-time-value (make-condition 'generator-yield))))
+    (restart-bind ((gen.send-value-restart (lambda (sent-val) (return-from gen.yield sent-val))))
+      (setf (generator-yield-value c) yield-val)
+      (error c))))
+
+(defmacro gen.func-from-body (&body body)
+  `(lambda ()
+     (macrolet (([yield-stmt] (val) `(gen.yield ,val))
+                ([yield-expr] (val) `(gen.yield ,val)))
+       ,@body)))

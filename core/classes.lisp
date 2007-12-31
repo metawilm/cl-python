@@ -3224,6 +3224,19 @@ finished; F will then not be called again."
       (format stream ":name ~A  :func ~A  :stopped ~A"
 	      name func stopped-yet))))
 
+(defclass generator-process (py-func-iterator)
+  ((process :initarg :process))
+  (:metaclass py-core-type))
+
+#+(or)
+(defun make-generator-process (f &rest args)
+  (check-type f function)
+  (let* ((gen-if (gen.start f))
+         (f (lambda (&optional val)
+              (gen.next gen-if val))))
+    (make-iterator-from-function :name `(:generator-process ,name)
+                                 :func f)))
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 ;;; Calling objects (functions, classes, instances)

@@ -2072,16 +2072,17 @@ Non-negative integer denoting the number of args otherwise."
 ;;;  Generator rewriting
 
 (defun generator-ast-p (ast)
-  "Is AST a function definition for a generator?"
+  "Is AST a function definition for a generator? Returns set of ([yield-expr] [yield-stmt]) of nodes found."
   ;; Note that LAMBDA-EXPR can't contain (yield) statements
   (assert (not (match-p ast '([module-stmt] ?_))) ()
     "GENERATOR-AST-P called with a MODULE ast.")
-  (with-py-ast (form ast)
-    (case (car form)
-      (([yield-expr] [yield-stmt])      (return-from generator-ast-p t))
-      (([classdef-stmt] [funcdef-stmt]) (values nil t))
-      (t                                form)))
-  nil)
+  (let (res)
+    (with-py-ast (form ast)
+      (case (car form)
+        (([yield-expr] [yield-stmt])      (pushnew (car form) res))
+        (([classdef-stmt] [funcdef-stmt]) (values nil t))
+        (t                                form)))
+    res))
 
 (defun ast-deleted-variables (ast)
   "Is there a DEL statement in the AST? If so, returns a list of all
