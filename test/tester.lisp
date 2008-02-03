@@ -28,7 +28,7 @@
 ;;;; from the original ACL 6.1 sources:
 ;; Id: tester.cl,v 2.2.12.1 2001/06/05 18:45:10 layer Exp
 
-;; $Id: tester.lisp,v 1.3 2007/09/01 11:52:02 willem Exp $
+;; $Id: tester.lisp,v 1.4 2008/02/03 09:50:52 willem Exp $
 
 (defpackage :util.test
   (:use :common-lisp :excl)
@@ -496,8 +496,10 @@ Reason: the format-arguments were incorrect.~%")
 	   (format t "~&**********************************~%" ,g-name)
 	   (format t "End ~a test~%" ,g-name)
 	   (format t "Errors detected in this test: ~s " *test-errors*)
-	   (unless (zerop *test-unexpected-failures*)
-	     (format t "UNEXPECTED: ~s" *test-unexpected-failures*))
+           (cond ((not (zerop *test-unexpected-failures*))
+                  (format t "UNEXPECTED: ~s" *test-unexpected-failures*))
+                 ((not (zerop *test-errors*))
+                  (format t "(all expected)")))
 	   (format t "~%Successes this test: ~s~%" *test-successes*)
 	   (setf (sys:gsgc-switch :print) state))))))
 
