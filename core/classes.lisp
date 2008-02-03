@@ -3200,8 +3200,10 @@ finished; F will then not be called again."
   (with-slots (stopped-yet func) fi
     (tagbody
       (when stopped-yet (go stop))
-      (whereas ((val (apply func args)))
-        (return-from py-func-iterator.next-or-send val))
+      (let ((val (apply func args)))
+        (format t "py-func-iterator.next-or-send: got val ~A~%" val)
+        (when val
+          (return-from py-func-iterator.next-or-send val)))
       (setf stopped-yet t)
      stop
       (funcall 'raise-StopIteration))))
@@ -3227,15 +3229,6 @@ finished; F will then not be called again."
 (defclass generator-process (py-func-iterator)
   ((process :initarg :process))
   (:metaclass py-core-type))
-
-#+(or)
-(defun make-generator-process (f &rest args)
-  (check-type f function)
-  (let* ((gen-if (gen.start f))
-         (f (lambda (&optional val)
-              (gen.next gen-if val))))
-    (make-iterator-from-function :name `(:generator-process ,name)
-                                 :func f)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 

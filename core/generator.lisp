@@ -28,8 +28,17 @@
                #'rewrite-generator-funcdef-only-yield-stmt)))
       (funcall f fname suite))))
     
-(defun rewrite-generator-funcdef-also-yield-expr ()
-  (assert nil))
+(defun rewrite-generator-funcdef-also-yield-expr (fname suite)
+  (declare (ignorable fname suite))
+  (error "todo")
+  #+(or)
+  `(make-generator-process
+      ',fname
+      (excl:named-function (:iterator-from-function ,fname :expr)
+        (lambda ()
+          (macrolet (([yield-stmt] (val) `(gen.yield ,val))
+                     ([yield-expr] (val) `(gen.yield ,val)))
+            ,suite)))))
 
 (defun rewrite-generator-funcdef-only-yield-stmt (fname suite)
   ;; Returns the function body
@@ -306,7 +315,7 @@
              (make-iterator-from-function 
 	      :name '(:iterator-from-function ,fname)
 	      :func
-	      (excl:named-function (:iterator-from-function ,fname)
+	      (excl:named-function (:iterator-from-function ,fname :stmt)
 		(lambda ()
                   ;; This is the function that will repeatedly be
                   ;; called to return the values
@@ -353,6 +362,7 @@
 
 ;;; Processes
 
+#||
 (eval-when (:compile-top-level :load-top-level :execute) 
   (require :process))
 
@@ -364,66 +374,76 @@
              (format s "Generator has yielded value ~A."
                      (generator-yield-value c)))))
 
-(defstruct (generator-interface
-            (:conc-name "gi-")
-            (:constructor make-gi))
+(defstruct (generator-interface (:conc-name "gi-") (:constructor make-gi))
   "Generator interface state"
-  process c->g g->c c-proc g-proc)
+  process c->g g->c c-proc g-proc started-p)
+
+(defun make-generator-process (fname f)
+  (check-type f function)
+  (let* ((gen-if (gen.start f))
+         (f (lambda (&optional val)
+              (gen.send gen-if val)))
+         (x (make-iterator-from-function :name `(:generator-process ,fname)
+                                         :func f)))
+    (change-class x 'py-func-iterator-sendable)
+    x))
 
 (defun gen.start (func)
+  "Start a new process for FUN, which will be gen.wrap'ed"
   (check-type func function)
-  (let* ((caller->gen-val (list nil))
-         (gen->caller-val (list nil))
-         (gen-if (make-gi :c->g caller->gen-val
-                          :g->c gen->caller-val
-                          :c-proc mp:*current-process*
-                          :g-proc nil)))
+  (let* ((gen-if (make-gi :c-proc mp:*current-process*)))
     (setf (gi-g-proc gen-if)
       (mp:process-run-function (format nil "Generator ~A" func)
-        #'gen.wrap func gen-if))
+        (gen.wrap func gen-if)))
     gen-if))
 
 (defun gen.send (if val)
   "Send value (for yield expr) to generator, waiting for next value."
-  (check-type if gen-if)
-  (setf (car (gi-c->g if)) val)
+  (check-type if generator-interface)
+  (when (and val (not (gi-started-p if)))
+    (py-raise '{TypeError} 
+              "Generator must be initialized with `next', not `send' (got value: ~A)" val))
+  (setf (gi-c->g if) (or val *the-none*))
   (mp:without-scheduling
+    (when *debug*
+      (format t "[gen.send] Enabling generator, disabling caller~%"))
     (mp:process-enable (gi-g-proc if))
     (mp:process-disable (gi-c-proc if)))
   ;; Wait until we are enabled by the generator...
   (when *debug*
-    (format t "[USER] Got from generator: ~A" (car (gi-g->c if)))))
+    (format t "[gen.send] Caller enabled; got from generator: ~A~%" (gi-g->c if)))
+  (setf (gi-started-p if) t)
+  (gi-g->c if))
 
 (defun gen.wrap (f if)
+  "Returns a lambda that will call F, invoking `send-value' on subsequent calls."
   (flet ((yield-wait-restart (c)
            (let ((r (find-restart 'gen.send-value-restart)))
              (assert r () "Generator wrapper misses `gen.send-value-restart' restart.")
-             (when *debug* (format t "[WRAPPER] Wrapper receiving yielded value: ~A.~%"
+             (when *debug* (format t "[gen.wrap] Wrapper receiving yielded value: ~A.~%"
                                    (generator-yield-value c)))
-             (setf (car (gi-g->c if)) (generator-yield-value c))
-             (setf (car (gi-c->g if)) :bla)
+             (setf (gi-g->c if) (generator-yield-value c))
+             (setf (gi-c->g if) :bla)
              
              (mp:without-scheduling
+               (when *debug*
+                 (format t "[gen.wrap] Caller enabled, generator disabled.~%"))
                (mp:process-enable (gi-c-proc if))
                (mp:process-disable (gi-g-proc if)))
              
-             (assert (not (eq (car (gi-c->g if)) :bla)))
-             (invoke-restart r (car (gi-c->g if))))))
+             (when *debug*
+               (format t "[gen.wrap] Resuming generator with value ~A.~%" (gi-c->g if)))
+             (assert (not (eq (gi-c->g if) :bla)))
+             (invoke-restart r (gi-c->g if)))))
     
-    (handler-bind ((generator-yield #'yield-wait-restart))
-      (mp:process-disable (gi-g-proc if))
-      ;; Wait for initial `next' call...
-      (when *debug* (format t "[WRAPPER] Generator called for the first time.~%"))
-      (funcall f))))
+    (lambda ()
+      (handler-bind ((generator-yield #'yield-wait-restart))
+        (funcall f)))))
 
 (defun gen.yield (yield-val)
+  "Signal a Yield condition. Execution is resumed by invoking the `send-value' restart."
   (let ((c (load-time-value (make-condition 'generator-yield))))
     (restart-bind ((gen.send-value-restart (lambda (sent-val) (return-from gen.yield sent-val))))
       (setf (generator-yield-value c) yield-val)
       (error c))))
-
-(defmacro gen.func-from-body (&body body)
-  `(lambda ()
-     (macrolet (([yield-stmt] (val) `(gen.yield ,val))
-                ([yield-expr] (val) `(gen.yield ,val)))
-       ,@body)))
+||#
