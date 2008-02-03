@@ -1504,20 +1504,22 @@ finally:
 ;;
 ;; Helper functions for the compiler
 
+(defun stmt-p (sym)
+  (check-type sym symbl)
+  (let ((sym.name (symbol-name sym)))
+    (cond ((<= (length sym.name) 5) nil)
+          ((string-equal (subseq sym.name (- (length sym.name) 5)) "-stmt") sym)
+          (t nil))))
+
 (defun ast-contains-stmt-p (ast &key allowed-stmts)
   "Returns the forbidden statement, or NIL"
   (when (eq allowed-stmts t)
     (return-from ast-contains-stmt-p nil))
-  (labels ((is-stmt-sym (s)
-	     (let ((s.name (symbol-name s)))
-	       (cond ((<= (length s.name) 5) nil)
-		     ((string-equal (subseq s.name (- (length s.name) 5)) "-stmt") s)
-		     (t nil))))
-           (test (ast)
+  (labels ((test (ast)
 	     (typecase ast
 	       (list (loop for x in ast when (test x) return it finally (return nil)))
 	       (symbol (unless (member ast allowed-stmts :test #'eq)
-			 (whereas ((s (is-stmt-sym ast)))
+			 (whereas ((s (stmt-p ast)))
 			   (return-from test s))))
 	       (t    nil))))
     (test ast)))
