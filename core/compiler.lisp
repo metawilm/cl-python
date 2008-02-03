@@ -71,6 +71,9 @@ like .join (string.join), .sort (list.sort), etc")
 (defvar *inline-getattr-call* t
   "Inline getattr(x,y).(zzz) calls, which usually saves creation of a temporary bound method.")
 
+(defvar *inline-print* t
+  "Inline calls to `print', which will improves efficiency of printing strings and fixnums.")
+
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (defconstant +optimize-std+     '(optimize (speed 3) (safety 1) (debug 1)))
   (defconstant +optimize-fast+    '(optimize (speed 3) (safety 1)))

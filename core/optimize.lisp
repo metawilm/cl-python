@@ -366,7 +366,8 @@
 	     nil))))
 
 (define-compiler-macro py-print (&whole whole dest items comma?)
-  (if (and (null dest)
+  (if (and *inline-print*
+           (null dest)
 	   (listp items)
 	   (eq (car items) 'list))
       
