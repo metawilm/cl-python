@@ -1869,7 +1869,7 @@ Non-negative integer denoting the number of args otherwise."
               ((= nargs 4)
                (cond ((and (eq a1 kw1)
                            (eq a3 kw2))
-                      (values (values a2 a4)))
+                      (values a2 a4))
                      ((and (eq a1 kw2)
                            (eq a3 kw1))
                       (values a4 a2))
@@ -1938,8 +1938,7 @@ Non-negative integer denoting the number of args otherwise."
                     (if (and (eq nargs-mi (excl::ll :fixnum-to-mi 2))
                              (not (symbolp ,pa)))
                         (funcall f-body ,pa ,pb)
-                      (slow-2-kw-call ,pa ,pb ,e1 ,e2
-                                      nargs-mi
+                      (slow-2-kw-call nargs-mi ,pa ,pb ,e1 ,e2
                                       '(,ka ,kb) f-body)))))))))))
 
 (defstruct (func-args (:type vector) (:conc-name fa-) (:constructor make-fa))

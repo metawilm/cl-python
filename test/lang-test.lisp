@@ -459,7 +459,7 @@ assert f(1) == 1 + 42")
   (run-no-error "
 f = lambda x, y=lambda: 42: x + y()
 assert f(1, lambda: 2) == 1 + 2")
-  )
+  (run-no-error "assert (lambda x, y: x+y)(x=3, y=4) == 7"))
 
 (defmethod test-lang ((kind (eql :listcompr-expr)))
   (run-no-error "assert [x for x in [1,2] if x > 1] == [2]")
