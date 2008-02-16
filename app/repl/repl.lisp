@@ -144,9 +144,9 @@ KIND can be :ptime, :time, :space, :pspace or NIL."
          (*truncation-explain* t)
 	 acc)
     
-    (dolist (x '({_} {__} {___}))
-      (setf (py-attr *repl-mod* x) *the-none*))
-    (setf (py-attr *repl-mod* '{__name__}) "__main__")
+    (dolist (x '(_ __ ___))
+      (setf (py-attr* *repl-mod* x) *the-none*))
+    (setf (py-attr* *repl-mod* "__name__") "__main__")
     
     (labels ((print-cmds ()
 	       (format t *repl-doc*))
@@ -156,9 +156,9 @@ KIND can be :ptime, :time, :space, :pspace or NIL."
                ;; for both Python (repl module namespace) and Lisp (dynamic vars).
                (when val ;; don't save NIL (which can be return value for Lisp eval)
                  (shiftf ___ __ _ val)
-                 (shiftf (py-attr *repl-mod* '{___})
-                         (py-attr *repl-mod* '{__})
-                         (py-attr *repl-mod* '{_})
+                 (shiftf (py-attr* *repl-mod* '___)
+                         (py-attr* *repl-mod* '__)
+                         (py-attr* *repl-mod* '_)
                          val)))
 
 	     (run-ast-func (suite)
