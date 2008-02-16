@@ -1459,6 +1459,13 @@ but the latter two classes are not in CPython.")
   (set-module-attr x attr nil)
   *the-none*)
 
+(defun create-python-module (code)
+  (check-type code string)
+  (let* ((ast (parse code))
+         (mod nil)
+         (*module-hook* (lambda (m) (setf mod m))))
+    (funcall (compile nil `(lambda () ,ast)))
+    mod))
 
 ;; Lisp Packages can be used like Python modules
 ;;
@@ -2870,6 +2877,19 @@ But if RELATIVE-TO package name is given, result may contains dots."
 
 
 ;;; Attributes are a fundamental thing: getting, setting, deleting
+
+(defun py-attr* (x attr)
+  "Like PY-ATTR, but attr can be a string or a symbol in any package.
+Returns NIL if attribute not found."
+  (let* ((attr.sym (ensure-user-symbol (string attr)))
+         (res (catch :getattr-block (py-attr x attr.sym :via-getattr t))))
+    (if (eq res :py-attr-not-found)
+        nil
+      res)))
+
+(defun (setf py-attr*) (val x attr)
+  (let ((attr.sym (ensure-user-symbol (string attr))))
+    (setf (py-attr x attr.sym) val)))
 
 (defun py-attr (x attr.as_sym &key (bind-class-attr t) via-getattr)
   ;; If BIND-CLASS-ATTR = NIL, then if the attribute value is a function

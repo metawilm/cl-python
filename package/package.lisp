@@ -241,7 +241,7 @@
 	   #:*the-none* #:*the-true* #:*the-false* #:*the-ellipsis* #:*the-notimplemented*
 	   #:*the-empty-tuple* #:make-tuple-from-list
 	   #:*py-modules* #:dyn-globals #:py-call #:py-class-of #:py-raise #:bind-val
-	   #:py-repr-string #:py-attr
+	   #:py-repr-string #:py-attr #:py-attr*
 	   #:run #:exception-args
 	   ;; more to come...
 	   #:*exceptions-loaded*
