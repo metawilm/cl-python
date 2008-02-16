@@ -942,7 +942,7 @@ LOCALS shares share tail structure with input arg locals."
 			       `([return-stmt] ,(rewrite-generator-funcdef-suite
 						 context-fname suite))
 			     `(progn ,suite
-				     *the-none*)))))))))
+				     (load-time-value *the-none*))))))))))
 	  
 	  (when (keywordp fname)
 	    (return-from [funcdef-stmt] func-lambda))
