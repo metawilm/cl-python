@@ -74,6 +74,17 @@ like .join (string.join), .sort (list.sort), etc")
 (defvar *inline-print* t
   "Inline calls to `print', which will improves efficiency of printing strings and fixnums.")
 
+(defvar *optimize-function-arg-checking* t
+  "Whether to optimize the check on function receiving correct number of arguments.")
+
+(defmacro without-inlining (&body body)
+  `(let ((*inline-fixnum-arithmetic* nil)
+         (*inline-builtin-methods* nil)
+         (*inline-getattr-call* nil)
+         (*inline-print* nil)
+         (*optimize-function-arg-checking* nil))
+     ,@body))
+
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (defconstant +optimize-std+     '(optimize (speed 3) (safety 1) (debug 1)))
   (defconstant +optimize-fast+    '(optimize (speed 3) (safety 1)))
@@ -1880,7 +1891,8 @@ Non-negative integer denoting the number of args otherwise."
   ;; If BODY creates closures, then the register value will be overwritten before we have
   ;; a chance to look at it. Therefore, if we read the :nargs register, the BODY is wrapped
   ;; in FLET.
-  (when (or (>= (length pos-args) 3)
+  (when (or (not *optimize-function-arg-checking*)
+            (>= (length pos-args) 3)
             key-args *-arg **-arg)
     (return-from py-arg-function whole))
   
