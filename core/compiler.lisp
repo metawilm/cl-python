@@ -1803,6 +1803,13 @@ Non-negative integer denoting the number of args otherwise."
 		      :**-arg           **-arg)))
     
     `(progn
+       ;; Maybe LOAD-TIME-VALUE could be used for default argument values; but only
+       ;; for top-level functions: for inner functions like `g' below, the default
+       ;; value `bar()' is calculated when the outer function is called, not at
+       ;; module loading time.
+       ;;
+       ;;    def f(x=foo()):
+       ;;       def g(y=bar()): pass
        ,@(when (> num-key-args 0)
 	   `((setf (fa-key-arg-default-vals ,fa)
 	       (make-array ,num-key-args :initial-contents (list ,@key-arg-default-asts)))))
