@@ -3406,9 +3406,9 @@ finished; F will then not be called again."
 ;; The return value of py-+= indicates whether the in-place method
 ;; __iadd__ was found.
 
-(defun raise-invalid-operands (operation left &optional right)
-  (py-raise '{TypeError} "Operation `~A' not supported for operand~@[s~*~] `~A'~@[ and `~A'~]."
-            operation right left right))
+(defun raise-invalid-operands (operation left &optional (right nil right-p))
+  (py-raise '{TypeError} "Operation `~A' not supported for operand~@[s~*~] `~A'~:[~; and `~A'~]."
+            operation right-p left right-p right))
 
 (defvar *binary-op-funcs-ht* (make-hash-table :test #'eq))
 (defvar *binary-iop-funcs-ht* (make-hash-table :test #'eq))
