@@ -33,12 +33,6 @@
 (setf (top-level:alias "ptl")
   #'goto-python-top-level)
 
-(defun retry-repl-comp ()
-  (let ((r (find-restart 'retry-repl-comp)))
-    (if r
-	(invoke-restart r)
-      (warn "There is no Python REPL running."))))
-
 (setf (top-level:alias "rc")
   #'retry-repl-comp)
 
@@ -169,15 +163,27 @@ KIND can be :ptime, :time, :space, :pspace or NIL."
                    (setf f (compile nil f)))
                  f))
 	     
-	     (eval-print-ast (ast)
+             (nice-one-line-input-abbrev (total)
+               (check-type total string)
+               (loop while (and (> (length total) 0)
+                                (char= (aref total 0) #\Newline))
+                   do (setf total (subseq total 1)))
+               (let ((ix (position #\Newline total)))
+                 (cond (ix
+                        (setf total (concatenate 'string (subseq total 0 (min ix 30)) " ...")))
+                       ((> (length total) 30)
+                        (setf total (concatenate 'string (subseq total 0 30) "...")))))
+               total)
+             
+	     (eval-print-ast (ast total)
                (with-matching (ast ([module-stmt] ?suite))
 		 (assert (suite-stmt-p ?suite))
 		 (let ((vals (multiple-value-list
                               (block :val 
                                 (loop (let ((helper-func (run-ast-func ?suite)))
                                         (loop (with-simple-restart
-                                                  (retry-repl-eval
-                                                   "Retry the execution the compiled REPL command. [:re]")
+                                                  (retry-repl-eval "Retry the expression: \"~A\" [:re]"
+                                                                   (nice-one-line-input-abbrev total))
                                                 (return-from :val
                                                   (profile helper-func *repl-prof*))))))))))
                    (when (car vals) ;; skip NIL
@@ -228,7 +234,10 @@ KIND can be :ptime, :time, :space, :pspace or NIL."
                                             ({UnexpectedEofError} ()
                                               (return-from handle-as-python-code t))
                                             (error (err2)
-                                              (return-syntax-error err2))))))
+                                              (return-syntax-error err2))
+                                            (:no-error (val)
+                                              (setf total new-str)
+                                              val)))))
                                     (return-syntax-error err))))))
                    (when ast
                      (when (eq ast-finished :maybe)
@@ -239,7 +248,7 @@ KIND can be :ptime, :time, :space, :pspace or NIL."
                            (when (ast-complete-p (car (last ?items)))
                              (setf ast-finished t)))))
                      (when (eq ast-finished t)
-                       (eval-print-ast ast)
+                       (eval-print-ast ast total)
                        (setf acc nil)))
                    (return-from handle-as-python-code t))))
 	     
@@ -280,7 +289,12 @@ KIND can be :ptime, :time, :space, :pspace or NIL."
 				  (write r)
 				  (write-char #\Newline))
 				(setf acc nil)
-                                t))))))))
+                                t)))))))
+
+             (input-available-p ()
+               (let ((ch (read-char-no-hang *standard-input*)))
+                 (when ch
+                   (prog1 t (unread-char ch))))))
       
       (loop
 	  initially (format t "[CLPython -- type `:q' to quit, `:help' for help]~%")
@@ -290,8 +304,13 @@ KIND can be :ptime, :time, :space, :pspace or NIL."
 		 (loop 
 		   (locally (declare (special *stdout-softspace*))
 		     (setf *stdout-softspace* (py-bool nil)))
-		   (write-string (nth (if acc 1 0) *prompts*) t)
-                   (force-output t)
+                   
+                   (unless (input-available-p)
+                     ;; When copy-pasting multiple lines of Python source code into the REPL,
+                     ;; prevent several prompts being printed below the copied code.
+                     (write-string (nth (if acc 1 0) *prompts*) t)
+                     (force-output t))
+                   
 		   (let ((x (read-line)))
 		     (cond
                       ((and (> (length x) 0)
