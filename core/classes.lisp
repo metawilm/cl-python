@@ -3052,8 +3052,7 @@ But if RELATIVE-TO package name is given, result may contains dots."
   (change-class x new-cls))
 	   
 (defun (setf py-attr) (val x attr.sym)
-  ;; When ATTR.SYM is NIL, it means attribute is deleted ("del x.attr")
-  
+  ;; When val is NIL, it means attribute is deleted ("del x.attr")
   (assert (symbolp attr.sym))
   (let* ((x.class (py-class-of x))
 	 (x.attr  (recursive-class-dict-lookup x.class attr.sym)))
