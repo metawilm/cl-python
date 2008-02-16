@@ -95,13 +95,17 @@
 (defmethod asdf:perform :after ((op asdf:test-op) (c (eql (asdf:find-system :clpython))))
   (funcall (find-symbol (string '#:run-tests) :clpython.test)))
 
+(defvar *shown-clpython-usage* nil)
+
 (defmethod asdf:perform :after ((op asdf:load-op) (c (eql (asdf:find-system :clpython))))
-  (terpri)
-  (format t "CLPython quick start:~%")
-  (format t "  Run a Python file: (clpython:run #p\"~~/example/foo.py\").~%~%")
-  (format t "After loading ASDF system `clpython-app' you can:~%")
-  (format t "  Start the Python read-eval-print loop: (clpython.app.repl:repl)~%")
-  (format t "  See the call count profiler: (clpython.app.profiler:profile-test).~%~%"))
+  (unless *shown-clpython-usage*
+    (setf *shown-clpython-usage* t)
+    (terpri)
+    (format t "CLPython quick start:~%")
+    (format t "  Run a Python file: (clpython:run #p\"~~/example/foo.py\").~%~%")
+    (format t "After loading ASDF system `clpython-app' you can:~%")
+    (format t "  Start the Python read-eval-print loop: (clpython.app.repl:repl)~%")
+    (format t "  See the call count profiler: (clpython.app.profiler:profile-test).~%~%")))
 
 
 ;; Check for presence of CL-Yacc
