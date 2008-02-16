@@ -681,6 +681,20 @@
 (def-py-method py-function.__name__ :attribute (func)
   (py-function-name func))
 
+(def-py-method py-function.dis :attribute (x)
+  ;; CLPython-specific attribute, to ease debugging.
+  ;;
+  ;; Calling DISASSEMBLE directly on X will print (at least) two functions:
+  ;;  - the instructions that load and call the funcallable instance function
+  ;;  - the instructions of the funcallable instance function
+  ;; The first is not very interesting imho.
+  ;; 
+  ;; DISASSEMBLE accepts fbound symbols or lambda expressions, according to the spec.
+  ;; It might thus be Allegro-specific that its DISASSEMBLE accepts a function object.
+  (when (typep x 'py-function)
+    (setf x (py-function-lambda x)))
+  (eval `(disassemble ,x)))
+
 (defmethod py-function-name ((x function))
   (format nil "~A" (excl::func_name x)))
 
