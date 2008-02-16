@@ -681,7 +681,15 @@
 (def-py-method py-function.__name__ :attribute (func)
   (py-function-name func))
 
-(def-py-method py-function.dis :attribute (x)
+(def-py-method py-function._fif :attribute (x)
+  "The funcallable instance function of X."
+  ;; CLPython-specific.
+  (when (typep x 'py-function)
+    (setf x (py-function-lambda x)))
+  (assert (functionp x))
+  x)
+
+(def-py-method py-function._dis :attribute (x)
   ;; CLPython-specific attribute, to ease debugging.
   ;;
   ;; Calling DISASSEMBLE directly on X will print (at least) two functions:
