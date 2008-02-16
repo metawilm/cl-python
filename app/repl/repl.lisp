@@ -60,7 +60,7 @@
   "Execution of each expression is profiled according to this setting.
 Possible values: :time :ptime :space :pspace nil")
 
-(defvar *repl-compile* nil
+(defvar *repl-compile* t
   "Whether code typed in the REPL is compiled before running.")
 
 (defvar *ignore-copied-prompts* t
@@ -139,17 +139,14 @@ KIND can be :ptime, :time, :space, :pspace or NIL."
   (values))
   
 (defun repl-1 ()
-  (let* ((repl-mod (make-module))
-	 (*repl-mod* repl-mod)
-	 (dyn-globals (slot-value repl-mod 'dyn-globals))
-	 (clpython::*habitat* (clpython::make-habitat))
+  (let* ((*repl-mod* (make-module))
+         (clpython::*habitat* (clpython::make-habitat))
          (*truncation-explain* t)
 	 acc)
     
-    (setf (gethash '{_}        dyn-globals) *the-none*
-	  (gethash '{__}       dyn-globals) *the-none*
-	  (gethash '{___}      dyn-globals) *the-none*
-	  (gethash '{__name__} dyn-globals) "__main__")
+    (dolist (x '({_} {__} {___}))
+      (setf (py-attr *repl-mod* x) *the-none*))
+    (setf (py-attr *repl-mod* '{__name__}) "__main__")
     
     (labels ((print-cmds ()
 	       (format t *repl-doc*))
@@ -159,14 +156,14 @@ KIND can be :ptime, :time, :space, :pspace or NIL."
                ;; for both Python (repl module namespace) and Lisp (dynamic vars).
                (when val ;; don't save NIL (which can be return value for Lisp eval)
                  (shiftf ___ __ _ val)
-                 (shiftf (gethash '{___} dyn-globals)
-                         (gethash '{__}  dyn-globals)
-                         (gethash '{_}   dyn-globals)
+                 (shiftf (py-attr *repl-mod* '{___})
+                         (py-attr *repl-mod* '{__})
+                         (py-attr *repl-mod* '{_})
                          val)))
 
 	     (run-ast-func (suite)
                (let ((f `(lambda ()
-                           (clpython::with-this-module-context (,repl-mod)
+                           (clpython::with-this-module-context (,*repl-mod*)
                              ,suite))))
                  (when *repl-compile*
                    (setf f (compile nil f)))
