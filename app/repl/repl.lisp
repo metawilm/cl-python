@@ -165,9 +165,12 @@ KIND can be :ptime, :time, :space, :pspace or NIL."
 	     
              (nice-one-line-input-abbrev (total)
                (check-type total string)
-               (loop while (and (> (length total) 0)
+               (loop while (and (plusp (length total))
                                 (char= (aref total 0) #\Newline))
                    do (setf total (subseq total 1)))
+               (loop while (and (plusp (length total))
+                                (char= (aref total (1- (length total))) #\Newline))
+                   do (setf total (subseq total 0 (- (length total) 1))))
                (let ((ix (position #\Newline total)))
                  (cond (ix
                         (setf total (concatenate 'string (subseq total 0 (min ix 30)) " ...")))
