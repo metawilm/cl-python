@@ -129,13 +129,18 @@ Only has effect when *include-line-number-hook-calls* is true.")
 
 ;;; Compiler Progress Messages
 
-(defvar *compiler-verbose* nil
-  "Whether to print Python compiler messages, e.g. inlining decisions")
+(define-condition compiler-message ()
+  ())
 
-(defun compiler-message (&rest args)
-  (when *compiler-verbose*
-    (format t "CLPython compiler: ")
-    (apply #'format t args)))
+(defun compiler-message (string &rest args)
+  (signal (make-condition 'compiler-message
+            :format-control string
+            :format-arguments args)))
+
+(defmacro with-compiler-messages (&body body)
+  `(handler-bind ((compiler-message
+                   (lambda (c) (format t ";; Compiler message: ~A~%" c))))
+     ,@body))
 
 ;;; Compiler State
 
@@ -215,7 +220,7 @@ GENSYMS are made gensym'd Lisp vars."
 		num-targets (length val-list)))
     val-list))
 
-(defun target-list-get-bound-vars (tg)
+(defun target-get-bound-vars (tg)
   (loop with todo and res
       for x = tg then (pop todo)
       while x
@@ -231,7 +236,7 @@ GENSYMS are made gensym'd Lisp vars."
   ;; Valid for ASSIGN-STMT targets and DEL-STMT target.
   (with-matching (ass-stmt ([assign-stmt] ?value ?targets))
     (declare (ignore ?value))
-    (mapcan #'target-list-get-bound-vars ?targets)))
+    (mapcan #'target-get-bound-vars ?targets)))
 
 (defmacro [assign-stmt] (value targets)
   (with-gensyms (assign-val)
@@ -729,7 +734,7 @@ GENSYMS are made gensym'd Lisp vars."
       ([exec-stmt] string glob-d loc-d :allowed-stmts ([module-stmt] [suite-stmt]))
       res)))
 
-(defmacro [for-in-stmt] (target source suite else-suite)
+(defmacro [for-in-stmt] (target source suite else-suite &environment e)
   (with-gensyms (f x)
     `(tagbody
        (let* ((,f (excl:named-function (lambda ,(intern (format nil "for ~A in ~A"
@@ -738,7 +743,11 @@ GENSYMS are made gensym'd Lisp vars."
                     (lambda (,x)
                       ([assign-stmt] ,x (,target))
                       (tagbody 
-                        (with-pydecl ((:inside-loop-p t))
+                        (with-pydecl ((:inside-loop-p t)
+                                      ,@(unless (ast-deleted-variables suite)
+                                           `((:safe-lex-visible-vars
+                                              ,(nconc (target-get-bound-vars target)
+                                                      (get-pydecl :safe-lex-visible-vars e))))))
                           ,suite)
                         (go .continue) ;; prevent warning about unused tag
                        .continue)))))
@@ -1054,8 +1063,9 @@ LOCALS shares share tail structure with input arg locals."
 	 
 	 (local-lookup ()
 	   (if (member name (get-pydecl :safe-lex-visible-vars e))
-	       (progn #+(or)(warn "safe: ~A" name)
-		      name)
+	       (progn (compiler-message "Safe lexical var `~A' in context `~A'."
+                                        name (format nil "~{~A~^.~}" (reverse (get-pydecl :context-stack e))))
+                      name)
 	     `(or ,name
 		  (unbound-variable-error ',name)))))
     
