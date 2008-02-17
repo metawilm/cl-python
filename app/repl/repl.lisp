@@ -33,9 +33,6 @@
 (setf (top-level:alias "ptl")
   #'goto-python-top-level)
 
-(setf (top-level:alias "rc")
-  #'retry-repl-comp)
-
 (defun retry-repl-eval ()
   (let ((r (find-restart 'retry-repl-eval)))
     (if r
