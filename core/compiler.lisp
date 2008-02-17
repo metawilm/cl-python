@@ -129,18 +129,24 @@ Only has effect when *include-line-number-hook-calls* is true.")
 
 ;;; Compiler Progress Messages
 
+(defvar *signal-compiler-messages* nil
+  "Whether the compiler signals certain states and decision.
+Disabled by default, to not confuse the test suite.")
+
 (define-condition compiler-message ()
   ())
 
 (defun compiler-message (string &rest args)
-  (signal (make-condition 'compiler-message
-            :format-control string
-            :format-arguments args)))
+  (when *signal-compiler-messages*
+    (signal (make-condition 'compiler-message
+              :format-control string
+              :format-arguments args))))
 
 (defmacro with-compiler-messages (&body body)
-  `(handler-bind ((compiler-message
-                   (lambda (c) (format t ";; Compiler message: ~A~%" c))))
-     ,@body))
+  `(let ((*signal-compiler-messages* t))
+     (handler-bind ((compiler-message
+                     (lambda (c) (format t ";; Compiler message: ~A~%" c))))
+       ,@body)))
 
 ;;; Compiler State
 
@@ -216,8 +222,8 @@ GENSYMS are made gensym'd Lisp vars."
   (let ((val-list (py-iterate->lisp-list iterable)))
     (unless (= (length val-list) num-targets)
       (py-raise '{ValueError}
-		"Assignment to several vars: wanted ~A values, but got ~A"
-		num-targets (length val-list)))
+		"Assignment to multiple targets: wanted ~A values, but iteration gave ~A, from object ~A."
+		num-targets (length val-list) (py-repr-string iterable)))
     val-list))
 
 (defun target-get-bound-vars (tg)
@@ -744,10 +750,12 @@ GENSYMS are made gensym'd Lisp vars."
                       ([assign-stmt] ,x (,target))
                       (tagbody 
                         (with-pydecl ((:inside-loop-p t)
-                                      ,@(unless (ast-deleted-variables suite)
-                                           `((:safe-lex-visible-vars
-                                              ,(nconc (target-get-bound-vars target)
-                                                      (get-pydecl :safe-lex-visible-vars e))))))
+                                      (:safe-lex-visible-vars
+                                       ,(union (set-difference
+                                                (target-get-bound-vars target)
+                                                (nconc (ast-deleted-variables suite)
+                                                       (get-pydecl :lexically-declared-globals e)))
+                                               (get-pydecl :safe-lex-visible-vars e))))
                           ,suite)
                         (go .continue) ;; prevent warning about unused tag
                        .continue)))))
@@ -1320,31 +1328,38 @@ LOCALS shares share tail structure with input arg locals."
 
 (define-compiler-macro [suite-stmt] (&whole whole stmts &environment e)
   ;; Skip checks for bound-ness, when a lexical variable is certainly bound.
-  (cond ((and (some (lambda (s) (match-p s '([assign-stmt] ?value ?targets)))
-		    (butlast stmts))
-	      (not (ast-deleted-variables whole))) ; XXX this should be more nuanced
-         ;; Collect the stmts before the assignment, and those after
-         (multiple-value-bind (before-stmts ass-stmt after-stmts)
-	     (loop for sublist on stmts
-		 for s = (car sublist)
-		 until (match-p s '([assign-stmt] ?value ?targets))
-		 collect s into before
-		 finally (return (values before s (cdr sublist))))
-	   #+(or)(warn "bef: ~A  ass: ~A  after: ~A" before-stmts ass-stmt after-stmts)
-	   (assert ass-stmt)
-	   `(progn ,@(when before-stmts
-		       `(([suite-stmt] ,before-stmts))) ;; recursive, but doesn't contain assign-stmt
-		   ,ass-stmt
-		   ,@(when after-stmts
-		       (let ((bound-vars (assign-stmt-get-bound-vars ass-stmt)))
-			 `((with-pydecl ((:safe-lex-visible-vars
-					  ,(union (set-difference 
-						   bound-vars
-						   (get-pydecl :lexically-declared-globals e))
-						  (get-pydecl :safe-lex-visible-vars e))))
-			     ([suite-stmt] ,after-stmts)))))))) ;; recursive, but 1 assign-stmt less
-	
-	(t whole)))
+  (let* ((deleted-vars (ast-deleted-variables whole))
+         (deleted-safe (intersection deleted-vars (get-pydecl :safe-lex-visible-vars e)))
+         (global-safe (intersection (get-pydecl :lexically-declared-globals e) 
+                                    (get-pydecl :safe-lex-visible-vars e))))
+    ;; This is a nice place for some sanity checks
+    (assert (not deleted-safe) () "Bug: deleted vars ~A found in :safe-lex-visible-vars" deleted-safe)
+    (assert (not global-safe) () "Bug: global vars ~A found in :safe-lex-visible-vars" global-safe)
+
+    (unless (some (lambda (s) (match-p s '([assign-stmt] ?value ?targets)))
+                  (butlast stmts))
+      (return-from [suite-stmt] whole))
+    
+    ;; Collect the stmts before the assignment, and those after
+    (multiple-value-bind (before-stmts ass-stmt after-stmts)
+        (loop for sublist on stmts
+            for s = (car sublist)
+            until (match-p s '([assign-stmt] ?value ?targets))
+            collect s into before
+            finally (return (values before s (cdr sublist))))
+      #+(or)(warn "bef: ~A  ass: ~A  after: ~A" before-stmts ass-stmt after-stmts)
+      (assert ass-stmt)
+      `(progn ,@(when before-stmts
+                  `(([suite-stmt] ,before-stmts))) ;; recursive, but doesn't contain assign-stmt
+              ,ass-stmt
+              ,@(when after-stmts
+                  (let ((bound-vars (assign-stmt-get-bound-vars ass-stmt)))
+                    `((with-pydecl ((:safe-lex-visible-vars
+                                     ,(union (set-difference 
+                                              bound-vars
+                                              (nconc deleted-vars (get-pydecl :lexically-declared-globals e)))
+                                             (get-pydecl :safe-lex-visible-vars e))))
+                        ([suite-stmt] ,after-stmts))))))))) ;; recursive, but 1 assign-stmt less
 
 (defvar *last-raised-exception* nil)
 

@@ -4032,7 +4032,7 @@ next value gotten by iterating over X. Returns NIL, NIL upon exhaustion.")
 						  (values val t))))))) ;; )
 		   
 		   (t
-		    (py-raise '{TypeError} "Iteration over non-sequence (got: ~A)" x))))))
+		    (py-raise '{TypeError} "Iteration over non-sequence: ~A." x))))))
 
 (defgeneric map-over-py-object (func object)
   (:documentation 
