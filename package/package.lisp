@@ -239,7 +239,7 @@
   (:use :common-lisp :clpython.package :clpython.parser)
   (:export #:py-val->string #:py-str-string #:py-repr #:py-bool #:make-module
 	   #:*the-none* #:*the-true* #:*the-false* #:*the-ellipsis* #:*the-notimplemented*
-	   #:*the-empty-tuple* #:make-tuple-from-list
+	   #:*the-empty-tuple* #:make-tuple-from-list #:create-python-module
 	   #:*py-modules* #:dyn-globals #:py-call #:py-class-of #:py-raise #:bind-val
 	   #:py-repr-string #:py-attr #:py-attr*
 	   #:run #:exception-args
