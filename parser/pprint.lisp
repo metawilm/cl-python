@@ -22,14 +22,19 @@
 
 (defun py-pprint (ast &optional stream)
   "Print AST as Python source code to STREAM.
-If STREAM is not supplied, output goes to a string."
+If STREAM is not supplied, output goes to a string.
+If output goes to a stream, then the first character will be a newline;
+output to a string does not start with a newline."
   (flet ((do-print (stream)
 	   (let ((*print-pprint-dispatch* *py-pprint-dispatch*))
 	     (pprint ast stream))))
     (if stream
 	(do-print stream)
-      (with-output-to-string (s)
-	(do-print s)))))
+      (let ((str (with-output-to-string (s)
+                   (do-print s))))
+        (when (plusp (length str))
+          (assert (char= (aref str 0) #\Newline))
+          (make-array (1- (length str)) :element-type 'character :displaced-to str :displaced-index-offset 1))))))
 
 (defgeneric py-pprint-1 (stream ast)
   (:documentation "Print AST as Python source code to STREAM"))
