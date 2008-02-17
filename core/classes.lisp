@@ -1486,6 +1486,7 @@ but the latter two classes are not in CPython.")
   (let* ((ast (parse code))
          (mod nil)
          (*module-hook* (lambda (m) (setf mod m))))
+    (declare (special *module-hook*))
     (funcall (compile nil `(lambda () ,ast)))
     mod))
 
