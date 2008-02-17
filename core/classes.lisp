@@ -2900,14 +2900,15 @@ But if RELATIVE-TO package name is given, result may contains dots."
 
 ;;; Attributes are a fundamental thing: getting, setting, deleting
 
-(defun py-attr* (x attr)
-  "Like PY-ATTR, but attr can be a string or a symbol in any package.
-Returns NIL if attribute not found."
-  (let* ((attr.sym (ensure-user-symbol (string attr)))
-         (res (catch :getattr-block (py-attr x attr.sym :via-getattr t))))
-    (if (eq res :py-attr-not-found)
-        nil
-      res)))
+(defun py-attr* (x &rest chained-attr)
+  "Chained attribute lookup. Attributes may be strings or symbols.
+Returns nil upon lookup failure."
+  (dolist (attr chained-attr x)
+    (let* ((attr.sym (ensure-user-symbol (string attr)))
+           (res (catch :getattr-block (py-attr x attr.sym :via-getattr t))))
+      (when (eq res :py-attr-not-found)
+        (return-from py-attr* nil))
+      (setf x res))))
 
 (defun (setf py-attr*) (val x attr)
   (let ((attr.sym (ensure-user-symbol (string attr))))
