@@ -387,7 +387,8 @@ C must be either a character or NIL."
                       (return-from replace-non-unicode-escapes res))
                     ;; Read one escaped char
                     (assert (char= #\\ (aref s s.ix)))
-                    (assert (<= s.ix (- (length s) 2))) ;; last char of S cannot be a backslash
+                    (assert (<= s.ix (- (length s) 2))
+                        () "Error parsing escapes (last char cannot be backslash): s=~S s.ix=~A" s s.ix)
                     (let ((c (aref s (incf s.ix))))
                       (multiple-value-bind (ch.a ch.b)
                           (case c 
@@ -460,17 +461,22 @@ C must be either a character or NIL."
                                           until (and (char= z x y ch1) (not prev-bs))
                                           finally (return (- %lex-last-read-char-ix% 3)))))
                             (lex-substring start end)))
+                         
                          ((char= ch1 ch2) ;; "" or '' but not """ or '''
                           (when ch3 (lex-unread-char ch3))
                           (return-from read-string ""))
+                         
                          ((and (char= ch1 ch3) ;; "x"
                                (char/= ch2 #\\))
                           (return-from read-string (lex-substring (1- %lex-last-read-char-ix%) 
                                                                   (1- %lex-last-read-char-ix%))))
+                         
                          (t (let* ((start (- %lex-last-read-char-ix% 1))
                                    (end   (loop with x = (lex-read-char)
-                                              for prev-bs = nil then (and (char= #\\ (shiftf x (lex-read-char)))
-                                                                          (not prev-bs))
+                                              for prev-bs = (and (char= ch3 #\\)
+                                                                 (not (char= ch2 #\\)))
+                                              then (and (char= #\\ (shiftf x (lex-read-char)))
+                                                        (not prev-bs))
                                               until (and (char= x ch1) (not prev-bs))
                                               finally (return (1- %lex-last-read-char-ix%)))))
                               (lex-substring start end))))))
