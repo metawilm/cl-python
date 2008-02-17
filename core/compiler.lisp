@@ -732,15 +732,18 @@ GENSYMS are made gensym'd Lisp vars."
 (defmacro [for-in-stmt] (target source suite else-suite)
   (with-gensyms (f x)
     `(tagbody
-       (let* ((,f (lambda (,x)
-		    ([assign-stmt] ,x (,target))
-		    (tagbody 
-		      (with-pydecl ((:inside-loop-p t))
-			,suite)
-		      (go .continue) ;; prevent warning about unused tag
-		     .continue))))
-	 (declare (dynamic-extent ,f))
-	 (map-over-py-object ,f ,source))
+       (let* ((,f (excl:named-function (lambda ,(intern (format nil "for ~A in ~A"
+                                                                (py-pprint target)
+                                                                (py-pprint source)) #.*package*))
+                    (lambda (,x)
+                      ([assign-stmt] ,x (,target))
+                      (tagbody 
+                        (with-pydecl ((:inside-loop-p t))
+                          ,suite)
+                        (go .continue) ;; prevent warning about unused tag
+                       .continue)))))
+         (declare (dynamic-extent ,f))
+         (map-over-py-object ,f ,source))
        ,@(when else-suite `(,else-suite))
        
        (go .break) ;; prevent warning

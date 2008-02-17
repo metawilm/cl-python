@@ -313,9 +313,9 @@
 	  
 	  `(let ((.state. 0) ,@(nreverse vars))
              (make-iterator-from-function 
-	      :name '(:iterator-from-function ,fname)
+	      :name '(,fname generator)
 	      :func
-	      (excl:named-function (:iterator-from-function ,fname :stmt)
+	      (excl:named-function (,fname generator-internal-lambda)
 		(lambda ()
                   ;; This is the function that will repeatedly be
                   ;; called to return the values
