@@ -141,6 +141,15 @@ def f(): pass" nil))
     (test-equal 42 (handler-bind (({SyntaxError} (lambda (c) (declare (ignore c))
                                                          (continue))))
                      (parse " 42" :one-expr t)))
+    ;; strings with quotes
+    (let ((s (apply #'concatenate 'string (mapcar 'string '(#\' #\" #\\ #\' #\')))))
+      (test-equal (parse s :incl-module nil) "\"'"))
+    (let ((s (apply #'concatenate 'string (mapcar 'string '(#\' #\\ #\\ #\')))))
+      (test-equal (ignore-errors (parse s :incl-module nil)) "\\"))
+    (let ((s (apply #'concatenate 'string (mapcar 'string '(#\' #\\ #\\ #\' #\Space)))))
+      (test-equal (ignore-errors (parse s :incl-module nil)) "\\"))
+    ;; trailing comma
+    (test-no-error (parse "def f(a=3,): pass") :known-failure t)
     ))
 
 (defun run-code-walker-test ()
