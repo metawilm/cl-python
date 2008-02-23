@@ -357,7 +357,7 @@ Useful when re-parsing copied interpreter input."
           (loop for ix = (search prompt new :test 'string=)
               while ix do (setf changed t)
                           (replace new new :start1 (1+ ix) :start2 (+ ix (length prompt)))
-                          (setf new (subseq new 0 (- (length new) (length prompt))))))))
+                          (setf new (subseq new 0 (1+ (- (length new) (length prompt)))))))))
     (values new changed)))
 
 
