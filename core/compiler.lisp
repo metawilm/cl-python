@@ -740,30 +740,35 @@ GENSYMS are made gensym'd Lisp vars."
       ([exec-stmt] string glob-d loc-d :allowed-stmts ([module-stmt] [suite-stmt]))
       res)))
 
+(defmacro with-iterator ((target source) &body body)
+  ;; (with-iterator (var object) (...var...))
+  ;; VAR is NIL if object iteration exhausted; or non-NIL if broken out of.
+  (assert (symbolp target))
+  (with-gensyms (it-fun)
+    `(locally (declare #.+optimize-fastest+)
+       (let ((,it-fun (get-py-iterate-fun ,source)))
+         (loop for ,target = (funcall (the function ,it-fun))
+             while ,target
+             do (locally (declare #.+optimize-std+)
+                  ,@body))))))
+
 (defmacro [for-in-stmt] (target source suite else-suite &environment e)
-  (with-gensyms (f x)
-    `(tagbody
-       (let* ((,f (excl:named-function (lambda ,(intern (format nil "for ~A in ~A"
-                                                                (py-pprint target)
-                                                                (py-pprint source)) #.*package*))
-                    (lambda (,x)
-                      ([assign-stmt] ,x (,target))
-                      (tagbody 
-                        (with-pydecl ((:inside-loop-p t)
-                                      (:safe-lex-visible-vars
-                                       ,(union (set-difference
-                                                (target-get-bound-vars target)
-                                                (nconc (ast-deleted-variables suite)
-                                                       (get-pydecl :lexically-declared-globals e)))
-                                               (get-pydecl :safe-lex-visible-vars e))))
-                          ,suite)
-                        (go .continue) ;; prevent warning about unused tag
-                       .continue)))))
-         (declare (dynamic-extent ,f))
-         (map-over-py-object ,f ,source))
+  (with-gensyms (x)
+    `(tagbody (with-iterator (,x ,source)
+                ([assign-stmt] ,x (,target))
+                (tagbody
+                  (with-pydecl ((:inside-loop-p t)
+                                (:safe-lex-visible-vars
+                                 ,(union (set-difference
+                                          (target-get-bound-vars target)
+                                          (nconc (ast-deleted-variables suite)
+                                                 (get-pydecl :lexically-declared-globals e)))
+                                         (get-pydecl :safe-lex-visible-vars e))))
+                    ,suite)
+                  (go .continue) ;; prevent warning about unused tag
+                 .continue))
        ,@(when else-suite `(,else-suite))
-       
-       (go .break) ;; prevent warning
+       (go .break) ;; prevent warning about unused tag
       .break)))
 
 (defun lambda-args-and-destruct-form (f-pos-args f-key-args)
