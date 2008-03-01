@@ -14,7 +14,7 @@
   (:use :common-lisp :clpython :clpython.parser)
   (:export #:repl #:*repl-compile* #:*repl-prof*)
   (:import-from :clpython #:with-matching)
-  (:import-from :clpython.ast #:suite-stmt-p #:module-stmt-p))
+  (:import-from :clpython.ast #:|suite-stmt-p| #:|module-stmt-p|))
 
 (in-package :clpython.app.repl)
 (in-syntax *ast-user-readtable*)
@@ -189,7 +189,7 @@ KIND can be :ptime, :time, :space, :pspace or NIL."
              
 	     (eval-print-ast (ast total)
                (with-matching (ast ([module-stmt] ?suite))
-		 (assert (suite-stmt-p ?suite))
+		 (assert (|suite-stmt-p| ?suite))
 		 (let ((vals (multiple-value-list
                               (block :val 
                                 (loop (let ((helper-func (run-ast-func ?suite)))
@@ -254,7 +254,7 @@ KIND can be :ptime, :time, :space, :pspace or NIL."
                                     (return-syntax-error err))))))
                    (when ast
                      (when (eq ast-finished :maybe)
-                       (assert (module-stmt-p ast))
+                       (assert (|module-stmt-p| ast))
                        (with-matching (ast ([module-stmt] ?suite-stmt))
                          (with-matching (?suite-stmt ([suite-stmt] ?items))
                            (assert (listp ?items)) ;; ?items can be multiple, e.g. in the case of "a=3; b=4".
