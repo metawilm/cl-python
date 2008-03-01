@@ -2843,6 +2843,21 @@ But if RELATIVE-TO package name is given, result may contains dots."
                 (vector-getitem vec item (lambda (item/s single-p)
                                            (make-tuple-from-list (if single-p (list item/s) item/s))))))))
 
+(def-py-method py-tuple.__hash__ (x^)
+  (declare (optimize (speed 3)))
+  (loop with res = 0
+      for i in x
+      for ix fixnum from 0
+      for i.hash = (py-hash i)
+      for i.hash.16bit = (the fixnum (logand (the integer i.hash) #xFFFF)) ;; use 16 bits
+      for i.shift = (the fixnum (mod (* 7 ix) #.(- (1- (integer-length most-positive-fixnum)) 16)))
+      for i.h.rotated = (ash i.hash.16bit i.shift)
+      do #+(or)(format t "elm ~A = ~A -> h=~A=~A  shift=~A~%" j i i.hash i.hash.16bit i.shift)
+         (unless (typep i.h.rotated 'fixnum)
+           (error "tuple hash bug"))
+         (setf res (logxor res (sxhash i.h.rotated)))
+      finally (return res)))
+
 (def-py-method py-tuple.__iter__ (x^)
   (make-iterator-from-function
    :name :tuple-iterator
@@ -3868,6 +3883,23 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
   (or (get x 'py-hash)
       (let ((hash (py-string.__hash__ (symbol-name x))))
         (setf (get x 'py-hash) hash))))
+
+#|| 
+;; Defining the shortcut functions like this would be more efficient,
+;; in that is skips creation of bound method.
+(defmethod py-hash ((x t))
+  (catch :getattr-block
+    (multiple-value-bind (.a .b .c)
+        (py-attr x '{__hash__} :bind-class-attr nil :via-getattr t) ;; but should also skip instance dict
+      ;;(break "ph: ~A ~A ~A" .a .b .c)
+      (if (eq .a :class-attr)
+          (funcall .b .c)
+        (return-from py-hash (py-call .a)))))
+  (py-raise '{TypeError}
+            "Object ~A (a ~A) has no `~A' method"
+            x (class-name (py-class-of x))
+            '{__hash__}))
+||#
 
 (defun py-val->string (x)
   (if (symbolp x) ;; Symbols don't represent Python values, but this is just handy for ourselves
