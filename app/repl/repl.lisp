@@ -20,28 +20,35 @@
 (in-syntax *ast-user-readtable*)
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
-  (import 'clpython.app.repl:repl :clpython))
+  (import 'clpython.app.repl:repl :clpython)
+  (export 'clpython.app.repl:repl :clpython))
 
 ;;; Restarts
 
-(defun goto-python-top-level ()
-  (let ((r (find-restart 'return-python-toplevel)))
+(eval-when (:compile-toplevel :load-toplevel :execute)
+
+(defparameter *repl-restart-aliases*
+    '((:pt . return-python-toplevel)
+      (:re . retry-repl-eval)))
+
+(defun abbrev-for-restart (r)
+  (or (car (rassoc 'retry-repl-eval *repl-restart-aliases*))
+      (error "No such Python repl restart: ~A." r)))
+)
+
+(defun try-invoke-restart (rname)
+  (let ((r (find-restart rname)))
     (if r
-	(invoke-restart r)
+        (invoke-restart r)
       (warn "There is no Python REPL running."))))
 
-(setf (top-level:alias "ptl")
-  #'goto-python-top-level)
-
-(defun retry-repl-eval ()
-  (let ((r (find-restart 'retry-repl-eval)))
-    (if r
-	(invoke-restart r)
-      (warn "There is no Python REPL running."))))
-
-(setf (top-level:alias "re")
-  #'retry-repl-eval)
-
+(defmacro with-repl-toplevel-aliases (&body body)
+  `(progn (progn ,@(loop for (abbrev . restart) in *repl-restart-aliases*
+                       collect `(setf (top-level:alias ,(string abbrev))
+                                  (lambda () (try-invoke-restart ',restart)))))
+          (unwind-protect (progn ,@body)
+            (with-output-to-string (*terminal-io*) ;; suppress "removed `pt' alias" messages
+              (tpl:remove-alias ,@(loop for (abbrev . nil) in *repl-restart-aliases* collect abbrev))))))
 
 (defvar _   *the-none* "The last value evaluated by REPL")
 (defvar __  *the-none* "The second-last value evaluated by REPL")
@@ -58,7 +65,7 @@ Possible values: :time :ptime :space :pspace nil")
   "Whether to remove initial `>>>' and `...' on the input line.
 If true, previous input can be copy-pasted as new input easily.")
                                 
-(defvar *repl-doc* "
+(defvar *repl-doc* (format nil "
 In the Python interpreter:
      :help          => print (this) help
      :q             => quit
@@ -66,20 +73,24 @@ In the Python interpreter:
   <space><command>  => execute Lisp <command>
 
 In the Lisp debugger:
-     :ptl           => back to Python top level
-     :re            => retry the last (failed) Python command
+     ~S            => back to Python top level
+     ~S            => retry the last (failed) Python command
 
 Relevant Lisp variables (exported from package :clpython.app.repl):
-   *repl-compile*  => whether source code is compiled into assembly
-                      before running
-   *repl-prof*     => profile execution of Python code
-                      value must be one of:
+   *repl-compile*   => whether source code is compiled into assembly
+                       before running (current value: ~A)
+   *repl-prof*      => profile execution of Python code (current value: ~A)
+                       value must be one of:
                          :time    = like (TIME ...)
                          :ptime   = time call graph
                          :space   = list of allocations
                          :pspace  = space call graph
                          nil      = no profiling
-")
+"
+                           (abbrev-for-restart 'return-python-toplevel)
+                           (abbrev-for-restart 'retry-repl-eval)
+                           *repl-compile*          
+                           *repl-prof*))
 
 (defvar *repl-mod* nil "The REPL module (for debugging)")
 (defvar *prompts* '(">>> " "... "))
@@ -106,9 +117,10 @@ KIND can be :ptime, :time, :space, :pspace or NIL."
 
 
 (defun repl ()
-  (clpython::with-python-compiler-style-warnings
-      (with-ast-user-readtable ()
-        (repl-1))))
+  (with-repl-toplevel-aliases
+      (clpython::with-python-compiler-style-warnings
+          (with-ast-user-readtable ()
+            (repl-1)))))
 
 (defvar *object-repr-char-limit* 300
   "At most this many characters are printed for an object represenation in the REPL (NIL = infinite)")
@@ -182,8 +194,9 @@ KIND can be :ptime, :time, :space, :pspace or NIL."
                               (block :val 
                                 (loop (let ((helper-func (run-ast-func ?suite)))
                                         (loop (with-simple-restart
-                                                  (retry-repl-eval "Retry the expression: \"~A\" [:re]"
-                                                                   (nice-one-line-input-abbrev total))
+                                                  (retry-repl-eval "Retry the expression: \"~A\" (~S)."
+                                                                   (nice-one-line-input-abbrev total)
+                                                                   (abbrev-for-restart 'retry-repl-eval))
                                                 (return-from :val
                                                   (profile helper-func *repl-prof*))))))))))
                    (when (car vals) ;; skip NIL
@@ -299,7 +312,9 @@ KIND can be :ptime, :time, :space, :pspace or NIL."
       (loop
 	  initially (format t "[CLPython -- type `:q' to quit, `:help' for help]~%")
 	  do (loop 
-	       (with-simple-restart (return-python-toplevel "Return to Python top level [:ptl]")
+	       (with-simple-restart (return-python-toplevel
+                                     "Return to Python top level (~S)."
+                                     (abbrev-for-restart 'return-python-toplevel))
 		 (setf acc ())
 		 (loop 
 		   (locally (declare (special *stdout-softspace*))
