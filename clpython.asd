@@ -15,16 +15,13 @@
   (error "This ASDF file should be run interpreted."))
 
 
-;;; Check for Allegro
-
+;;; Check Allegro version
 #+(and allegro-version>= (not (version>= 8 1)))
 (warn "CLPython is being developed on Allegro Common Lisp 8.1, ~
        but it might work in other environments too.")
 
 
-;;; If you want ot use
-
-;;; Systems
+;;; Core systems: parser, compiler, runtime
 
 (asdf:defsystem :clpython.package
     :description "CLPython package and readtables"
@@ -83,29 +80,48 @@
                                        (:file "re")
                                        (:file "gc")))))
 
+;;; Application systems
+
+(asdf:defsystem :clpython.app.repl
+    :description "CLPython read-eval-print loop"
+    :depends-on (:clpython.core)
+    :components ((:module "app"
+			  :components ((:module "repl"
+						:components ((:file "repl")))))))
+
+(asdf:defsystem :clpython.app.profiler
+    :description "CLPython call count profiler"
+    :depends-on (:clpython.core)
+    :components ((:module "app"
+			  :components ((:module "profiler"
+						:components ((:file "profiler")))))))
+
+(asdf:defsystem :clpython.app
+    :description "CLPython applications"
+    :depends-on (:clpython.app.repl :clpython.app.profiler))
+
+
+;;; The main system
+
 (asdf:defsystem :clpython
     :description "CLPython - an implementation of Python in Common Lisp"
-    :depends-on (:clpython.package :clpython.parser :clpython.core :clpython.lib)
-    :in-order-to ((asdf:test-op (asdf:load-op :clpython-test)))
-    #+(or) 
-    :perform
-    #+(or) (asdf:test-op :after (op c)
-			 (funcall (find-symbol (string '#:run) :clpython.test))))
+    :depends-on (:clpython.package :clpython.parser :clpython.core :clpython.lib clpython.app)
+    :in-order-to ((asdf:test-op (asdf:load-op :clpython-test))))
 
 (defmethod asdf:perform :after ((op asdf:test-op) (c (eql (asdf:find-system :clpython))))
   (funcall (find-symbol (string '#:run-tests) :clpython.test)))
+
 
 (defvar *shown-clpython-usage* nil)
 
 (defmethod asdf:perform :after ((op asdf:load-op) (c (eql (asdf:find-system :clpython))))
   (unless *shown-clpython-usage*
-    (setf *shown-clpython-usage* t)
     (terpri)
     (format t "CLPython quick start:~%")
-    (format t "  Run a Python file: (clpython:run #p\"~~/example/foo.py\").~%~%")
-    (format t "After loading ASDF system `clpython-app' you can:~%")
-    (format t "  Start the Python read-eval-print loop: (clpython.app.repl:repl)~%")
-    (format t "  See the call count profiler: (clpython.app.profiler:profile-test).~%~%")))
+    (format t "  Run a string of Python code: (~S \"for i in range(4): print i\")~%" (find-symbol (string '#:run) :clpython))
+    (format t "  Run a Python file:           (~S #p\"~~/example/foo.py\")~%" (find-symbol (string '#:run) :clpython))
+    (format t "  Start the Python repl:       (~S)~%~%" (find-symbol (string '#:repl) :clpython.app.repl))
+    (setf *shown-clpython-usage* t)))
 
 
 ;; Check for presence of CL-Yacc
