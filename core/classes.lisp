@@ -3334,16 +3334,13 @@ finished; F will then not be called again."
 #+(and allegro-version>= (version>= 8 0))
 (define-compiler-macro py-call (&whole whole prim &rest args)
   (declare (ignorable whole))
-  #+(or)(warn "py-call ~A" whole)
   `(locally (declare (notinline py-call))
      
      ,(cond ((and (listp prim)
 		  (eq (first prim) 'py-attr)
 		  (= (length prim) 3))
-	     
-	     ;; Optimize "obj.attr(..args..)" = (py-call (py-attr obj attr) ..args..)
-	     ;; so the allocation of a bound method object is skipped.
-	     
+             ;; Optimize "obj.attr(..args..)" = (py-call (py-attr obj attr) ..args..)
+             ;; so the allocation of a bound method object is skipped.
 	     #+(or)(warn "inlining (py-call (py-attr ..) ..):  ~A.~A(..)"
 			 (second prim) (second (third prim)))
 	     (destructuring-bind (x attr) (cdr prim)
@@ -3358,15 +3355,12 @@ finished; F will then not be called again."
 			     (funcall .b .c ,@args))
 		    (py-call .a ,@args)))))
 	    
-	    
 	    ((and (listp prim)
 		  (eq (first prim) 'bind-val)
 		  (= (length prim) 4))
-	     
-	     ;; Optimize  (py-call (bind-val val x x.class) ..args..)
-	     ;; where val is a function and x an instance, so it doesn't allocate
-	     ;; bound method.
-
+             ;; Optimize  (py-call (bind-val val x x.class) ..args..)
+             ;; where val is a function and x an instance, so it doesn't allocate
+             ;; bound method.
 	     #+(or)(warn "inlining (py-call (bind-val ..) ..) ~A" whole)
 	     (destructuring-bind (val x x.class) (cdr prim)
 	       `(let ((.val ,val)
@@ -3376,14 +3370,19 @@ finished; F will then not be called again."
 		      (progn #+(or)(warn "saving binding ~A" ',whole)
 			     (funcall .val .x ,@args))
 		    (py-call (bind-val .val .x .x.class) ,@args)))))
-	    
 	    (t 
-	     ;; Optimize case where PRIM is a function.
-	     `(let ((.prim ,prim))
-		(if (functionp .prim)
-		    (progn #+(or)(warn "inlining py-call <function> ~A" .prim)
-			   (funcall (the function .prim) ,@args))
-		  (py-call .prim ,@args)))))))
+             ;; Optimize case where PRIM is a function.
+             (let ((a (gensym "args"))
+                   (p (gensym "prim")))
+               (let ((res `(locally (declare (optimize (speed 3)))
+                             (let ((,p ,prim))
+                               (excl:with-stack-list (,a ,@args)
+                                 (if (functionp ,p)
+                                     (progn #+(or)(warn "inlined py-call <function> ~A" ,p)
+                                            (apply 'funcall (the function ,p) ,a))
+                                   (apply 'py-call ,p ,a)))))))
+                 #+(or)(format t ";; py-call => ~A" res)
+                 res))))))
 
 
 ;;; Subscription of items (sequences, mappings)
