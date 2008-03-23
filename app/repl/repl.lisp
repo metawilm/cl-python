@@ -32,7 +32,7 @@
       (:re . retry-repl-eval)))
 
 (defun abbrev-for-restart (r)
-  (or (car (rassoc 'retry-repl-eval *repl-restart-aliases*))
+  (or (car (rassoc r *repl-restart-aliases*))
       (error "No such Python repl restart: ~A." r)))
 )
 
