@@ -1822,7 +1822,7 @@ Non-negative integer denoting the number of args otherwise."
          (arg-kwname-vec (make-array
 			  num-pos-key-args
 			  :initial-contents (loop for x in pos-key-arg-names
-						collect (intern x :keyword))))
+						collect (intern (string x) :keyword))))
          
 	 (fa (make-fa :func-name        name
 		      :num-pos-args     num-pos-args
