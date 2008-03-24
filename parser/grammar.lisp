@@ -28,8 +28,7 @@
       (left [*] [/] [%] [//] )
       (left unary-plusmin )
       (left [~]   )
-      (right [**] )
-      #+(or)(nonassoc high-prec))
+      (right [**] ))
   "Precedence and associativity rules, ordered by increasing precedence.")
 
 (defun get-precedence-and-associativity (left-token right-token no-assoc-token)
@@ -140,21 +139,22 @@
 ;; 20040827.
 ;; Try/except/finally-stmt and with-stmt added later.
 
-(p python-grammar (file-input) `([module-stmt] ([suite-stmt] ,(nreverse $1))))
+(p python-grammar (one-stmt-input) $1)
 
-(p file-input ()                     ())
-(p file-input (file-input [newline]) $1)
-(p file-input (file-input stmt)      (cons $2 $1))
+(p one-stmt-input (stmt)      $1)
+(p one-stmt-input (stmt [newline])      $1)
 
 (p decorator ([@] dotted-name                 [newline]) (dotted-name-to-attribute-ref $2))
+(p decorator ([@] dotted-name [(]         [)] [newline]) `([call-expr] ,(dotted-name-to-attribute-ref $2) (nil nil nil nil)))
 (p decorator ([@] dotted-name [(] arglist [)] [newline]) `([call-expr] ,(dotted-name-to-attribute-ref $2) ,$4))
 
 (gp decorator+)
 
+(p funcdef (decorator* [def] [identifier] [(] [)] [:] suite)
+   `([funcdef-stmt] ,$1 ([identifier-expr] ,$3) (nil nil nil nil) ,$7))
 (p funcdef (decorator* [def] [identifier] [(] parameters [)] [:] suite) 
    `([funcdef-stmt] ,$1 ([identifier-expr] ,$3) ,$5 ,$8))
 
-(p parameters () (list nil nil nil nil))
 (p parameters (parameter-list) $1)
 
 (p parameter-list (parameter-list5)
@@ -236,21 +236,23 @@
    ((exec-stmt)   $1)
    ((assert-stmt) $1))
 
-(p expr-stmt (testlist expr-stmt2)
-   (cond ((null $2) $1) ;; not an assignment expression
-         ((and $2 (eq (car $2) '[=]))
-          (setf $2 (second $2))
-          (let* ((val (car (last $2)))
-                 (targets (cons $1 (nbutlast $2))))
-            `([assign-stmt] ,val ,targets)))
-         ($2 `([augassign-stmt] ,(car $2) ,$1 ,(cdr $2)))
-         (t $1)))
+(p expr-stmt :or
+   ((testlist expr-stmt2)
+    (cond ((null $2) $1) ;; not an assignment expression
+          ((and $2 (eq (car $2) '[=]))
+           (setf $2 (second $2))
+           (let* ((val (car (last $2)))
+                  (targets (cons $1 (nbutlast $2))))
+             `([assign-stmt] ,val ,targets)))
+          ($2 `([augassign-stmt] ,(car $2) ,$1 ,(cdr $2)))
+          (t $1)))
+   ((testlist) $1)) 
 
 (gp =--testlist+)
 (p =--testlist ([=] testlist) $2)
 (p =--testlist ([=] yield-expr) $2)
 
-(p expr-stmt2 (=--testlist*)       (when $1 `([=] ,$1)))
+(p expr-stmt2 (=--testlist+)       (when $1 `([=] ,$1)))
 (p expr-stmt2 (augassign testlist) (cons $1 $2))
 (p expr-stmt2 (augassign yield-expr) (cons $1 $2))
 
@@ -280,7 +282,11 @@
 (p pass-stmt     ([pass])             `([pass-stmt] ))
 (p break-stmt    ([break])            `([break-stmt]))
 (p continue-stmt ([continue])         `([continue-stmt]))
-(p return-stmt   ([return] testlist?) `([return-stmt] ,$2))
+
+(p return-stmt :or
+   (([return])           `([return-stmt] nil))
+   (([return] testlist)  `([return-stmt] ,$2)))
+
 (p yield-stmt    (yield-expr)         `([yield-stmt] ,@(cdr $1)))
 
 (p yield-expr ([yield] testlist?) `([yield-expr] ,$2))
@@ -361,7 +367,7 @@
 (p while-stmt ([while] test [:] suite else--suite?) `([while-stmt] ,$2 ,$4 ,$5))
 
 (p for-stmt ([for] exprlist [in] testlist [:] suite else--suite?)
-   `([for-in-stmt] ,$2 ,$4 ,$6 ,$7) #+(or)(:precedence high-prec))
+   `([for-in-stmt] ,$2 ,$4 ,$6 ,$7))
 
 (p try-stmt :or
    (([try] [:] suite except--suite+ else--suite?) `([try-except-stmt] ,$3 ,$4 ,$5))
@@ -416,8 +422,8 @@
 (p binop-expr (binop2-expr) $1)
 
 (p binop2-expr :or
-   ;((atom) $1)
-   ((atom trailer*)                 (parse-trailers $1 $2))
+   ((atom)                          $1)
+   ((atom trailer+)                 (parse-trailers $1 $2))
    ((binop2-expr [+]  binop2-expr) `([binary-expr] ,$2 ,$1 ,$3))
    ((binop2-expr [-]  binop2-expr) `([binary-expr] ,$2 ,$1 ,$3))
    ((binop2-expr [*]  binop2-expr) `([binary-expr] ,$2 ,$1 ,$3))
@@ -470,14 +476,17 @@
 
 (p testlist-gexp (test gen-for) `([generator-expr] ,$1 ,$2))
 (p testlist-gexp (test comma--test* comma?) (if (or $2 $3) `([tuple-expr] (,$1 . ,$2)) $1))
- 
+
+(p lambdef ([lambda] [:] test)                    `([lambda-expr] (nil nil nil nil) ,$3))
 (p lambdef ([lambda] parameters [:] test)         `([lambda-expr] ,$2 ,$4))
+(p old-lambdef ([lambda] [:] old-test)            `([lambda-expr] (nil nil nil nil) ,$3))
 (p old-lambdef ([lambda] parameters [:] old-test) `([lambda-expr] ,$2 ,$4))
 
 (p trailer :or
-   (( [(] arglist [)]        )  `([call-expr] ,$2))
-   (( [[] subscriptlist [\]] )  `([subscription-expr] ,$2))
-   (( [.] [identifier]       )  `([attributeref-expr] ([identifier-expr] ,$2))))
+   (( [(] [)]                ) `([call-expr] (nil nil nil nil)))
+   (( [(] arglist [)]        ) `([call-expr] ,$2))
+   (( [[] subscriptlist [\]] ) `([subscription-expr] ,$2))
+   (( [.] [identifier]       ) `([attributeref-expr] ([identifier-expr] ,$2))))
 
 (gp trailer+)
 
@@ -492,21 +501,24 @@
    ((test? [:] test? sliceop?) `([slice-expr] ,$1 ,$3 ,$4)))
 (p sliceop ([:] test?) $2)
 
-(p exprlist (expr exprlist2) (if (not (equal $2 '(nil)))
-                                 `([tuple-expr] (,$1 ,@(butlast $2)))
-                               $1))
+(p exprlist (expr)           $1)
+(p exprlist (expr exprlist2) `([tuple-expr] (,$1 ,@(if (eq (car (last $2)) t)
+                                                       (butlast $2)
+                                                     $2))))
 (p exprlist2 :or
-           (()                    `(nil)     )
-           (([,])                 `(t)       )
+           (([,])                 `(t))
+           (([,] expr)            `(,$2))
            (([,] expr exprlist2)  `(,$2 ,@$3)))
 
-(p testlist (test testlist2) (if (not (equal $2 '(nil)))
-                                 `([tuple-expr] (,$1 ,@(butlast $2)))
-                               $1))
- 
+(p testlist :or
+   ((test)           $1)
+   ((test testlist2) `([tuple-expr] (,$1 ,@(if (eq (car (last $2)) t)
+                                               (butlast $2)
+                                             $2)))))
+
 (p testlist2 :or
-           (()                   `(nil))
            (([,])                `(t))
+           (([,] test)           `(,$2))
            (([,] test testlist2) `(,$2 ,@$3)))
 
 (p testlist-safe (old-test testlist-safe2) (if $2
@@ -532,28 +544,31 @@
 (p inheritance ([(]          [)]) '([tuple-expr] nil))
 (p inheritance ([(] testlist [)]) (if (eq (car $2) '[tuple-expr]) $2 `([tuple-expr] (,$2))))
 
-(p arglist () `(nil nil nil nil))
-(p arglist (argument--comma* arglist-2)
-   (destructuring-bind (a *-a **-a) $2
-     (let* ((all-pos/key (nconc $1 (when a (list a))))
-            (key-start (position :key all-pos/key :key 'car))
-            (pos-end   (position :pos all-pos/key :key 'car :from-end t)))
-       (when (and key-start pos-end (< key-start pos-end))
-         (raise-syntax-error
-          "Postional argument was found after keyword argument `~A = ...'."
-          (cadadr (nth key-start all-pos/key))))
-       (multiple-value-bind (pos key)
-           (cond ((and key-start pos-end)
-                  (let ((pos-args all-pos/key)
-                        (key-args (nthcdr key-start all-pos/key)))
-                    (setf (cdr (nthcdr pos-end all-pos/key)) nil)
-                    (values pos-args key-args)))
-                 (key-start (values () all-pos/key))
-                 (pos-end   (values all-pos/key ()))
-                 (t         (values () ())))
-         (map-into pos 'second pos)
-         (map-into key 'cdr key)
-         (list pos key *-a **-a)))))
+(p arglist (arglist-2) (handle-arglist () $1))
+(p arglist (argument--comma+ arglist-2) (handle-arglist $1 $2))
+
+(defun handle-arglist ($1 $2)
+  (destructuring-bind (a *-a **-a) $2
+    (let* ((all-pos/key (nconc $1 (when a (list a))))
+           (key-start (position :key all-pos/key :key 'car))
+           (pos-end   (position :pos all-pos/key :key 'car :from-end t)))
+      (when (and key-start pos-end (< key-start pos-end))
+        (raise-syntax-error
+         "Postional argument was found after keyword argument `~A = ...'."
+         (cadadr (nth key-start all-pos/key))))
+      (multiple-value-bind (pos key)
+          (cond ((and key-start pos-end)
+                 (let ((pos-args all-pos/key)
+                       (key-args (nthcdr key-start all-pos/key)))
+                   (setf (cdr (nthcdr pos-end all-pos/key)) nil)
+                   (values pos-args key-args)))
+                (key-start (values () all-pos/key))
+                (pos-end   (values all-pos/key ()))
+                (t         (values () ())))
+        (map-into pos 'second pos)
+        (map-into key 'cdr key)
+        (list pos key *-a **-a)))))
+
 (p arglist-2 :or
    ((argument comma?)            (list  $1 nil nil))
    (([*]  test comma--**--test?) (list nil  $2  $3))
@@ -585,10 +600,9 @@
 (defun parse-trailers (item trailers)
   ;; foo[x].a => (id foo) + ((subscription (id x)) (attributeref (id a)))
   ;;          => (attributeref (subscription (id foo) (id x)) (id a))
-  (declare (optimize speed))
   (dolist (tr trailers)
-    (setf (cdr tr) (cons item (cdr tr))
-          item     tr))
+    (setf tr `(,(car tr) ,item ,@(cdr tr)) ;; dont change first cons of tr: might be constant 
+          item tr))
   item)
 
 (defun dotted-name-to-attribute-ref (dotted-name)

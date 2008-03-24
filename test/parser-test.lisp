@@ -16,7 +16,7 @@
 (defun ps (s &optional (incl-module t))
   (if incl-module
       (parse s :incl-module t)
-    (parse s :one-expr t)))
+    (parse s :one-expr t :incl-module nil)))
 
 (defun run-parser-test ()
   (with-subtest (:name "CLPython-Parser")
@@ -109,10 +109,22 @@
 @foo(bar)
 @zut
 def f(): pass" nil))
+
+    ;; Precedence of unary operators
+    (test-equal '([binary-expr] [*] 
+                  ([unary-expr] [-] 1)
+                  2)
+                (ps "-1 * 2" nil)
+                :fail-info "unary plus-min takes precedence over multiplication")
+    
+    (test-equal '([binary-expr] [-]
+                  1
+                  ([binary-expr] [*] 2 3))
+                (ps "1 - 2 * 3" nil))
     
     ;; Empty string is parsed as module without body
-    (test-equal '([module-stmt] ([suite-stmt] () ))
-		(parse ""))
+    #+(or)(test-equal '([module-stmt] ([suite-stmt] () ))
+                      (parse ""))
 
     ;; yield expressions are implemented
     (test-no-error (parse "y = yield x"))
@@ -122,7 +134,7 @@ def f(): pass" nil))
     (let ((fname (excl.osi:with-open-temp-file (s (format nil "_clpython-ast-test-~A" (gensym)))
 		   (format s "print 42"))))
       (test-equal '([print-stmt] nil (42) nil)
-		  (..parser:parse (pathname fname) :incl-module nil))
+		  (..parser:parse (pathname fname) :one-expr t))
       (test t (excl.osi:unlink fname)))
     
     ;; handling eof
@@ -143,11 +155,11 @@ def f(): pass" nil))
                      (parse " 42" :one-expr t)))
     ;; strings with quotes
     (let ((s (apply #'concatenate 'string (mapcar 'string '(#\' #\" #\\ #\' #\')))))
-      (test-equal (parse s :incl-module nil) "\"'"))
+      (test-equal (parse s :one-expr t) "\"'"))
     (let ((s (apply #'concatenate 'string (mapcar 'string '(#\' #\\ #\\ #\')))))
-      (test-equal (ignore-errors (parse s :incl-module nil)) "\\"))
+      (test-equal (ignore-errors (parse s :one-expr t)) "\\"))
     (let ((s (apply #'concatenate 'string (mapcar 'string '(#\' #\\ #\\ #\' #\Space)))))
-      (test-equal (ignore-errors (parse s :incl-module nil)) "\\"))
+      (test-equal (ignore-errors (parse s :one-expr t)) "\\"))
     ;; trailing comma
     (test-no-error (parse "def f(a=3,): pass") :known-failure t)
     ))
@@ -179,7 +191,7 @@ def f(): pass" nil))
 		      (test-equal (parse ,str)
 				  (parse (py-pprint (parse ,str :one-expr t)))
 				  ,@options)))))
-      (parse "")
+      #+(or)(parse "")
       ;; number
       (pe "42")
       (pe "1.")

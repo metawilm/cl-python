@@ -125,20 +125,18 @@
 
 
 ;; Check for presence of CL-Yacc
-(defvar *support-clyacc* nil
-  "Using CL-Yacc for CLPython is in progress.")
 
 (let ((cl-yacc-grammar (let* ((sys (asdf:find-system :clpython.parser))
                               (mod (car (asdf:module-components sys))))
                          (asdf:find-component mod "grammar-clyacc"))))
   (defmethod asdf:perform :around ((op asdf:load-op) (c (eql cl-yacc-grammar)))
-    (when (and *support-clyacc* (asdf:find-system :yacc nil))
+    (when (asdf:find-system :yacc nil)
       (call-next-method)
       (format t "Note: The asdf system CL-Yacc was found. To use CL-Yacc as parser for CLPython, bind ~S to ~S.~%"
               (find-symbol (string '#:*default-yacc-version*) (find-package '#:clpython.parser)) :cl-yacc)))
   
   (defmethod asdf:perform :around ((op asdf:compile-op) (c (eql cl-yacc-grammar)))
-    (when (and *support-clyacc* (asdf:find-system :yacc nil))
+    (when (asdf:find-system :yacc nil)
       (call-next-method))))
 
 

@@ -198,7 +198,7 @@ GENSYMS are made gensym'd Lisp vars."
                                                            :warn-unused nil
                                                            :parse-options '(:incl-module nil))))
        `(let ,(mapcar #'cdr gensym-repl)
-          ,ast))))
+          ,@ast))))
                    
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; 

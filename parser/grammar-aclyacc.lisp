@@ -36,17 +36,19 @@
   "Whether to catch YACC conditions, and translate them into Python exceptions.
 \(Disable to debug the grammar rules.)")
 
-(defmethod parse-with-yacc ((x (eql :allegro-yacc)) lexer)
+(defmethod parse-form-with-yacc ((yacc-version (eql :allegro-yacc)) lexer)
   (let ((grammar (make-instance 'python-grammar :lexer lexer)))
     (if *catch-yacc-conditions*
-        (handler-bind ((condition #'handle-parser-condition))
+        (handler-bind ((condition (lambda (c)
+                                    (handle-parser-condition :allegro-yacc c lexer))))
           (excl.yacc:parse grammar))
       (excl.yacc:parse grammar))))
 
-(defun handle-parser-condition (c)
+(defmethod handle-parser-condition ((yacc-version (eql :allegro-yacc)) c lexer)
   ;; When a SyntaxError is thrown by us in the lexer, the parser
   ;; first signals the SyntaxError, then it raises a GRAMMAR-PARSE-ERROR.
-  (declare (special clpython:*exceptions-loaded* *include-line-numbers*))
+  (declare (special clpython:*exceptions-loaded* *include-line-numbers*)
+           (ignore lexer))
   (cond ((and clpython:*exceptions-loaded* (typep c '{SyntaxError}))
 	 (error c)) ;; Converting SIGNAL to ERROR
 	
@@ -58,7 +60,9 @@
                   (token (excl.yacc:grammar-parse-error-token c))
                   (encl-error (excl.yacc::grammar-parse-error-enclosed-error c)))
              
-             (when (and (integerp token) *include-line-numbers*)
+             ;; Hide line number mechanism hack
+             (when (and (listp token)
+                        (eq (car token) :newline))
                (setf token '[newline]))
 	   
              (cond (encl-error ;; Error in one of our grammar rules
@@ -69,7 +73,7 @@
                               SyntaxError (~A)." c))
 
                     (raise-syntax-error
-                     (format nil "Parse error at line ~A~@[, at token `~S'~].~%[Internal error: ~A~_(catched due to ~S)]"
+                     (format nil "Parse error at line ~A~@[, at token `~S'~].~%[Internal error: ~A~_(caught due to ~S)]"
                              line token encl-error '*catch-yacc-conditions*)))
                    
                    ((or (eq token 'excl.yacc:eof) eof-seen)

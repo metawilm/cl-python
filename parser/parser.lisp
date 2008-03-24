@@ -24,36 +24,64 @@ Most important options:
   :ONE-EXPR     -- only return first form read (implies :INCL-MODULE NIL)
   :TAB-WIDTH    -- width of one tab character in spaces")
   
-  (:method :around (x &rest options &key (incl-module t) (one-expr nil))
-           (let ((res (apply #'call-next-method x (sans options :incl-module :one-expr))))
-             (cond ((or one-expr (not incl-module))
-                    (destructuring-bind (module-stmt (suite-stmt suite-items)) res
-                      (assert (eq module-stmt '[module-stmt]))
-                      (assert (eq suite-stmt '[suite-stmt]))
-                      (cond ((and one-expr (/= (length suite-items) 1))
-                             (error "Wanted one (due to :one-expr arg) but got ~A values, in AST for ~S."
-                                    (length suite-items) x))
-                            ((or one-expr (= (length suite-items) 1))
-                             (car suite-items))
-                            (t `([suite-stmt] ,suite-items)))))
-                   (t res))))
+  (:method :around (x &rest options &key (one-expr nil) (incl-module (not one-expr)))
+           (assert (not (and incl-module one-expr)) ()
+             "PARSE options :ONE-EXPR and :INCL-MODULE are practically mutually exclusive.")
+           (let ((res (apply #'call-next-method x :incl-module incl-module (sans options :one-expr))))
+             (when one-expr
+               (assert (= (length res) 1) ()
+                 "PARSE got ~A forms, while only one expected (due to :ONE-EXPR), in AST for ~S."
+                 (length res) x)
+               (setf res (car res)))
+             res))
   
   (:method ((x string) &rest options &key (yacc-version *default-yacc-version*))
-           (let ((lexer (apply #'make-lexer x :yacc-version yacc-version options)))
-             (parse-with-yacc yacc-version lexer)))
+           (let ((lexer (apply #'make-lexer yacc-version x (sans options :incl-module))))
+             (apply #'parse-module-with-yacc yacc-version lexer options)))
   
   (:method ((x pathname) &rest options)
            (apply #'parse (clpython.package::slurp-file x) options))
 
   (:method ((x stream) &rest options)
-           (let ((seq (make-string (file-length x) :initial-element #\Space)))
-             (read-sequence seq x)
+           (let* ((seq (make-string (file-length x)))
+                  (n (read-sequence seq x)))
+             (setf seq (adjust-array seq n))
              (parse seq))))
 
-(defgeneric parse-with-yacc (yacc-version lexer)
+(defun parse-module-with-yacc (yacc-version lexer &key incl-module #+(or) &allow-other-keys)
+  "Collect all parsed top-level forms."
+  (let (forms)
+    (loop (multiple-value-bind (form eof-p)
+              (parse-form-with-yacc yacc-version lexer)
+            (push form forms)
+            (when eof-p
+              (setf forms (nreverse forms))
+              (return))))
+    (when incl-module
+      (setf forms `([module-stmt] ([suite-stmt] ,forms))))
+    forms))
+
+(defgeneric parse-form-with-yacc (yacc-version lexer)
+  (:documentation "Parse one top-level form with the given yacc. Returns FORM, EOF-P.")
+  (:method :around (yv lexer)
+           (declare (ignore yv lexer))
+           (let* ((*lex-fake-eof-after-toplevel-form* t)
+                  (at-real-eof))
+             (declare (special *lex-fake-eof-after-toplevel-form*))
+             (handler-bind ((next-eof-real (lambda (c)
+                                             (declare (ignore c))
+                                             (setf at-real-eof t)
+                                             (invoke-restart (find-restart 'muffle))))
+                            (next-eof-fake-after-toplevel-form
+                             (lambda (c)
+                               (declare (ignore c))
+                               (invoke-restart (find-restart 'muffle)))))
+               (let ((res (call-next-method)))
+                 (values res at-real-eof)))))
   (:method (v lexer)
            (declare (ignore lexer))
-           (error "The parser ~S could not be found." v)))
+           (error "Parser ~S is unavailable." v)))
+
 
 (defun parse-with-replacements (string replacements &key (warn-unused t) parse-options)
   "Parse STRING, but replace certain tokens in the resulting AST.

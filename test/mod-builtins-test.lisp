@@ -43,8 +43,8 @@ assert g['a'] == 3"))
   "[IronPython] Hashing in IronPython"
   (run-no-error "
 hashes = {}
-for i in range(100):
-  for j in range(50):
+for i in range(60):
+  for j in range(30):
     hashes[ hash( (i,j) ) ] = None
 assert len(hashes) > 1000"
                 :fail-info "Ensure tuple hashes nicely distributed."))

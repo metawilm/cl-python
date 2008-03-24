@@ -30,16 +30,34 @@
               collect `(,name ,@(loop for (terms outcome options) in rules
                                     for args = (loop for i from 1 to (length terms)
                                                    collect (intern (format nil "$~A" i) :clpython.parser))
-                                    collect `(,@(or terms `(())) ;; Splice the terms, or insert ().
-                                                #'(lambda ,args
+                                    for func = `#'(lambda ,args
                                                     (declare (ignorable ,@args))
-                                                    ,outcome))
-                                    when options
-                                    do (warn "CLPython + CL-Yacc warning: in grammar rule for `~A'~_~
-                                              the option ~S is ignored, because this rule-level~_~
-                                              precedence handling is not supported by CL-Yacc.~_~
-                                              Unfortunately this means CL-Yacc may return wrong parse trees."
-                                             name (car options))))))
+                                                    ,outcome)
+                                    collect `(,@(or terms `(())) ;; splice term or insert () 
+                                                (,func ,@options))))))
 
-(defmethod parse-with-yacc ((x (eql :cl-yacc)) lexer)
-  (yacc:parse-with-lexer lexer *cl-yacc-python-parser*))
+(defmethod parse-form-with-yacc ((yacc-version (eql :cl-yacc)) lexer)
+  (if *catch-yacc-conditions*
+      (handler-bind ((condition (lambda (c) (handle-parser-condition :cl-yacc c lexer))))
+        (yacc:parse-with-lexer lexer *cl-yacc-python-parser*))
+    (yacc:parse-with-lexer lexer *cl-yacc-python-parser*)))
+
+(defmethod handle-parser-condition ((yacc-version (eql :cl-yacc)) c lexer)
+  (cond ((typep c 'yacc:yacc-parse-error)
+         (let* ((pos (funcall lexer :report-location))
+                (line (second (assoc :line-no pos)))
+                (eof-seen (second (assoc :eof-seen pos)))
+                (token (yacc:yacc-parse-error-terminal c))
+                (value (yacc:yacc-parse-error-value c))
+                (expected-tokens (yacc:yacc-parse-error-expected-terminals c)))
+           (declare (ignore token))
+           ;; Hide line number mechanism hack
+           (when (and (listp value)
+                      (eq (car value) :newline))
+             (setf value '[newline]))
+           
+           (cond (eof-seen (raise-unexpected-eof))
+                 (t        (raise-syntax-error
+                            (format nil "Parse error at line ~A, at token `~A'. ~
+                                         ~_Expected one of: ~{`~A'~^ ~}.~%[Internal error ~S caught due to ~S]"
+                                    line value expected-tokens c '*catch-yacc-conditions*))))))))

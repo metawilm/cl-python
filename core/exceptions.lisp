@@ -109,7 +109,7 @@
       #+(or) ;; old
       (progn (format stream ": ")
              (apply #'format stream string format-args))
-      (format stream ": ~@<~@;~A~:>" (apply #'format nil string format-args)))))
+      (format stream ": ~@<~@;~A~:>" (if format-args (apply #'format nil string format-args) string)))))
 
 (def-py-method {Exception.__repr__} (x)
   (with-output-to-string (s)
