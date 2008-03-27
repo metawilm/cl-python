@@ -26,10 +26,16 @@
   (:documentation "Create lexer function that when called will return two values for every token, ~
                    or the grammar-specific eof indication."))
 
+(defmethod make-lexer (yacc-version (string string) &rest options)
+  "Default lexer"
+  (apply #'make-lexer-1 string :yacc-version yacc-version options))
+
 (defmethod make-lexer ((yacc-version (eql :allegro-yacc)) (string string) &rest options)
-  (let ((f (apply #'make-lexer-1 string 
-                  :yacc-version yacc-version
-                  options))
+  (declare (ignore options))
+  #-allegro 
+  (error "Make-lexer :allegro-yacc not supported in this Lisp.")
+  #+allegro
+  (let ((f (call-next-method))
         (grammar-class (find-class 'python-grammar)))
     (lambda (grammar &optional op)
       (declare (ignore grammar))
@@ -45,18 +51,14 @@
             (values token val)))))))
 
 (defmethod make-lexer ((yacc-version (eql :cl-yacc)) (string string) &rest options)
-  (apply #'make-lexer-1 string :yacc-version yacc-version options))
+  (declare (ignore options))
+  (call-next-method))
+
+
 
 
 (defgeneric lexer-eof-token (yacc-version)
   (:documentation "Value returned by lexer to signal eof."))
-
-(defmethod lexer-eof-token ((yacc-version (eql :cl-yacc)))
-  nil)
-
-(defmethod lexer-eof-token ((yacc-version (eql :allegro-yacc)))
-  'excl.yacc:eof)
-
 
 (defvar *lex-fake-eof-after-toplevel-form* nil)
 
@@ -70,8 +72,7 @@
 (defclass lexer-state ()
   ((string        :initarg :string        :accessor ls-string                                     :type string)
    (tab-width     :initarg :tab-width     :accessor ls-tab-width     :initform *tab-width-spaces* :type fixnum) 
-   #+(or)(eof-token     :initarg :eof-token     :accessor ls-eof-token     :initform nil                :type symbol)
-   (incl-line-nos :initarg :incl-line-nos :accessor ls-incl-line-nos :initform *include-line-numbers*)
+   #+(or)(incl-line-nos :initarg :incl-line-nos :accessor ls-incl-line-nos :initform *include-line-numbers*)
    (yacc-version  :initarg :yacc-version  :accessor ls-yacc-version  :initform nil)
    (last-read-char-ix :accessor ls-last-read-char-ix :initform -1  :type fixnum)
    (curr-line-no  :accessor ls-curr-line-no  :initform 1  :type fixnum)
@@ -127,11 +128,11 @@ Will return two value each time: TYPE, VALUE.
 On EOF returns: eof-token, eof-token."
   (check-type string string)
   (let* ((lex-state (apply #'make-instance 'lexer-state :string string options)))
-    (excl:named-function lexer
+    (named-function lexer
       (lambda (op)
         (let ((*lex-state* lex-state))
           (block lexer
-            (with-slots (string incl-line-nos last-read-char-ix curr-line-no yacc-version
+            (with-slots (last-read-char-ix curr-line-no yacc-version
                          tokens-todo indent-stack bracket-level open-deco debug) lex-state
               (when (eq op :report-location) ;; used when GRAMMAR-PARSE-ERROR occurs (Allegro CL Yacc)
                 (return-from lexer `((:line-no ,curr-line-no)
@@ -330,7 +331,7 @@ C must be either a character or NIL."
 (defun lex-substring (start end)
   (assert (<= start end) () "Lex-substring: start=~A which is not <= end=~A" start end)
   (make-array (1+ (- end start))
-              :element-type 'character
+              :element-type (array-element-type %lex-string%)
               :displaced-to %lex-string%
               :displaced-index-offset start))
 

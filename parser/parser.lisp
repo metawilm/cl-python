@@ -14,6 +14,10 @@
 
 (defvar *default-yacc-version* #+allegro :allegro-yacc #-allegro :cl-yacc)
 
+(defparameter *catch-yacc-conditions* t
+  "Whether to catch YACC conditions, and translate them into Python exceptions.
+\(Disable to debug the grammar rules.)")
+
 (defgeneric parse (thing &rest options)
   
   (:documentation "Parse THING (pathname or string); return AST.
@@ -61,21 +65,32 @@ Most important options:
       (setf forms `([module-stmt] ([suite-stmt] ,forms))))
     forms))
 
+(defmacro with-parser-eof-detection ((at-real-eof-var) &body body)
+  (check-type at-real-eof-var symbol)
+  `(let* ((*lex-fake-eof-after-toplevel-form* t)
+          (,at-real-eof-var nil))
+     (declare (special *lex-fake-eof-after-toplevel-form*))
+     (handler-bind ((next-eof-real (lambda (c)
+                                     (declare (ignore c))
+                                     (setf ,at-real-eof-var t)
+                                     (invoke-restart (find-restart 'muffle))))
+                    (next-eof-fake-after-toplevel-form
+                     (lambda (c)
+                       (declare (ignore c))
+                       (invoke-restart (find-restart 'muffle)))))
+       ,@body)))
+
+(defmacro with-parser-conditions-handled ((yacc-version lexer) &body body)
+  `(handler-bind ((condition (lambda (c)
+                               (when *catch-yacc-conditions*
+                                 (handle-parser-condition ,yacc-version c ,lexer)))))
+     ,@body))
+
 (defgeneric parse-form-with-yacc (yacc-version lexer)
   (:documentation "Parse one top-level form with the given yacc. Returns FORM, EOF-P.")
-  (:method :around (yv lexer)
-           (declare (ignore yv lexer))
-           (let* ((*lex-fake-eof-after-toplevel-form* t)
-                  (at-real-eof))
-             (declare (special *lex-fake-eof-after-toplevel-form*))
-             (handler-bind ((next-eof-real (lambda (c)
-                                             (declare (ignore c))
-                                             (setf at-real-eof t)
-                                             (invoke-restart (find-restart 'muffle))))
-                            (next-eof-fake-after-toplevel-form
-                             (lambda (c)
-                               (declare (ignore c))
-                               (invoke-restart (find-restart 'muffle)))))
+  (:method :around (yacc-version lexer)
+           (with-parser-eof-detection (at-real-eof)
+             (with-parser-conditions-handled (yacc-version lexer)
                (let ((res (call-next-method)))
                  (values res at-real-eof)))))
   (:method (v lexer)

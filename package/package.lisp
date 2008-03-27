@@ -9,6 +9,7 @@
 
 ;;;; CLPython Package definitions
 
+#+allegro
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (when (eq excl::*current-case-mode* :case-sensitive-lower)
     (pushnew :clpython-allegro-modern-mode *features*)))
@@ -204,7 +205,8 @@
   (:export #:in-syntax #:*ast-readtable* #:*user-readtable* #:*ast-user-readtable*
            #:with-ast-user-readtable #:with-ast-user-pprinter
            #:setup-omnivore-readmacro
-           #:with-auto-mode-recompile #:whereas #:sans))
+           #:with-auto-mode-recompile #:whereas #:sans #:named-function
+           #:with-stack-list #:without-redefinition-warnings))
 
 ;;; CLPYTHON.PARSER - Parser and Lexer
 

@@ -11,10 +11,10 @@
 (in-syntax *user-readtable*)
 
 (defstruct (format-string (:conc-name fs-) (:constructor make-fs))
-  (string        :type string)
-  (type-of-arg   :type (member :mapping :list) :read-only t)
-  (recipes       :type list)
-  (list-num-args :type (or fixnum null)))
+  (string        ""    :type string)
+  (type-of-arg   :list :type (member :mapping :list) :read-only t)
+  (recipes       #()   :type vector)
+  (list-num-args nil   :type (or fixnum null)))
 
 (defun fs-extend-vec (additional-str str)
   (loop for ch across additional-str do (vector-push-extend ch str)))
@@ -24,7 +24,7 @@
   (let ((is-mapping-fs (ecase (fs-type-of-arg fs)
 			 (:mapping t)
 			 (:list    nil))))
-    (excl:with-stack-list (one-arg-list arg)
+    (with-stack-list (one-arg-list arg)
       (loop
 	  with list-args = (unless is-mapping-fs
 			     (let ((args (deproxy arg)))

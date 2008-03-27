@@ -138,7 +138,7 @@ POS-ARGS is any iterable object; KW-DICT must be of type PY-DICT."
 	  (pushnew "__dict__" res :test #'string=)))
       
       (let ((x.class (py-class-of x)))
-        (loop for c in (mop:class-precedence-list x.class)
+        (loop for c in (class-precedence-list x.class)
 	    until (or (eq c (ltv-find-class 'standard-class))
 		      (eq c (ltv-find-class 'py-dict-mixin))
                       (eq c (ltv-find-class 'standard-generic-function)))

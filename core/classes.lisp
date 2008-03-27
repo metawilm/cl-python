@@ -46,12 +46,25 @@
 ;; Python metatype. Class `type' and subclasses thereof are instances
 ;; of py-meta-type.
 
+(defun finalize-inheritance (c)
+  #+allegro (mop:finalize-inheritance c)
+  #+lispworks (clos:finalize-inheritance c)
+  #-(or allegro lispworks) (error "No FINALIZE-INHERITANCE defined in this implementation."))
+
 (defclass py-meta-type (py-dict-mixin standard-class)
   ())
 
+#+lispworks ;; Apparently needed; should look into
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (defmethod cl::validate-superclass ((class py-meta-type) superclass)
+    t)
+
+  (defmethod cl::validate-superclass ((class standard-class) (superclass py-meta-type))
+    t))
+
 (defmethod initialize-instance :after ((cls py-meta-type) &rest initargs)
   (declare (ignore initargs))
-  (mop:finalize-inheritance cls))
+  (finalize-inheritance cls))
 
 
 ;; A class for Python classes. This is an instance of py-meta-type
@@ -60,9 +73,17 @@
   ()
   (:metaclass py-meta-type))
 
+#+lispworks ;; Apparently needed; should look into
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (defmethod cl::validate-superclass ((class py-type) superclass)
+    t)
+
+  (defmethod cl::validate-superclass ((class standard-class) (superclass py-type))
+    t))
+
 (defmethod initialize-instance :after ((cls py-type) &rest initargs)
   (declare (ignore initargs))
-  (mop:finalize-inheritance cls))
+  (finalize-inheritance cls))
 
 
 ;; Python classes are instances of (a subclass of) python-type
@@ -71,13 +92,14 @@
   ()
   (:metaclass py-type))
 
-(mop:finalize-inheritance (find-class 'py-dictless-object))
+
+(finalize-inheritance (find-class 'py-dictless-object))
 
 (defclass py-object (py-dict-mixin py-dictless-object)
   ()
   (:metaclass py-type))
 
-(mop:finalize-inheritance (find-class 'py-object))
+(finalize-inheritance (find-class 'py-object))
 
 
 ;; Core type/object
@@ -102,10 +124,26 @@
   (:documentation "Base class for proxy classes"))
 
 
+(defun ensure-class (&rest args)
+  #+allegro (apply #'mop:ensure-class args)
+  #+lispworks (apply #'clos:ensure-class args)
+  #-(or allegro lispworks) (error "No ENSURE-CLASS defined in this implementation."))
+
+(defun ensure-class-using-class (&rest args)
+  #+allegro (apply #'mop:ensure-class-using-class args)
+  #+lispworks (apply #'clos:ensure-class-using-class args)
+  #-(or allegro lispworks) (error "No ENSURE-CLASS-USING-CLASS defined in this implementation."))
+
+(defun class-direct-superclasses (&rest args)
+  #+allegro (apply #'mop:class-direct-superclasses args)
+  #+lispworks (apply #'clos:class-direct-superclasses args)
+  #-(or allegro lispworks) (error "No CLASS-DIRECT-SUPERCLASSES defined in this implementation."))
+
 ;; Fix superclass and metaclass of PY-DICT.
-(mop:ensure-class 'py-dict
-		  :direct-superclasses (list 'py-core-object)
-		  :metaclass 'py-core-type)
+
+(ensure-class 'py-dict
+              :direct-superclasses (list 'py-core-object)
+              :metaclass 'py-core-type)
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;
@@ -303,7 +341,7 @@
       
       ;; Subclass of `type' has metaclass 'py-meta-type
       (when (eq metaclass (ltv-find-class 'py-meta-type))
-	(let ((cls (mop:ensure-class
+	(let ((cls (ensure-class
 		    (make-symbol (symbol-name name))
 		    :direct-superclasses supers
 		    :metaclass (ltv-find-class 'py-meta-type)
@@ -356,10 +394,6 @@
 (defconstant *the-true* 1)
 (defconstant *the-false* 0)
 
-(defvar *the-none*)
-(defvar *the-ellipsis*)
-(defvar *the-notimplemented*)
-    
 (defun py-bool (lisp-val)
   (if lisp-val *the-true* *the-false*))
 
@@ -454,9 +488,14 @@
   (declare (ignore func))
   (make-instance cls))
 
+(defun classp (x)
+  #+allegro (excl::classp x)
+  #+lispworks (clos::classp x)
+  #-(or allegro lispworks) (error "No CLASSP defined in this implementation."))
+  
 (def-py-method py-class-method.__get__ (x inst class)
   (declare (ignore class))
-  (let ((arg (if (excl::classp inst) inst (py-class-of inst))))
+  (let ((arg (if (classp inst) inst (py-class-of inst))))
     (make-instance 'py-bound-method
       :func (slot-value x 'func)
       :instance arg)))
@@ -465,9 +504,8 @@
   (setf (slot-value x 'func) func))
 
 (def-py-method py-class-method.__call__ (x^ obj &rest args)
-  (let ((arg (if (excl::classp obj) obj (py-class-of obj))))
-    (with-slots (func class) x
-      (apply #'py-call (py-method-func x) arg args))))
+  (let ((arg (if (classp obj) obj (py-class-of obj))))
+    (apply #'py-call (py-method-func x) arg args)))
 
 
 ;; py-attribute-method
@@ -492,7 +530,7 @@
 ;; py-class-attribute-method
 
 (def-py-method py-class-attribute-method.__get__ (x inst class)
-  (unless (excl::classp inst)
+  (unless (classp inst)
     (break "py-class-attribute-method.__get__ wants class instance as first arg! ~A ~A ~A"
            x inst class))
   (py-call (slot-value x 'func) inst))
@@ -577,7 +615,7 @@
 	      (class-name class)))))
 
 (def-py-method py-unbound-method.__call__ (x &rest args)
-  (with-slots (class func) x
+  (with-slots (func) x
     (apply #'py-call func args)))
 
 (def-py-method py-unbound-method.__get__ (x &rest args)
@@ -593,7 +631,6 @@
 
 (def-py-method py-static-method.__get__ (x inst class)
   (declare (ignore inst class))
-  #+(or)(break "psm get ~A ~A ~A" x inst class)
   (slot-value x 'func))
 
 (def-py-method py-static-method.__repr__ (x)
@@ -615,15 +652,13 @@
   ()
   (:metaclass py-core-type))
 
-(mop:finalize-inheritance (find-class 'py-lisp-function))
+(finalize-inheritance (find-class 'py-lisp-function))
 
 (def-py-method py-lisp-function.__repr__ (func)
   (with-output-to-string (s)
     (print-object func s)))
 
 (def-py-method py-lisp-function.__get__ (func inst cls)
-  #+(or)(when (eq func #'py-lisp-function.__get__)
-	  (break "py-lisp-function.__get__ self: ~S ~S" inst cls))
   (assert inst)
   (let ((to-make (cond ((eq inst *the-none*)
 			(if (and (typep cls 'class)
@@ -640,23 +675,32 @@
       (:unbound-method (make-instance 'py-unbound-method :class cls :func func)))))
 
 (def-py-method py-lisp-function.__name__ :attribute (func)
- (string (excl::func_name func)))
+  #+allegro (string (excl::func_name func))
+  #-allegro "[nameless function]")
 
-(defclass funcallable-python-class (mop:funcallable-standard-class py-core-type)
+(defclass funcallable-python-class (#+allegro mop:funcallable-standard-class 
+                                    #+lispworks clos::funcallable-standard-class
+
+                                    py-core-type)
   ;; When subclassable python classes also get such a metatype,
   ;; s/py-core-type/py-type/
   ())
 
 (defclass py-function (standard-generic-function py-core-object py-dict-mixin)
   ;; mop:funcallable-standard-class defines :name initarg, but I don't know how to access it...
-  ((name         :initarg :name         :accessor py-function-name)
+  ((name         :initarg :fname        :accessor py-function-name)
    (context-name :initarg :context-name :accessor py-function-context-name)
    (lambda       :initarg :lambda       :accessor py-function-lambda))
   (:metaclass funcallable-python-class))
 
+(defun set-funcallable-instance-function (inst func)
+  (#+allegro mop:set-funcallable-instance-function
+   #+lispworks clos::set-funcallable-instance-function
+   inst func))
+
 (defun make-py-function (&key name context-name lambda)
-  (let ((x (make-instance 'py-function :name (string name) :lambda lambda :context-name context-name)))
-    (mop:set-funcallable-instance-function x lambda)
+  (let ((x (make-instance 'py-function :fname (string name) :lambda lambda :context-name context-name)))
+    (set-funcallable-instance-function x lambda)
     ;; fill dict?
     x))
 
@@ -704,7 +748,8 @@
   (eval `(disassemble ,x)))
 
 (defmethod py-function-name ((x function))
-  (format nil "~A" (excl::func_name x)))
+  #+allegro (format nil "~A" (excl::func_name x))
+  #-allegro (call-next-method))
 
 (defmethod py-function-name ((x t))
   ;; fall-back
@@ -719,7 +764,7 @@
   ((gener :initarg :gener))
   (:metaclass py-core-type))
 
-(mop:finalize-inheritance (find-class 'py-enumerate))
+(finalize-inheritance (find-class 'py-enumerate))
 
 (def-py-method py-enumerate.__new__ :static (cls iterable)
   #+(or)(assert (subtypep cls 'py-enumerate))
@@ -983,7 +1028,7 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
   (start stop step)
   (:metaclass py-core-type))
 
-(mop:finalize-inheritance (find-class 'py-xrange))
+(finalize-inheritance (find-class 'py-xrange))
 
 (def-py-method py-xrange.__init__ (x &rest args)
   (with-slots (start stop step) x
@@ -1018,11 +1063,6 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 
 ;; None
 
-(defmethod make-load-form ((x (eql *the-none*)) &optional e)
-  (declare (ignore e))
-  `(locally (declare (special *the-none*))
-     *the-none*))
-
 (defun none-p (x) (eq x *the-none*))
 
 (def-py-method py-none.__repr__ (x)
@@ -1038,21 +1078,10 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 (defclass py-ellipsis (py-core-type) () (:metaclass py-core-type))
 (defvar *the-ellipsis* (make-instance 'py-ellipsis))
 
-(defmethod make-load-form ((x (eql *the-ellipsis*)) &optional e)
-  (declare (ignore e))
-  `(locally (declare (special *the-ellipsis*))
-     *the-ellipsis*))
-
 ;; NotImlemented
 
 (defclass py-notimplemented (py-core-type) () (:metaclass py-core-type))
 (defvar *the-notimplemented* (make-instance 'py-notimplemented))
-
-(defmethod make-load-form ((x (eql *the-notimplemented*)) &optional e)
-  (declare (ignore e))
-  `(locally (declare (special *the-notimplemented*))
-     *the-notimplemented*))
-
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; User objects (Object, Module, File, Property)
@@ -1080,9 +1109,13 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 	     (make-instance 'py-bound-method :instance .x :func .val))
 	 (bind-val .val .x ,x.class)))))
 
+(defun class-precedence-list (c)
+  #+allegro (mop:class-precedence-list c)
+  #+lispworks (clos:class-precedence-list c))
+  
 (defun py-get-dict-attr (x x.class)
   (or (dict x)
-      (loop for c in (mop:class-precedence-list x.class)
+      (loop for c in (class-precedence-list x.class)
 	  when (dict c) return it)
       (error "XXX No dict found in object ~S or its class ~A?!" x x.class)))
 
@@ -1129,7 +1162,7 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
   (py-class-of x))
 
 (def-py-method py-object.__class__ :attribute-write (x new-class)
-  (assert (excl::classp new-class))
+  (assert (classp new-class))
   (change-class x new-class))
 
 (def-py-method py-object.__repr__ (x)
@@ -1148,7 +1181,7 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
   (assert (symbolp attr))
   #+(or)(format t "recursive-class-dict-lookup: ~A ~A~%" attr cls)
   #+(or)(assert (typep cls 'class))
-  (loop for c in (or cls-list (mop:class-precedence-list cls))
+  (loop for c in (or cls-list (class-precedence-list cls))
       until (or (eq c (ltv-find-class 'standard-class))
   		(eq c (ltv-find-class 'py-dict-mixin))
                 (eq c (ltv-find-class 'standard-generic-function))) ;; condition copied from py-attr 
@@ -1162,7 +1195,7 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
       finally ;; this seems not needed, in the finally clause
 	(let ((obj-attr (sub/dict-get (load-time-value (dict (find-class 'py-object))) attr)))
 	  (when obj-attr
-	    #+(or)(warn "rec van py-object: ~A (cpl: ~A)" attr (mop:class-precedence-list cls))
+	    #+(or)(warn "rec van py-object: ~A (cpl: ~A)" attr (class-precedence-list cls))
 	    (return obj-attr)))))
 	
 
@@ -1196,7 +1229,7 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 		       :metaclass
 		     :class))
 	 
-	 (c (mop:ensure-class
+	 (c (ensure-class
 	     (make-symbol (symbol-name name)) 
 	     
 	     :direct-superclasses (if supers
@@ -1213,7 +1246,7 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 			  (:class     metacls))
 	     :dict dict)))
     
-    (mop:finalize-inheritance c)
+    (finalize-inheritance c)
     
     c))
 
@@ -1234,16 +1267,16 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
   (signal-class-dict-replacement cls (dict cls) new-dict))
 
 (def-py-method py-type.__bases__ :attribute-read (cls)
-  (assert (excl::classp cls))
-  (let* ((supers (mop:class-direct-superclasses cls)))
+  (assert (classp cls))
+  (let* ((supers (class-direct-superclasses cls)))
     (assert supers () "Class ~A has no direct superclasses?!" cls)
     (make-tuple-from-list (remove (ltv-find-class 'py-user-object) supers))))
 
 (def-py-method py-type.__bases__ :attribute-write (cls bases^)
-  (assert (excl::classp cls))
+  (assert (classp cls))
   (let ((bases (py-iterate->lisp-list bases)))
-    (mop:ensure-class-using-class cls (mop::class-name cls) 
-				  :direct-superclasses bases)
+    (ensure-class-using-class cls (class-name cls) 
+                              :direct-superclasses bases)
     cls))
 
 (defvar *mro-filter-implementation-classes* t
@@ -1254,7 +1287,7 @@ but the latter two classes are not in CPython.")
 (def-py-method py-type.__mro__ :class-attribute (x)
   ;; We could filter out the Lisp implementation classes.
   (make-tuple-from-list
-   (loop for cls in (mop:class-precedence-list x)
+   (loop for cls in (class-precedence-list x)
        until (or (eq cls (ltv-find-class 'standard-class))
 		 (eq cls (ltv-find-class 'standard-object)))
        unless (member (class-name cls) '(py-user-object
@@ -1272,8 +1305,12 @@ but the latter two classes are not in CPython.")
 		   (nconc (last res) (list (find-class base-cls))))
 		 (return res)))))
 
+(defun class-direct-subclasses (c)
+  #+allegro (mop:class-direct-subclasses c)
+  #+lispworks (clos:class-direct-subclasses c))
+
 (def-py-method py-type.__subclasses__ (x)
-  (make-py-list-from-list (mop:class-direct-subclasses x)))
+  (make-py-list-from-list (class-direct-subclasses x)))
 
 (defvar *class-display-without-py-prefix* t
   "Whether to show class names without `py-' prefix: `int' instead of `py-int' etc.")
@@ -1371,11 +1408,19 @@ but the latter two classes are not in CPython.")
 		name
 		(unless builtinp filepath))))))
 
+(defun slot-definition-name (s)
+  #+allegro (mop:slot-definition-name s)
+  #+lispworks (clos:slot-definition-name s))
+
+(defun class-slots (c)
+  #+allegro (mop:class-slots c)
+  #+lispworks (clos:class-slots c))
+
 (defun copy-module-contents (&key from to)
   (check-type from py-module)
   (check-type to py-module)
-  (dolist (s (mapcar #'mop:slot-definition-name
-		     (mop:class-slots (find-class 'py-module))))
+  (dolist (s (mapcar #'slot-definition-name
+		     (class-slots (find-class 'py-module))))
     (setf (slot-value to s) (slot-value from s)))
   t)
 
@@ -1429,7 +1474,7 @@ but the latter two classes are not in CPython.")
 	   (py-raise '{AttributeError} "Module ~A has no attribute ~A" x attr)))
     
     (let ((attr.sym (py-string-val->symbol attr :intern nil)))
-      (with-slots (name globals-names globals-values dyn-globals) x
+      (with-slots (globals-names globals-values dyn-globals) x
 	
 	(when attr.sym 
 	  ;; If symbol not interned, then it cannot be in the globals-names vector
@@ -1750,7 +1795,7 @@ But if RELATIVE-TO package name is given, result may contains dots."
   `(progn (defclass ,py-name ,(or supers '(py-lisp-object))
 	    ,slots
 	    (:metaclass py-lisp-type))
-	  (mop:finalize-inheritance (find-class ',py-name))))
+	  (finalize-inheritance (find-class ',py-name))))
 
 ;; Number (Lisp object: number)
 
@@ -2078,11 +2123,6 @@ But if RELATIVE-TO package name is given, result may contains dots."
 
 (def-py-method py-dict.__iter__ (dict)
   ;; Iterator over the keys.
-  ;; Due to the following in CLHS, the code is not portable:
-  ;;  "It is unspecified what happens if any of the implicit interior state of
-  ;;   an iteration is returned outside the dynamic extent of the
-  ;;   with-hash-table-iterator form such as by returning some closure over
-  ;;   the invocation form."
   (make-iterator-from-function
    :name :py-dict-iterator
    :func (dikt-iter-keys-func (py-dict-dikt dict))))
@@ -2577,9 +2617,12 @@ But if RELATIVE-TO package name is given, result may contains dots."
 		   max-found-code external-format max-code)))
 
     (multiple-value-bind (octets num-bytes-copied)
+        #+allegro
 	(excl:string-to-octets string
 			       :external-format ex-format
 			       :null-terminate nil)
+        #-allegro
+        (error "No STRING-TO-OCTECTS defined in this implementation.")
       
       (when (< num-bytes-copied (length string))
 	(py-raise '{UnicodeEncodeError}
@@ -2617,7 +2660,10 @@ But if RELATIVE-TO package name is given, result may contains dots."
 		    max-found-code ex-format max-octet-code)))
       
       (multiple-value-bind (string chars-copied octets-used)
+          #+allegro
 	  (excl:octets-to-string vec :external-format ex-format)
+          #-allegro
+          (error "No OCTETS-TO-STRING defined in this implementation.")
 	(declare (ignore chars-copied))
 	
 	(when (< octets-used (length vec))
@@ -2988,6 +3034,9 @@ Returns nil upon lookup failure."
 	  (throw :getattr-block :py-attr-not-found)
 	(py-raise '{AttributeError} "Object ~A has no attribute `~A'." x (symbol-name attr.as_sym))))))
 
+(unless (find-class '{AttributeError} nil)
+  (defclass {AttributeError} () ()))
+
 (defun try-calling-getattribute (ga x x.class attr.as_sym)
   (assert (symbolp attr.as_sym))
   (handler-case
@@ -3002,7 +3051,7 @@ Returns nil upon lookup failure."
   (let (__getattribute__ __getattr__ class-attr)
 
     ;; XXX find stop classes
-    (loop for c in (mop:class-precedence-list x.class)
+    (loop for c in (class-precedence-list x.class)
 	until (or (eq c (ltv-find-class 'standard-class))
 		  (eq c (ltv-find-class 'py-dict-mixin))
                   (eq c (ltv-find-class 'standard-generic-function)))
@@ -3043,8 +3092,8 @@ Returns nil upon lookup failure."
   (if (typep x 'class)
 
       (progn
-	#+(or)(break "cls ~A: cpl ~A" x (mop:class-precedence-list x))
-	(loop for c in (mop:class-precedence-list x)
+	#+(or)(break "cls ~A: cpl ~A" x (class-precedence-list x))
+	(loop for c in (class-precedence-list x)
 	    until (or (eq c (ltv-find-class 'standard-class))
 		      (eq c (ltv-find-class 'py-dict-mixin)))
 		  
@@ -3093,7 +3142,7 @@ Returns nil upon lookup failure."
 	      (eq (first attr) 'identifier-expr))
 	 (case (second attr)
 	   ({__name__}  `(let ((.x ,x))
-			   (if (excl::classp .x)
+			   (if (classp .x)
 			       (symbol-name (class-name .x))
                              (locally
 				 (declare (notinline py-attr))
@@ -3376,7 +3425,7 @@ finished; F will then not be called again."
                    (p (gensym "prim")))
                (let ((res `(locally (declare (optimize (speed 3)))
                              (let ((,p ,prim))
-                               (excl:with-stack-list (,a ,@args)
+                               (with-stack-list (,a ,@args)
                                  (if (functionp ,p)
                                      (progn #+(or)(warn "inlined py-call <function> ~A" ,p)
                                             (apply 'funcall (the function ,p) ,a))
@@ -3655,10 +3704,9 @@ finished; F will then not be called again."
 	  (setf (gethash ',syntax *binary-comparison-funcs-ht*) ',func)))
 	    
 (defun py-id (x)
-  #+allegro
-  (excl:lispval-to-address x)
-  #-allegro
-  (error "TODO: id() not implemented for this Lisp implementation"))
+  #+allegro (excl:lispval-to-address x)
+  #+lispworks (system:object-address x)
+  #-(or allegro lispworks) (error "TODO: id() not implemented for this Lisp implementation"))
 
 (defgeneric py-cmp (x y)
   (:documentation
@@ -3805,7 +3853,7 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
 
 (def-comparison  [<]  py-<   (=  (the (integer -1 1) (py-cmp x y)) -1))
 (def-comparison  [>]  py->   (=  (the (integer -1 1) (py-cmp x y))  1))
-(excl:without-redefinition-warnings
+(without-redefinition-warnings
  (fmakunbound 'py-==)
  (def-comparison [==] py-==  (=  (the (integer -1 1) (py-cmp x y))  0)))
 (def-comparison  [!=] py-!=  (/= (the (integer -1 1) (py-cmp x y))  0)) ;; lexer: <> --> !=
@@ -3873,7 +3921,7 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
 (def-py-shortcut-func py-nonzero {__nonzero__} )
 (def-py-shortcut-func py-float {__float__})
 
-(excl:without-redefinition-warnings
+(without-redefinition-warnings
  (fmakunbound 'py-hash)
  (def-py-shortcut-func py-hash {__hash__}))
 
@@ -3914,7 +3962,7 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
 	i
       (py-raise '{TypeError} "Expected an integer ~@[>= ~A~]; got: ~S" min x))))
 
-integer(defun py-val->number (x)
+(defun py-val->number (x)
   (let ((n (deproxy x)))
     (if (numberp n)
 	n
@@ -3936,6 +3984,7 @@ integer(defun py-val->number (x)
 (defvar *circle-print-max-num-objects* 100)
 (defvar *circle-print-abbrev* "...")
 
+#+allegro
 (excl:def-fwrapper print-circle-wrapper (x)
   (cond ((typep x '(or string number))
          (excl:call-next-fwrapper))
@@ -3958,10 +4007,13 @@ integer(defun py-val->number (x)
   (if *circle-print-ht*
       (funcall f)
     (let ((*circle-print-ht* (make-hash-table :test 'eq)))
+      #+allegro
       (unwind-protect
           (progn (excl:fwrap #'py-repr :print-circle-wrapper 'print-circle-wrapper)
                  (funcall f))
-        (excl:funwrap #'py-repr :print-circle-wrapper)))))
+        (excl:funwrap #'py-repr :print-circle-wrapper))
+      #-allegro ;; No circle detection
+      (funcall f))))
   
 (defun py-repr-circle (x)
   (with-circle-detection (py-repr x)))
@@ -3990,7 +4042,6 @@ integer(defun py-val->number (x)
 (defun repr-fmt (stream argument &optional colon-p at-p &rest parameters)
   "Wrapper function for PY-REPR that is usable inside format string, using
 the ~/.../ directive: ~/clpython:repr-fmt/"
-  
   (when (or colon-p at-p parameters)
     (error "Format string function py-repr-fmt does not support colon, ~
             at or parameters"))
@@ -4147,21 +4198,23 @@ the lisp list will be returned).")
 ;; Class change signals; only called for user-defined classes that are not
 ;; at the metaclass level.
 
-(excl:without-redefinition-warnings
+#+(or)
+(without-redefinition-warnings
  ;; already defined above; not really needed
  (defmethod initialize-instance :after ((cls py-type) &rest initargs)
    (declare (ignore initargs))
-   (mop:finalize-inheritance cls)
+   (finalize-inheritance cls)
    (signal-class-created cls)))
 
+#+(or)
 (defmethod reinitialize-instance :before ((cls py-type) &rest initargs)
   (declare (ignore initargs))
   (signal-class-changed-before cls))
 
+#+(or)
 (defmethod reinitialize-instance :after ((cls py-type) &rest initargs)
   (declare (ignore initargs))
   (signal-class-changed-after cls))
-
 
 (defun signal-class-dict-replacement (cls old new)
   (declare (ignore cls old new))
@@ -4211,16 +4264,27 @@ the lisp list will be returned).")
 ;; Therefore we need to rehash all dicts.
 
 (defun rehash-py-dicts ()
-  #-(error "not implemented")
-  #+allegro
   (flet ((get-py-hts ()
+           #+allegro
            (loop for d across
-                 (excl::get-objects (sys::typecode (make-py-hash-table)))
+                 (excl::get-objects #.(sys::typecode (make-py-hash-table)))
                when (and (hash-table-p d)
                          (eq (hash-table-test d) 'py-==->lisp-val))
-               collect d))
+               collect d)
+           #+lispworks
+           (let (res)
+             (hcl:sweep-all-objects 
+              (lambda (x)
+                (when (and (hash-table-p x)
+                           (eq (hash-table-test x) 'py-==->lisp-val))
+                  (push x res))))
+             res)
+           #-(or allegro lispworks)
+           (error "Required rehashing of dicts not possible in this implementation."))
+                                  
          (fix-ht (ht)
            (check-type ht hash-table)
+           (break "ht to rehash: ~A" ht)
            ;; Lets do this the KISS way; there are just about 12 dicts to fix.
            (let* ((contents (loop for k being the hash-key in ht
                                 using (hash-value v)
@@ -4253,4 +4317,5 @@ the lisp list will be returned).")
       (assert (= (py-hash "a") (py-hash 'a)))
       (length hts))))
 
+#+(or) ;; Seems not needed anymore, as at this point all dicts only contain symbols?!
 (rehash-py-dicts)

@@ -34,7 +34,7 @@
   #+(or)
   `(make-generator-process
       ',fname
-      (excl:named-function (:iterator-from-function ,fname :expr)
+      (named-function (:iterator-from-function ,fname :expr)
         (lambda ()
           (macrolet (([yield-stmt] (val) `(gen.yield ,val))
                      ([yield-expr] (val) `(gen.yield ,val)))
@@ -92,7 +92,7 @@
                                        (values `(return-from function-body :explicit-return)
                                                t))
                         (t form))))
-               `(excl:named-function ,fname
+               `(named-function ,fname
                   (lambda ()
                     ,(rewrite-generator-funcdef-suite
                       fname
@@ -315,7 +315,7 @@
              (make-iterator-from-function 
 	      :name '(,fname generator)
 	      :func
-	      (excl:named-function (,fname generator-internal-lambda)
+	      (named-function (,fname generator-internal-lambda)
 		(lambda ()
                   ;; This is the function that will repeatedly be
                   ;; called to return the values

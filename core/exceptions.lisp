@@ -75,9 +75,9 @@
   (declare (optimize (debug 3))
 	   (notinline def-python-exceptions))
   (flet ((def-sub-exc (super exc-name)
-	     (let ((c (mop:ensure-class exc-name
-					:direct-superclasses (list super)
-					:metaclass 'py-type)))
+	     (let ((c (ensure-class exc-name
+                                    :direct-superclasses (list super)
+                                    :metaclass 'py-type)))
 	       (push c *exception-classes*))))
     (if (symbolp child-tree)
 	(def-sub-exc parent child-tree)

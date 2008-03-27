@@ -18,7 +18,9 @@
 
 #.`(excl.yacc:defgrammar python-grammar (excl.yacc:grammar)
      ()
-     ,@(get-precedence-and-associativity :left-associative :right-associative :non-associative)
+     ,@(get-precedence-and-associativity :left-associative
+                                         :right-associative
+                                         :non-associative)
      (:lexemes ,@*terminals*))
 
 #.`(progn ,@(loop for name being the hash-key in *python-prods*
@@ -29,20 +31,16 @@
 
 (build-grammar python-grammar nil nil)
 
+;; For lexer
+
+(defmethod lexer-eof-token ((yacc-version (eql :allegro-yacc)))
+  'excl.yacc:eof)
 
 ;; Handling parse errors
 
-(defparameter *catch-yacc-conditions* t
-  "Whether to catch YACC conditions, and translate them into Python exceptions.
-\(Disable to debug the grammar rules.)")
-
 (defmethod parse-form-with-yacc ((yacc-version (eql :allegro-yacc)) lexer)
   (let ((grammar (make-instance 'python-grammar :lexer lexer)))
-    (if *catch-yacc-conditions*
-        (handler-bind ((condition (lambda (c)
-                                    (handle-parser-condition :allegro-yacc c lexer))))
-          (excl.yacc:parse grammar))
-      (excl.yacc:parse grammar))))
+    (excl.yacc:parse grammar)))
 
 (defmethod handle-parser-condition ((yacc-version (eql :allegro-yacc)) c lexer)
   ;; When a SyntaxError is thrown by us in the lexer, the parser

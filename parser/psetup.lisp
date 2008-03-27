@@ -35,5 +35,6 @@
 
 ;;; Depenency on Allegro's YACC
 
+#+allegro
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (require :yacc))

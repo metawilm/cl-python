@@ -28,7 +28,7 @@
 ;;;; from the original ACL 6.1 sources:
 ;; Id: tester.cl,v 2.2.12.1 2001/06/05 18:45:10 layer Exp
 
-;; $Id: tester.lisp,v 1.4 2008/02/03 09:50:52 willem Exp $
+;; $Id: tester.lisp,v 1.5 2008/03/27 22:04:42 willem Exp $
 
 (defpackage :util.test
   (:use :common-lisp :excl)
@@ -484,23 +484,28 @@ Reason: the format-arguments were incorrect.~%")
 	 (if* *break-on-test-failures*
 	    then (doit)
 	    else (handler-bind 
-		   ((error (lambda (c)
-                             (format
-                              *error-output*
-                              "~
+                     ((error (lambda (c)
+                               (format
+                                *error-output*
+                                "~
 ~&Test ~a aborted by signalling an uncaught error:~%~a~%"
-                              ,g-name c))))
+                                ,g-name c))))
                    (doit)))
-	 (let ((state (sys:gsgc-switch :print)))
-	   (setf (sys:gsgc-switch :print) nil)
-	   (format t "~&**********************************~%" ,g-name)
-	   (format t "End ~a test~%" ,g-name)
-	   (format t "Errors detected in this test: ~s " *test-errors*)
-           (cond ((not (zerop *test-unexpected-failures*))
-                  (format t "UNEXPECTED: ~s" *test-unexpected-failures*))
-                 ((not (zerop *test-errors*))
-                  (format t "(all expected)")))
-	   (format t "~%Successes this test: ~s~%" *test-successes*)
-	   (setf (sys:gsgc-switch :print) state))))))
+         (macrolet ((without-gc-messages (&body body)
+                      #+allegro `(let ((state (sys:gsgc-switch :print)))
+                                   (setf (sys:gsgc-switch :print) nil)
+                                   (unwind-protect 
+                                       (progn ,@body)
+                                     (setf (sys:gsgc-switch :print) state)))
+                      #-allegro `(progn ,@body)))
+           (without-gc-messages
+            (format t "~&**********************************~%" ,g-name)
+            (format t "End ~a test~%" ,g-name)
+            (format t "Errors detected in this test: ~s " *test-errors*)
+            (cond ((not (zerop *test-unexpected-failures*))
+                   (format t "UNEXPECTED: ~s" *test-unexpected-failures*))
+                  ((not (zerop *test-errors*))
+                   (format t "(all expected)")))
+            (format t "~%Successes this test: ~s~%" *test-successes*)))))))
 
 (provide :tester #+module-versions 1.1)

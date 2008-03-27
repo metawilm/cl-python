@@ -14,5 +14,6 @@
 (defun |sleep| (n)
   (common-lisp:sleep (clpython::py-val->number n)))
 
-(defun |time| ()  
-  (excl.osi:universal-to-unix-time (get-universal-time)))
+(defun |time| () 
+  #+allegro (excl.osi:universal-to-unix-time (get-universal-time))
+  #-allegro (error "todo"))

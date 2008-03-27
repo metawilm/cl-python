@@ -115,7 +115,8 @@
   ;; Return True if the file is connected to a tty(-like) device, else
   ;; False.  If a file-like object is not associated with a real file,
   ;; this method should not be implemented. [pydoc]
-  (py-bool (excl.osi:isatty (py-file-stream f))))
+  (py-bool #+allegro (excl.osi:isatty (py-file-stream f))
+           #-allegro (error "Error: py-file.isatty")))
 
 (def-py-method py-file.__iter__ (f)
   (ensure-open-file f)

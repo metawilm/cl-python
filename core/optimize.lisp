@@ -348,22 +348,25 @@
 (defun py-print-cmhelper (x stream)
   ;; Quickly prints obj to stdout
   ;; If X is a string, returns last char of it; otherwise returns NIL
-  (excl::fast
-   (typecase x
-     
-     (fixnum (when (< x 0)
-               (write-char #\- stream)
-               (setf x (- x)))
-             (excl::print-fixnum stream 10 x) ;; only handles positive numbers!
-	     nil)
-     
-     (string (excl::write-string-nokey x stream)
-	     (let ((x.len (length x)))
-	       (and (> x.len 0)
-		    (aref x (1- (length x))))))
-     
-     (t      (excl::write-string-nokey (py-str-string x) stream)
-	     nil))))
+  (typecase x
+    (fixnum (when (< x 0)
+              (write-char #\- stream)
+              (setf x (- x)))
+            #+allegro (excl::print-fixnum stream 10 x) ;; only handles positive numbers!
+            #-allegro (format stream "~D" x)
+            nil)
+    (string #+allegro (excl::write-string-nokey x stream)
+            #-allegro (write-string x stream)
+            (let ((x.len (length x)))
+              (and (> x.len 0)
+                   (aref x (1- (length x))))))
+    (t      #+allegro (excl::write-string-nokey (py-str-string x) stream)
+            #-allegro (write-string (py-str-string x) stream)
+            nil)))
+
+(defmacro fast-write-char (char stream)
+  ;; #+allegro `(excl::fast-write-char ,char ,stream)
+  `(write-char ,char ,stream))
 
 (define-compiler-macro py-print (&whole whole dest items comma?)
   (if (and *inline-print*
@@ -371,7 +374,7 @@
 	   (listp items)
 	   (eq (car items) 'list))
       
-      `(let ((stdout (excl::fast *standard-output*))) ;; XXX use sys.stdout (add check?)
+      `(let ((stdout (fast *standard-output*))) ;; XXX use sys.stdout (add check?)
 	 (declare (ignorable stdout))
 	 ,@(loop 
 	       with num-items = (length (cdr items))
@@ -380,11 +383,11 @@
 	       collect `(progn 
 			  ;; Spaces before first item (perhaps), always between items
 			  ,(if (= i 0)
-			       `(when (py-val->lisp-bool (excl::fast *stdout-softspace*))
-				  (excl::fast-write-char #\Space stdout))
-			     `(excl::fast-write-char #\Space stdout))
-			  
-			  ;; Print item
+			       `(when (py-val->lisp-bool (fast *stdout-softspace*))
+				  (fast-write-char #\Space stdout))
+                             `(fast-write-char #\Space stdout))
+                          
+                          ;; Print item
 			  ,(if (< i (1- num-items))
 			       `(py-print-cmhelper ,x stdout)
 			     
@@ -401,7 +404,7 @@
 				      (py-bool (not printed-newline-already)))))))))
 	 ;; Newline after last item
 	 ,(unless comma?
-	    `(progn (excl::fast-write-char #\Newline stdout)
+	    `(progn (fast-write-char #\Newline stdout)
 		    (force-output stdout)))
 	 
 	 ;; Return value:
@@ -422,7 +425,7 @@
 (defmethod py-str ((x fixnum)) (if (<= 0 x 100)
 				   (svref (load-time-value
 					   (coerce (loop for i from 0 to 100
-						       collect (format nil "~D" i)) 'array))
+						       collect (format nil "~D" i)) 'simple-vector))
 					  x)
 				 (format nil "~D" x)))
 

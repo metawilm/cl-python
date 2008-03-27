@@ -43,12 +43,15 @@
       (warn "There is no Python REPL running."))))
 
 (defmacro with-repl-toplevel-aliases (&body body)
+  #+allegro
   `(progn (progn ,@(loop for (abbrev . restart) in *repl-restart-aliases*
                        collect `(setf (top-level:alias ,(string abbrev))
                                   (lambda () (try-invoke-restart ',restart)))))
           (unwind-protect (progn ,@body)
             (with-output-to-string (*terminal-io*) ;; suppress "removed `pt' alias" messages
-              (tpl:remove-alias ,@(loop for (abbrev . nil) in *repl-restart-aliases* collect abbrev))))))
+              (tpl:remove-alias ,@(loop for (abbrev . nil) in *repl-restart-aliases* collect abbrev)))))
+  #-allegro
+  `(progn ,@body))
 
 (defvar _   *the-none* "The last value evaluated by REPL")
 (defvar __  *the-none* "The second-last value evaluated by REPL")
@@ -99,20 +102,24 @@ Relevant Lisp variables (exported from package :clpython.app.repl):
   "Call F in profiling context.
 KIND can be :ptime, :time, :space, :pspace or NIL."
   (ecase kind
-    (:ptime  (prof:with-profiling (:type :time)
-               (funcall f))
-             (terpri)
-             (prof:show-call-graph))
-    (:time  (prog1 (time (funcall f))
-              (terpri)))
-    (:space  (prof:with-profiling
-                 (:type :space :count t) (funcall f))
-             (terpri)
-             (prof:show-flat-profile))
-    (:pspace (prof:with-profiling (:type :space)
-               (funcall f))
-             (terpri)
-             (prof:show-call-graph))
+    (:ptime  #-allegro (error "todo")
+             #+allegro (progn (prof:with-profiling (:type :time)
+                                (funcall f))
+                              (terpri)
+                              (prof:show-call-graph)))
+    (:time   #-allegro (error "todo")
+             #+allegro (prog1 (time (funcall f))
+                         (terpri)))
+    (:space  #-allegro (error "todo")
+             #+allegro (progn (prof:with-profiling
+                                  (:type :space :count t) (funcall f))
+                              (terpri)
+                              (prof:show-flat-profile)))
+    (:pspace #-allegro (error "todo")
+             #+allegro (progn (prof:with-profiling (:type :space)
+                                (funcall f))
+                              (terpri)
+                              (prof:show-call-graph)))
     ((nil)   (funcall f))))
 
 
@@ -320,12 +327,12 @@ KIND can be :ptime, :time, :space, :pspace or NIL."
 		   (locally (declare (special *stdout-softspace*))
 		     (setf *stdout-softspace* (py-bool nil)))
                    
-                   (unless (input-available-p)
+                   (unless #+allegro(input-available-p)
+                           #-allegro nil
                      ;; When copy-pasting multiple lines of Python source code into the REPL,
                      ;; prevent several prompts being printed below the copied code.
-                     (write-string (nth (if acc 1 0) *prompts*) t)
-                     (force-output t))
-                   
+                     (format t (nth (if acc 1 0) *prompts*)))
+
 		   (let ((x (read-line)))
 		     (cond
                       ((and (> (length x) 0)

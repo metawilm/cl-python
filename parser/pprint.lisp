@@ -61,7 +61,7 @@ output to a string does not start with a newline."
 
 (defmethod py-pprint-1 (stream (x string))  
   (multiple-value-bind (delim-quote other-quote unicode?)
-      (loop for ch character across x
+      (loop for ch of-type character across x
 	  counting (char= ch #\') into single-qs
 	  counting (char= ch #\") into double-qs
 	  counting (> (char-code ch) 255) into unicode
@@ -77,7 +77,7 @@ output to a string does not start with a newline."
       
       (write-char delim-quote stream) ;; starting quote
       
-      (loop for ch character across (the string x)
+      (loop for ch of-type character across (the string x)
 	  do (cond ((char= ch delim-quote)  (write-char #\\ stream)
 					    (write-char ch stream))
 		   

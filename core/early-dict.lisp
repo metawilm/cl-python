@@ -126,11 +126,14 @@ All these symbols are in the clpython.user package.")
     (if (equalp x y) 1 0)))
 
 (defun make-py-hash-table ()
-  (make-hash-table :test 'py-==->lisp-val :hash-function 'py-hash))
+  #+(or allegro lispworks)
+  (make-hash-table :test 'py-==->lisp-val :hash-function 'py-hash)
+  #-(or allegro lispworks)
+  (erorr "Creating python dict not suported in this environment."))
 
 (defun convert-dikt (x)
   (declare #.*dict-optimize-settings*)
-  #+(or)(break "converting dikt")
+  #+(or)(break "converting dikt ~A" x)
   (do ((d (make-py-hash-table))
        (i 0 (1+ i)))
       ((= i +dikt-hash-vector-size+)
@@ -310,22 +313,52 @@ All these symbols are in the clpython.user package.")
                     using (hash-value d1.v)
                     always (py-== (dikt-get d2 d1.k) d1.v))))))
 
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (defconstant +hash-table-iterator-indefinite-extent+
+      #+allegro nil
+      #+lispworks nil
+      #-(or allegro lispworks) nil
+    "Whether the iterator created by WITH-HASH-TABLE-ITERATOR has indefinite extent.
+This is not guaranteed due to the following in ANSI:
+  It is unspecified what happens if any of the implicit interior state of
+  an iteration is returned outside the dynamic extent of the
+  with-hash-table-iterator form such as by returning some closure over
+  the invocation form."))
+
+(defun hashtable-nth-entry (ht i)
+  "Return the I-th entry in the hashtable, using its internal order."
+  (declare (optimize (speed 3) (safety 0) (debug 0)))
+  (loop for ix from 0 below i
+      for k being the hash-key in ht
+      finally (return (values k (gethash k ht)))))
+
 (defmacro def-dikt-iter-func (name args doc key-var val-var action-form)
   ;; BLOCK is named 'iter.
   ;; Modifying the value of the most recently returned item by the iterator
   ;; should be okay; removing it is not yet supported.
   `(defun ,name (.d ,@args)
+     (declare (optimize (debug 3) (safety 3) (speed 0)))
      ,doc
      (if (dikt-hash-table .d)
-         (with-hash-table-iterator (.next-func (dikt-hash-table .d))
-           (lambda ()
-             (block iter
-               (multiple-value-bind (.ret ,(or key-var '.key) ,(or val-var '.val)) 
-                   (.next-func)
-                 ,@(unless key-var `((declare (ignore .key))))
-                 ,@(unless val-var `((declare (ignore .val))))
-                 (when .ret
-                   ,action-form)))))
+         ,(if +hash-table-iterator-indefinite-extent+
+              `(with-hash-table-iterator (.next-func (dikt-hash-table .d))
+                 (lambda ()
+                   (block iter
+                     (multiple-value-bind (.ret ,(or key-var '.key) ,(or val-var '.val)) 
+                         (.next-func)
+                       ,@(unless key-var `((declare (ignore .key))))
+                       ,@(unless val-var `((declare (ignore .val))))
+                       (when .ret
+                         ,action-form)))))
+            `(let ((.i 0)
+                   (.ht (dikt-hash-table .d)))
+               (lambda ()
+                 (block iter
+                   (multiple-value-bind (,(or key-var '.key) ,(or val-var '.val))
+                       (hashtable-nth-entry .ht (incf .i))
+                     ,@(unless key-var `((declare (ignore .key))))
+                     ,@(unless val-var `((declare (ignore .val))))
+                     ,action-form)))))
        (let ((.hash-ix 0)
              (.nth-item 0))
          (lambda ()
@@ -381,4 +414,3 @@ All these symbols are in the clpython.user package.")
         (t (setf (dikt-vector d)
              (make-array +dikt-hash-vector-size+))))
   d)
-        

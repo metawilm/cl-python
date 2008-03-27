@@ -18,7 +18,7 @@
     :components ((:module "test"
                           :serial t
                           :components ((:file "tester")
-                                       (:file "tsetup")
+                                       (:file "tsetup" :depends-on ("tester"))
                                        (:file "parser-test")
                                        (:file "compiler-test")
                                        (:file "lang-test")

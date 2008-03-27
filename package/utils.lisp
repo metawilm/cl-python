@@ -15,7 +15,8 @@
   "Automatically recompile on ANSI/Modern conflicts."
   (assert (atom verbose))
   `(handler-bind
-       (((or excl::file-incompatible-fasl-error
+       (#+allegro
+        ((or excl::file-incompatible-fasl-error
 	     excl::fasl-casemode-mismatch)
 	 (lambda (c)
 	   (declare (ignore c))
@@ -73,3 +74,28 @@ http://groups.google.nl/group/comp.lang.lisp/msg/2520fe9bc7749328?dmode=source"
 	   (let ((vec (make-array (file-length s) :element-type '(unsigned-byte 8))))
 	     (read-sequence vec s)
 	     (map 'string #'code-char vec))))
+
+(defmacro named-function (name lambda-form)
+  #+allegro
+  `(excl:named-function ,name ,lambda-form)
+  #-allegro
+  (declare (ignore name))
+  lambda-form)
+
+(defmacro with-stack-list ((name &rest items) &body body)
+  (check-type name symbol)
+  #+allegro
+  `(excl:with-stack-list (,name ,@items)
+     ,@body)
+  #-allegro
+  `(let ((,name (list ,@items)))
+     (declare (dynamic-extent ,name))
+     ,@body))
+
+(defmacro without-redefinition-warnings (&body body)
+  #+allegro `(excl:without-redefinition-warnings ,@body)
+  #-allegro `(progn ,@body))
+
+(defmacro fast (&body body)
+  `(locally (declare (optimize (speed 3)))
+     ,@body))

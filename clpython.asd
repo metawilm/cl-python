@@ -38,15 +38,13 @@
 			  :components ((:file "psetup"  )
 				       (:file "grammar"  :depends-on ("psetup"))
                                        (:file "grammar-aclyacc" :depends-on ("grammar"))
+                                       (:file "grammar-clyacc" :depends-on ("grammar"))
                                        (:file "lexer"    :depends-on ("grammar"))
 				       (:file "parser"   :depends-on ("grammar" "lexer"))
                                        (:file "ast-match")
                                        (:file "ast-util" :depends-on ("ast-match" "grammar"))
                                        (:file "walk"     :depends-on ("psetup"))
-				       (:file "pprint"   :depends-on ("psetup"))
-
-                                       
-                                       (:file "grammar-clyacc" :depends-on ("grammar")))))) ;; only loaded if CL-Yacc is available; see below.
+				       (:file "pprint"   :depends-on ("psetup"))))))
 
 (asdf:defsystem :clpython.core
     :description "Python semantics and compiler"
@@ -124,21 +122,33 @@
     (setf *shown-clpython-usage* t)))
 
 
-;; Check for presence of CL-Yacc
-
-(let ((cl-yacc-grammar (let* ((sys (asdf:find-system :clpython.parser))
-                              (mod (car (asdf:module-components sys))))
-                         (asdf:find-component mod "grammar-clyacc"))))
-  (defmethod asdf:perform :around ((op asdf:load-op) (c (eql cl-yacc-grammar)))
-    (when (asdf:find-system :yacc nil)
-      (call-next-method)
-      (format t "Note: The asdf system CL-Yacc was found. To use CL-Yacc as parser for CLPython, bind ~S to ~S.~%"
-              (find-symbol (string '#:*default-yacc-version*) (find-package '#:clpython.parser)) :cl-yacc)))
+;; Check for presence of CL-Yacc and Allegro CL Yacc.
+(let* ((parser-mod (let ((sys (asdf:find-system :clpython.parser)))
+                     (car (asdf:module-components sys)))))
   
-  (defmethod asdf:perform :around ((op asdf:compile-op) (c (eql cl-yacc-grammar)))
-    (when (asdf:find-system :yacc nil)
-      (call-next-method))))
+  (let ((cl-yacc-grammar (asdf:find-component parser-mod "grammar-clyacc")))
+  
+    (defmethod asdf:perform :around ((op asdf:load-op) (c (eql cl-yacc-grammar)))
+      (when (asdf:find-system :yacc nil)
+        (call-next-method)
+        (format t "Note: The asdf system CL-Yacc was found. ~
+                 To use CL-Yacc as parser for CLPython, bind ~S to ~S.~%"
+                (find-symbol (string '#:*default-yacc-version*)
+                             (find-package '#:clpython.parser)) :cl-yacc)))
+    
+    (defmethod asdf:perform :around ((op asdf:compile-op) (c (eql cl-yacc-grammar)))
+      (when (asdf:find-system :yacc nil)
+        (call-next-method))))
+  
+  (let ((allegro-yacc-grammar (asdf:find-component parser-mod "grammar-aclyacc")))
 
+    (defmethod asdf:perform :around ((op asdf:load-op) (c (eql allegro-yacc-grammar)))
+      #+allegro
+      (call-next-method))
+    
+    (defmethod asdf:perform :around ((op asdf:compile-op) (c (eql allegro-yacc-grammar)))
+      #+allegro
+      (call-next-method))))
 
 ;; Testing is never finished.
 (defmethod asdf:operation-done-p ((o asdf:test-op)

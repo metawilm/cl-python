@@ -87,6 +87,9 @@
 This function builds upon Allegro's 'relative package names'."
   (check-type modname symbol)
   (let ((*package* :clpython.module))
+    #-allegro
+    (error "Todo: implement LISP-PACKAGE-AS-PY-MODULE in this implementation.")
+    #+allegro
     (or (excl::relative-package-name-to-package (concatenate 'string "." (symbol-name modname)))
         ;; for ANSI:
         (excl::relative-package-name-to-package
@@ -293,6 +296,7 @@ Returns the loaded module, or NIL on error."
 (defun path-kind (path)
   "The file kind, which is either :FILE, :DIRECTORY or NIL"
   (assert (stringp path))
-  (cond ((not (probe-file path))       nil)
-	((excl:file-directory-p path)  :directory)
-	(t                             :file)))
+  (cond ((not (probe-file path))                       nil)
+        #+allegro   ((excl:file-directory-p path)      :directory)
+        #+lispworks ((lispworks:file-directory-p path) :directory)
+        (t                                             :file)))

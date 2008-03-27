@@ -59,7 +59,7 @@
 			      (file-length f)))))))
     (warn "code ~A = type ~A = ~A bytes per item" type-code lisp-type item-size)
     (flet ((create-array (&optional (size 0))
-	     (make-instance 'array 
+	     (make-instance '|array| 
 	       :kind type-code
 	       :array (make-array size :element-type lisp-type :adjustable t :fill-pointer 0)
 	       :elmtype lisp-type

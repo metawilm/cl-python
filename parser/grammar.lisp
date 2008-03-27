@@ -86,7 +86,9 @@
             `(add-rule ',name ',terms ',outcome ,@options)
 
           (labels ((find-suffix-token (suffix)
-                     (position suffix terms :test #'char= :key (lambda (x) (token-suffix x))))
+                     (position suffix terms
+                               :test 'eql 
+                               :key (lambda (x) (token-suffix x))))
                    (shift-outcome (removed-n)
                      (labels ((shift-tree (tree)
                                 (typecase tree
@@ -521,14 +523,18 @@
            (([,] test)           `(,$2))
            (([,] test testlist2) `(,$2 ,@$3)))
 
-(p testlist-safe (old-test testlist-safe2) (if $2
-                                               `([tuple-expr] ,(cons $1 (if (eq (car (last $2)) :dummy)
-                                                                            (butlast $2)
-                                                                          $2)))
-                                             $1))
+(p testlist-safe :or
+   ((old-test testlist-safe2) (if $2
+                                  `([tuple-expr] ,(cons $1 (if (eq (car (last $2))
+                                                                   :dummy)
+                                                               (butlast $2)
+                                                             $2)))
+                                $1))
+   ((old-test)  $1))
+   
 (p testlist-safe2 :or
-   (()                            nil)
    (([,])                         (list :dummy))
+   (([,] old-test)                (list $2))
    (([,] old-test testlist-safe2) (if (eq (car $3) :dummy)
                                       $2
                                     (cons $2 $3))))
@@ -537,10 +543,11 @@
 (gp comma--test--\:--test+)
 (p comma--test--\:--test ([,] test [:] test) (cons $2 $4))
 
+(p classdef ([class] [identifier] [:] suite)
+   `([classdef-stmt] ([identifier-expr] ,$2) ([tuple-expr] nil) ,$4))
 (p classdef ([class] [identifier] inheritance [:] suite)
    `([classdef-stmt] ([identifier-expr] ,$2) ,$3 ,$5))
 
-(p inheritance (                ) '([tuple-expr] nil))
 (p inheritance ([(]          [)]) '([tuple-expr] nil))
 (p inheritance ([(] testlist [)]) (if (eq (car $2) '[tuple-expr]) $2 `([tuple-expr] (,$2))))
 
