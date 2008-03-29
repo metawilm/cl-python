@@ -326,11 +326,12 @@ This is not guaranteed due to the following in ANSI:
   the invocation form."))
 
 (defun hashtable-nth-entry (ht i)
-  "Return the I-th entry in the hashtable, using its internal order."
+  "Return the I-th entry in the hashtable (I >= 0), using its internal order."
   (declare (optimize (speed 3) (safety 0) (debug 0)))
-  (loop for ix from 0 below i
+  (loop for ix from 0 to i
       for k being the hash-key in ht
-      finally (return (values k (gethash k ht)))))
+      when (= ix i) return (values k (gethash k ht))
+      finally (return (values nil nil))))
 
 (defmacro def-dikt-iter-func (name args doc key-var val-var action-form)
   ;; BLOCK is named 'iter.
@@ -344,21 +345,25 @@ This is not guaranteed due to the following in ANSI:
               `(with-hash-table-iterator (.next-func (dikt-hash-table .d))
                  (lambda ()
                    (block iter
-                     (multiple-value-bind (.ret ,(or key-var '.key) ,(or val-var '.val)) 
+                     (multiple-value-bind (.ret .k .v)
                          (.next-func)
-                       ,@(unless key-var `((declare (ignore .key))))
-                       ,@(unless val-var `((declare (ignore .val))))
-                       (when .ret
-                         ,action-form)))))
+                       (declare (ignorable .k .v))
+                       (let (,@(when key-var `((,key-var .k)))
+                             ,@(when val-var `((,val-var .v))))
+                         (when .ret
+                           ,action-form))))))
             `(let ((.i 0)
                    (.ht (dikt-hash-table .d)))
                (lambda ()
                  (block iter
-                   (multiple-value-bind (,(or key-var '.key) ,(or val-var '.val))
-                       (hashtable-nth-entry .ht (incf .i))
-                     ,@(unless key-var `((declare (ignore .key))))
-                     ,@(unless val-var `((declare (ignore .val))))
-                     ,action-form)))))
+                   (multiple-value-bind (.k .v)
+                       (hashtable-nth-entry .ht .i)
+                     (declare (ignorable .k .v))
+                     (let (,@(when key-var `((,key-var .k)))
+                           ,@(when val-var `((,val-var .v))))
+                       (when (and .k .v)
+                         (incf .i)
+                         ,action-form)))))))
        (let ((.hash-ix 0)
              (.nth-item 0))
          (lambda ()
@@ -394,7 +399,6 @@ This is not guaranteed due to the following in ANSI:
   "Func, a function of two args, is called for every key-value pair."
   key val (progn (funcall func key val)
                  t))
-    
 
 (defun dikt-count (d)
   (if (dikt-hash-table d)

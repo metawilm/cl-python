@@ -3034,9 +3034,6 @@ Returns nil upon lookup failure."
 	  (throw :getattr-block :py-attr-not-found)
 	(py-raise '{AttributeError} "Object ~A has no attribute `~A'." x (symbol-name attr.as_sym))))))
 
-(unless (find-class '{AttributeError} nil)
-  (defclass {AttributeError} () ()))
-
 (defun try-calling-getattribute (ga x x.class attr.as_sym)
   (assert (symbolp attr.as_sym))
   (handler-case
@@ -3979,10 +3976,19 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
 
 ;;; Printing with circle (recursion) detection
 
+(defvar *circle-detection-mechanism*
+    #+allegro :hash-table
+    #+lispworks :level
+    #-(or allegro lispworks) :level)
+
+(defvar *circle-print-abbrev* "...")
+
 (defvar *circle-print-ht* nil)
 (defvar *circle-print-max-occur* 3)
 (defvar *circle-print-max-num-objects* 100)
-(defvar *circle-print-abbrev* "...")
+
+(defvar *circle-level* 0)
+(defconstant +max-circle-level+ 5)
 
 #+allegro
 (excl:def-fwrapper print-circle-wrapper (x)
@@ -4004,16 +4010,20 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
 
 (defun call-with-circle-detection (f)
   (declare (dynamic-extent f))
-  (if *circle-print-ht*
-      (funcall f)
-    (let ((*circle-print-ht* (make-hash-table :test 'eq)))
-      #+allegro
-      (unwind-protect
-          (progn (excl:fwrap #'py-repr :print-circle-wrapper 'print-circle-wrapper)
-                 (funcall f))
-        (excl:funwrap #'py-repr :print-circle-wrapper))
-      #-allegro ;; No circle detection
-      (funcall f))))
+  (ecase *circle-detection-mechanism*
+    (:hash-table (if *circle-print-ht*
+                     (funcall f)
+                   (let ((*circle-print-ht* (make-hash-table :test 'eq)))
+                     #+allegro
+                     (unwind-protect
+                         (progn (excl:fwrap #'py-repr :print-circle-wrapper 'print-circle-wrapper)
+                                (funcall f))
+                       (excl:funwrap #'py-repr :print-circle-wrapper))
+                     #-allegro (error "No hash-table based circle detection defined in this implementation."))))
+    (:level (let ((*circle-level* (1+ *circle-level*)))
+              (if (>= *circle-level* +max-circle-level+)
+                  *circle-print-abbrev*
+                (funcall f))))))
   
 (defun py-repr-circle (x)
   (with-circle-detection (py-repr x)))

@@ -2127,6 +2127,7 @@ Non-negative integer denoting the number of args otherwise."
          #+(or)
          (error (lambda (c)
                   (warn "with-py-handlers passed on error: ~A" c))))
+      
       (funcall f))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;

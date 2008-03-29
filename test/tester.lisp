@@ -28,7 +28,7 @@
 ;;;; from the original ACL 6.1 sources:
 ;; Id: tester.cl,v 2.2.12.1 2001/06/05 18:45:10 layer Exp
 
-;; $Id: tester.lisp,v 1.5 2008/03/27 22:04:42 willem Exp $
+;; $Id: tester.lisp,v 1.6 2008/03/29 17:22:24 willem Exp $
 
 (defpackage :util.test
   (:use :common-lisp :excl)
@@ -400,6 +400,9 @@ Reason: detected an unexpected error of type `~s':
         ~a.~%"
 				    (class-of condition)
 				    condition)
+                            #+(and) ;; added WB: abort test on unexpected condition
+                            (unless known-failure
+                              (error condition))
 		     elseif (not (if* include-subtypes
 				    then (typep condition condition-type)
 				    else (eq (class-of condition)

@@ -224,7 +224,10 @@
 (defmacro generate-cmp-cm (op)
   `(define-compiler-macro ,op (&whole whole x y)
      (if (and (numberp x) (numberp y))
-         (let ((val (py-bool (,op x y))))
+         (let ((val (,op x y)))
+           (assert (member val (list *the-true* *the-false*)) ()
+             "Constant comparison of two numbers should result in True or False (got ~A ~A ~A => ~S)"
+             x ',op y val)
            `,val)
        whole)))
 

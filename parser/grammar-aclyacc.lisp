@@ -13,8 +13,7 @@
 (in-syntax *user-readtable*)
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
-  (require :yacc)
-  (import 'excl.yacc:(defgrammar grammar defproduction build-grammar)))
+  (require :yacc))
 
 #.`(excl.yacc:defgrammar python-grammar (excl.yacc:grammar)
      ()
@@ -26,10 +25,10 @@
 #.`(progn ,@(loop for name being the hash-key in *python-prods*
                 using (hash-value rules)
                 nconc (loop for (terms outcome options) in rules
-                          collect `(defproduction (,name python-grammar) ,terms (,outcome)
-                                                  ,@(when options (list options))))))
+                          collect `(excl.yacc:defproduction (,name python-grammar) ,terms (,outcome)
+                                                            ,@(when options (list options))))))
 
-(build-grammar python-grammar nil nil)
+(excl.yacc:build-grammar python-grammar nil nil)
 
 ;; For lexer
 

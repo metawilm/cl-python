@@ -68,6 +68,8 @@
   (run-error "assert not True" {AssertionError})
   (run-no-error     "assert not not True")
   (run-no-error     "assert not False")
+  (run-no-error     "assert 1 < 2")
+  (run-no-error     "assert not 1 > 2")
   
   (multiple-value-bind (x err) 
       (ignore-errors (run "assert 0, 'abc'"))

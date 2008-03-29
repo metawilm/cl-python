@@ -25,15 +25,16 @@
 
 ;;; Restarts
 
+#+allegro
 (eval-when (:compile-toplevel :load-toplevel :execute)
-
-(defparameter *repl-restart-aliases*
-    '((:pt . return-python-toplevel)
-      (:re . retry-repl-eval)))
-
-(defun abbrev-for-restart (r)
-  (or (car (rassoc r *repl-restart-aliases*))
-      (error "No such Python repl restart: ~A." r)))
+  (defparameter *repl-restart-aliases*
+      '((:pt . return-python-toplevel)
+        (:re . retry-repl-eval)))
+  
+  #+allegro
+  (defun abbrev-for-restart (r)
+    (or (car (rassoc r *repl-restart-aliases*))
+        (error "No such Python repl restart: ~A." r)))
 )
 
 (defun try-invoke-restart (rname)
@@ -68,17 +69,24 @@ Possible values: :time :ptime :space :pspace nil")
   "Whether to remove initial `>>>' and `...' on the input line.
 If true, previous input can be copy-pasted as new input easily.")
                                 
-(defvar *repl-doc* (format nil "
+(defvar *repl-doc* (concatenate 'string
+                     "
 In the Python interpreter:
      :help          => print (this) help
      :q             => quit
   <command>         => execute Python or Lisp <command>
   <space><command>  => execute Lisp <command>
-
+"
+                     #+allegro
+                     (format nil "
 In the Lisp debugger:
      ~S            => back to Python top level
      ~S            => retry the last (failed) Python command
-
+" 
+                             (abbrev-for-restart 'return-python-toplevel)
+                             (abbrev-for-restart 'retry-repl-eval))
+                     
+                     (format nil "
 Relevant Lisp variables (exported from package :clpython.app.repl):
    *repl-compile*   => whether source code is compiled into assembly
                        before running (current value: ~A)
@@ -90,10 +98,8 @@ Relevant Lisp variables (exported from package :clpython.app.repl):
                          :pspace  = space call graph
                          nil      = no profiling
 "
-                           (abbrev-for-restart 'return-python-toplevel)
-                           (abbrev-for-restart 'retry-repl-eval)
-                           *repl-compile*          
-                           *repl-prof*))
+                             *repl-compile*          
+                             *repl-prof*)))
 
 (defvar *repl-mod* nil "The REPL module (for debugging)")
 (defvar *prompts* '(">>> " "... "))
@@ -121,7 +127,6 @@ KIND can be :ptime, :time, :space, :pspace or NIL."
                               (terpri)
                               (prof:show-call-graph)))
     ((nil)   (funcall f))))
-
 
 (defun repl ()
   (with-repl-toplevel-aliases
@@ -201,9 +206,9 @@ KIND can be :ptime, :time, :space, :pspace or NIL."
                               (block :val 
                                 (loop (let ((helper-func (run-ast-func ?suite)))
                                         (loop (with-simple-restart
-                                                  (retry-repl-eval "Retry the expression: \"~A\" (~S)."
+                                                  (retry-repl-eval (concatenate 'string "Retry the expression: \"~A\"" #+allegro " (~S).")
                                                                    (nice-one-line-input-abbrev total)
-                                                                   (abbrev-for-restart 'retry-repl-eval))
+                                                                   #+allegro (abbrev-for-restart 'retry-repl-eval))
                                                 (return-from :val
                                                   (profile helper-func *repl-prof*))))))))))
                    (when (car vals) ;; skip NIL
@@ -244,7 +249,10 @@ KIND can be :ptime, :time, :space, :pspace or NIL."
                               ;; 
                               ;; If lines start with (copied) `>>>'/`...', then parsing is tried
                               ;; after removing those.
-                              ({UnexpectedEofError} () (return-from handle-as-python-code t))
+                              ({UnexpectedEofError} (c)
+                                (if (eq ast-finished t)
+                                    (error c)
+                                  (return-from handle-as-python-code t)))
 			      ({SyntaxError} (err)
                                 (or (when *ignore-copied-prompts*
                                       (multiple-value-bind (new-str changed)
@@ -320,8 +328,8 @@ KIND can be :ptime, :time, :space, :pspace or NIL."
 	  initially (format t "[CLPython -- type `:q' to quit, `:help' for help]~%")
 	  do (loop 
 	       (with-simple-restart (return-python-toplevel
-                                     "Return to Python top level (~S)."
-                                     (abbrev-for-restart 'return-python-toplevel))
+                                     (concatenate 'string "Return to Python top level" #+allegro " (~S).")
+                                     #+allegro (abbrev-for-restart 'return-python-toplevel))
 		 (setf acc ())
 		 (loop 
 		   (locally (declare (special *stdout-softspace*))
