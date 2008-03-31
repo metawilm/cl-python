@@ -313,7 +313,7 @@
 	  
 	  `(let ((.state. 0) ,@(nreverse vars))
              (make-iterator-from-function 
-	      :name '(,fname generator)
+	      :name ',fname
 	      :func
 	      (named-function (,fname generator-internal-lambda)
 		(lambda ()
