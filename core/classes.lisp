@@ -2122,10 +2122,7 @@ But if RELATIVE-TO package name is given, result may contains dots."
       (py-raise '{KeyError} "Dict ~A has no such key: ~A" dict k)))
 
 (def-py-method py-dict.__iter__ (dict)
-  ;; Iterator over the keys.
-  (make-iterator-from-function
-   :name :py-dict-iterator
-   :func (dikt-iter-keys-func (py-dict-dikt dict))))
+  (py-dict.iterkeys dict))
 
 (def-py-method py-dict.__len__ (dict)
   (dikt-count (py-dict-dikt dict)))
@@ -2197,7 +2194,7 @@ But if RELATIVE-TO package name is given, result may contains dots."
 
 (def-py-method py-dict.iteritems (x)
   (make-iterator-from-function
-   :name :py-dict-iterator
+   :name :dict-iter-items
    :func (let ((f (dikt-iter-keys-values-func (py-dict-dikt x))))
            (lambda ()
              (multiple-value-bind (k v) (funcall f)
@@ -2205,12 +2202,12 @@ But if RELATIVE-TO package name is given, result may contains dots."
 
 (def-py-method py-dict.iterkeys (x)
   (make-iterator-from-function
-   :name :py-dict-iterator
+   :name :dict-iter-keys
    :func (dikt-iter-keys-func (py-dict-dikt x))))
 
 (def-py-method py-dict.itervalues (x)
   (make-iterator-from-function
-   :name :py-dict-iterator
+   :name :dict-iter-values
    :func (dikt-iter-values-func (py-dict-dikt x))))
 
 (def-py-method py-dict.keys (x)
@@ -3305,7 +3302,6 @@ finished; F will then not be called again."
     (tagbody
       (when stopped-yet (go stop))
       (let ((val (apply func args)))
-        (format t "py-func-iterator.next-or-send: got val ~A~%" val)
         (when val
           (return-from py-func-iterator.next-or-send val)))
       (setf stopped-yet t)
