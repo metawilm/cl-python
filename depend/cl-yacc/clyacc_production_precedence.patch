@@ -1,0 +1,59 @@
+
+New patches:
+
+[Add :precedence option to productions.
+Willem Broekema <metawilm@gmail.com>**20080325205318] {
+hunk ./yacc-tests.lisp 105
+-              '(LB (ID + (ID * ID)) RB))
++              '(lb (id + (id * id)) rb))
+hunk ./yacc.lisp 51
+-                                            &key action action-form))
++                                            &key action action-form precedence))
+hunk ./yacc.lisp 57
+-  (action-form nil))
++  (action-form nil)
++  (precedence nil))
+hunk ./yacc.lisp 63
+-    (format s "~S -> ~{~S~^ ~}" (production-symbol p) (production-derives p))))
++    (format s "~S -> ~{~S~^ ~}" (production-symbol p) (production-derives p))
++    (when (production-precedence p)
++      (format s " :precedence ~A" (production-precedence p)))))
+hunk ./yacc.lisp 872
+-             (op1-tail (find-precedence op1 (grammar-precedence grammar)))
+-             (op2-tail (find-precedence op2 (grammar-precedence grammar))))
++             (op1-tail (find-precedence (or (production-precedence p1) op1)
++                                        (grammar-precedence grammar)))
++             (op2-tail (find-precedence (or (production-precedence p2) op2)
++                                        (grammar-precedence grammar))))
+hunk ./yacc.lisp 1103
+-         (let ((l (car (last stuff))))
+-           (let ((rhs (if (symbolp l) stuff (butlast stuff)))
+-                 (action (if (symbolp l) '#'list l)))
++         (let* ((l (car (last stuff)))
++                (rhs (if (symbolp l) stuff (butlast stuff))))
++           (multiple-value-bind (action precedence)
++               (typecase l
++                 (symbol (values '#'list nil))
++                 (list ;; (#'func :precedence pr)
++                  (values (car l) (getf (cdr l) :precedence)))
++                 (t      (values l nil)))
+hunk ./yacc.lisp 1112
+-                     :action (eval action)
+-                     :action-form action)
++                                    :action (eval action)
++                                    :action-form action
++                                    :precedence precedence)
+}
+
+Context:
+
+[Documentation tweaks.
+Juliusz Chroboczek <jch@pps.jussieu.fr>**20051208172730] 
+[Rename EOF to YACC-EOF-SYMBOL, export it.
+Juliusz Chroboczek <jch@pps.jussieu.fr>**20051208171252
+ Suggested by Kevin Reid.
+] 
+[TAG cl-yacc-0.1
+Juliusz Chroboczek <jch@pps.jussieu.fr>**20050404171234] 
+Patch bundle hash:
+d7d4d6fb92d2f7f28f6b0ec92035c156bc8e5517
