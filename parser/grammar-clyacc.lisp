@@ -11,6 +11,7 @@
 
 (in-package :clpython.parser)
 
+#+(or) ;; Disabled while cl-yacc is included in the CLPython distribution
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (asdf:operate 'asdf:load-op :yacc))
 
