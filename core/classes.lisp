@@ -2882,7 +2882,7 @@ But if RELATIVE-TO package name is given, result may contains dots."
 		   (t (py-raise '{IndexError}
 				"Attempt to retrieve element ~A from tuple of size ~A: ~:A."
 				item (length x) x))))
-    (py-slice (let ((vec (coerce x 'array))) ;; Use slice handling in vector-getitem
+    (py-slice (let ((vec (coerce x 'vector))) ;; Use slice handling in vector-getitem
                 (vector-getitem vec item (lambda (item/s single-p)
                                            (make-tuple-from-list (if single-p (list item/s) item/s))))))))
 
