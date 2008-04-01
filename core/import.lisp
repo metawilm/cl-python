@@ -83,17 +83,17 @@
                              :name *package-indicator-filename*))))
   
 (defun lisp-package-as-py-module (modname)
-  "Return Lisp package with given name, that is a package-child of :clpython.module
-This function builds upon Allegro's 'relative package names'."
+  "Return Lisp package with given name.
+First a package with that name as subpackage of CLPYTHON.MODULE is searched.
+Otherwise a package with MODNAME as regular name.
+As for case: both MODNAME's own name its upper-case variant are tried."
   (check-type modname symbol)
-  (let ((*package* :clpython.module))
-    #-allegro
-    (error "Todo: implement LISP-PACKAGE-AS-PY-MODULE in this implementation.")
-    #+allegro
-    (or (excl::relative-package-name-to-package (concatenate 'string "." (symbol-name modname)))
-        ;; for ANSI:
-        (excl::relative-package-name-to-package
-         (concatenate 'string "." (string-upcase (symbol-name modname)))))))
+  (let ((variants (list (symbol-name modname) (string-upcase modname))))
+    (dolist (v variants)
+      (whereas ((pkg (or (find-package (concatenate 'string
+                                         (string (package-name :clpython.module)) "." v))
+                         (find-package v))))
+        (return-from lisp-package-as-py-module pkg)))))
 
 (defun find-py-file (name search-paths)
   "Returns pathnames of SRC and/or BINARY file found earliest.
@@ -118,8 +118,15 @@ Returns NIL if nothing found."
 
 (defmacro with-python-code-reader (() &body body)
   ;; The Python parser handles all reading.
-  `(let ((*readtable* (load-time-value (setup-omnivore-readmacro #'clpython.parser:parse (copy-readtable nil)))))
-     ,@body))
+  `(handler-bind
+       ((error (lambda (c)
+                 (signal c)
+                 ;; ERROR with normal *readtable*, otherwise interactive
+                 ;; debugging becomes impossible.
+                 (with-standard-io-syntax (error c)))))
+     (let ((*readtable* (load-time-value 
+                         (setup-omnivore-readmacro #'clpython.parser:parse (copy-readtable nil)))))
+       ,@body)))
 
 (defun compile-py-file (filename &key (mod-name (error ":mod-name required"))
                                       (output-file (error ":output-file required")))
@@ -131,13 +138,12 @@ Returns NIL if nothing found."
   (let* ((*current-module-path* filename) ;; used by compiler
          (*current-module-name* mod-name))
     (declare (special *current-module-path*))
-    
     (with-auto-mode-recompile (:verbose *import-compile-verbose*)
       (with-python-code-reader ()
-	(compile-file filename
-		      :output-file output-file
-		      :if-newer (not *import-force-recompile*)
-		      :verbose *import-compile-verbose*)))))
+        (compile-file filename
+                      :output-file output-file
+                      #+allegro #+allegro :if-newer (not *import-force-recompile*)
+                      :verbose *import-compile-verbose*)))))
 
 (defun load-compiled-python-file (filename
 				  &key (mod-name (error ":mod-name required"))
@@ -155,9 +161,9 @@ Returns the loaded module, or NIL on error."
   (check-type context-mod-name (or symbol string))
   (assert (probe-file filename) (filename)
     "Compiled Python file ~A does not exist" filename)
-    
-  (when (get-loaded-module mod-name habitat)
-    (break "Module ~A already known, but imported again (file ~A)" mod-name filename))
+  
+  #+(or)(when (get-loaded-module mod-name habitat)
+          (break "Module ~A already known, but imported again (file ~A)" mod-name filename))
          
   (let* ((old-module (when habitat (get-known-module mod-name habitat))))
     (flet ((do-loading ()
@@ -245,7 +251,7 @@ Returns the loaded module, or NIL on error."
          (dotted-name (module-dotted-name mod-name-as-list)))
     
     ;; 2. (Dotted) Module already imported into habitat
-    (unless (and nil force-reload)
+    (unless force-reload
       (whereas ((m (get-loaded-module dotted-name habitat)))
         (return-from py-import m)))
     
