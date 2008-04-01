@@ -32,10 +32,10 @@
 
 (defmacro run-code-test (string test-expr)
   `(progn
-     (when util.test::*announce-test*
+     (when *announce-test*
        (terpri)
        (format t "Run-code-test:~% ~S~% ~S~%" ',string ',test-expr))
-     (let ((util.test::*announce-test* nil))
+     (let ((*announce-test* nil))
        (run-with-tests ,string '(({TEST} . ,test-expr))))))
 
 (defun run-compiler-test ()
