@@ -76,10 +76,10 @@ http://groups.google.nl/group/comp.lang.lisp/msg/2520fe9bc7749328?dmode=source"
 	     (map 'string #'code-char vec))))
 
 (defmacro named-function (name lambda-form)
+  (declare (ignorable name))
   #+allegro
   `(excl:named-function ,name ,lambda-form)
   #-allegro
-  (declare (ignore name))
   lambda-form)
 
 (defmacro with-stack-list ((name &rest items) &body body)
