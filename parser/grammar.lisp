@@ -607,10 +607,8 @@
 (defun parse-trailers (item trailers)
   ;; foo[x].a => (id foo) + ((subscription (id x)) (attributeref (id a)))
   ;;          => (attributeref (subscription (id foo) (id x)) (id a))
-  (dolist (tr trailers)
-    (setf tr `(,(car tr) ,item ,@(cdr tr)) ;; dont change first cons of tr: might be constant 
-          item tr))
-  item)
+  (dolist (tr trailers item)
+    (setf item `(,(car tr) ,item ,@(cdr tr))))) ;; dont change first cons of tr: might be constant 
 
 (defun dotted-name-to-attribute-ref (dotted-name)
   (assert dotted-name)
