@@ -34,7 +34,6 @@
        (dolist (,g2 '(t nil))
          (let ((clpython::*use-environment-acccessors* ,g1)
                (clpython::*compile-python-ast-before-running* ,g2))
-           (format t "~%env: ~A   compile: ~A~%" ,g1 ,g2)
            ,@body)))))
 
 (defmacro run-error (string condtype &rest options)
