@@ -484,8 +484,9 @@ C must be either a character or NIL."
                                                 (values #\\ c))))
                             ((#\0 #\1 #\2 #\3 #\4 #\5 #\6 #\7) ;; char code: up to three octal digits
                              (loop with code = 0
-                                 for x = c then (aref s (incf s.ix))
-                                 for x.octal = (digit-char-p x 8)
+                                 for x = c then (when (< (incf s.ix) s.len)
+                                                  (aref s s.ix))
+                                 for x.octal = (and x (digit-char-p x 8))
                                  repeat 3 while x.octal
                                  do (setf code (+ (* code 8) x.octal))
                                  finally (unless x.octal
@@ -495,7 +496,8 @@ C must be either a character or NIL."
                             (#\x (let* ((a (aref s (incf s.ix))) ;; char code: up to two hex digits
                                         (b (when (< (incf s.ix) s.len)
                                              (aref s s.ix)))
-                                        (a.hex (digit-char-p a 16))
+                                        (a.hex (progn (assert (characterp a))
+                                                      (digit-char-p a 16)))
                                         (b.hex (and b (digit-char-p b 16))))
                                    (unless a.hex (raise-syntax-error "Non-hex digit `~A' found after `\x' (line ~A)."
                                                                      a %lex-curr-line-no%))
