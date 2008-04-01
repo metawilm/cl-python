@@ -14,11 +14,10 @@
 
 (asdf:defsystem :clpython-test
     :description "CLPython tests"
-    :depends-on (:clpython)
+    :depends-on (:clpython :ptester)
     :components ((:module "test"
                           :serial t
-                          :components ((:file "tester")
-                                       (:file "tsetup" :depends-on ("tester"))
+                          :components ((:file "tsetup")
                                        (:file "parser-test")
                                        (:file "compiler-test")
                                        (:file "lang-test")
