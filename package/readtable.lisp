@@ -28,6 +28,10 @@
   `(eval-when (:compile-toplevel :load-toplevel :execute)
      (setq *readtable* ,readtable-expression)))
 
+(defconstant +reader-error-has-format+
+    #+allegro t
+    #+lispworks nil)
+
 (defun read-package-symbol-func (package start-char end-char &key intern)
   "Create a reader function that reads from start-char until endchar,
 and returns a symbol in the given package. When no such symbol exists,
@@ -53,10 +57,10 @@ it will be interned if INTERN, otherwise an error is raised."
 	  (return (or (find-symbol name package)
 		      (when intern
 			(intern name package))
-		      (error 'reader-error
-			     :stream stream
-			     :format-control "No symbol named ~S in package ~S"
-			     :format-arguments (list name (find-package package))))))))
+		      (apply #'error 'reader-error :stream stream
+			     (when +reader-error-has-format+
+                               (list :format-control "No symbol named ~S in package ~S"
+                                     :format-arguments (list name (find-package package))))))))))
 
 (defun setup-ast-readmacro (&optional (readtable *readtable*))
   (let ((read-[-func (read-package-symbol-func (find-package :clpython.ast) #\[ #\] :intern nil)))
