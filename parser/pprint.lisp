@@ -34,7 +34,10 @@ output to a string does not start with a newline."
                    (do-print s))))
         (when (plusp (length str))
           (assert (char= (aref str 0) #\Newline))
-          (make-array (1- (length str)) :element-type 'character :displaced-to str :displaced-index-offset 1))))))
+          (make-array (1- (length str)) 
+                      :element-type (array-element-type str)
+                      :displaced-to str
+                      :displaced-index-offset 1))))))
 
 (defgeneric py-pprint-1 (stream ast)
   (:documentation "Print AST as Python source code to STREAM"))
