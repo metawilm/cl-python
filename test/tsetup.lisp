@@ -10,9 +10,11 @@
 ;;;; CLPython test harness setup
 
 (defpackage :clpython.test
-  (:use :common-lisp :clpython :util.test)
+  (:use :common-lisp :clpython)
   (:import-from :clpython #:in-syntax)
   (:import-from :clpython.parser #:parse)
+  (:import-from :ptester #:*announce-test* #:with-tests
+                #:test #:test-error #:test-no-error #:test-warning)
   (:export #:run))
 
 (in-package :clpython.test)
@@ -28,6 +30,28 @@
 (defmacro test-equal (&rest args)
   `(test ,@args :test 'equal))
 
+(defconstant +compilation-warnings-muffled-by-compiler+
+    #.(progn
+        (define-condition c1 (warning) ())
+        (defmacro m1 () (warn 'c1))
+        (defun foo1 () (m1))
+        (let (muffled)
+          (handler-case
+              (with-output-to-string (*standard-output*)
+                (progn (compile 'foo1) (setf muffled t)))
+            (c1 () (setf muffled nil)))
+          muffled))
+    "Whether warnings signalled during compilation by a macro-expansion can be
+caught outside the COMPILE form. ANSI 3.2.5 \"Exceptional Situations in the Compiler\"
+seems to give implementations some freedom here. (In practice: Allegro=NIL, LisWorks=T")
+
+(defmacro test-some-warning (&rest args)
+  `(test-warning ,@args 
+                 :known-failure ,+compilation-warnings-muffled-by-compiler+
+                 :fail-info (format nil "Failure probably caused by ~S = ~S"
+                                    '+compilation-warnings-muffled-by-compiler+
+                                    +compilation-warnings-muffled-by-compiler+)))
+  
 (defvar *test-active* nil)
 
 (defmacro with-subtest (options &body body)
@@ -38,7 +62,7 @@
 	 (progn (format t "~%[subtest: ~A]~%" ,(getf options :name))
 		(run-body))
        (let ((*test-active* t)
-             (util.test::*announce-test* t))
+             (*announce-test* t))
 	 (with-tests ,options (run-body))))))
 
 (defun seq-equal (x y &key (test 'eq) ignore silent)

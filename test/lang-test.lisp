@@ -30,10 +30,11 @@
 (defmacro with-all-compiler-variants-tried (&body body)
   (let ((g1 (gensym))
         (g2 (gensym)))
-    `(dolist (,g1 '(t nil))
+    `(dolist (,g1 (clpython::all-use-environment-accessor-values))
        (dolist (,g2 '(t nil))
          (let ((clpython::*use-environment-acccessors* ,g1)
                (clpython::*compile-python-ast-before-running* ,g2))
+           (format t "~%env: ~A   compile: ~A~%" ,g1 ,g2)
            ,@body)))))
 
 (defmacro run-error (string condtype &rest options)
@@ -86,7 +87,14 @@
   (run-test 3 "a,b = [3,4]; a")
   (run-error "a,b = 3" {TypeError} :fail-info "Iteration over non-sequence.")
   (run-error "a,b = 3,4,5" {ValueError})
-  (run-error "a,b = [3,4,5]" {ValueError}))
+  (run-error "a,b = [3,4,5]" {ValueError})
+  (run-no-error "
+g = 3
+def f():
+  global g
+  g = 2
+f()
+assert g == 2"))
 
 (defmethod test-lang ((kind (eql :attributeref-expr)))
   (run-no-error "class C: pass
@@ -377,7 +385,7 @@ assert f(x) == 3"))
   )
 
 (defmethod test-lang ((kind (eql :global-stmt)))
-  (test-warning (run "global x")) ;; useless at toplevel
+  (test-some-warning (run "global x")) ;; useless at toplevel
   (run-error "
 def f():
   x = 3
@@ -397,7 +405,7 @@ def f():
   return g
 f()(4)
 assert x == 4" :fail-info "Global decl is also valid for nested functions")
-  (test-warning (run "
+  (test-some-warning (run "
 global y  # bogus declaration; check it does not leak into f
 def f(a):
   y = a
