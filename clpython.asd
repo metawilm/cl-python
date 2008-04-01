@@ -17,8 +17,7 @@
 
 ;;; Check Allegro version
 #+(and allegro-version>= (not (version>= 8 1)))
-(warn "CLPython is being developed on Allegro Common Lisp 8.1, ~
-       but it might work in other environments too.")
+(warn "CLPython is being developed on Allegro Common Lisp 8.1, but it might work in this earlier version, too.")
 
 
 ;;; Core systems: parser, compiler, runtime
@@ -31,9 +30,15 @@
                                        (:file "readtable" :depends-on ("package"))
                                        (:file "aupprint" :depends-on ("package"))))))
 
+(asdf:defsystem :clpython.depend
+    :description "External libraries, included with minor modifications"
+    :components ((:module "depend"
+                          :components ((:module "cl-yacc"
+                                                :components ((:file "yacc")))))))
+
 (asdf:defsystem :clpython.parser
     :description "Python parser, code walker, and pretty printer"
-    :depends-on (:clpython.package)
+    :depends-on (:clpython.package :clpython.depend)
     :components ((:module "parser"
 			  :components ((:file "psetup"  )
 				       (:file "grammar"  :depends-on ("psetup"))
@@ -123,11 +128,12 @@
 
 
 ;; Check for presence of CL-Yacc and Allegro CL Yacc.
+
 (let* ((parser-mod (let ((sys (asdf:find-system :clpython.parser)))
                      (car (asdf:module-components sys)))))
   
+  #+(or) ;; Disabled whil CL-Yacc is included in CLPython/dependency.
   (let ((cl-yacc-grammar (asdf:find-component parser-mod "grammar-clyacc")))
-  
     (defmethod asdf:perform :around ((op asdf:load-op) (c (eql cl-yacc-grammar)))
       (when (asdf:find-system :yacc nil)
         (call-next-method)
@@ -135,20 +141,16 @@
                  To use CL-Yacc as parser for CLPython, bind ~S to ~S.~%"
                 (find-symbol (string '#:*default-yacc-version*)
                              (find-package '#:clpython.parser)) :cl-yacc)))
-    
     (defmethod asdf:perform :around ((op asdf:compile-op) (c (eql cl-yacc-grammar)))
       (when (asdf:find-system :yacc nil)
         (call-next-method))))
   
+  ;; Skip loading Allegro yacc in non-Allegro environment
   (let ((allegro-yacc-grammar (asdf:find-component parser-mod "grammar-aclyacc")))
-
     (defmethod asdf:perform :around ((op asdf:load-op) (c (eql allegro-yacc-grammar)))
-      #+allegro
-      (call-next-method))
-    
+      #+allegro (call-next-method))
     (defmethod asdf:perform :around ((op asdf:compile-op) (c (eql allegro-yacc-grammar)))
-      #+allegro
-      (call-next-method))))
+      #+allegro (call-next-method))))
 
 ;; Testing is never finished.
 (defmethod asdf:operation-done-p ((o asdf:test-op)
