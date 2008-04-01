@@ -19,12 +19,8 @@
      (:precedence ,(nreverse (get-precedence-and-associativity :left :right :nonassoc)))
      (:start-symbol clpython.parser::python-grammar)
      
-     ,@'#.(loop with name-rules = (sort (loop for name being the hash-key in *python-prods*
-                                            using (hash-value rules)
-                                            collect (list name rules))
-                                        #'string< 
-                                        :key #'car)
-              for (name rules) in name-rules
+     ,@'#.(loop for name being the hash-key in *python-prods*
+              using (hash-value rules)
               collect `(,name ,@(loop for (terms outcome options) in rules
                                     for args = (loop for i from 1 to (length terms)
                                                    collect (intern (format nil "$~A" i) :clpython.parser))
