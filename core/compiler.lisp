@@ -846,7 +846,8 @@ LOCALS shares share tail structure with input arg locals."
 	 (let ((name (second form)))
 	   (when (and target 
 		      (not (member name locals))
-		      (not (member name new-locals)))
+		      (not (member name new-locals))
+                      (not (member name globals)))
 	     (push name locals)
 	     (push name new-locals)))
 	 (values nil t))
@@ -1077,7 +1078,7 @@ LOCALS shares share tail structure with input arg locals."
 	 
 	 (local-lookup ()
 	   (if (member name (get-pydecl :safe-lex-visible-vars e))
-	       (progn (compiler-message "Safe lexical var `~A' in context `~A'."
+	       (progn (compiler-message "Safe lexical var `~A' in context `~A': skipped boundness check."
                                         name (format nil "~{~A~^.~}" (reverse (get-pydecl :context-stack e))))
                       name)
 	     `(or ,name
@@ -1334,6 +1335,10 @@ LOCALS shares share tail structure with input arg locals."
 
 (define-compiler-macro [suite-stmt] (&whole whole stmts &environment e)
   ;; Skip checks for bound-ness, when a lexical variable is certainly bound.
+  
+  (unless (eq (get-pydecl :context e) :function)
+    (return-from [suite-stmt] whole))
+  
   (let* ((deleted-vars (ast-deleted-variables whole))
          (deleted-safe (intersection deleted-vars (get-pydecl :safe-lex-visible-vars e)))
          (global-safe (intersection (get-pydecl :lexically-declared-globals e) 
@@ -1353,7 +1358,6 @@ LOCALS shares share tail structure with input arg locals."
             until (match-p s '([assign-stmt] ?value ?targets))
             collect s into before
             finally (return (values before s (cdr sublist))))
-      #+(or)(warn "bef: ~A  ass: ~A  after: ~A" before-stmts ass-stmt after-stmts)
       (assert ass-stmt)
       `(progn ,@(when before-stmts
                   `(([suite-stmt] ,before-stmts))) ;; recursive, but doesn't contain assign-stmt
@@ -1361,10 +1365,18 @@ LOCALS shares share tail structure with input arg locals."
               ,@(when after-stmts
                   (let ((bound-vars (assign-stmt-get-bound-vars ass-stmt)))
                     `((with-pydecl ((:safe-lex-visible-vars
-                                     ,(union (set-difference 
-                                              bound-vars
-                                              (nconc deleted-vars (get-pydecl :lexically-declared-globals e)))
-                                             (get-pydecl :safe-lex-visible-vars e))))
+                                     ,(let ((new-safe-vars (get-pydecl :safe-lex-visible-vars e)))
+                                        (dolist (v bound-vars new-safe-vars)
+                                          (when (and (member v (get-pydecl :lexically-visible-vars e))
+                                                     (not (member v deleted-vars)))
+                                            (assert (not (member v (get-pydecl :lexically-declared-globals e))) 
+                                                () "Bug: variable ~A both lexicaly-visible and lexically-global." v)
+                                            (unless (member v (get-pydecl :safe-lex-visible-vars e))
+                                              (push v new-safe-vars)
+                                              (compiler-message "New safe-lev-vars in ~A, after assignment \"~A\": ~A."
+                                                                (get-pydecl :context e)
+                                                                (clpython.parser::py-pprint ass-stmt)
+                                                                v)))))))
                         ([suite-stmt] ,after-stmts))))))))) ;; recursive, but 1 assign-stmt less
 
 (defvar *last-raised-exception* nil)
@@ -1986,12 +1998,12 @@ Non-negative integer denoting the number of args otherwise."
                                         '(,ka ,kb) f-body))))))))))))
 
 (defstruct (func-args (:type vector) (:conc-name fa-) (:constructor make-fa))
-  (num-pos-args         0 :type fixnum :read-only t)
-  (num-key-args         0 :type fixnum :read-only t)
-  (num-pos-key-args     0 :type fixnum :read-only t)
-  (pos-key-arg-names    #() :type vector :read-only t)
-  (key-arg-default-vals #() :type vector :read-only nil) ;; filled at load time
-  (arg-kwname-vec       #() :type vector :read-only t)
+  (num-pos-args          0 :type fixnum :read-only t)
+  (num-key-args          0 :type fixnum :read-only t)
+  (num-pos-key-args      0 :type fixnum :read-only t)
+  (pos-key-arg-names    nil :type (or null vector) :read-only t)
+  (key-arg-default-vals nil :type (or null vector) :read-only nil) ;; filled at load time
+  (arg-kwname-vec       nil :type (or null vector) :read-only t)
   (*-arg                nil :type symbol :read-only t)
   (**-arg               nil :type symbol :read-only t)
   (func-name            nil :type symbol :read-only t))
