@@ -119,10 +119,300 @@ CLASSDEF, FUNCDEF or LAMBDA."
       (walk-py-ast-1 ast :value value :target target))))
 
 
+#+(or)
 (defun ast-recurse-fun (f form &rest context &key value target)
   "Given function F and a FORM (AST), walks into subforms of FORM in the given
 VALUE and TARGET context."
   (declare (optimize (debug 3)))
+  (assert form () "AST-RECURSE-FUN: got NIL as AST")
+  
+  (unless (consp form)
+    (return-from ast-recurse-fun form))
+  
+  (macrolet ((make (form)
+	       `(if *walk-build-result*
+		    ,form
+		  (let ((y ,form))
+		    (declare (dynamic-extent y)
+			     (ignore y)) ;; This way Allegro will optimize away most consing
+		    nil))))
+    
+    (case (car form)
+      
+      ([assert-stmt]
+       (make `([assert-stmt] ,(funcall f (second form) :value +normal-value+)
+			     ,(when (third form) (funcall f (third form) :value +normal-value+)))))
+      
+      ([assign-stmt]
+       (make `([assign-stmt] ,(funcall f (second form) :value +normal-value+ :target +no-target+)
+			     ,(mapcar (lambda (x) (funcall f x :target +normal-target+))
+				      (third form)))))
+      
+      ([attributeref-expr]
+       ;; Don't recurse on attr name
+       (make `([attributeref-expr] ,(funcall f (second form) :value +normal-value+) ,(third form))))
+    
+      ([augassign-stmt]
+       (make `(augassign-stmt ,(second form)
+			      ;; the place is used as both value and target
+			      ,(funcall f (third form)
+					:value +augassign-value+
+					:target +augassign-target+)
+			      ,(funcall f (fourth form) :value +normal-value+))))
+      
+      ([backticks-expr]
+       (make `(backticks-expr ,(funcall f (second form) :value +normal-value+))))
+      
+      (([binary-expr] [binary-lazy-expr])
+       (make `(,(first form) ,(second form)
+			     ,(funcall f (third form)  :value +normal-value+)
+			     ,(funcall f (fourth form) :value +normal-value+))))
+            
+      ([break-stmt]
+       form) 
+      
+      ([call-expr]
+       (destructuring-bind (primary (p-a k-a *-a **-a)) (cdr form)
+	 (make `([call-expr] ,(funcall f primary :value +normal-value+)
+			     (,(mapcar (lambda (pos-arg) (funcall f pos-arg :value +normal-value+)) p-a)
+			      ,(mapcar (lambda (kv)
+					 (list (first kv) (funcall f (second kv) :value +normal-value+)))
+				       k-a)
+			      ,(when *-a  (funcall f *-a  :value +normal-value+))
+			      ,(when **-a (funcall f **-a :value +normal-value+)))))))
+      
+      ([classdef-stmt] 
+       (destructuring-bind (cname inheritance suite) (cdr form)
+	 (assert (eq (car inheritance) '[tuple-expr]))
+	 (make `([classdef-stmt] ,(funcall f cname :target +normal-target+)
+				 ,(funcall f inheritance :value +normal-value+)
+				 ,(if *walk-into-nested-namespaces*
+				      (funcall f suite)
+				    suite)))))
+    
+      ([comparison-expr] 
+       (destructuring-bind (op left right) (cdr form)
+	 (make `([comparison-expr] ,op
+				   ,(funcall f left  :value +normal-value+)
+				   ,(funcall f right :value +normal-value+)))))
+
+      ([continue-stmt]
+       form)
+      
+      ([del-stmt]
+       ;; Note the special (true) value for :target
+       (make `([del-stmt] ,(funcall f (second form) :target +delete-target+))))
+      
+      ([dict-expr]
+       (make `([dict-expr] ,(loop for (k . v) in (second form)
+				collect (cons (funcall f k :value +normal-value+)
+					      (funcall f v :value +normal-value+))))))
+    
+      ([exec-stmt]
+       (destructuring-bind (code globals locals) (cdr form)
+	 (make `([exec-stmt] ,(funcall f code :value +normal-value+)
+			     ,(when globals (funcall f globals :value +normal-value+))
+			     ,(when locals  (funcall f locals  :value +normal-value+))))))
+    
+      ([for-in-stmt]
+       (destructuring-bind (targets sources suite else-suite)
+	   (cdr form)
+	 (make `([for-in-stmt] ,(funcall f targets :target +normal-target+)
+			       ,(funcall f sources :value +normal-value+)
+			       ,(funcall f suite)
+			       ,(when else-suite (funcall f else-suite))))))
+    
+      ([funcdef-stmt]
+       (destructuring-bind (decorators fname (pos-args key-args *-arg **-arg) suite)
+	   (cdr form)
+	 (make `([funcdef-stmt] ,(loop for deco in decorators
+				     collect (funcall f deco :value +normal-value+))
+				,(funcall f fname :target +normal-target+)
+				(,pos-args
+				 ,(mapcar (lambda (kv)
+					    (list (first kv)
+						  (funcall f (second kv) :value +normal-value+)))
+					  key-args)
+				 ,*-arg
+				 ,**-arg)
+				,(if *walk-into-nested-namespaces*
+				     (funcall f suite)
+				   suite)))))
+    
+      (([generator-expr] [listcompr-expr])
+       (destructuring-bind (item for-in/if-clauses) (cdr form)
+	 ;; The order of walking subforms is important: if we started
+	 ;; recursing on ITEM now, then the compiler might raise a
+	 ;; SyntaxError ("local variable used before assignment")
+	 ;; because the variable is bound in a `for-in' or `if' clause.
+	 (flet ((clause-handler (for/if)
+		  (ecase (car for/if)
+		    ([for-in-clause] (destructuring-bind (expr iterable) (cdr for/if)
+				       (let* ((rec-iterable (funcall f iterable :value +normal-value+))
+					      (rec-expr (funcall f expr :target +normal-target+)))
+					 `(,(car for/if) ,rec-expr ,rec-iterable))))
+		    ([if-clause] (let* ((test (second for/if)))
+				   `(,(car for/if) ,(funcall f test :value +normal-value+)))))))
+	   (let* ((rec-clauses (mapcar #'clause-handler for-in/if-clauses))
+		  (rec-item (funcall f item :value +normal-value+)))
+	     `(,(car form) ,rec-item ,rec-clauses)))))
+
+      ([global-stmt]
+       (let ((names (second form)))
+         `(,(car form) ,(funcall f names :target +global-decl-target+))))
+      
+      ([identifier-expr]
+       form)
+      
+      ([if-expr]
+       (destructuring-bind (condition then else) (cdr form)
+         (make `([if-expr] ,(funcall f condition :value +normal-value+)
+                           ,(funcall f then :value +normal-value+)
+                           ,(funcall f else :value +normal-value+)))))
+      
+      ([if-stmt]
+       (destructuring-bind
+	   (clauses else-suite) (cdr form)
+	 (make `([if-stmt] ,(loop for (test suite) in clauses
+				collect (list (funcall f test :value +normal-value+)
+					      (funcall f suite)))
+			   ,(when else-suite (funcall f else-suite))))))
+    
+      ([import-stmt]
+       ;; IMPORT statement is not walked into; name handling is a bit tricky.
+       (values form t))
+    
+      ([import-from-stmt]
+       ;; IMPORT-FROM statement is not walked into; name handling is a bit tricky.
+       (values form t))
+     
+      ([lambda-expr]
+       (destructuring-bind
+	   ((pos-a key-a *-a **-a) expr) (cdr form)
+	 (make `([lambda-expr] (,pos-a
+				,(mapcar (lambda (kv) 
+					   (funcall f (second kv) :value +normal-value+))
+					 key-a)
+				,*-a
+				,**-a)
+			       ,(if *walk-into-nested-namespaces*
+				    (funcall f expr :value +normal-value+)
+				  expr)))))
+    
+      (([list-expr] [tuple-expr])
+       ;; The items inside are a target iff the list itself is
+       (make `(,(first form)
+	       ,(loop for x in (second form)
+		    collect (funcall f x :value value :target target)))))
+    
+      ([module-stmt]
+       (make `([module-stmt] ,(funcall f (second form) :value +normal-value+))))
+      
+      ([pass-stmt]
+       form)
+      
+      ([print-stmt]
+       (destructuring-bind (dest items comma?) (cdr form)
+	 (make `([print-stmt]
+		 ,(when dest (funcall f dest :value +normal-value+))
+		 ,(mapcar (lambda (x) (funcall f x :value +normal-value+)) items)
+		 ,comma?))))
+    
+      ([raise-stmt]
+       (destructuring-bind (exc var tb) (cdr form)
+	 (make `([raise-stmt] ,(when exc (funcall f exc :value +normal-value+))
+			      ,(when var (funcall f var :value +normal-value+))
+			      ,(when tb  (funcall f var :value +normal-value+))))))
+      ([return-stmt]
+       (make `([return-stmt] ,(when (second form)
+				(funcall f (second form) :value +normal-value+)))))
+      
+      ([slice-expr]
+       (destructuring-bind (start stop step) (cdr form)
+	 (make `([slice-expr] ,(when start (funcall f start :value +normal-value+))
+			      ,(when stop  (funcall f stop  :value +normal-value+))
+			      ,(when step  (funcall f step  :value +normal-value+))))))
+      
+      ([subscription-expr]
+       `([subscription-expr] ,(funcall f (second form) :value +normal-value+)
+			     ,(funcall f (third form)  :value +normal-value+)))
+      ([suite-stmt]
+       `([suite-stmt] ,(loop for x in (second form) collect (funcall f x))))
+      
+      ([try-except-stmt]
+       (destructuring-bind (suite except-clauses else-suite) (cdr form)
+	 (make `([try-except-stmt]
+		 ,(funcall f suite)
+		 (,@(loop for (exc var handler-form) in except-clauses 
+			collect `(,(when exc (funcall f exc :value +normal-value+))
+				     ,(when var (funcall f var :target +normal-target+))
+				   ,(funcall f handler-form))))
+		 ,(when else-suite
+		    (funcall f else-suite))))))
+      
+      ([try-finally-stmt]
+       (destructuring-bind (try-suite finally-suite) (cdr form)
+	 (make `([try-finally-stmt]
+		 ,(funcall f try-suite) ,(funcall f finally-suite)))))
+    
+      ([unary-expr]
+       (make `(unary-expr ,(second form) ,(funcall f (third form) :value +normal-value+))))
+      
+      ([while-stmt]
+       (destructuring-bind (test suite else-suite) (cdr form)
+	 (make `([while-stmt] ,(funcall f test :value +normal-value+)
+			      ,(funcall f suite)
+			      ,(when else-suite (funcall f else-suite))))))
+
+      ([with-stmt]
+       (destructuring-bind (test var suite) (cdr form)
+         (make `([with-stmt] ,(funcall f test :value +normal-value+)
+                             ,(when var (funcall f var :target +normal-target+))
+                             ,(funcall f suite)))))
+       
+      (([yield-expr] [yield-stmt])
+       (make `(,(car form) ,(when (second form)
+                              (funcall f (second form) :value +normal-value+)))))
+    
+      (t
+       (when (and (symbolp (car form))
+                  (not (fboundp (car form)))
+		  *walk-warn-unknown-form*)
+	 (warn "WALK: assuming ~S is a Lisp form: not walked into." form))
+       form))))
+
+#||
+(def-ast-node [assert-stmt] (test +normal-value+) (&optional raise-arg +normal-value+))
+(def-ast-node [assign-stmt] (value +normal-value+) (&rest targets +normal-value+))
+(def-ast-node [attributeref-expr] (item +normal-value+) attr)
+(def-ast-node [augassign-stmt] op (place +augassign-target/value+) (val +normal-value+))
+(def-ast-node [backticks-expr] (val +normal-value+))
+(def-ast-node [binary-expr] op (left +normal-value+) (right +normal-value+))
+(def-ast-node [binary-lazy-expr] op (left +normal-value+) (right +normal-value+))
+(def-ast-node [break-stmt])
+(def-ast-node [call-expr] (primary +normal-value+) ((&rest pos-arg +normal-value+)
+                                                    (&rest kv &key 'second +normal-value+)
+                                                    (&optional *-a +normal-value+)
+                                                    (&optional **-a +normal-value+)))
+(def-ast-node [classdef-stmt] (name +normal-target+) (inheritance +normal-value+) (suite +namespace-suite+))
+(def-ast-node [comparison-expr] op (left +normal-value+) (right +normal-value+))
+(def-ast-node [continue-stmt] )
+(def-ast-node [del-stmt] (item +delete-target+))
+(def-ast-node [dict-expr] (&rest kv (&key 'car +normal-value+) (&key 'cdr +normal-value+)))
+(def-ast-node [exec-stmt]
+    (code +normal-value+) (&optional globals +normal-value+) (&optional locals +normal-value+))
+(def-ast-node [for-in-stmt] (target=2 +normal-target+) (sources=1 +normal-value+) (suite +suite+)
+              (&optional else-suite +suite+))
+(def-ast-node [funcdef-stmt] (&rest decorators=2 +normal-value+) (fname=3 +normal-target+)
+              (pos-args (&rest key-args=1 &key 'second +normal-value+) *-arg **-arg)
+              +namespace-suite+)
+||#
+    
+(defun ast-recurse-fun (f form &rest context &key value target)
+  "Given function F and a FORM (AST), walks into subforms of FORM in the given
+VALUE and TARGET context."
+  (declare (optimize (debug 3))
+           (ignore context))
   (assert form () "AST-RECURSE-FUN: got NIL as AST")
   
   (unless (consp form)
@@ -397,7 +687,7 @@ VALUE and TARGET context."
     (when (symbolp subform)
       (setf subform `(,subform &rest ,context)))
     `(walk-py-ast ,ast
-		  (excl:named-function :with-py-ast-function
+		  (named-function :with-py-ast-function
 		    (lambda ,subform
 		      (declare (optimize (debug 3))
 			       (ignore ,context))
