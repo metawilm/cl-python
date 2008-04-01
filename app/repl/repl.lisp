@@ -180,9 +180,9 @@ KIND can be :ptime, :time, :space, :pspace or NIL."
                (let ((f `(lambda ()
                            (clpython::with-this-module-context (,*repl-mod*)
                              ,suite))))
-                 (when *repl-compile*
-                   (setf f (compile nil f)))
-                 f))
+                 (if *repl-compile*
+                     (setf f (compile nil f))
+                   (coerce f 'function)))) ;; coerce, as lambda expr is not funcallable
 	     
              (nice-one-line-input-abbrev (total)
                (check-type total string)
