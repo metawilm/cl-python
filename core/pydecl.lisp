@@ -23,7 +23,7 @@
       :inside-loop-p              ;; T iff inside WHILE of FOR  (to check BREAK, CONTINUE).
       :inside-setf-py-attr        ;; T if insides a (setf (py-attr ..) ..) form (work around Allegro CL bug).
       :lexically-declared-globals ;; List of variable names declared global in an outer scope (also global in inner scopes).
-      :lexically-visible-vars     ;; List of variable names that can be closed over.
+      :lexically-visible-vars     ;; List of variable names that can be closed over (excludes globals).
       :mod-futures                ;; The features imported from the __future__ module.
       :mod-globals-names          ;; Vector of variable names at the module level.
       :safe-lex-visible-vars      ;; List of all variables guaranteed to be lexically visible and bound; subset of :LEX-VIS-VARS.
@@ -43,6 +43,10 @@
 ;; This is controlled by a dynamic variable and not by a read-time conditional,
 ;; so that the test suite can force Allegro to not use its new env accessors.
 
+(defun all-use-environment-accessor-values ()
+  "Used by unit test"
+  (if *use-environment-acccessors* '(nil t) '(nil)))
+
 #+(and :allegro :new-environments)
 (sys:define-declaration
     pydecl (&rest property-pairs) nil :declare
@@ -60,6 +64,7 @@
          ,@body)
     `(symbol-macrolet ((%pydecl-state% ,(nconc (copy-list pairs)
                                          (get-pydecl-state env))))
+       (declare (ignorable %pydecl-state%))
        ,@body)))
 
 (defun ensure-valid-pydecl-keys (&rest keys)
@@ -73,7 +78,7 @@
              (sys:declaration-information 'pydecl env)
              #-(and :allegro :new-environments)
              (error "CLPython compiler item: ~S is true, but don't know how to
-use the CLTL-like environment accessors in this Lisp:~%  ~A ~A."
+use the CLTL-like environment accessors in this Lisp: \"~A ~A\"."
                     '*use-environment-acccessors*
                     (lisp-implementation-type)
                     (lisp-implementation-version)))
