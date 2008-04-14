@@ -1,4 +1,4 @@
-;; -*- package: user -*-
+;; -*- package: cl-user -*-
 ;;
 ;; This software is Copyright (c) Franz Inc. and Willem Broekema.
 ;; Franz Inc. and Willem Broekema grant you the rights to
@@ -9,15 +9,10 @@
 
 ;;;; ASDF System Definitions
 
-(in-package #:user)
+(in-package #:cl-user)
 
 (eval-when (:compile-toplevel)
   (error "This ASDF file should be run interpreted."))
-
-
-;;; Check Allegro version
-#+(and allegro-version>= (not (version>= 8 1)))
-(warn "CLPython is being developed on Allegro Common Lisp 8.1, but it might work in this earlier version, too.")
 
 
 ;;; Core systems: parser, compiler, runtime
@@ -53,7 +48,7 @@
 
 (asdf:defsystem :clpython.core
     :description "Python semantics and compiler"
-    :depends-on (:clpython.package :clpython.parser)
+    :depends-on (:clpython.package :clpython.parser :closer-mop)
     :components ((:module "core"
                           :serial t
                           :components ((:file "csetup"       )
