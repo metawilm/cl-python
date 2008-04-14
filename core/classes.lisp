@@ -25,7 +25,7 @@
   ;; This means that it is not guaranteed to first define a class and then below it
   ;; in a function use (load-time-value (find-class ..)), therefore also include a run-time
   ;; check.
-  `(or (load-time-value (find-class ,clsname))
+  `(or (load-time-value (find-class ,clsname nil))
        (find-class ,clsname)))
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
@@ -237,6 +237,7 @@
 					    #.*package*)))
 		     (push real-name real-args)
 		     (setf body `(let ((,real-name (deproxy ,real-name)))
+                                   (declare (ignorable ,real-name))
 				   ,body)))
 		   
 		else do (push sym real-args)
@@ -511,7 +512,6 @@
 ;; py-class-method
 
 (def-py-method py-class-method.__new__ :static (cls func)
-  (declare (ignore func))
   (make-instance cls))
 
 (defun classp (x)
@@ -521,7 +521,6 @@
   #-(or allegro lispworks cmu) (typep x 'class))
   
 (def-py-method py-class-method.__get__ (x inst class)
-  (declare (ignore class))
   (let ((arg (if (classp inst) inst (py-class-of inst))))
     (make-instance 'py-bound-method
       :func (slot-value x 'func)
@@ -538,14 +537,11 @@
 ;; py-attribute-method
 
 (def-py-method py-attribute-method.__get__ (x inst class)
-  #+(or)(break "pam.get ~A ~A ~A" x inst class)
-  (declare (ignore class))
   (if (and inst (not (eq inst *the-none*)))
       (py-call (slot-value x 'func) inst)
     nil))
 
 (def-py-method py-attribute-method.__set__ (x obj val)
-  (declare (ignore val))
   (py-raise '{TypeError}
 	    "Attribute ~A of object ~A is read-only (value: ~A)"
 	    x obj (py-call (slot-value x 'func) obj)))
@@ -570,7 +566,6 @@
     (error "No writer defined for writable attribute: ~A" x)))
 
 (def-py-method py-writable-attribute-method.__get__ (x inst class)
-  (declare (ignore class))
   (if (and inst (not (eq inst *the-none*)))
       (py-call (slot-value x 'func) inst)
     nil))
@@ -657,7 +652,6 @@
   (make-instance 'py-static-method :func func))
 
 (def-py-method py-static-method.__get__ (x inst class)
-  (declare (ignore inst class))
   (slot-value x 'func))
 
 (def-py-method py-static-method.__repr__ (x)
@@ -1092,11 +1086,9 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 (defun none-p (x) (eq x *the-none*))
 
 (def-py-method py-none.__repr__ (x)
-  (declare (ignore x))
   "None")
 
 (def-py-method py-none.__nonzero__ (x)
-  (declare (ignore x))
   *the-false*)
    
 ;; Ellipsis
@@ -1177,11 +1169,10 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
     (setf (py-attr x attr.sym) nil)))
 
 (def-py-method py-object.__new__ :static (cls &rest attr)
-  (declare (ignore attr))
   (make-instance cls))
 
 (def-py-method py-object.__init__ (&rest attr)
-  (declare (ignore attr)))
+  )
 
 (def-py-method py-object.__class__ :attribute-read (x)
   (py-class-of x))
@@ -1197,7 +1188,6 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 
 (def-py-method py-object.__nonzero__ (x)
   ;; By default, objects are nonzero. Override in subclass.
-  (declare (ignore x))
   (py-bool t))
 
 (defun recursive-class-dict-lookup (cls attr &optional cls-list)
@@ -1244,7 +1234,6 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
       (bind-val val x x.cls))))
     
 (def-py-method py-object.__get__ (value instance class)
-  (declare (ignore instance class))
   value)
 
 ;; Type (User object)
@@ -1288,7 +1277,6 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
     c))
 
 (def-py-method py-type.__init__ (cls &rest args)
-  (declare (ignore cls args))
   nil)
 
 (def-py-method py-type.__name__ :attribute (cls)
@@ -1432,7 +1420,6 @@ but the latter two classes are not in CPython.")
 		 x))
 
 (def-py-method py-module.__init__ (&rest args)
-	       (declare (ignore args))
 	       nil)
 
 (def-py-method py-module.__repr__ (x^)
@@ -1505,7 +1492,7 @@ but the latter two classes are not in CPython.")
 
 (def-py-method py-module.__getattribute__ (x^ attr)
   (flet ((raise-attr-error (attr)
-	   (py-raise '{AttributeError} "Module ~A has no attribute ~A" x attr)))
+	   (py-raise '{AttributeError} "Module ~A has no attribute ~A." x attr)))
     
     (let ((attr.sym (py-string-val->symbol attr :intern nil)))
       (with-slots (globals-names globals-values dyn-globals) x
@@ -1542,13 +1529,13 @@ but the latter two classes are not in CPython.")
 	(let ((i (position attr.sym globals-names :test #'eq)))
 	  (when i
 	    (unless (or val (svref globals-names i))
-	      (py-raise 'Attribute "Module ~A has no attribute ~A to delete" x attr))
+	      (py-raise 'Attribute "Module ~A has no attribute ~A to delete." x attr))
 	    (setf (svref globals-values i) val)
 	    (return-from set-module-attr val))))
       
       (progn
 	(unless (or val (gethash (or attr.sym attr) dyn-globals))
-	  (py-raise '{AttributeError} "Module ~A has no attribute ~A to delete" x attr))
+	  (py-raise '{AttributeError} "Module ~A has no attribute ~A to delete." x attr))
 	(if val
 	    (setf (gethash (or attr.sym attr) dyn-globals) val)
 	  (remhash (or attr.sym attr) dyn-globals))
@@ -1774,7 +1761,6 @@ But if RELATIVE-TO package name is given, result may contains dots."
 	  (slot-value x 'doc)  (or doc  ""))))
 
 (def-py-method py-property.__get__ (x obj class)
-  (declare (ignore class))
   (with-slots (fget) x
     (if (eq fget *the-none*)
 	(py-raise '{AttributeError} "Cannot get attribute")
@@ -2141,7 +2127,7 @@ But if RELATIVE-TO package name is given, result may contains dots."
 
 (def-py-method py-dict.__delitem__ (dict k)
   (or (dikt-del (py-dict-dikt dict) k)
-      (py-raise '{KeyError} "Dict ~A has no such key: ~A" dict k)))
+      (py-raise '{KeyError} "Dict ~A has no such key: ~A." dict k)))
 
 (def-py-method py-dict.__eq__ (dict1 dict2)
   (py-bool (cond ((eq dict1 dict2) t)
@@ -2153,7 +2139,7 @@ But if RELATIVE-TO package name is given, result may contains dots."
 (def-py-method py-dict.__getitem__ (dict k)
   "KEY may be symbol (converted to string)"
   (or (dikt-get (py-dict-dikt dict) k)
-      (py-raise '{KeyError} "Dict ~A has no such key: ~A" dict k)))
+      (py-raise '{KeyError} "Dict ~A has no such key: ~A." dict k)))
 
 (def-py-method py-dict.__iter__ (dict)
   (py-dict.iterkeys dict))
@@ -2342,7 +2328,6 @@ But if RELATIVE-TO package name is given, result may contains dots."
   (make-array size :adjustable t :fill-pointer 0))
 
 (def-py-method py-list.__new__ :static (cls &optional iterable)
-	       (declare (ignore iterable))
 	       (let ((vec (make-py-list)))
 		 (if (eq cls (ltv-find-class 'py-list))
 		     vec
@@ -2758,7 +2743,6 @@ But if RELATIVE-TO package name is given, result may contains dots."
     y))
 
 (def-py-method py-string.center (x^ width &optional (fillchar " "))
-  (declare (ignorable x width))
   (assert (= (length fillchar) 1))
   (error :todo))
    
@@ -2773,7 +2757,6 @@ But if RELATIVE-TO package name is given, result may contains dots."
   (py-bool (string= (subseq x (- (length x) (length suffix))) suffix)))
   
 (def-py-method py-string.find (x^ item &rest args)
-  (declare (ignore x item args))
   (warn "todo :string.find")
   -1)
 
@@ -2923,19 +2906,12 @@ But if RELATIVE-TO package name is given, result may contains dots."
                                            (make-tuple-from-list (if single-p (list item/s) item/s))))))))
 
 (def-py-method py-tuple.__hash__ (x^)
-  (declare (optimize (speed 3)))
-  (loop with res = 0
-      for i in x
-      for ix fixnum from 0
-      for i.hash = (py-hash i)
-      for i.hash.16bit = (the fixnum (logand (the integer i.hash) #xFFFF)) ;; use 16 bits
-      for i.shift = (the fixnum (mod (* 7 ix) #.(- (1- (integer-length most-positive-fixnum)) 16)))
-      for i.h.rotated = (ash i.hash.16bit i.shift)
-      do #+(or)(format t "elm ~A = ~A -> h=~A=~A  shift=~A~%" j i i.hash i.hash.16bit i.shift)
-         (unless (typep i.h.rotated 'fixnum)
-           (error "tuple hash bug"))
-         (setf res (logxor res (sxhash i.h.rotated)))
-      finally (return res)))
+  (declare (optimize (speed 3) (safety 0) (debug 0)))
+  (with-stack-list (tmp (py-hash (first x))
+                        (py-hash (second x))
+                        (py-hash (third x))
+                        (py-hash (fourth x)))
+    (sxhash tmp)))
 
 (def-py-method py-tuple.__iter__ (x^)
   (make-iterator-from-function
@@ -3373,6 +3349,7 @@ finished; F will then not be called again."
 (defgeneric py-call (f &rest args)
 
   (:method ((f null) &rest args)
+           (declare (ignore args))
 	   (error "PY-CALL of NIL"))
   
   (:method ((f t) &rest args)
@@ -3484,7 +3461,7 @@ finished; F will then not be called again."
 		      (if __delitem__
 			    (py-call __delitem__ x item)
 			(py-raise '{TypeError}
-				  "Object ~A (a ~A) has no `__delitem__' method"
+				  "Object ~A (a ~A) has no `__delitem__' method."
 				  x (class-name (py-class-of x)))))
 	     
 	     (let ((si (recursive-class-dict-lookup (py-class-of x) '{__setitem__})))
@@ -3934,7 +3911,7 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
 			    (py-call ,method)
 			  ,(or error
 			       `(py-raise '{TypeError}
-					  "Object ~A (a ~A) has no `~A' method"
+					  "Object ~A (a ~A) has no `~A' method."
 					  x (class-name (py-class-of x))
 					  ',method)))))))
 
@@ -3969,7 +3946,7 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
           (funcall .b .c)
         (return-from py-hash (py-call .a)))))
   (py-raise '{TypeError}
-            "Object ~A (a ~A) has no `~A' method"
+            "Object ~A (a ~A) has no `~A' method."
             x (class-name (py-class-of x))
             '{__hash__}))
 ||#

@@ -13,4 +13,6 @@
 
 (defun py-raise (exc-type string &rest format-args)
   "Raise a Python exception with given format string"
-  (error exc-type :args (cons string format-args)))
+  (if +exceptions-are-python-objects+
+      (error exc-type :args (cons string format-args)))
+  (error exc-type

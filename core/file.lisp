@@ -47,7 +47,6 @@
   ;; line buffered, and larger numbers specify the buffer size.
   ;; 
   ;; Note: open() is an alias for file().   [pydoc]
-  (declare (ignore buffering))
   (unless (stringp name)
     (py-raise '{TypeError} "Invalid file name: ~S." name))
   (setf mode (if mode (string-downcase (py-val->string mode)) "r"))
@@ -106,7 +105,6 @@
   *the-none*)
 
 (def-py-method py-file.fileno (f)
-  (declare (ignore f))
   "File descriptor"
   ;; ?? (ensure-open-file f)
   (py-raise '{IOError} "file.fileno(): todo"))
@@ -191,7 +189,6 @@
   ;; size) are read. Objects implementing a file-like interface may
   ;; choose to ignore sizehint if it cannot be implemented, or cannot
   ;; be implemented efficiently.
-  (declare (ignore sizehint))
   (ensure-open-file f)
   (make-py-list-from-list (loop for line = (multiple-value-bind (line eof-p) 
 					       (py-file.readline f)
@@ -258,7 +255,6 @@
   ;; include that file may remain unchanged, increase to the specified
   ;; size as if zero-filled, or increase to the specified size with
   ;; undefined new content. Availability: Windows, many Unix variants.
-  (declare (ignore size))
   (ensure-open-file f)
   (error "todo"))
 
@@ -275,7 +271,6 @@
   ;; iterable object producing strings, typically a list of
   ;; strings. There is no return value. (The name is intended to match
   ;; readlines(); writelines() does not add line separators.)
-  (declare (ignore sequence))
   (ensure-open-file f)
   (error "todo"))
 
@@ -297,7 +292,6 @@
   ;; may not be present on all file-like objects. It may also be None,
   ;; in which case the file uses the system default encoding for
   ;; converting Unicode strings.
-  (declare (ignore f))
   (error "todo"))
 
 (def-py-method py-file.mode :attribute (f)
@@ -324,7 +318,6 @@
   ;; indicate that multiple newline conventions were encountered. For
   ;; files not opened in universal newline read mode the value of this
   ;; attribute will be None.
-  (declare (ignore f))
   (error "todo"))
 
 (def-py-method py-file.softspace :attribute (f)
@@ -338,6 +331,5 @@
   ;; provide a writable softspace attribute. Note: This attribute is
   ;; not used to control the print statement, but to allow the
   ;; implementation of print to keep track of its internal state.
-  (declare (ignore f))
   (error "todo"))
     

@@ -15,17 +15,32 @@
 (defvar *exceptions-loaded* nil)
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
-  
+(defconstant +exceptions-are-python-objects+
+    #+allegro t
+    #+lispworks t
+    #+cmu nil    ;; CMUCL does not allow arbitrary meta/superclasses in conditions
+    #-(or allegro lispworks cmu) nil)
+
+(when +exceptions-are-python-objects+
+  (pushnew :clpython-exceptions-are-python-objects *features*))
+
+#+clpython-exceptions-are-python-objects
 (defclass {Exception} (py-object error)
   ((args :initarg :args :initform nil :documentation "Arguments as Lisp list"
 	 :accessor exception-args))
   (:metaclass py-type))
 
-(def-py-method {Exception.__new__} :static (cls &rest args)
-	       (declare (ignore args))
-	       #+(or)(assert (subtypep cls (load-time-value (find-class '{Exception} ))))
-	       (make-instance cls))
+#-clpython-exceptions-are-python-objects
+(define-condition {Exception} (error)
+  ((args :initarg :args :initform nil :documentation "Arguments as Lisp list"
+	 :accessor exception-args)))
 
+#+clpython-exceptions-are-python-objects
+(def-py-method {Exception.__new__} :static (cls &rest args)
+  #+(or)(assert (subtypep cls (load-time-value (find-class '{Exception} ))))
+  (make-instance cls))
+
+#+clpython-exceptions-are-python-objects
 (def-py-method {Exception.__init__} (x &rest args)
   ;; raise AttributeError("a %s b", 24)  =>  AttributeError: "a 24 b"
   (when (and (>= (length args) 2)
@@ -75,9 +90,12 @@
   (declare (optimize (debug 3))
 	   (notinline def-python-exceptions))
   (flet ((def-sub-exc (super exc-name)
-	     (let ((c (ensure-class exc-name
+	     (let ((c #+clpython-exceptions-are-python-objects
+                      (ensure-class exc-name
                                     :direct-superclasses (list super)
-                                    :metaclass 'py-type)))
+                                    :metaclass 'py-type)
+                      #-clpython-exceptions-are-python-objects
+                      (eval `(define-condition ,exc-name ,(list super) nil))))
 	       (push c *exception-classes*))))
     (if (symbolp child-tree)
 	(def-sub-exc parent child-tree)
@@ -95,29 +113,26 @@
 
 ) ;; eval-when
 
-(defun py-raise-runtime-error ()
-  ;; RuntimeError object is allocated at load-time, to prevent causing
-  ;; a new error.
-  (error (load-time-value (make-instance '{RuntimeError}))))
-
+#+clpython-exceptions-are-python-objects
 (defmethod print-object ((x {Exception}) stream)
   (format stream "~A" (class-name (class-of x)))
   (when (and (slot-boundp x 'args)
 	     (slot-value x 'args))
     (destructuring-bind (string . format-args)
         (slot-value x 'args)
-      #+(or) ;; old
-      (progn (format stream ": ")
-             (apply #'format stream string format-args))
       (format stream ": ~@<~@;~A~:>" (if format-args (apply #'format nil string format-args) string)))))
 
+#+clpython-exceptions-are-python-objects
 (def-py-method {Exception.__repr__} (x)
   (with-output-to-string (s)
     (print-object x s)))
 
 
 (defparameter *cached-StopIteration*
-    (make-instance '{StopIteration} :args (list "Iterator has finished"))
+    #+clpython-exceptions-are-python-objects
+  (make-instance '{StopIteration} :args (list "Iterator has finished"))
+  #-clpython-exceptions-are-python-objects
+  (make-condition '{StopIteration})
   "Shared instance of this commonly used exception")
 
 (defun raise-StopIteration ()

@@ -1568,7 +1568,7 @@ finally:
 ;; Helper functions for the compiler
 
 (defun stmt-p (sym)
-  (check-type sym symbl)
+  (check-type sym symbol)
   (let ((sym.name (symbol-name sym)))
     (cond ((<= (length sym.name) 5) nil)
           ((string-equal (subseq sym.name (- (length sym.name) 5)) "-stmt") sym)
@@ -2123,6 +2123,8 @@ Non-negative integer denoting the number of args otherwise."
                              (declare (ignore c))
                              (py-raise '{ZeroDivisionError}
                                        "Division or modulo by zero")))
+         
+         #+(or) ;; Don't try to raise new Python exception.
          (storage-condition (lambda (c)
                               (declare (ignore c))
                               (py-raise-runtime-error)))
