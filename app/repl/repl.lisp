@@ -349,9 +349,18 @@ KIND can be :ptime, :time, :space, :pspace or NIL."
 			   (read-from-string (string-downcase x))
 			 (declare (ignore ix))
 			 (case cmd
-			   (:help (print-cmds))
-			   (:q    (return-from repl-1 (values)))
-			   (t     (warn "Unknown command: ~S" cmd)))))
+			   (:help
+                            (print-cmds))
+			   (:q
+                            (return-from repl-1 (values)))
+                           ((:time :ptime :space :pspace)
+                            (if (eq *repl-prof* cmd)
+                                (progn (setf *repl-prof* nil)
+                                       (format t ";; Stopped profiling.~%"))
+                              (progn (setf *repl-prof* cmd)
+                                     (format t ";; Set profiling to ~A.~%" cmd))))
+			   (t
+                            (warn "Unknown command: ~S" cmd)))))
 		      
 		      ((string= x "")
                        (let ((total (apply #'concatenate 'string (nreverse acc))))
