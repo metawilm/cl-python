@@ -513,7 +513,7 @@ None, use identity function (multiple sequences -> list of tuples)."
       collect it into tuples
       else return (make-array (length tuples)
 			      :adjustable t
-			      :fill-pointer (length tuples)
+			      :fill-pointer t
 			      :initial-contents tuples)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;

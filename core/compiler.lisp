@@ -1168,6 +1168,9 @@ LOCALS shares share tail structure with input arg locals."
   ;; Used by REPL
   (check-type module py-module)
   (with-slots (globals-names globals-values dyn-globals) module
+    ;; XXX CMUCL rightly complains here that the globals are passed as literal objects,
+    ;; and in BODY there may be assignment statements that modify them using (setf svref)
+    ;; or (setf gethash). This is strictly not allowed. Should be fixed.
     `(with-module-context (,globals-names ,globals-values ,dyn-globals :existing-mod ,module)
        ,@body)))
 
@@ -1264,7 +1267,7 @@ LOCALS shares share tail structure with input arg locals."
 
 (defun delete-identifier-at-module-level (name ix +mod+)
   ;; Reset module-level vars with built-in names to their built-in value
-  (with-slots (globals-names globals-values dyn-globals) +mod+
+  (with-slots (globals-values dyn-globals) +mod+
     (let ((biv (builtin-value name))  ;; maybe NIL
 	  (old-val (if ix
 		       (svref globals-values ix) 
@@ -1908,7 +1911,7 @@ Non-negative integer denoting the number of args otherwise."
 	     (locally #+(or)(declare (optimize (safety 3) (debug 3)))
 	       ,@body)))))))
 
-#+allegroXXX
+#+allegro
 (progn
   (defun check-1-kw-call (got-kw nargs-mi want-kw)
     (unless (and (= (excl::ll :mi-to-fixnum nargs-mi) 2)
@@ -1951,7 +1954,7 @@ Non-negative integer denoting the number of args otherwise."
               (>= (length pos-args) 3)
               key-args *-arg **-arg)
       (return-from py-arg-function whole))
-    
+
     (ecase (length pos-args)
       (0 `(named-function ,name
             (lambda ()

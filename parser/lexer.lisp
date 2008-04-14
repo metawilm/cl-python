@@ -335,7 +335,7 @@ C must be either a character or NIL."
               :displaced-to %lex-string%
               :displaced-index-offset start))
 
-(defun lex-looking-at-token (s &key (char-after-test (complement 'identifier-char2-p)))
+(defun lex-looking-at-token (s &key (char-after-test (complement #'identifier-char2-p)))
   "Returns whether next characters are for token, with whitespace or eof after it." 
   (loop with chs-seen
       for i from 0 below (length s)
@@ -353,7 +353,7 @@ C must be either a character or NIL."
               (return ch-correct)))
 
 (defvar *reserved-words-vector*
-    (loop with vec = (make-array 128)
+    (loop with vec = (make-array 128 :initial-element nil)
         with pkg = (find-package :clpython.ast.reserved)
         for rw being the external-symbol in pkg
         for rw.name = (symbol-name rw)

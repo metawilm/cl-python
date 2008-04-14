@@ -87,7 +87,7 @@
 (def-py-method py-file.__repr__ (f)
   (with-output-to-string (s)
     (print-unreadable-object (f s :identity t)
-      (with-slots (file-stream mode closed-p) f
+      (with-slots (mode closed-p) f
 	(format s "file ~A :mode ~S" (py-file.name f) mode)
 	(when closed-p
 	  (write-string " :closed t" s))))))

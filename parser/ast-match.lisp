@@ -102,7 +102,7 @@ differs in structure from the template for ~A ast nodes, which is: ~A"
        (when .match-p
          (let ,(loop for wc in wildcards
                    collect `(,wc (cdr (assoc ',wc .bindings))))
-           (declare (ignorable ,@wildcards template))
+           (declare (ignorable ,@wildcards))
            ,@body)))))
 
 (defmacro with-perhaps-matching ((form template &rest args) &body body)

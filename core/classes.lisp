@@ -19,10 +19,18 @@
 (in-syntax *ast-user-readtable*)
 
 (defmacro ltv-find-class (clsname)
-  `(load-time-value (find-class ,clsname)))
+  ;; About LOAD-TIME-VALUE: "It is guaranteed that the evaluation of form will take
+  ;; place only once when the file is loaded, but the order of evaluation with respect
+  ;; to the evaluation of top level forms in the file is implementation-dependent."
+  ;; This means that it is not guaranteed to first define a class and then below it
+  ;; in a function use (load-time-value (find-class ..)), therefore also include a run-time
+  ;; check.
+  `(or (load-time-value (find-class ,clsname))
+       (find-class ,clsname)))
 
-(defclass py-dict-mixin ()
-  ((dict :initarg :dict :initform (make-dict) :accessor dict)))
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (defclass py-dict-mixin ()
+    ((dict :initarg :dict :initform (make-dict) :accessor dict))))
 
 (defmethod dict ((x t))
   nil)
@@ -47,19 +55,20 @@
 ;; of py-meta-type.
 
 (defun finalize-inheritance (c)
-  #+allegro (mop:finalize-inheritance c)
-  #+lispworks (clos:finalize-inheritance c)
-  #-(or allegro lispworks) (error "No FINALIZE-INHERITANCE defined in this implementation."))
+  (closer-mop:finalize-inheritance c))
 
-(defclass py-meta-type (py-dict-mixin standard-class)
-  ())
-
-#+lispworks ;; Apparently needed; should look into
 (eval-when (:compile-toplevel :load-toplevel :execute)
-  (defmethod cl::validate-superclass ((class py-meta-type) superclass)
-    t)
+  (defclass py-meta-type (py-dict-mixin standard-class)
+    ())
 
-  (defmethod cl::validate-superclass ((class standard-class) (superclass py-meta-type))
+  ;; Allegro does not require these VALIDATE-SUPERCLASS methods,
+  ;; but most other implementations complain.
+  (defmethod closer-mop:validate-superclass ((class py-meta-type) superclass)
+    (declare (ignorable class superclass))
+    t)
+  
+  (defmethod closer-mop:validate-superclass ((class standard-class) (superclass py-meta-type))
+    (declare (ignorable class superclass))
     t))
 
 (defmethod initialize-instance :after ((cls py-meta-type) &rest initargs)
@@ -69,16 +78,17 @@
 
 ;; A class for Python classes. This is an instance of py-meta-type
 
-(defclass py-type (py-dict-mixin standard-class)
-  ()
-  (:metaclass py-meta-type))
-
-#+lispworks ;; Apparently needed; should look into
 (eval-when (:compile-toplevel :load-toplevel :execute)
-  (defmethod cl::validate-superclass ((class py-type) superclass)
+  (defclass py-type (py-dict-mixin standard-class)
+    ()
+    (:metaclass py-meta-type))
+  
+  (defmethod closer-mop:validate-superclass ((class py-type) superclass)
+    (declare (ignorable class superclass))
     t)
 
-  (defmethod cl::validate-superclass ((class standard-class) (superclass py-type))
+  (defmethod closer-mop:validate-superclass ((class standard-class) (superclass py-type))
+    (declare (ignorable class superclass))
     t))
 
 (defmethod initialize-instance :after ((cls py-type) &rest initargs)
@@ -125,19 +135,13 @@
 
 
 (defun ensure-class (&rest args)
-  #+allegro (apply #'mop:ensure-class args)
-  #+lispworks (apply #'clos:ensure-class args)
-  #-(or allegro lispworks) (error "No ENSURE-CLASS defined in this implementation."))
+  (apply #'closer-mop:ensure-class args))
 
 (defun ensure-class-using-class (&rest args)
-  #+allegro (apply #'mop:ensure-class-using-class args)
-  #+lispworks (apply #'clos:ensure-class-using-class args)
-  #-(or allegro lispworks) (error "No ENSURE-CLASS-USING-CLASS defined in this implementation."))
+  (apply #'closer-mop:ensure-class-using-class args))
 
 (defun class-direct-superclasses (&rest args)
-  #+allegro (apply #'mop:class-direct-superclasses args)
-  #+lispworks (apply #'clos:class-direct-superclasses args)
-  #-(or allegro lispworks) (error "No CLASS-DIRECT-SUPERCLASSES defined in this implementation."))
+  (apply #'closer-mop:class-direct-superclasses args))
 
 ;; Fix superclass and metaclass of PY-DICT.
 
@@ -237,9 +241,18 @@
 		   
 		else do (push sym real-args)
 		     
-		finally (return `(defun ,func-name ,(nreverse real-args)
-				   (block ,cls.meth
-				     ,body)))))
+		finally (return (progn (setf real-args (nreverse real-args))
+                                       `(defun ,func-name ,real-args
+                                          ;; Make all args ignorable. Otherwise there will be warnings for
+                                          ;; unused variables even if there is (declare (ignore ..)) in the
+                                          ;; function body: function body is wrapped in a LOCALLY.
+                                          ;; XXX Ugly, should parse declare-ignore declarations.
+                                          ,(let ((sym-args (remove-if-not (lambda (s) (and (symbolp s)
+                                                                                           (not (char= (aref (string s) 0) #\&))))
+                                                                          real-args)))
+                                             `(declare (ignorable ,@sym-args)))
+                                          (block ,cls.meth
+                                            ,body))))))
 	 
 	 (let* ((cls (or (find-class ',cls) (error "No such class: ~A" ',cls)))
                 (dict (or (dict cls)
@@ -280,8 +293,21 @@
 ;;;
 ;;; dynamic class creation
 
+(defparameter *user-defined-classes*
+    ()
+  #+(or)(progn
+          #+allegro (make-hash-table :test #'eq :weak-keys t)
+          #-allegro (make-hash-table :test #'eq)))
 
-(defun make-py-class (&key name context-name namespace supers cls-metaclass mod-metaclass)
+(defun make-py-class (&rest args)
+  (declare (dynamic-extent args))
+  (multiple-value-bind (cls kind)
+      (apply #'make-py-class-1 args)
+    (assert (member kind '(:metaclass :class)))
+    (push (cons cls kind) *user-defined-classes*)
+    cls))
+             
+(defun make-py-class-1 (&key name context-name namespace supers cls-metaclass mod-metaclass)
   (declare (ignore context-name)) ;; XXX for now
 
   #+(or)(assert (symbolp name))
@@ -346,7 +372,7 @@
 		    :direct-superclasses supers
 		    :metaclass (ltv-find-class 'py-meta-type)
 		    :dict namespace)))
-	  (return-from make-py-class cls)))
+	  (return-from make-py-class-1 (values cls :metaclass))))
             
       ;; Not a subclass of `type', so at the `object' level
       (let ((__new__ (recursive-class-dict-lookup metaclass '{__new__})))
@@ -387,7 +413,7 @@
 	    #+(or)(warn "Not calling __init__ method, as class ~A is not instance of metaclass ~A"
 			cls metaclass))
 	  
-	  cls)))))
+	  (values cls :class))))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -491,7 +517,8 @@
 (defun classp (x)
   #+allegro (excl::classp x)
   #+lispworks (clos::classp x)
-  #-(or allegro lispworks) (error "No CLASSP defined in this implementation."))
+  #+cmu (pcl::classp x)
+  #-(or allegro lispworks cmu) (typep x 'class))
   
 (def-py-method py-class-method.__get__ (x inst class)
   (declare (ignore class))
@@ -678,13 +705,14 @@
   #+allegro (string (excl::func_name func))
   #-allegro "[nameless function]")
 
-(defclass funcallable-python-class (#+allegro mop:funcallable-standard-class 
-                                    #+lispworks clos::funcallable-standard-class
-
-                                    py-core-type)
+(defclass funcallable-python-class (closer-mop:funcallable-standard-class py-core-type)
   ;; When subclassable python classes also get such a metatype,
   ;; s/py-core-type/py-type/
   ())
+
+(defmethod closer-mop:validate-superclass ((class funcallable-python-class) superclass)
+  (declare (ignorable class superclass))
+  t)
 
 (defclass py-function (standard-generic-function py-core-object py-dict-mixin)
   ;; mop:funcallable-standard-class defines :name initarg, but I don't know how to access it...
@@ -694,9 +722,7 @@
   (:metaclass funcallable-python-class))
 
 (defun set-funcallable-instance-function (inst func)
-  (#+allegro mop:set-funcallable-instance-function
-   #+lispworks clos::set-funcallable-instance-function
-   inst func))
+  (closer-mop:set-funcallable-instance-function inst func))
 
 (defun make-py-function (&key name context-name lambda)
   (let ((x (make-instance 'py-function :fname (string name) :lambda lambda :context-name context-name)))
@@ -1110,8 +1136,7 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 	 (bind-val .val .x ,x.class)))))
 
 (defun class-precedence-list (c)
-  #+allegro (mop:class-precedence-list c)
-  #+lispworks (clos:class-precedence-list c))
+  (closer-mop:class-precedence-list c))
   
 (defun py-get-dict-attr (x x.class)
   (or (dict x)
@@ -1178,9 +1203,20 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 (defun recursive-class-dict-lookup (cls attr &optional cls-list)
   ;; Look for ATTR in class CLS and all its superclasses.
   ;; and finally (which is in this implementation not a superclass of a class).
-  (assert (symbolp attr))
-  #+(or)(format t "recursive-class-dict-lookup: ~A ~A~%" attr cls)
-  #+(or)(assert (typep cls 'class))
+  (check-type attr symbol)
+  #+(or) ;; experimental
+  (unless cls-list
+    (whereas ((cac (get-class-attr-cache cls)))
+      (return-from recursive-class-dict-lookup
+        (let ((res 
+               (multiple-value-bind (val kind)
+                   (cac-lookup cac attr nil)
+                 (ecase kind
+                   ((t)            val)
+                   ((:getattr nil) (return-from recursive-class-dict-lookup nil))))))
+          #+(or)(format t "Returning from cache: ~A ~A = ~A~%" cls attr res)
+          res))))
+    
   (loop for c in (or cls-list (class-precedence-list cls))
       until (or (eq c (ltv-find-class 'standard-class))
   		(eq c (ltv-find-class 'py-dict-mixin))
@@ -1190,7 +1226,8 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 		(val (when d
 		       (sub/dict-get d attr))))
            (when val
-	     (return-from recursive-class-dict-lookup val)))
+	     (return-from recursive-class-dict-lookup
+               (values val c))))
 
       finally ;; this seems not needed, in the finally clause
 	(let ((obj-attr (sub/dict-get (load-time-value (dict (find-class 'py-object))) attr)))
@@ -1264,7 +1301,7 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 (def-py-method py-type.__dict__ :attribute-write (cls new-dict)
   ;; XXX check NEW-DICT is of (sub)type PY-DICT.
   (setf (slot-value cls 'dict) new-dict)
-  (signal-class-dict-replacement cls (dict cls) new-dict))
+  (%class-dict-replacement cls (dict cls) new-dict))
 
 (def-py-method py-type.__bases__ :attribute-read (cls)
   (assert (classp cls))
@@ -1306,8 +1343,7 @@ but the latter two classes are not in CPython.")
 		 (return res)))))
 
 (defun class-direct-subclasses (c)
-  #+allegro (mop:class-direct-subclasses c)
-  #+lispworks (clos:class-direct-subclasses c))
+  (closer-mop:class-direct-subclasses c))
 
 (def-py-method py-type.__subclasses__ (x)
   (make-py-list-from-list (class-direct-subclasses x)))
@@ -1409,12 +1445,10 @@ but the latter two classes are not in CPython.")
 		(unless builtinp filepath))))))
 
 (defun slot-definition-name (s)
-  #+allegro (mop:slot-definition-name s)
-  #+lispworks (clos:slot-definition-name s))
+  (closer-mop:slot-definition-name s))
 
 (defun class-slots (c)
-  #+allegro (mop:class-slots c)
-  #+lispworks (clos:class-slots c))
+  (closer-mop:class-slots c))
 
 (defun copy-module-contents (&key from to)
   (check-type from py-module)
@@ -1500,7 +1534,7 @@ but the latter two classes are not in CPython.")
   "Returns new value"
   (check-type x py-module)
   (let ((attr.sym (py-string-val->symbol attr :intern nil)))
-    (with-slots (name globals-names globals-values dyn-globals) x
+    (with-slots (globals-names globals-values dyn-globals) x
 
       ;; XXX Does x.attr.__set__ play a role? (Think not)
       (when attr.sym
@@ -1998,7 +2032,7 @@ But if RELATIVE-TO package name is given, result may contains dots."
   (let ((bool-val (if (py-val->lisp-bool val) *the-true* *the-false*)))
     (if (eq cls (ltv-find-class 'py-bool))
 	bool-val
-      (make-instance 'cls :lisp-object bool-val))))
+      (make-instance cls :lisp-object bool-val))))
 
 ;; Float
 
@@ -2318,7 +2352,7 @@ But if RELATIVE-TO package name is given, result may contains dots."
   (when iterable
     (let* ((items (py-iterate->lisp-list iterable))
 	   (len (length items)))
-      (adjust-array x len)
+      (setq x (adjust-array x len))
       (loop for i from 0 below len
 	  do (setf (aref x i) (pop items)))
       (setf (fill-pointer x) len)
@@ -2556,14 +2590,17 @@ But if RELATIVE-TO package name is given, result may contains dots."
 		     the-val
 		   (make-instance cls :lisp-object the-val))))
 
-(defvar *py-char-strings* (make-array 256
-				      :element-type 'string
-				      :initial-element nil))
+(defvar *py-char-strings*
+    (make-array 256
+                :element-type 'string
+                :initial-contents (loop for i from 0 to 255
+                                      collect (string (code-char i))))
+  "Mapping from character to corresponding length-1 string.")
+
 (defun py-string-from-char (ch)
   (let ((code (char-code ch)))
     (if (<= 0 code 255)
-	(or (aref *py-char-strings* (char-code ch))
-	    (setf (aref *py-char-strings* (char-code ch)) (string ch)))
+        (aref *py-char-strings* code)
       (string ch))))
 
 (defun py-unicode-external-format->lisp-external-format (name)
@@ -2587,7 +2624,7 @@ But if RELATIVE-TO package name is given, result may contains dots."
     (values :latin1 255 255))
    
    ((member name '("utf8" "utf_8" "utf-8" "utf" "u8") :test 'string=)
-    (values :utf8 #16x0010FFFF 255))
+    (values :utf8 #x0010FFFF 255))
    
    (t (py-raise '{UnicodeError} "Unrecognized Unicode external format: ~S" name))))
 
@@ -2597,14 +2634,13 @@ But if RELATIVE-TO package name is given, result may contains dots."
   ;; regular lists, but strings are immutable so more efficient.
   ;; 
   ;; A future version of Python will have a `byte vector' data type.
-  
   (when errors
     (error "TODO: errors parameter for unicode.encode"))
 
   (multiple-value-bind (ex-format max-code max-octet-code)
       (py-unicode-external-format->lisp-external-format external-format)
-    (declare (ignore max-octet-code))
-
+    (declare (ignorable ex-format)
+             (ignore max-octet-code))
     (let ((max-found-code (reduce #'max string :key #'char-code)))
       (when (> max-found-code max-code)
 	(py-raise '{UnicodeEncodeError}
@@ -3695,11 +3731,12 @@ finished; F will then not be called again."
 			 (load-time-value *the-true*)
 		       (load-time-value *the-false*))))
 	  (setf (gethash ',syntax *binary-comparison-funcs-ht*) ',func)))
-	    
+
 (defun py-id (x)
   #+allegro (excl:lispval-to-address x)
   #+lispworks (system:object-address x)
-  #-(or allegro lispworks) (error "TODO: id() not implemented for this Lisp implementation"))
+  #+cmu (kernel:get-lisp-obj-address x)
+  #-(or allegro lispworks cmu) (error "TODO: id() not implemented for this Lisp implementation"))
 
 (defgeneric py-cmp (x y)
   (:documentation
@@ -3868,13 +3905,9 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
     0))
 
 (defmethod py-== ((x string) (y symbol))
-  (declare (optimize (speed 3) (safety 0) (debug 0)))
-  (rotatef x y)
-  (if (or (eq (symbol-name x) y)
-          (and (char= (aref (symbol-name x) 0) (aref y 0))
-               (string= (symbol-name x) y)))
-      1
-    0))
+  (declare (optimize (speed 3) (safety 0) (debug 0))
+           (notinline py-==)) ;; skip compiler macro
+  (py-== y x))
 
 (defmethod py-== ((x symbol) y)
   (py-== (symbol-name x) y))
@@ -4028,7 +4061,8 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
   (with-circle-detection (py-str x)))
 
 
-(defun py-string->symbol  (x &optional (package #.(find-package :clpython.user)))
+(defun py-string->symbol  (x &optional (package #+cmu(load-time-value (find-package :clpython.user))
+                                                #-cmu #.(find-package :clpython.user))) ;; cmu errs on this
   ;; {symbol,string} -> symbol
   (if (symbolp x) 
       x
@@ -4200,59 +4234,6 @@ the lisp list will be returned).")
 	    (setf (py-attr dest '{softspace}) must-print-newline-next-time)
 	  (setf *stdout-softspace* must-print-newline-next-time))))))
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Class change signals; only called for user-defined classes that are not
-;; at the metaclass level.
-
-#+(or)
-(without-redefinition-warnings
- ;; already defined above; not really needed
- (defmethod initialize-instance :after ((cls py-type) &rest initargs)
-   (declare (ignore initargs))
-   (finalize-inheritance cls)
-   (signal-class-created cls)))
-
-#+(or)
-(defmethod reinitialize-instance :before ((cls py-type) &rest initargs)
-  (declare (ignore initargs))
-  (signal-class-changed-before cls))
-
-#+(or)
-(defmethod reinitialize-instance :after ((cls py-type) &rest initargs)
-  (declare (ignore initargs))
-  (signal-class-changed-after cls))
-
-(defun signal-class-dict-replacement (cls old new)
-  (declare (ignore cls old new))
-  #+(or)(warn "** dict replacement cls ~A" (class-name cls))
-  nil)
-
-(defun signal-class-changed-before (cls) 
-  (declare (ignore cls))
-  nil)
-
-(defun signal-class-changed-after (cls)
-  (declare (ignore cls))
-  #+(or)(warn "** Class ~A changed" (class-name cls)))
-
-(defun signal-class-created (cls)
-  (declare (ignore cls))
-  #+(or)(warn "** Class ~A created" (class-name cls)))
-
-(defun signal-class-dict-changed (dict key)
-  (declare (ignore dict key))
-  ;; not all clearing is required... XXX
-  #+(or)(warn "** Class had attribute ~A modified" attr))
-   
-(defun signal-class-dict-set-key (dict key val)
-  (declare (ignore val))
-  (signal-class-dict-changed dict key)
-  #+(or)(warn "** Class dict changed, key ~A" key))
-
-(defun signal-class-dict-del-key (dict key)
-  (signal-class-dict-changed dict key)
-  #+(or)(warn "** Class dict deleted key ~A" key))
-
 ;; Utils
 
 (defun py-string-val->symbol (x &key (intern t))
@@ -4325,3 +4306,111 @@ the lisp list will be returned).")
 
 #+(or) ;; Seems not needed anymore, as at this point all dicts only contain symbols?!
 (rehash-py-dicts)
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Class attribute caching
+
+#+(or)
+(without-redefinition-warnings
+ ;; already defined above; not really needed
+ (defmethod initialize-instance :after ((cls py-type) &rest initargs)
+   (declare (ignore initargs))
+   (finalize-inheritance cls)
+   (class-signal :class-created cls)))
+
+#+(or)
+(defmethod reinitialize-instance :before ((cls py-type) &rest initargs)
+  (declare (ignore initargs))
+  (class-signal :class-changed-before cls))
+
+#+(or)
+(defmethod reinitialize-instance :after ((cls py-type) &rest initargs)
+  (declare (ignore initargs))
+  (class-signal :class-changed-after cls))
+
+(defun %class-created (cls)
+  (declare (ignorable cls)))
+
+(defun %class-changed-before (cls)
+  (declare (ignorable cls)))
+
+(defun %class-changed-after (cls)
+  (declare (ignorable cls)))
+
+(defun %class-dict-replacement (cls old-dict new-dict)
+  (declare (ignorable cls old-dict new-dict)))
+
+(defun %class-dict-set-key (dict key val)
+  (declare (ignorable dict key val)))
+
+(defun %class-dict-del-key (dict key)
+  (declare (ignorable dict key)))
+
+(defparameter *cac*
+    #+(or)(make-hash-table :test 'eq)
+    ())
+
+(defstruct (class-attr-cache (:conc-name cac-)
+            (:constructor make-cac (vector getattr getattribute)))
+  vector getattr getattribute)
+  
+(defun cac-able (cls)
+  ;; User-defined classes that are not at metaclass level.
+  (check-type cls class)
+  #+(or)(eq :class (gethash cls *user-defined-classes*))
+  (eq :class (cdr (assoc cls *user-defined-classes*))))
+
+(defun get-class-attr-cache (cls)
+  (or (cdr (assoc cls *cac*)) ;; #+(or)gethash
+      (when (cac-able cls)
+        (let ((cac (create-class-attr-cache cls)))
+          (push (cons cls cac) *cac*)
+          #+(or)(setf (gethash cls *cac*) cac)
+          cac))))
+
+(defun create-class-attr-cache (cls)
+  (check-type cls class)
+  (loop with summed-vector = (make-array +dikt-hash-vector-size+ :initial-element nil)
+      with getattr and getattribute
+      for c in (class-precedence-list cls)
+      until (or (eq c (ltv-find-class 'standard-class))
+                (eq c (ltv-find-class 'py-dict-mixin))
+                (eq c (ltv-find-class 'standard-generic-function)))
+            ;; condition copied from py-attr 
+      do (let* ((d (dict c))
+                (dikt (py-dict-dikt d)))
+           (when (dikt-hash-table dikt)
+             (error "Cannot create CAC for class ~A: dict ~A is hashtable."
+                    cls d))
+           (dikt-map dikt (lambda (k v)
+                            (check-type k symbol)
+                            (pushnew (cons k v) 
+                                     (svref summed-vector (get-sym-attr-hash k))
+                                     :key #'car
+                                     :test #'eq)))
+           (unless (eq c (find-class 'py-object))
+             (unless getattr
+               (setf getattr (dikt-get dikt '{__getattr__})))
+             (unless getattribute
+               (setf getattribute (dikt-get dikt '{__getattribute__})))))
+      finally (map-into summed-vector #'nreverse summed-vector)
+              (return (make-cac summed-vector getattr getattribute))))
+
+(defun cac-lookup (cac attr getattribute)
+  ;; Returns either:
+  ;;  VALLUE, T                        -- attribute found
+  ;;  #'__getattribute, :getattribute  -- (only if GETATTRIBUTE true)
+  ;;  #__getattr__      :getattr
+  ;;  NIL
+  (check-type attr symbol)
+  (when getattribute
+    (whereas ((ga (cac-getattribute cac)))
+      (return-from cac-lookup
+        (values ga :getattribute))))
+  (let ((entry (svref (cac-vector cac) (get-sym-attr-hash attr))))
+    (loop for (key . val) in entry
+        when (eq key attr) 
+        do (return-from cac-lookup (values val t))))
+  (whereas ((ga (cac-getattr cac)))
+    (return-from cac-lookup (values ga :getattr)))
+  nil)

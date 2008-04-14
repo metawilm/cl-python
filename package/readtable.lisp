@@ -30,7 +30,9 @@
 
 (defconstant +reader-error-has-format+
     #+allegro t
-    #+lispworks nil)
+    #+lispworks nil
+    #+cmu t
+    #-(or allegro lispworks cmu) nil)
 
 (defun read-package-symbol-func (package start-char end-char &key intern)
   "Create a reader function that reads from start-char until endchar,

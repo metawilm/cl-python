@@ -26,7 +26,8 @@ If STREAM is not supplied, output goes to a string.
 If output goes to a stream, then the first character will be a newline;
 output to a string does not start with a newline."
   (flet ((do-print (stream)
-	   (let ((*print-pprint-dispatch* *py-pprint-dispatch*))
+	   (let ((*print-pprint-dispatch* *py-pprint-dispatch*)
+                 (*print-level* nil)) ;; no limit
 	     (pprint ast stream))))
     (if stream
 	(do-print stream)
@@ -95,7 +96,7 @@ output to a string does not start with a newline."
 		   
 		   ((> (char-code ch) 255)
 		    (format stream "\u~v,vX"
-			    (if (> (char-code ch) #16xFFFF) 8 4)
+			    (if (> (char-code ch) #xFFFF) 8 4)
 			    #\0 (char-code ch)))
 		   
 		   ((alphanumericp ch)  (write-char ch stream))

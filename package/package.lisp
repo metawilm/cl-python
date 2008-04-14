@@ -5,7 +5,7 @@
 ;; (http://opensource.franz.com/preamble.html),
 ;; known as the LLGPL.
 
-(in-package :user)
+(in-package :cl-user)
 
 ;;;; CLPython Package definitions
 

@@ -407,7 +407,11 @@ VALUE and TARGET context."
               (pos-args (&rest key-args=1 &key 'second +normal-value+) *-arg **-arg)
               +namespace-suite+)
 ||#
-    
+
+#+(or)
+(define-condition ast-walk-unknown-form ()
+  (form :initarg :form :accessor ast-walk-unknown-form-form))
+
 (defun ast-recurse-fun (f form &rest context &key value target)
   "Given function F and a FORM (AST), walks into subforms of FORM in the given
 VALUE and TARGET context."
@@ -668,6 +672,7 @@ VALUE and TARGET context."
                   (not (fboundp (car form)))
 		  *walk-warn-unknown-form*)
 	 (warn "WALK: assuming ~S is a Lisp form: not walked into." form))
+       #+(or)(signal 'ast-walk-unknown-form :form form)
        form))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -683,14 +688,15 @@ VALUE and TARGET context."
   ;; 
   ;; (with-sub-ast (form ast)
   ;;   ... form...)
-  (let ((context '#:context))
+  (let (context)
     (when (symbolp subform)
-      (setf subform `(,subform &rest ,context)))
+      (setf context '#:contect
+            subform `(,subform &rest ,context)))
     `(walk-py-ast ,ast
 		  (named-function :with-py-ast-function
 		    (lambda ,subform
 		      (declare (optimize (debug 3))
-			       (ignore ,context))
+			       ,@(when context `((ignore ,context))))
 		      ,@body))
 		  ;; user-supplied options take precedence...
 		  ,@options

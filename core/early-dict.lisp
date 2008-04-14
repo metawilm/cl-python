@@ -1,4 +1,4 @@
-;; -*- package: clpython -*-
+;; -*- package: clpython; readtable: py-user-readtable -*-
 ;;
 ;; This software is Copyright (c) Franz Inc. and Willem Broekema.
 ;; Franz Inc. and Willem Broekema grant you the rights to
@@ -10,6 +10,8 @@
 ;;;; Python dictionary
 
 (in-package :clpython)
+
+(in-syntax *user-readtable*)
 
 (defparameter *magic-methods*
     '#.(sort (loop for s being the external-symbol in :clpython.user
@@ -46,13 +48,13 @@ All these symbols are in the clpython.user package.")
         (pop plist)
       ;; Not set as first property, or not set at all
       (or (get x +attr-cache-ix-property+)
-          (setf (get x +attr-cache-ix-property+)
-            (mod (the fixnum (incf (the fixnum *attr-cache-iter*))) +dikt-hash-vector-size+))))))
+           (setf (get x +attr-cache-ix-property+)
+             (mod (the fixnum (incf (the fixnum *attr-cache-iter*))) +dikt-hash-vector-size+))))))
 
 (defun set-magic-methods-attr-hashes ()
   (mapcar #'get-sym-attr-hash *magic-methods*)
   (let ((sym '{__init__})
-        (hash 14)) ;; hardcoded, yeah
+        (hash 1)) ;; hardcoded, yeah
     (assert (= (get-sym-attr-hash sym) hash) ()
       "Sanity check for attribute hash codes failed: hash of ~S is ~A, expected ~A."
       sym (get-sym-attr-hash sym) hash)))
@@ -71,7 +73,7 @@ All these symbols are in the clpython.user package.")
 ;;; Py-dict 
 
 (defstruct (dikt (:type vector))
-  (vector (make-array +dikt-hash-vector-size+))
+  (vector (make-array +dikt-hash-vector-size+ :initial-element nil))
   (hash-table nil))
 
 ;; Invariant:
@@ -207,6 +209,8 @@ All these symbols are in the clpython.user package.")
   (if (dikt-hash-table x)
       (dikt-set x key-sym val)
     (let ((entries (svref (dikt-vector x) hash)))
+      (unless (listp entries)
+        (error "invalid args: ~A" `(dikt-set-sym-with-hash ,x ,key-sym ,hash ,val)))
       (do ((entry (pop entries) (pop entries)))
           ((null entry) (push (cons key-sym val) (svref (dikt-vector x) hash)))
         (when (eq key-sym (car entry))
@@ -223,6 +227,7 @@ All these symbols are in the clpython.user package.")
     (cond ((null key.sym) 
            whole)
           ((member key.sym *magic-methods*)
+           (assert (get-sym-attr-hash key.sym) () "Symbol ~A denotes magic method, but property missing." key.sym)
            `(dikt-set-sym-with-hash ,x ',key.sym ,(get-sym-attr-hash key.sym) ,val))
           (t
            `(dikt-set-sym-with-hash ,x ',key.sym (load-time-value (get-sym-attr-hash ',key.sym)) ,val)))))
@@ -416,5 +421,5 @@ This is not guaranteed due to the following in ANSI:
              ((= i +dikt-hash-vector-size+) )
            (setf (svref d i) nil)))
         (t (setf (dikt-vector d)
-             (make-array +dikt-hash-vector-size+))))
+             (make-array +dikt-hash-vector-size+ :initial-element nil))))
   d)
