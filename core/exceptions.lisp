@@ -14,7 +14,13 @@
 
 (defvar *exceptions-loaded* nil)
 
-(eval-when (:compile-toplevel :load-toplevel :execute)
+(defun py-raise (exc-type string &rest format-args)
+  "Raise a Python exception with given format string"
+  #+clpython-exceptions-are-python-objects
+  (error exc-type :args (cons string format-args))
+  #-clpython-exceptions-are-python-objects
+  (error exc-type))
+
 #+clpython-exceptions-are-python-objects
 (defclass {Exception} (py-object error)
   ((args :initarg :args :initform nil :documentation "Arguments as Lisp list"
@@ -101,8 +107,6 @@
       do (def-python-exceptions-1 '{Exception} branch)))
 
 (def-python-exceptions)
-
-) ;; eval-when
 
 #+clpython-exceptions-are-python-objects
 (defmethod print-object ((x {Exception}) stream)
