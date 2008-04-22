@@ -516,13 +516,7 @@ GENSYMS are made gensym'd Lisp vars."
                         :supers ,(with-matching (inheritance ([tuple-expr] ?supers))
                                    `(list ,@?supers))
                         :cls-metaclass (sub/dict-get new-cls-dict "__metaclass__")
-                        :mod-metaclass
-                        ,(let ((ix (position '{__metaclass__}
-                                             (get-pydecl :mod-globals-names e))))
-                           (if ix
-                               `(svref +mod-static-globals-values+ ,ix)
-                             `(gethash '{__metaclass__} +mod-dyn-globals+))))))
-             
+                        :mod-metaclass (py-module-get +mod+ '{__metaclass__}))))
              (record-source-file-loc ',context-cname :type)
              ([assign-stmt] ,cls (,name))))))))
 
@@ -1020,50 +1014,38 @@ LOCALS shares share tail structure with input arg locals."
   ;; As a bonus the "delete form" is given (sixth value).
   (let ((glob-ix (position name (get-pydecl :mod-globals-names e))))
     (with-gensyms (val)
-
-      ;; 1) Store form
-      (symbol-macrolet ((module-set
-			    (if glob-ix
-				`(setf (svref +mod-static-globals-values+ ,glob-ix) ,val)
-			      `(setf (gethash ',name +mod-dyn-globals+) ,val)))
-			(local-set `(setf ,name ,val))
-			(class-set `(sub/dict-set +cls-namespace+ ',name ,val)))
-	(let ((store-form
-	       (ecase (get-pydecl :context e)
-		 (:module    module-set)
-		 (:function  (if (or (member name (get-pydecl :lexically-declared-globals e))
-				     (not (member name (get-pydecl :lexically-visible-vars e))))
-				 module-set
-			       local-set))
-		 (:class     (if (member name (get-pydecl :lexically-declared-globals e))
-				 module-set 
-			       class-set)))))
-	  ;; 2) Del form
-	  (symbol-macrolet ((module-del
-				`(delete-identifier-at-module-level ',name ,glob-ix +mod+))
-			    (local-del
-                                `(progn (unless ,name
-                                          (unbound-variable-error ',name nil))
-                                        (setf ,name ,(when (builtin-value name) `(builtin-value ',name)))))
-			    (class-del `(unless (py-del-subs +cls-namespace+ ,name)
-					  (unbound-variable-error ',name nil))))
-	    (let ((del-form 
-		   (ecase (get-pydecl :context e)
-		     (:module   module-del)
-		     (:function (if (or (member name (get-pydecl :lexically-declared-globals e))
-					(not (member name (get-pydecl :lexically-visible-vars e))))
-				    module-del
-				  local-del))
-		     (:class    (if (member name (get-pydecl :class-globals e))
-				    module-del
-				  class-del)))))
-	      (values
-	       () ;; temps
-	       () ;; values
-	       (list val) ;; stores
-	       store-form
-	       `([identifier-expr] ,name) ;; name is literal symbol, thus no side-effect
-	       del-form)))))))) ;; bonus
+      (let* ((level (ecase (get-pydecl :context e)
+                      (:module    :module-level)
+                      (:function  (if (or (member name (get-pydecl :lexically-declared-globals e))
+                                          (not (member name (get-pydecl :lexically-visible-vars e))))
+                                      :module-level
+                                    :local-level))
+                      (:class     (if (member name (get-pydecl :lexically-declared-globals e))
+                                      :module-level 
+                                    :class-level))))
+             
+             (store-form (ecase level
+                           (:module-level (if glob-ix
+                                              `(setf (svref +mod-static-globals-values+ ,glob-ix) ,val)
+                                            `(setf (gethash ',name +mod-dyn-globals+) ,val)))
+                           (:local-level `(setf ,name ,val))
+                           (:class-level `(sub/dict-set +cls-namespace+ ',name ,val))))
+             
+             (del-form (ecase level
+                         (:module-level `(delete-identifier-at-module-level ',name ,glob-ix +mod+))
+                         (:local-level `(progn (unless ,name
+                                                 (unbound-variable-error ',name nil))
+                                               (setf ,name ,(when (builtin-value name)
+                                                              `(builtin-value ',name)))))
+                         (:class-level `(unless (py-del-subs +cls-namespace+ ,name)
+                                          (unbound-variable-error ',name nil))))))
+        (values
+         () ;; temps
+         () ;; values
+         (list val) ;; stores
+         store-form
+         `([identifier-expr] ,name) ;; name is literal symbol, thus no side-effect
+         del-form))))) ;; bonus
 
 (defmacro [identifier-expr] (name &environment e)
   ;; The identifier is used for its value; it is not an assignent

@@ -1490,27 +1490,19 @@ but the latter two classes are not in CPython.")
 	      (remhash k dyn-globals)
 	    (setf (gethash k dyn-globals) v)))))
 
+(defun py-module-get (x attr)
+  (let ((attr.sym (py-string-val->symbol attr :intern nil)))
+    (with-slots (globals-names globals-values dyn-globals) x
+      (when attr.sym 
+        ;; If symbol not interned, then it cannot be in the globals-names vector
+        (let ((i (position attr.sym globals-names :test #'eq)))
+          (when i
+            (return-from py-module-get (svref globals-values i)))))
+      (gethash (or attr.sym attr) dyn-globals))))
+
 (def-py-method py-module.__getattribute__ (x^ attr)
-  (flet ((raise-attr-error (attr)
-	   (py-raise '{AttributeError} "Module ~A has no attribute ~A." x attr)))
-    
-    (let ((attr.sym (py-string-val->symbol attr :intern nil)))
-      (with-slots (globals-names globals-values dyn-globals) x
-	
-	(when attr.sym 
-	  ;; If symbol not interned, then it cannot be in the globals-names vector
-	  (let ((i (position attr.sym globals-names :test #'eq)))
-	    (if i
-		(let ((val (svref globals-values i)))
-		  (if (null val)
-		      (raise-attr-error attr)
-		    (return-from py-module.__getattribute__ val))))))
-	
-	(let ((val (gethash (or attr.sym attr) dyn-globals)))
-	  (when val
-	    (return-from py-module.__getattribute__ val))))
-      
-      (raise-attr-error (or attr.sym attr)))))
+  (or (py-module-get x attr)
+      (py-raise '{AttributeError} "Module ~A has no attribute ~A." x attr)))
 
 (def-py-method py-module.__setattr__ (x^ attr val)
   (when (slot-value x 'builtinp)

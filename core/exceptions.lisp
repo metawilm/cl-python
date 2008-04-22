@@ -15,15 +15,6 @@
 (defvar *exceptions-loaded* nil)
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
-(defconstant +exceptions-are-python-objects+
-    #+allegro t
-    #+lispworks t
-    #+cmu nil    ;; CMUCL does not allow arbitrary meta/superclasses in conditions
-    #-(or allegro lispworks cmu) nil)
-
-(when +exceptions-are-python-objects+
-  (pushnew :clpython-exceptions-are-python-objects *features*))
-
 #+clpython-exceptions-are-python-objects
 (defclass {Exception} (py-object error)
   ((args :initarg :args :initform nil :documentation "Arguments as Lisp list"
