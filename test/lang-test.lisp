@@ -80,8 +80,8 @@
                #-clpython-exceptions-are-python-objects t
                #-clpython-exceptions-are-python-objects :fail-info
                #-clpython-exceptions-are-python-objects (format nil "Probably failed due to ~A = ~A"
-                                                                'clpython::+exceptions-are-python-objects+
-                                                                clpython::+exceptions-are-python-objects+))))
+                                                                'clpython::*exceptions-are-python-objects*
+                                                                clpython::*exceptions-are-python-objects*))))
 
 (defmethod test-lang ((kind (eql :assign-stmt)))
   (run-test 3 "a = 3; a")

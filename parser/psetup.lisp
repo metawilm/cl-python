@@ -20,9 +20,9 @@
 
 (defun raise-syntax-error (formatstring &rest args)
   "Raise SyntaxError, or (if that condition is unavailable) a regular error."
-  (declare (special clpython:*exceptions-loaded*))
+  (declare (special clpython:*exceptions-loaded* clpython::*exceptions-are-python-objects*))
   (if clpython:*exceptions-loaded*
-      (if clpython::+exceptions-are-python-objects+
+      (if clpython::*exceptions-are-python-objects*
           (apply 'clpython:py-raise '{SyntaxError} formatstring args)
         (error '{SyntaxError}))
     (apply #'error (concatenate 'string "SyntaxError: " formatstring) args)))
