@@ -13,8 +13,8 @@
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
 (defparameter *exceptions-are-python-objects*
-    #+allegro nil
-    #+lispworks nil
+    #+allegro t
+    #+lispworks t
     #+cmu nil    ;; CMUCL does not allow arbitrary meta/superclasses in conditions
     #-(or allegro lispworks cmu) nil)
 
