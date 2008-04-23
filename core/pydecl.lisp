@@ -77,7 +77,7 @@
       (progn #+(and :allegro :new-environments)
              (sys:declaration-information 'pydecl env)
              #-(and :allegro :new-environments)
-             (error "CLPython compiler item: ~S is true, but don't know how to
+             (error "CLPython compiler error: ~S is true, but don't know how to
 use the CLTL-like environment accessors in this Lisp: \"~A ~A\"."
                     '*use-environment-acccessors*
                     (lisp-implementation-type)
