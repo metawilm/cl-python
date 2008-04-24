@@ -361,7 +361,14 @@ def f():
     x = 3
   yield x
 g = f()
-assert g.next() == 3"))
+assert g.next() == 3")
+  (run-no-error "
+def f():
+  yield 1
+  yield 2
+  raise StopIteration('stop')
+res = [x for x in f()]
+assert res == [1,2]"))
 
 (defmethod test-lang ((kind (eql :funcdef-stmt)))
   ;; *-arg, **-arg

@@ -70,7 +70,9 @@
 
 
 (defmethod get-py-iterate-fun ((x py-func-iterator))
-  (slot-value x 'func))
+  (lambda ()
+    (handler-case (funcall (slot-value x 'func))
+      ({StopIteration} () nil))))
 
 (defmethod get-py-iterate-fun ((x string))
   (let ((i 0))

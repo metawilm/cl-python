@@ -3281,7 +3281,7 @@ Returns nil upon lookup failure."
 ;; iterator from lambda
 
 (defclass py-func-iterator (py-core-object)
-  ((name        :initarg :name)
+  ((name        :initarg :name :initform "(unnamed)")
    (func        :initarg :func :type function)
    (stopped-yet :initform nil))
   (:metaclass py-core-type))
