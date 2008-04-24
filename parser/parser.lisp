@@ -50,7 +50,7 @@ Most important options:
            (let* ((seq (make-string (file-length x)))
                   (n (read-sequence seq x)))
              (setf seq (adjust-array seq n))
-             (parse seq))))
+             (apply #'parse seq options))))
 
 (defun parse-module-with-yacc (yacc-version lexer &key incl-module #+(or) &allow-other-keys)
   "Collect all parsed top-level forms."
