@@ -373,6 +373,11 @@ KIND can be :ptime, :time, :space, :pspace or NIL."
 			     (try-parse-again ()
 				 :report "Parse string again into AST")))))
 		      
+                      ((and (> (length x) 0)
+                            (char= (aref x 0) #\#))
+                       ;; skip comment line
+                       )
+                      
 		      (t (push (concatenate 'string x (string #\Newline)) acc)
 			 (let* ((total (apply #'concatenate 'string (reverse acc))))
                            (ecase (handle-as-python-code total)
