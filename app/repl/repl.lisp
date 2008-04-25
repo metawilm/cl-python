@@ -113,9 +113,8 @@ KIND can be :ptime, :time, :space, :pspace or NIL."
                                 (funcall f))
                               (terpri)
                               (prof:show-call-graph)))
-    (:time   #-allegro (error "todo")
-             #+allegro (prog1 (time (funcall f))
-                         (terpri)))
+    (:time   (prog1 (time (funcall f))
+               (terpri)))
     (:space  #-allegro (error "todo")
              #+allegro (progn (prof:with-profiling
                                   (:type :space :count t) (funcall f))
