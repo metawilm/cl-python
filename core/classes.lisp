@@ -2520,6 +2520,9 @@ But if RELATIVE-TO package name is given, result may contains dots."
 		  "list.pop(x, i): ix wrong (got: ~A; x.len: ~A)"
 		  ix x.len)))))
 
+(def-py-method py-list.reverse (x^)
+  (nreverse x))
+
 (def-py-method py-list.sort (x^ &optional fn)
   (let* ((sort-fun (if fn
 		       (lambda (x y) (< (signum (deproxy (py-call fn x y))) 0))
