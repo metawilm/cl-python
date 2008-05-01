@@ -393,7 +393,7 @@ C must be either a character or NIL."
                                    %lex-curr-line-no%))
              (loop for i below num-hex-digits
                  for ch = (aref s (+ s.ix i))
-                 for shift from (* 4 (1- num-hex-digits)) by -4
+                 for shift downfrom (* 4 (1- num-hex-digits)) by 4
                  for ch.code = (or (digit-char-p ch 16) 
                                    (raise-syntax-error "Invalid unicode escape: `\\~A' should be ~
                                                         followed by ~A hex digits, but got non-hex ~

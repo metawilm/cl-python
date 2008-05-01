@@ -956,9 +956,9 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 		    (values :nonempty-stepped-slice
 			    start real-stop step (1+ num-increments))))
 		 
-		 (t (break :unexpected))))
+		 (t (break "unexpected"))))
 	  
-	  (t (break :unexpected)))))
+	  (t (break "unexpected")))))
 
 ;; super( <B class>, <C instance> ) where C derives from B:
 ;;   :object = <C instance>
@@ -1859,7 +1859,7 @@ But if RELATIVE-TO package name is given, result may contains dots."
 			  (sxhash (realpart x))
 			(sxhash x)))
 	
-	(t (break :unexpected))))
+	(t (break "unexpected"))))
 
 (def-py-method py-number.__eq__  (x^ y^) (py-bool (and (numberp x) (numberp y) (= x y))))
 (def-py-method py-number.__mul__ (x^ y^) 
