@@ -48,7 +48,7 @@ such indirect special calls.")
   "The ASSERT-STMT uses the value of *__debug__* to determine whether
 or not to include the assertion code.")
 
-(defconstant +standard-module-globals+ '({__name__} {__debug__})
+(defconstant-once +standard-module-globals+ '({__name__} {__debug__})
   "Names of global variables automatically created for every module")
 
 ;;; Compiler warnings
@@ -86,9 +86,9 @@ like .join (string.join), .sort (list.sort), etc")
      ,@body))
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
-  (defconstant +optimize-std+     '(optimize (speed 3) (safety 1) (debug 1)))
-  (defconstant +optimize-fast+    '(optimize (speed 3) (safety 1)))
-  (defconstant +optimize-fastest+ '(optimize (speed 3) (safety 0) (debug 0))))
+  (defconstant-once +optimize-std+     '(optimize (speed 3) (safety 1) (debug 1)))
+  (defconstant-once +optimize-fast+    '(optimize (speed 3) (safety 1)))
+  (defconstant-once +optimize-fastest+ '(optimize (speed 3) (safety 0) (debug 0))))
 
 (defmacro fast (&body body)
   `(locally (declare ,+optimize-fastest+)

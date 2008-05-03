@@ -28,13 +28,6 @@
   `(or (load-time-value (find-class ,clsname nil))
        (find-class ,clsname)))
 
-(eval-when (:compile-toplevel :load-toplevel :execute)
-  (defclass py-dict-mixin ()
-    ((dict :initarg :dict :initform (make-dict) :accessor dict))))
-
-(defmethod dict ((x t))
-  nil)
-
 (defmacro sub/dict-get (d key)
   "Returns value or NIL; does not use dict's __getitem__ etc"
   `(dikt-get (py-dict-dikt ,d) ,key))
@@ -46,7 +39,7 @@
 (defun sub/dict-del (d key)
   "Returns if succesfull (i.e. key was present)"
   (check-type d py-dict)
-  (if (eq (class-of d) (ltv-find-class 'py-dict))
+  (if (subtypep (class-of d) (ltv-find-class 'py-dict))
       (dikt-del (py-dict-dikt d) key)
     (py-classlookup-bind-call d '{__delitem__} key)))
 
@@ -57,65 +50,14 @@
 (defun finalize-inheritance (c)
   (closer-mop:finalize-inheritance c))
 
-(eval-when (:compile-toplevel :load-toplevel :execute)
-  (defclass py-meta-type (py-dict-mixin standard-class)
-    ())
-
-  ;; Allegro does not require these VALIDATE-SUPERCLASS methods,
-  ;; but most other implementations complain.
-  (defmethod closer-mop:validate-superclass ((class py-meta-type) superclass)
-    (declare (ignorable class superclass))
-    t)
-  
-  (defmethod closer-mop:validate-superclass ((class standard-class) (superclass py-meta-type))
-    (declare (ignorable class superclass))
-    t))
-
 (defmethod initialize-instance :after ((cls py-meta-type) &rest initargs)
   (declare (ignore initargs))
   (finalize-inheritance cls))
-
-
-;; A class for Python classes. This is an instance of py-meta-type
-
-(eval-when (:compile-toplevel :load-toplevel :execute)
-  (defclass py-type (py-dict-mixin standard-class)
-    ()
-    (:metaclass py-meta-type))
-  
-  (defmethod closer-mop:validate-superclass ((class py-type) superclass)
-    (declare (ignorable class superclass))
-    t)
-
-  (defmethod closer-mop:validate-superclass ((class standard-class) (superclass py-type))
-    (declare (ignorable class superclass))
-    t))
 
 (defmethod initialize-instance :after ((cls py-type) &rest initargs)
   (declare (ignore initargs))
   (finalize-inheritance cls))
 
-
-;; Python classes are instances of (a subclass of) python-type
-
-(defclass py-dictless-object (standard-object)
-  ()
-  (:metaclass py-type))
-
-
-(finalize-inheritance (find-class 'py-dictless-object))
-
-(defclass py-object (py-dict-mixin py-dictless-object)
-  ()
-  (:metaclass py-type))
-
-(finalize-inheritance (find-class 'py-object))
-
-
-;; Core type/object
-
-(defclass py-core-object (py-dictless-object) ())
-(defclass py-core-type   (py-type)   ())
 
 ;; User type/object
 (defclass py-user-type   (py-type) ())
@@ -143,11 +85,6 @@
 (defun class-direct-superclasses (&rest args)
   (apply #'closer-mop:class-direct-superclasses args))
 
-;; Fix superclass and metaclass of PY-DICT.
-
-(ensure-class 'py-dict
-              :direct-superclasses (list 'py-core-object)
-              :metaclass 'py-core-type)
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;
@@ -1571,11 +1508,11 @@ but the latter two classes are not in CPython.")
 (defconstant +impl-status-comment-prop+ 'clpython::.impl-status-comment.)
 (defconstant +impl-warned-prop+         'clpython::.impl-warned.)
 
-(defconstant +impl-statuses+ '((t           . "complete")
-                               (:incomplete . "incomplete")
-                               (:todo       . "todo")
-			       (:n/a        . "not applicable")
-                               (nil         . "unknown status")))
+(defconstant-once +impl-statuses+ '((t           . "complete")
+                                    (:incomplete . "incomplete")
+                                    (:todo       . "todo")
+                                    (:n/a        . "not applicable")
+                                    (nil         . "unknown status")))
 
 (defun impl-status (symbol &optional want-comment)
   "Returns impl status of symbol, and optionally the corresponding comment."

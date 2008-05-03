@@ -18,7 +18,7 @@
 (defvar *tab-width-spaces* 8
   "One tab is equivalent to this many spaces, when it comes to indentation levels.")
 
-(defconstant +whitespace+ '(#\Space #\Tab #\Newline #\Return #\Page))
+(defconstant-once +whitespace+ '(#\Space #\Tab #\Newline #\Return #\Page))
 
 ;; Internal
 

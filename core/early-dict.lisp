@@ -70,23 +70,93 @@ All these symbols are in the clpython.user package.")
               (and s (get-sym-attr-hash s))))
     (t (mod (py-hash x) +dikt-hash-vector-size+))))
 
-;;; Py-dict 
 
-(defstruct (dikt (:type vector))
-  (vector (make-array +dikt-hash-vector-size+ :initial-element nil))
-  (hash-table nil))
+;;;; Set up the core classes, including PY-DICT.
+
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (defstruct (dikt (:type vector))
+    (vector (make-array +dikt-hash-vector-size+ :initial-element nil))
+    (hash-table nil)))
 
 ;; Invariant:
 ;;  VECTOR is NIL <=> HASH-TABLE is used.
 ;;  VECTOR not NIL => all keys are symbols (representing Python strings)
 
-(defclass py-dict ()
-  ((dikt :accessor py-dict-dikt :initform (make-dikt))))
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  
+  (defclass py-early-dict () ())
+  
+  (defvar *early-dicts* ())
+  
+  (defvar *make-dict-type* 'py-early-dict)
+  
+  (defun make-dict ()
+    ;;(break "make-dict ~A" *make-dict-type*)
+    ;;(declare #.*dict-optimize-settings*)
+    (let* ((type *make-dict-type*)
+           (d (make-instance type)))
+      (when (eq type 'py-early-dict)
+        (push d *early-dicts*))
+      d))
+  
+  (defclass py-dict-mixin ()
+    ((dict :initarg :dict :initform (make-dict) :accessor dict)))
+  
+  (defmethod dict ((x t))
+    nil)
+  
+  (defclass py-meta-type (py-dict-mixin standard-class)
+    ())
+  
+  (defmethod closer-mop:validate-superclass ((class py-meta-type) superclass)
+    (declare (ignorable class superclass))
+    t)
+  
+  (defclass py-type (py-dict-mixin standard-class)
+    ()      
+    (:metaclass py-meta-type))
+  
+  (defmethod closer-mop:validate-superclass ((class py-type) superclass)
+    (declare (ignorable class superclass))
+    t)
+  
+  (defmethod closer-mop:validate-superclass ((class standard-class) (superclass py-type))
+    (declare (ignorable class superclass))
+    t)
+  
+  (defclass py-dictless-object (standard-object)
+    ()
+    (:metaclass py-type))
+  
+  (defclass py-object (py-dict-mixin py-dictless-object)
+    ()
+    (:metaclass py-type))
+  
+  (defclass py-core-object (py-dictless-object) ())
+  
+  (defmethod closer-mop:validate-superclass (class (superclass py-meta-type))
+    (declare (ignorable class superclass))
+    t)
+  
+  (defmethod closer-mop:validate-superclass ((class standard-class) (superclass py-meta-type))
+    (declare (ignorable class superclass))
+    t)
+  
+  (defclass py-core-type   (py-type)   ())
 
-(defun make-dict ()
-  (declare #.*dict-optimize-settings*)
-  (make-instance 'py-dict))
+  (defclass py-dict (py-core-object)
+    ((dikt :accessor py-dict-dikt :initform (make-dikt)))
+    (:metaclass py-core-type))
 
+  (setf *make-dict-type* 'py-dict)
+
+  #+(or)(warn "Converting ~A dict from early to normal" (length *early-dicts*))
+  (loop for d = (pop *early-dicts*)
+      while d
+      do (change-class d 'py-dict)))
+
+;;;; Setting up the core classes is finished now.
+      
 (defun dict-map (x func)
   (check-type x py-dict)
   (check-type func function)

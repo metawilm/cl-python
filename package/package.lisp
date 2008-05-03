@@ -206,7 +206,7 @@
            #:with-ast-user-readtable #:with-ast-user-pprinter
            #:setup-omnivore-readmacro
            #:with-auto-mode-recompile #:whereas #:sans #:named-function
-           #:with-stack-list #:without-redefinition-warnings))
+           #:with-stack-list #:without-redefinition-warnings #:defconstant-once))
 
 ;;; CLPYTHON.PARSER - Parser and Lexer
 

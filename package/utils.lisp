@@ -99,3 +99,9 @@ http://groups.google.nl/group/comp.lang.lisp/msg/2520fe9bc7749328?dmode=source"
 (defmacro fast (&body body)
   `(locally (declare (optimize (speed 3)))
      ,@body))
+
+(defmacro defconstant-once (name &rest args)
+  (check-type name symbol)
+  `(eval-when (:compile-toplevel :load-toplevel :execute)
+     (unless (boundp ',name)
+       (defconstant ,name ,@args))))
