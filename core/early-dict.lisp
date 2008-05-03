@@ -197,11 +197,18 @@ All these symbols are in the clpython.user package.")
     #+(or)(warn "old py-== ~A ~A" x y)
     (if (equalp x y) 1 0)))
 
+#+sbcl
+(sb-int:define-hash-table-test 'py-hash-table-test
+    #'py-==->lisp-val #'py-hash)
+    
 (defun make-py-hash-table ()
-  #+(or allegro lispworks)
-  (make-hash-table :test 'py-==->lisp-val :hash-function 'py-hash)
-  #-(or allegro lispworks)
-  (erorr "Creating python dict not suported in this environment."))
+  (or #+(or allegro lispworks)
+      (make-hash-table :test 'py-==->lisp-val :hash-function 'py-hash)
+      
+      #+sbcl
+      (make-hash-table :test 'py-hash-table-test)
+      
+      (error "Creating python dict not suported in this environment.")))
 
 (defun convert-dikt (x)
   (declare #.*dict-optimize-settings*)
@@ -390,9 +397,10 @@ All these symbols are in the clpython.user package.")
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (defconstant +hash-table-iterator-indefinite-extent+
-      #+allegro nil
+      #+allegro t
       #+lispworks nil
-      #-(or allegro lispworks) nil
+      #+sbcl t
+      #-(or allegro lispworks sbcl) nil
     "Whether the iterator created by WITH-HASH-TABLE-ITERATOR has indefinite extent.
 This is not guaranteed due to the following in ANSI:
   It is unspecified what happens if any of the implicit interior state of
