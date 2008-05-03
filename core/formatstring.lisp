@@ -91,7 +91,7 @@
     (#\r (py-repr-string obj))
     (#\c (setf obj (deproxy obj))
 	 (typecase obj
-	   (integer (clpython.user.builtin.function:|chr| obj))
+	   (integer ({chr} obj))
 	   (string  (unless (= (length obj) 1)
 		      (py-raise '{TypeError}
 				"The %c formatting code wants 1-char string (got: ~S)."
