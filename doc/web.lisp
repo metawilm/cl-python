@@ -99,9 +99,16 @@ are available to Python code, and Python libraries can be accessed by Lisp code.
     ((:div style "width: 54%; float: left")
      
      (:h2 "Requirements")
-     (:p "CLPython runs successfully on the following platforms (porting to others is in progress):")
+     (:p "CLPython runs successfully on the following platforms:")
      (:ul (:li ((:a href "http://franz.com/products/allegrocl/" class "external") "Allegro CL 8.1"))
           (:li ((:a href "http://www.lispworks.com/" class "external") "LispWorks 5.0")))
+     (:p "CLPython still relies on some unportable features, which were uncovered when porting to the following platforms. These issues should be resolved soon:")
+     (:ul (:li ((:a href "http://sbcl.sourceforge.net/" class "external") "SBCL") 
+               ": fails at the point where CLPython does an invalid call to <i>ensure-class</i> (see "
+               ((:a href "http://common-lisp.net/pipermail/clpython-devel/2008-May/000035.html") "this post")
+               ")")
+          (:li ((:a href "http://www.cons.org/cmucl/" class "external") "CMUCL")
+               ": rightly complains about modification of constants, when a Python module is compiled"))
      (:p "There are dependencies on "
          ((:a href "http://common-lisp.net/project/closer/closer-mop.html" class "external") "Closer to MOP")
          " and " ((:a href "http://www.cliki.net/ptester" class "external") "ptester") ".")
@@ -142,7 +149,7 @@ and several hundred test successes. Unintended test errors will have the note \"
          ((:a href "http://opensource.franz.com/preamble.html" class "external") "LLGPL") ".")
      (:p))
 
-    ((:div style "width: 38%; float: right; background-color: #eeeeee; padding: 15px; margin: 5px")
+    ((:div style "width: 38%; float: right; background-color: #dddddd; padding: 15px; margin: 5px")
      (:h2 "Completeness")
      (:p "Almost all Python language features are implemented, like generators, classes, metaclasses, modules, 
 list comprehensions, and of course " (:i "lambda") ". A few fairly new Python features introduced
@@ -162,7 +169,7 @@ with " ((:a href "http://docs.python.org/whatsnew/whatsnew25.html" class "extern
              (push (cons rel-name (1+ percentage)) status))
            #+(or)(html (:princ (format nil "~A" status)))
            (html (:br)
-                 ((:img src (format nil "http://chart.apis.google.com/chart?chd=t:~{~A~^,~}&chg=25,0,1,3&chs=200x300&cht=bhs&chxl=0:||100%|1:|~{~A|~}&chxt=x,y&chf=bg,s,eeeeee"
+                 ((:img src (format nil "http://chart.apis.google.com/chart?chd=t:~{~A~^,~}&chg=25,0,1,3&chs=200x300&cht=bhs&chxl=0:||100%|1:|~{~A|~}&chxt=x,y&chf=bg,s,dddddd"
                                     (mapcar #'cdr status)
                                     (mapcar #'car status)))))))
      #+(or)((:h2 "Performance")
@@ -170,7 +177,7 @@ with " ((:a href "http://docs.python.org/whatsnew/whatsnew25.html" class "extern
 
     ((:br clear "all"))
 
-    ((:div style "background-color: #eeeeee; position: relative; left: 10%; width: 80%; padding: 10px; margin: 30px 0px")
+    ((:div style "background-color: #dddddd; position: relative; left: 10%; width: 80%; padding: 10px; margin: 30px 0px")
      ((:h1 id "running_python_code") "Getting started with CLPython")
      ((:table cellpadding "5")
       ((:tr valign "top")
@@ -227,154 +234,157 @@ Error: NameError: Variable `foo' is unbound."))
        (:td ">>> <i>print \"Have fun!\"</i><br>
 Have fun!"))))
 
-    (:h1 "CLPython - Some Technical Details")
-    #+(or)(make-anchor-links)
-    (list #6="Python Object Representation" #+(or)#11="Packages" #+(or)#1="Readtables" #+(or)#2="Parser and Pretty Printer"
-          #4="Compiler" #55="Compiler optimizations" #5="Compiled vs. Interpreted Code")
+    ((:br clear "all"))
     
-    ((:div style "width: 45%; float: left")
-     (h2-anchor #6#)
-     (:p "Python objects are represented by an equivalent Lisp value where possible, and as "
-         ((:a href "http://en.wikipedia.org/wiki/CLOS" class "external") "CLOS")
-         " instances otherwise:")
-     (:p)
-     ((:table style "position: relative; left: 1em; font-size: small")
-      (:tr ((:td style "border-top: 1px solid black; border-bottom: 1px dotted #999")
-            "Python data type")
-           ((:td style "border-top: 1px solid black; border-bottom: 1px dotted #999")
-            "Representation in CLPython"))
-      (loop with data = '(("Class"              "CLOS Class")
-                          ("Instance of user-defined class" "CLOS instance")
-                          ("Function"           "Function")
-                          ("Dict"               "Hashtable")
-                          ("(Unicode) String"   "Unicode string")
-                          ("List"               "Adjustable vector")
-                          ("Tuple"              "Consed list")
-                          ("Long, Integer, Boolean" "Integer")
-                          ("Complex"            "Complex")
-                          ("Float"              "Double-float")
-                          ("Complex"            "Complex"))
-          for (k v) in data
-          for i from 1
-          do (let ((style (if (= i (length data))
-                              "border-bottom: 1px solid black"
-                            "")))
-               (html (:tr ((:td style style)
-                           (:princ k))
-                          ((:td style style)
-                           (:princ v)))))))
-     (:p)
+    ((:div style "position: relative; left: 5%; width: 90%")
+     (:h1 "CLPython - Some Technical Details")
+     #+(or)(make-anchor-links)
+     (list #6="Python Object Representation" #+(or)#11="Packages" #+(or)#1="Readtables" #+(or)#2="Parser and Pretty Printer"
+           #4="Compiler" #55="Compiler optimizations" #5="Compiled vs. Interpreted Code")
+    
+     ((:div style "width: 45%; float: left")
+      (h2-anchor #6#)
+      (:p "Python objects are represented by an equivalent Lisp value where possible, and as "
+          ((:a href "http://en.wikipedia.org/wiki/CLOS" class "external") "CLOS")
+          " instances otherwise:")
+      (:p)
+      ((:table style "position: relative; left: 1em; font-size: small")
+       (:tr ((:td style "border-top: 1px solid black; border-bottom: 1px dotted #999")
+             "Python data type")
+            ((:td style "border-top: 1px solid black; border-bottom: 1px dotted #999")
+             "Representation in CLPython"))
+       (loop with data = '(("Class"              "CLOS Class")
+                           ("Instance of user-defined class" "CLOS instance")
+                           ("Function"           "Function")
+                           ("Dict"               "Hashtable")
+                           ("(Unicode) String"   "Unicode string")
+                           ("List"               "Adjustable vector")
+                           ("Tuple"              "Consed list")
+                           ("Long, Integer, Boolean" "Integer")
+                           ("Complex"            "Complex")
+                           ("Float"              "Double-float")
+                           ("Complex"            "Complex"))
+           for (k v) in data
+           for i from 1
+           do (let ((style (if (= i (length data))
+                               "border-bottom: 1px solid black"
+                             "")))
+                (html (:tr ((:td style style)
+                            (:princ k))
+                           ((:td style style)
+                            (:princ v)))))))
+      (:p)
      
-     #+(or)((h2-anchor #11#)
-            (:p "CLPython offers one package named <i>clpython</i> to the outside world. But internally the functionality is spread over separate packages:")
-            ((:ul style "font-size: small")
-             (:li "<i>clpython:</i> &nbsp;main package"
-                  (:ul (:li "<i>clpython.parser:</i> &nbsp; parser and code walker")
-                       (:li "<i>clpython.ast:</i>"
-                            (:ul (:li "<i>clpython.ast.reserved:</i> &nbsp;reserved words")
-                                 (:li "<i>clpython.ast.operator:</i> &nbsp;mathematical operators")
-                                 (:li "<i>clpython.ast.punctuation:</i> &nbsp;punctionation characters")
-                                 (:li "<i>clpython.ast.node:</i> &nbsp;AST nodes")))
-                       (:li "<i>clpython.user:</i> &nbsp; identifiers in Python code"
-                            (:ul (:li "<i>clpython.user.builtin</i>")
-                                 (:li "<i>clpython.user.builtin.type</i>")
-                                 (:li "<i>clpython.user.builtin.type.exception</i>")
-                                 (:li "<i>clpython.user.builtin.value</i>")))
-                       (:li "<i>clpython.module:</i> &nbsp;aggregation package of Python modules")
-                       (:li "<i>clpython.app:</i> &nbsp;programs and utilities"
-                            (:ul (:li "<i>clpython.app.repl:</i>&nbsp; read-eval-print loop")))
-                       (:li "<i>clpython.package:</i> &nbsp;utilities")))))
+      #+(or)((h2-anchor #11#)
+             (:p "CLPython offers one package named <i>clpython</i> to the outside world. But internally the functionality is spread over separate packages:")
+             ((:ul style "font-size: small")
+              (:li "<i>clpython:</i> &nbsp;main package"
+                   (:ul (:li "<i>clpython.parser:</i> &nbsp; parser and code walker")
+                        (:li "<i>clpython.ast:</i>"
+                             (:ul (:li "<i>clpython.ast.reserved:</i> &nbsp;reserved words")
+                                  (:li "<i>clpython.ast.operator:</i> &nbsp;mathematical operators")
+                                  (:li "<i>clpython.ast.punctuation:</i> &nbsp;punctionation characters")
+                                  (:li "<i>clpython.ast.node:</i> &nbsp;AST nodes")))
+                        (:li "<i>clpython.user:</i> &nbsp; identifiers in Python code"
+                             (:ul (:li "<i>clpython.user.builtin</i>")
+                                  (:li "<i>clpython.user.builtin.type</i>")
+                                  (:li "<i>clpython.user.builtin.type.exception</i>")
+                                  (:li "<i>clpython.user.builtin.value</i>")))
+                        (:li "<i>clpython.module:</i> &nbsp;aggregation package of Python modules")
+                        (:li "<i>clpython.app:</i> &nbsp;programs and utilities"
+                             (:ul (:li "<i>clpython.app.repl:</i>&nbsp; read-eval-print loop")))
+                        (:li "<i>clpython.package:</i> &nbsp;utilities")))))
      
-     #+(or)((h2-anchor #1#)
-            (:p "Programs that deal with abstract syntax trees of Python programs have to deal with symbols in different packages: "
-                "the nodes of the AST are in package <i>clpython.<b>ast</b></i> or a subpackage, e.g. <i>clpython.ast.node:if-stmt</i>."
-                "Identifiers used in the Python code, on the other hand, are interned in package <i>clpython.<b>user</b></i>, like "
-                "<i>clpython.user::foo</i>.")
-            (:p "Some of these symbols conflict with those from the <i>Common Lisp</i> package. For that reason they are not exported "
-                "from the <i>clpython</i> package. Nevertheless there is an easy way to refer to these symbols, namely by using a "
-                "handy " ((:a href "http://www.lisp.org/HyperSpec/Body/sec_2-1-1.html" class "external") "readtable") " defined by CLPython. "
-                "This allows writing <i>[foo]</i> to refer to <i>clpython.ast::foo</i>, and <i>{bar}</i> for <i>clpython.user::bar</i>. ")
-            (:p "There are three such readtables: <i>*ast-readtable*</i> for the <i>{foo}</i> styntax, "
-                "<i>*user-readtable*</i> for the <i>[if-stmt]</i> syntax, and <i>*ast-user-readtable*</i> for both. "
-                "These readtables have been "
-                ((:a href "http://www.franz.com/support/documentation/8.0/doc/operators/excl/named-readtable.htm"
-                     class "external") "named" )
-                " <i>:py-ast-readtable</i>, <i>:py-user-readtable</i> and <i>:py-ast-user-readtable</i>, "
-                "and these names can be used in the file mode line in Emacs source files:")
-            ((:p style "font-size: small; position: relative; left: 5%")
-             ";; -*- package: clpython; readtable: py-ast-user-readtable -*-<br>
+      #+(or)((h2-anchor #1#)
+             (:p "Programs that deal with abstract syntax trees of Python programs have to deal with symbols in different packages: "
+                 "the nodes of the AST are in package <i>clpython.<b>ast</b></i> or a subpackage, e.g. <i>clpython.ast.node:if-stmt</i>."
+                 "Identifiers used in the Python code, on the other hand, are interned in package <i>clpython.<b>user</b></i>, like "
+                 "<i>clpython.user::foo</i>.")
+             (:p "Some of these symbols conflict with those from the <i>Common Lisp</i> package. For that reason they are not exported "
+                 "from the <i>clpython</i> package. Nevertheless there is an easy way to refer to these symbols, namely by using a "
+                 "handy " ((:a href "http://www.lisp.org/HyperSpec/Body/sec_2-1-1.html" class "external") "readtable") " defined by CLPython. "
+                 "This allows writing <i>[foo]</i> to refer to <i>clpython.ast::foo</i>, and <i>{bar}</i> for <i>clpython.user::bar</i>. ")
+             (:p "There are three such readtables: <i>*ast-readtable*</i> for the <i>{foo}</i> styntax, "
+                 "<i>*user-readtable*</i> for the <i>[if-stmt]</i> syntax, and <i>*ast-user-readtable*</i> for both. "
+                 "These readtables have been "
+                 ((:a href "http://www.franz.com/support/documentation/8.0/doc/operators/excl/named-readtable.htm"
+                      class "external") "named" )
+                 " <i>:py-ast-readtable</i>, <i>:py-user-readtable</i> and <i>:py-ast-user-readtable</i>, "
+                 "and these names can be used in the file mode line in Emacs source files:")
+             ((:p style "font-size: small; position: relative; left: 5%")
+              ";; -*- package: clpython; readtable: py-ast-user-readtable -*-<br>
 \(in-package :clpython)<br>
 \(in-syntax *ast-user-readtable*)"))
 
-     #+(or)((h2-anchor #2#)
-            (:p "The parser (function <i>parse</i>) translates Python source code into an abstract syntax tree. ")
-            (:p "The pretty printer (function <i>py-pprint</i>) does the reverse: translating an AST into properly formatted Python source.
+      #+(or)((h2-anchor #2#)
+             (:p "The parser (function <i>parse</i>) translates Python source code into an abstract syntax tree. ")
+             (:p "The pretty printer (function <i>py-pprint</i>) does the reverse: translating an AST into properly formatted Python source.
          The outputted source code is normalized:")
-            ((:ul style "font-size: small")
-             (:li "Comments (i.e. lines starting with `#') are currently not included in the AST,
+             ((:ul style "font-size: small")
+              (:li "Comments (i.e. lines starting with `#') are currently not included in the AST,
 thus the emitted source code will not contain them. (But docstrings, being regular strings, are included.)")
-             (:li "String delimiters are by default single quotes: \"a\" will be printed as 'a'.")
-             (:li "Brackets put around subexpresions are printed only if the priority of operations requires it: '(1 * 2) + 3' will be printed as '1 * 2 + 3'.")
-             (:li "Whitespace is normalized: '1+2' is printed as '1 + 2'.")
-             (:li "Indentation is normalized, to use multiples of "
-                  (:princ clpython.parser::*tab-width-spaces*)
-                  " characters, and no tabs.")
-             (:li "Consecutive string constants are concatenated: \"x = 'a' 'b'\" will be printed as \"x = 'ab'\".")))
+              (:li "String delimiters are by default single quotes: \"a\" will be printed as 'a'.")
+              (:li "Brackets put around subexpresions are printed only if the priority of operations requires it: '(1 * 2) + 3' will be printed as '1 * 2 + 3'.")
+              (:li "Whitespace is normalized: '1+2' is printed as '1 + 2'.")
+              (:li "Indentation is normalized, to use multiples of "
+                   (:princ clpython.parser::*tab-width-spaces*)
+                   " characters, and no tabs.")
+              (:li "Consecutive string constants are concatenated: \"x = 'a' 'b'\" will be printed as \"x = 'ab'\".")))
     
-     (h2-anchor #4#)
-     (:p "CLPython first translates Python code into an abstract syntax tree (AST), and then translates the AST into "
-         "Lisp code. Most of the compilation work is carried out by macros:")
-     ((:p style "font-size: small; position: relative; left: 5%")
-      "if 4 > 3:<br>
+      (h2-anchor #4#)
+      (:p "CLPython first translates Python code into an abstract syntax tree (AST), and then translates the AST into "
+          "Lisp code. Most of the compilation work is carried out by macros:")
+      ((:p style "font-size: small; position: relative; left: 5%")
+       "if 4 > 3:<br>
   &nbsp; print 'y'<br>
 else:<br>
 &nbsp; print 'n'")
-     (:p "...macroexpands into a <i>cond</i> form:")
-     ((:p style "font-size: small; position: relative; left: 5%")
-      "(cond<br>
+      (:p "...macroexpands into a <i>cond</i> form:")
+      ((:p style "font-size: small; position: relative; left: 5%")
+       "(cond<br>
  &nbsp; ((py-val-&gt;lisp-bool (py-&gt; 4 3))<br>
  &nbsp; &nbsp; (py-print nil (list \"y\") nil))<br>
  &nbsp; (t<br>
  &nbsp; &nbsp; (py-print nil (list \"n\") nil)))")
-     (:p "...as defined by the macro:")
-     ((:p style  "font-size: small; position: relative; left: 5%") 
-      "(defmacro [if-stmt] (if-clauses else-clause)<br>
+      (:p "...as defined by the macro:")
+      ((:p style  "font-size: small; position: relative; left: 5%") 
+       "(defmacro [if-stmt] (if-clauses else-clause)<br>
   &nbsp; `(cond ,@(loop for (cond body) in if-clauses<br>
   &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; collect `((py-val->lisp-bool ,cond) ,body))<br>
   &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; ,@(when else-clause <br>
   &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; `((t ,else-clause)))))")
-     (:p "Note that the expansion contains calls to functions <i>py-val-&gt;lisp-bool</i>, <i>py-&gt;</i> and <i>py-print</i>. These function are part of CLPython \"runtime environment\", and not part of the generated code. CLPython must be loaded every time this code is executed."))
+      (:p "Note that the expansion contains calls to functions <i>py-val-&gt;lisp-bool</i>, <i>py-&gt;</i> and <i>py-print</i>. These function are part of CLPython \"runtime environment\", and not part of the generated code. CLPython must be loaded every time this code is executed."))
 
-    ((:div style "width: 45%; float: right")
-     (h2-anchor #55#)
-     (:p "Sometimes the generated Python code can be simplified because values of expressions are known at compile time. "
-         "This is where " ((:a href "http://www.lisp.org/HyperSpec/Body/sec_3-2-2-1.html" class "external") "compiler macros")
-         " play a role. In the previous example, as 4 > 3 always holds, first the compiler macro for <i>py-&gt;</i> replaces "
-         "<i>(py-&gt; 4 3)</i> by the Python value <i>True</i>. Then the compiler macro for <i>py-val-&gt;lisp-bool</i> "
-         "sees <i>True</i> is a constant value, and replaces <i>(py-val-&gt;lisp-bool True)</i> by <i>t</i>. "
-         "The Lisp compiler then deduces that always the first branch of the <i>if</i> expression is taken, "
-         "and replace the whole <i>(cond ...)</i> by <i>(py-print nil (list \"y\") nil)</i>, which is a call to the <i>print</i> function "
-         "in the CLPython runtime environment. (Actually there is a compiler macros for py-print too, which also does optimizations.)")
-     (:p "In this example the compiler macros were able to remove a lot of the Lisp code at compile time. In practice there is often not that much that can be decided at compile time, due to Python as language being very dynamic.
+     ((:div style "width: 45%; float: right")
+      (h2-anchor #55#)
+      (:p "Sometimes the generated Python code can be simplified because values of expressions are known at compile time. "
+          "This is where " ((:a href "http://www.lisp.org/HyperSpec/Body/sec_3-2-2-1.html" class "external") "compiler macros")
+          " play a role. In the previous example, as 4 > 3 always holds, first the compiler macro for <i>py-&gt;</i> replaces "
+          "<i>(py-&gt; 4 3)</i> by the Python value <i>True</i>. Then the compiler macro for <i>py-val-&gt;lisp-bool</i> "
+          "sees <i>True</i> is a constant value, and replaces <i>(py-val-&gt;lisp-bool True)</i> by <i>t</i>. "
+          "The Lisp compiler then deduces that always the first branch of the <i>if</i> expression is taken, "
+          "and replace the whole <i>(cond ...)</i> by <i>(py-print nil (list \"y\") nil)</i>, which is a call to the <i>print</i> function "
+          "in the CLPython runtime environment. (Actually there is a compiler macros for py-print too, which also does optimizations.)")
+      (:p "In this example the compiler macros were able to remove a lot of the Lisp code at compile time. In practice there is often not that much that can be decided at compile time, due to Python as language being very dynamic.
 For example, in the expression <i>5 + x</i> the value of <i>x</i> can be anything. As classes are able to redefine how the <i>+</i> operator
 behaves (with the <i>__add__</i> and <i>__radd__</i> methods), the value of <i>5 + x</i> can be anything as well.
 Unless the context gives more information about the type of <i>x</i>, the Lisp code must contain a call to the generic addition function <i>py-+</i>.")
-     (:p "Nevertheless, the compiler macro will inline \"common\" case, and make the generic call only for \"uncommon\" arguments.
+      (:p "Nevertheless, the compiler macro will inline \"common\" case, and make the generic call only for \"uncommon\" arguments.
 If small integers are common for the <i>+</i> operator, the compiler macro for <i>py-+</i> could emit:")
-     ((:p style "font-size: small; position: relative; left: 5%")
-      "(if (typep x 'fixnum)<br>
+      ((:p style "font-size: small; position: relative; left: 5%")
+       "(if (typep x 'fixnum)<br>
   &nbsp; &nbsp;  (+ 5 x)<br>
   &nbsp; (py-+ 5 x))")
-     (:p "The check for x being <i>fixnum</i> is very fast, as is the addition in that case. If x is not a <i>fixnum</i> it could another kind of number, or even a Pythonic object simulating "
-         "numeric behavior. The generic <i>py-+</i> will handle those types, and raise an exception if addition fails.")
-     (:p)
-     (h2-anchor #5#)
-     (:p "CLPython can run Python code in two Lisp modes, <i>interpreted</i> or <i>compiled</i>. In the latter case Lisp code is "
-         "translated into assembly (or byte code, depending on the Lisp implementation). The advantage of interpreted code is "
-         "that debugging is easier (the stack trace contains more information), but execution of compiled code "
-         "is much faster. When a Python module is compiled, the functions are compiled into assembly code and written to an "
-         "implementation-dependent <i>fasl</i> file.")
-     (:p))))
+      (:p "The check for x being <i>fixnum</i> is very fast, as is the addition in that case. If x is not a <i>fixnum</i> it could another kind of number, or even a Pythonic object simulating "
+          "numeric behavior. The generic <i>py-+</i> will handle those types, and raise an exception if addition fails.")
+      (:p)
+      (h2-anchor #5#)
+      (:p "CLPython can run Python code in two Lisp modes, <i>interpreted</i> or <i>compiled</i>. In the latter case Lisp code is "
+          "translated into assembly (or byte code, depending on the Lisp implementation). The advantage of interpreted code is "
+          "that debugging is easier (the stack trace contains more information), but execution of compiled code "
+          "is much faster. When a Python module is compiled, the functions are compiled into assembly code and written to an "
+          "implementation-dependent <i>fasl</i> file.")
+      (:p)))))
 
 
 (defmacro with-package-details ((rel-name is-first perc details) &body body)
