@@ -34,7 +34,7 @@
 If true, the compiler must generate additional code for every call,
 and execution will be slower. It is very rare for Python code to do
 such indirect special calls.")
-;; This is similar to the Javscript restriction on `eval' (ECMA 262, §15.1.2.1)
+;; This is similar to the Javscript restriction on `eval' (ECMA 262, paragraph 15.1.2.1)
 
 (defvar *mangle-private-variables-in-class* nil
   "In class definitions, replace __foo by _CLASSNAME__foo, like CPython does")
@@ -150,7 +150,7 @@ Disabled by default, to not confuse the test suite.")
 
 ;;; Compiler State
 
-(defconstant +__main__-module-name+ "__main__")
+(defconstant-once +__main__-module-name+ "__main__")
 
 (defvar *current-module-name* +__main__-module-name+
   "The name of the module now being compiled; module.__name__ is set to it.")
@@ -1311,8 +1311,6 @@ DETERMINE-BODY-GLOBALS
 
 (define-compiler-macro [suite-stmt] (&whole whole stmts &environment e)
   ;; Skip checks for bound-ness, when a lexical variable is certainly bound.
-  (format t ";; in compiler macro for SUITE-STMT")
-  
   (unless (eq (get-pydecl :context e) :function)
     (return-from [suite-stmt] whole))
   
