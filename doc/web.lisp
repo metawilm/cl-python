@@ -102,13 +102,12 @@ are available to Python code, and Python libraries can be accessed by Lisp code.
      (:p "CLPython runs successfully on the following platforms:")
      (:ul (:li ((:a href "http://franz.com/products/allegrocl/" class "external") "Allegro CL 8.1"))
           (:li ((:a href "http://www.lispworks.com/" class "external") "LispWorks 5.0")))
-     (:p "CLPython still relies on some unportable features, which were uncovered when porting to the following platforms. These issues should be resolved soon:")
+     (:p "CLPython does not run yet on the following platforms (at least not on Mac OS X 10.4, on which most development takes place):")
      (:ul (:li ((:a href "http://sbcl.sourceforge.net/" class "external") "SBCL") 
-               ": fails at the point where CLPython does an invalid call to <i>ensure-class</i> (see "
-               ((:a href "http://common-lisp.net/pipermail/clpython-devel/2008-May/000035.html") "this post")
-               ")")
-          (:li ((:a href "http://www.cons.org/cmucl/" class "external") "CMUCL")
-               ": rightly complains about modification of constants, when a Python module is compiled"))
+               " and " ((:a href "http://www.cons.org/cmucl/" class "external") "CMUCL"):
+               ": the source compiles fine, but creating a Python function object fails (see "
+               ((:a href "http://common-lisp.net/pipermail/clpython-devel/2008-May/000045.html") "this post")
+               ")"))
      (:p "There are dependencies on "
          ((:a href "http://common-lisp.net/project/closer/closer-mop.html" class "external") "Closer to MOP")
          " and " ((:a href "http://www.cliki.net/ptester" class "external") "ptester") ".")
@@ -120,9 +119,12 @@ are available to Python code, and Python libraries can be accessed by Lisp code.
           (:li (:i "cvs -d :pserver:cvspublic@cvspublic.franz.com:/cvs-public checkout clpython")))
      
      (:h2 "Install")
-     (:p "To compile and load CLPython you need " ((:a href "http://www.cliki.net/asdf" class "external") "asdf") ". "
-         "Create a link from the repository to file " (:i "clpython.asd") ", then load the system using
-using " (:i "(asdf:operate 'asdf:load-op :clpython)") ".")
+     (:p "To compile and load CLPython you need " ((:a href "http://www.cliki.net/asdf" class "external") "asdf") ": "
+         "first create a link from the repository to file " (:i "clpython.asd") ", then load the system using
+using " (:i "(asdf:operate 'asdf:load-op :clpython)") ". ")
+     
+     (:p "Read the sections below on " ((:a href "#getting_started") "getting started") " with CLPython, "
+         "and some " ((:a href "#technical_details") "technical details") " on the implementation.")
      (:p "To run the test suite, evaluate " (:i "(asdf:operate 'asdf:test-op :clpython)") ". The test
 result printed at the end should be the message \"Errors detected in this test: 5\" (which are the 5 or so known issues)
 and several hundred test successes. Unintended test errors will have the note \"unexpected\".")
@@ -156,13 +158,14 @@ list comprehensions, and of course " (:i "lambda") ". A few fairly new Python fe
 with " ((:a href "http://docs.python.org/whatsnew/whatsnew25.html" class "externab") "Python 2.5")
 " are missing:")
      (:ul (:li "Absolute and relative imports: &nbsp;" (:i "from .. import x"))
-          (:li "Generators that use " (:i "yield") "as expression: &nbsp;" (:i "y = (yield x)")))
+          (:li "Generators that use " (:i "yield") " as expression: &nbsp;" (:i "y = (yield x)")))
 
      (:p "Some of the modules in the "
          ((:a href "http://python.org/doc/current/modindex.html"
-              class "external") "Python library")
+              class "external") "Python standard library")
          " are written in C; they have to be ported to Lisp before they can be used in CLPython. "
-         "An overview of the porting progress: " (:br)
+         "Not much time has been spent on this yet. "
+         "Here's a rough overview of the porting progress: " (:br)
          
          (let (status)
            (with-package-details (rel-name is-first percentage details)
@@ -178,7 +181,7 @@ with " ((:a href "http://docs.python.org/whatsnew/whatsnew25.html" class "extern
     ((:br clear "all"))
 
     ((:div style "background-color: #dddddd; position: relative; left: 10%; width: 80%; padding: 10px; margin: 30px 0px")
-     ((:h1 id "running_python_code") "Getting started with CLPython")
+     ((:h1 id "getting_started") "Getting started with CLPython")
      ((:table cellpadding "5")
       ((:tr valign "top")
        ((:td width "50%")
@@ -237,7 +240,7 @@ Have fun!"))))
     ((:br clear "all"))
     
     ((:div style "position: relative; left: 5%; width: 90%")
-     (:h1 "CLPython - Some Technical Details")
+     ((:h1 id "technical_details") "CLPython - Some Technical Details")
      #+(or)(make-anchor-links)
      (list #6="Python Object Representation" #+(or)#11="Packages" #+(or)#1="Readtables" #+(or)#2="Parser and Pretty Printer"
            #4="Compiler" #55="Compiler optimizations" #5="Compiled vs. Interpreted Code")
@@ -364,9 +367,9 @@ else:<br>
           "sees <i>True</i> is a constant value, and replaces <i>(py-val-&gt;lisp-bool True)</i> by <i>t</i>. "
           "The Lisp compiler then deduces that always the first branch of the <i>if</i> expression is taken, "
           "and replace the whole <i>(cond ...)</i> by <i>(py-print nil (list \"y\") nil)</i>, which is a call to the <i>print</i> function "
-          "in the CLPython runtime environment. (Actually there is a compiler macros for py-print too, which also does optimizations.)")
+          "in the CLPython runtime environment. (Actually there is a compiler macro for py-print too, which also optimizes certain cases.)")
       (:p "In this example the compiler macros were able to remove a lot of the Lisp code at compile time. In practice there is often not that much that can be decided at compile time, due to Python as language being very dynamic.
-For example, in the expression <i>5 + x</i> the value of <i>x</i> can be anything. As classes are able to redefine how the <i>+</i> operator
+For example: in the expression <i>5 + x</i> the value of <i>x</i> can be anything. As classes are able to redefine how the <i>+</i> operator
 behaves (with the <i>__add__</i> and <i>__radd__</i> methods), the value of <i>5 + x</i> can be anything as well.
 Unless the context gives more information about the type of <i>x</i>, the Lisp code must contain a call to the generic addition function <i>py-+</i>.")
       (:p "Nevertheless, the compiler macro will inline \"common\" case, and make the generic call only for \"uncommon\" arguments.
