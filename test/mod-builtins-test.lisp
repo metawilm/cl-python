@@ -13,7 +13,7 @@
 
 (defun run-builtin-test ()
   (with-subtest (:name "CLPython-Builtins")
-    (dolist (x '(:globals :hash))
+    (dolist (x '(:globals :hash :range))
       (test-builtin x))))
 
 (defgeneric test-builtin (kind))
@@ -48,3 +48,9 @@ for i in range(60):
     hashes[ hash( (i,j) ) ] = None
 assert len(hashes) > 1000"
                 :fail-info "Ensure tuple hashes nicely distributed."))
+
+(defmethod test-builtin ((x (eql :range)))
+  (run-no-error "assert range(3) == [0,1,2]")
+  (run-no-error "assert range(1,3) == [1,2]")
+  (run-no-error "assert range(1,10,2) == [1,3,5,7,9]")
+  (run-no-error "assert range(10,1,-2) == [10,8,6,4,2]"))
