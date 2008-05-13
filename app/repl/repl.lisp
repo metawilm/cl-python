@@ -153,11 +153,12 @@ KIND can be :ptime, :time, :space, :pspace or NIL."
   (values))
   
 (defun repl-1 ()
-  (let* ((*repl-mod* (make-module))
+  (let* ((mgh (clpython::make-standard-mgh "__main__" "<repl>"))
+         (*repl-mod* (clpython::mgh-module mgh))
          (clpython::*habitat* (clpython::make-habitat))
          (*truncation-explain* t)
 	 acc)
-    
+    (declare (special clpython::*habitat*))
     (dolist (x '(_ __ ___))
       (setf (py-attr* *repl-mod* x) *the-none*))
     (setf (py-attr* *repl-mod* "__name__") "__main__")
@@ -176,12 +177,12 @@ KIND can be :ptime, :time, :space, :pspace or NIL."
                          val)))
 
 	     (run-ast-func (suite)
-               (let ((f `(lambda ()
-                           (clpython::with-this-module-context (,*repl-mod*)
-                             ,suite))))
-                 (if *repl-compile*
-                     (setf f (compile nil f))
-                   (coerce f 'function)))) ;; coerce, as lambda expr is not funcallable
+               (lambda () (clpython::run-python-ast suite :run-args (list :globals-handler mgh)))
+               #+(or)(let ((f `(lambda ()
+                                 ,suite)))
+                       (if *repl-compile*
+                           (setf f (compile nil f))
+                         (coerce f 'function)))) ;; coerce, as lambda expr is not funcallable
 	     
              (nice-one-line-input-abbrev (total)
                (check-type total string)
@@ -203,7 +204,7 @@ KIND can be :ptime, :time, :space, :pspace or NIL."
 		 (assert (|suite-stmt-p| ?suite))
 		 (let ((vals (multiple-value-list
                               (block :val 
-                                (loop (let ((helper-func (run-ast-func ?suite)))
+                                (loop (let ((helper-func (run-ast-func ast)))
                                         (loop (with-simple-restart
                                                   (retry-repl-eval (concatenate 'string "Retry the expression: \"~A\"" #+allegro " (~S).")
                                                                    (nice-one-line-input-abbrev total)
@@ -318,6 +319,7 @@ KIND can be :ptime, :time, :space, :pspace or NIL."
 				(setf acc nil)
                                 t)))))))
 
+             #+allegro
              (input-available-p ()
                (let ((ch (read-char-no-hang *standard-input*)))
                  (when ch

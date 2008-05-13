@@ -16,6 +16,7 @@
 
 (defun py-raise (exc-type string &rest format-args)
   "Raise a Python exception with given format string"
+  (declare (ignorable string format-args))
   #+clpython-exceptions-are-python-objects
   (error exc-type :args (cons string format-args))
   #-clpython-exceptions-are-python-objects

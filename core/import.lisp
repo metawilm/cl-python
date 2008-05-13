@@ -48,8 +48,8 @@
 (defparameter *use-asdf-binary-locations* t
   "Whether to store fasl files in directory determined by asdf-binary-locations.")
 
-(defgeneric compiled-file-name (kind modname filepath &key include-dir)
-  (:method :around (kind modname filepath &key include-dir)
+(defgeneric compiled-file-name (kind modname filepath &key include-dir create-dir)
+  (:method :around (kind modname filepath &key include-dir create-dir)
            (declare (ignore include-dir filepath kind))
            (check-type modname string)
            (let ((bin-path (call-next-method))
@@ -62,17 +62,18 @@
                                         (make-instance 'asdf:cl-source-file
                                           :parent (asdf:find-system :clpython)
                                           :pathname bin-path)))))
-                    (when new-path
+                    (when (and new-path create-dir)
                       (setf new-path (ensure-directories-exist new-path)))))))
              (or bin-path-2 bin-path)))
   
-  (:method ((kind (eql :module)) modname filepath &key include-dir)
-           (declare (ignore include-dir))
+  (:method ((kind (eql :module)) modname filepath &key include-dir create-dir)
+           (declare (ignore include-dir create-dir))
            (derive-pathname filepath
                             :name (pathname-name modname :case :common)
                             :type *py-compiled-file-type* ))
   
-  (:method ((kind (eql :package)) modname filepath &key (include-dir t))
+  (:method ((kind (eql :package)) modname filepath &key (include-dir t) create-dir)
+           (declare (ignore create-dir))
            (merge-pathnames
             (if include-dir
                 (make-pathname :directory `(:relative ,(pathname-name modname :case :common))
@@ -100,7 +101,6 @@ As for case: both MODNAME's own name its upper-case variant are tried."
 Returns (values KIND SRC-PATH BIN-PATH), where KIND one of :module, :package.
 Returns NIL if nothing found."
   (loop for path in search-paths
-		    
       for src-path = (find-if #'probe-file (source-file-names :module name path))
       for bin-path = (find-if #'probe-file (list (compiled-file-name :module name path)))
       for pkg-src-path = (find-if #'probe-file (source-file-names :package name path))
@@ -169,23 +169,28 @@ Returns the loaded module, or NIL on error."
     (flet ((do-loading ()
 	     (let* (new-module
                     loaded-okay
-		    (*module-hook* (lambda (mod)
-				     (setf new-module mod)
-                                     ;; Need to register module before it is fully loaded,
-				     ;; otherwise infinite recursion if two modules import
-				     ;; each other.
-                                     #+(or)(warn "Register module ~A as ~A in habitat ~A"
-                                                 mod (module-name mod) habitat)
-                                     (add-loaded-module mod habitat))))
-	       (declare (special *module-hook*))
+                    module-function
+                    (*module-function* (lambda (f) (setf module-function f)))
+		    (*module-preload-hook* (lambda (mod)
+                                             (setf new-module mod)
+                                             ;; Need to register module before it is fully loaded,
+                                             ;; otherwise infinite recursion if two modules import
+                                             ;; each other.
+                                             #+(or)(warn "Register module ~A as ~A in habitat ~A"
+                                                         mod (module-name mod) habitat)
+                                             (add-loaded-module mod habitat))))
+	       (declare (special *module-preload-hook* *module-function*))
                (with-auto-mode-recompile (:verbose *import-load-verbose*)
 		 (let ((*current-module-name* mod-name))
 		   (declare (special *current-module-name*))
 		   (setf loaded-okay (load filename :verbose *import-load-verbose*))))
                (unless loaded-okay
                  (return-from do-loading (values nil nil)))
+               (unless module-function
+                 (break "CLPython bug: module ~A did not call *module-function*" mod-name))
+               (funcall module-function)
                (unless new-module
-		 (break "CLPython bug: module ~A did not call *module-hook* upon loading"
+		 (break "CLPython bug: module ~A did not call *module-preload-hook* upon loading"
                         mod-name))
                (when (and old-module update-existing-mod)
 		 (copy-module-contents :from new-module :to old-module)
@@ -241,7 +246,7 @@ Returns the loaded module, or NIL on error."
            (optimize (debug 3)))
   (check-type mod-name-as-list list)
   (check-type habitat habitat)
-
+  
   ;; 1. Lisp module package, as child of `clpython.module'
   (when (= (length mod-name-as-list) 1)
     (whereas ((pkg (lisp-package-as-py-module (car mod-name-as-list))))
@@ -289,15 +294,16 @@ Returns the loaded module, or NIL on error."
       (assert (member kind '(:module :package)))
       (assert (or src-file bin-file))
 
-      (let ((bin-file (compiled-file-name kind just-mod-name src-file :include-dir nil)))
-        (compile-py-file src-file :mod-name dotted-name :output-file bin-file)
-        (let ((new-module (load-compiled-python-file bin-file
-                                                     :mod-name dotted-name
-                                                     :within-mod within-mod
-                                                     :habitat habitat)))
-          (when new-module ;; Maybe loading failed (which already gave a warning)
-            (add-loaded-module new-module habitat)
-            (return-from py-import new-module)))))))
+      (when src-file
+        (setf bin-file (compiled-file-name kind just-mod-name src-file :include-dir nil :create-dir t))
+        (compile-py-file src-file :mod-name dotted-name :output-file bin-file))
+      (let ((new-module (load-compiled-python-file bin-file
+                                                   :mod-name dotted-name
+                                                   :within-mod within-mod
+                                                   :habitat habitat)))
+        (when new-module ;; Maybe loading failed (which already gave a warning)
+          (add-loaded-module new-module habitat)
+          (return-from py-import new-module))))))
 
 (defun path-kind (path)
   "The file kind, which is either :FILE, :DIRECTORY or NIL"

@@ -145,7 +145,7 @@ POS-ARGS is any iterable object; KW-DICT must be of type PY-DICT."
 	    do (add-dict (dict c))))
       
       (when (typep x 'py-module)
-	(loop for k in (mapcar #'car (py-module-get-items x))
+	(loop for k in (mapcar #'car (mgh-all-items (module-mgh x)))
 	    do (pushnew (if (stringp k) k (py-val->string k)) res)))
 
       (when (packagep x)
@@ -265,9 +265,9 @@ POS-ARGS is any iterable object; KW-DICT must be of type PY-DICT."
   ;; CLS is either a class or a _tuple_ of classes (only tuple is
   ;; allowed, not other iterables).
   (if (typep cls 'py-tuple)
-      (dolist (c (py-iterate->lisp-list cls)
-		(when (subtypep (py-class-of x) c)
-		  (return-from isinstance-1 t))))
+      (dolist (c (py-iterate->lisp-list cls))
+        (when (subtypep (py-class-of x) c)
+          (return-from isinstance-1 t)))
     (subtypep (py-class-of x) cls)))
 
 

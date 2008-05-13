@@ -39,7 +39,7 @@
 (defun sub/dict-del (d key)
   "Returns if succesfull (i.e. key was present)"
   (check-type d py-dict)
-  (if (subtypep (class-of d) (ltv-find-class 'py-dict))
+  (if (eq (class-of d) (ltv-find-class 'py-dict))
       (dikt-del (py-dict-dikt d) key)
     (py-classlookup-bind-call d '{__delitem__} key)))
 
@@ -1332,10 +1332,7 @@ but the latter two classes are not in CPython.")
 ;; Module (User object)
 
 (defclass py-module (py-user-object) ;; no dict-mixin!?
-  ((globals-names  :initarg :globals-names  :type vector :initform #())
-   (globals-values :initarg :globals-values :type vector :initform #())
-   (dyn-globals    :initarg :dyn-globals    :type hash-table
-		   :initform (make-hash-table :test #'eq))
+  ((mgh            :initarg :mgh :accessor module-mgh)
    (name           :initarg :name           
 		   :type string
 		   :initform "__main__" 
@@ -1346,9 +1343,9 @@ but the latter two classes are not in CPython.")
    (packagep       :initarg :package        :initform :maybe :accessor module-package-p))
   (:metaclass py-user-type))
 
-;; XXX module has dict attribute, but it is not updated correctly
+;; XXX check module dict updating
 
-(defun make-module (&rest options)
+(defun make-py-module (&rest options)
   (apply #'make-instance 'py-module options))
 
 (def-py-method py-module.__new__ :static (cls name)
@@ -1385,57 +1382,19 @@ but the latter two classes are not in CPython.")
 (defmethod print-object ((x py-module) stream)
   (write-string (py-module.__repr__ x) stream))
 
-(defun py-module-get-items (x &key import-*)
-  (check-type x py-module)
-  (flet ((return-name-p (name)
-	   (when (symbolp name)
-	     (setf name (symbol-name name)))
-	   (check-type name string)
-	   (or (not import-*)
-	       (char/= (aref name 0) #\_))))
-    (with-slots (globals-names globals-values dyn-globals) x
-      (let ((full-list (nconc (loop for k across globals-names and v across globals-values
-				  when (and v (return-name-p k))
-				  collect (cons k v))
-			      (loop for k being the hash-key in dyn-globals
-				  using (hash-value v)
-				  when (return-name-p k)
-				  collect (cons k v)))))
-      (when import-*
-	;; Only those names listed in the module's __all__ attribute
-	;; XXX Error when name in __all__ not bound?
-	(let* ((__all__ (cdr (assoc '{__all__} full-list))))
-	  (when __all__
-	    (let ((all-names-list (py-iterate->lisp-list __all__)))
-	      (setf full-list 
-		(delete-if-not (lambda (kv) (member (car kv) all-names-list :test #'string=))
-			       full-list))))))
-
-      full-list))))
-
 (defun py-module-set-kv (x k v)
   ;; V may be null, to remove item
   (check-type x py-module)
   (check-type k symbol)
-  (with-slots (globals-names globals-values dyn-globals) x
-    (loop for kn across globals-names and i from 0
-	when (eq k kn) 
-	do (setf (aref globals-values i) v)
-	   (return)
-	finally
-	  (if (null v)
-	      (remhash k dyn-globals)
-	    (setf (gethash k dyn-globals) v)))))
+  (if v
+      (funcall (mgh-set (module-mgh x)) k v)
+    (funcall (mgh-del (module-mgh x)) k)))
 
 (defun py-module-get (x attr)
   (let ((attr.sym (py-string-val->symbol attr :intern nil)))
-    (with-slots (globals-names globals-values dyn-globals) x
-      (when attr.sym 
-        ;; If symbol not interned, then it cannot be in the globals-names vector
-        (let ((i (position attr.sym globals-names :test #'eq)))
-          (when i
-            (return-from py-module-get (svref globals-values i)))))
-      (gethash (or attr.sym attr) dyn-globals))))
+    ;; XXX things probably go wrong if ATTR is a subclassed string...
+    (when attr.sym
+      (funcall (mgh-get (module-mgh x)) attr.sym))))
 
 (def-py-method py-module.__getattribute__ (x^ attr)
   (or (py-module-get x attr)
@@ -1445,30 +1404,16 @@ but the latter two classes are not in CPython.")
   (when (slot-value x 'builtinp)
     (warn "Setting attribute '~A' on built-in module ~A." attr x))
   (set-module-attr x attr val))
-  
+
 (defun set-module-attr (x attr val)
   "Returns new value"
   (check-type x py-module)
-  (let ((attr.sym (py-string-val->symbol attr :intern nil)))
-    (with-slots (globals-names globals-values dyn-globals) x
-
-      ;; XXX Does x.attr.__set__ play a role? (Think not)
-      (when attr.sym
-	;; If symbol not interned, then it cannot be in the globals-names vector
-	(let ((i (position attr.sym globals-names :test #'eq)))
-	  (when i
-	    (unless (or val (svref globals-names i))
-	      (py-raise 'Attribute "Module ~A has no attribute ~A to delete." x attr))
-	    (setf (svref globals-values i) val)
-	    (return-from set-module-attr val))))
-      
-      (progn
-	(unless (or val (gethash (or attr.sym attr) dyn-globals))
-	  (py-raise '{AttributeError} "Module ~A has no attribute ~A to delete." x attr))
-	(if val
-	    (setf (gethash (or attr.sym attr) dyn-globals) val)
-	  (remhash (or attr.sym attr) dyn-globals))
-	val))))
+  (let* ((attr.sym (py-string-val->symbol attr)) ;; always sym
+         (ht (mgh-ht (module-mgh x))))
+    (if val
+        (setf (gethash attr.sym ht) val)
+      (remhash attr.sym ht))
+    (or val *the-none*)))
   
 (def-py-method py-module.__delattr__ (x^ attr)
   (when (slot-value x 'builtinp)
@@ -1842,7 +1787,7 @@ But if RELATIVE-TO package name is given, result may contains dots."
   (let ((r (realpart x))
 	(i (imagpart x)))
     (cond ((= i 0)
-	   (error :unexpected)) ;; due to CL simplification rules
+	   (error "unexpected")) ;; due to CL simplification rules
 	  ((= r 0)
 	   (format nil "~Aj" (py-repr-string i)))
 	  ((> i 0)
@@ -2207,6 +2152,10 @@ But if RELATIVE-TO package name is given, result may contains dots."
   ((module :initarg :module :accessor mdp-module)
    (updater :initarg :updater :accessor mdp-updater))
   (:metaclass py-core-type))
+
+(defmethod print-object ((x py-dict-moduledictproxy) stream)
+  (print-unreadable-object (x stream :type t :identity t)
+    (format stream ":dikt ~A" (py-dict-dikt x))))
 
 (defmethod (setf py-subs) :after (val (x py-dict-moduledictproxy) key)
   ;; Modifying this dict modifies the module globals.
@@ -2676,7 +2625,7 @@ But if RELATIVE-TO package name is given, result may contains dots."
 
 (def-py-method py-string.center (x^ width &optional (fillchar " "))
   (assert (= (length fillchar) 1))
-  (error :todo))
+  (error "todo"))
    
 (def-py-method py-string.decode (x^ &optional encoding^ errors)
   (py-decode-unicode x encoding errors))
@@ -2685,7 +2634,7 @@ But if RELATIVE-TO package name is given, result may contains dots."
   (py-encode-unicode x encoding errors))
 
 (def-py-method py-string.endswith (x^ suffix &optional start end)
-  (when (or start end) (error :todo))
+  (when (or start end) (error "todo"))
   (py-bool (string= (subseq x (- (length x) (length suffix))) suffix)))
   
 (def-py-method py-string.find (x^ item &rest args)
@@ -2751,7 +2700,7 @@ But if RELATIVE-TO package name is given, result may contains dots."
   (substitute (py-val->string new) (py-val->string old) x :count count))
 
 (def-py-method py-string.startswith (x^ prefix &optional start end)
-  (when (or start end) (error :todo))
+  (when (or start end) (error "todo"))
   (py-bool (and (>= (length x) (length prefix))
                 (string= (subseq x 0 (length prefix)) prefix))))
 

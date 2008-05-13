@@ -136,7 +136,7 @@ Disabled by default, to not confuse the test suite.")
 (define-condition compiler-message ()
   ())
 
-(defun compiler-message (string &rest args)
+(defun comp-msg (string &rest args)
   (when *signal-compiler-messages*
     (signal (make-condition 'compiler-message
               :format-control string
@@ -447,7 +447,7 @@ GENSYMS are made gensym'd Lisp vars."
                             ([call-expr] ([attributeref-expr] ?obj ([identifier-expr] ?attr-name))
                                          (?pos-args () nil nil)))
       (when (inlineable-method-p ?attr-name (length ?pos-args))
-        (compiler-message "Inlining call to builtin method `~A'." ?attr-name)
+        (comp-msg "Inlining call to builtin method `~A'." ?attr-name)
         (return-from [call-expr]
           (inlined-method-code ?obj ?attr-name ?pos-args)))))
           
@@ -458,7 +458,7 @@ GENSYMS are made gensym'd Lisp vars."
                                    (?pos-args () nil nil)))
       (with-perhaps-matching (?id-getattr ([identifier-expr] {getattr}))
         (assert (multi-eval-safe ?id-getattr))
-        (compiler-message "Optimizing \"getattr(x,y)(...)\" call, skipping bound method.")
+        (comp-msg "Optimizing \"getattr(x,y)(...)\" call, skipping bound method.")
         (return-from [call-expr]
           `(if (eq ,?id-getattr (symbol-function '{getattr}))
                (multiple-value-bind (.a .b .c)
@@ -516,7 +516,8 @@ GENSYMS are made gensym'd Lisp vars."
                         :supers ,(with-matching (inheritance ([tuple-expr] ?supers))
                                    `(list ,@?supers))
                         :cls-metaclass (sub/dict-get new-cls-dict "__metaclass__")
-                        :mod-metaclass (py-module-get +mod+ '{__metaclass__}))))
+                        :mod-metaclass (handler-case (module-get '{__metaclass__})
+                                         ({NameError} () nil)))))
              (record-source-file-loc ',context-cname :type)
              ([assign-stmt] ,cls (,name))))))))
 
@@ -644,12 +645,19 @@ GENSYMS are made gensym'd Lisp vars."
   t)
 
 (defconstant exec-stmt-helper-func-name 'exec-stmt-helper-func)
-
+(defvar *exec-stmt-globals-update-func*)
+(defvar *exec-stmt-initial-globals*)
+    
 (defun exec-stmt-ast (ast globals locals)
-  (let ((f `(with-module-context (#() #() (let ((ht (make-py-hash-table)))
-                                            (dict-map ,globals (lambda (k v) (setf (gethash k ht) v)))
-                                            ht)
-                                  :create-mod t)
+  (assert ([module-stmt-p] ast))
+  (let* ((globals-alist (let (res)
+                          (dict-map globals (lambda (k v) (push (cons (if (stringp k)
+                                                                          (intern k :clpython.user)
+                                                                        k)
+                                                                      v)
+                                                                res)))
+                          res))
+         (f `([module-stmt]
               ,([make-suite-stmt*]
 
                 ;; Define helper function
@@ -660,6 +668,10 @@ GENSYMS are made gensym'd Lisp vars."
                  ([make-suite-stmt*]
                   `(block helper
                      ,([make-suite-stmt*]
+                       
+                       `(loop for (k . v) in *exec-stmt-initial-globals*
+                            do (check-type k symbol)
+                               (module-set k v))
                        
                        `([suite-stmt]
                          ;; Set local variables
@@ -685,12 +697,14 @@ GENSYMS are made gensym'd Lisp vars."
                 
                 ;; Call helper function
                 ([make-call-expr] :primary ([make-identifier-expr*] 'exec-stmt-helper-func)
-                                  :all-args '(() () nil nil)))
+                                  :all-args '(() () nil nil))
 
-              ;; Update `globals'
-              (loop for (k . v) in (py-module-get-items +mod+)
-                  unless (eq k exec-stmt-helper-func-name)
-                  do (setf (py-subs ,globals k) v)))))
+                ;; Update `globals'.
+                ;; Using *exec-stmt-globals-update-func* so that we don't have to include
+                ;; GLOBALS as literal (so read-only) object in the function.
+                `(loop for (k . v) in (mgh-all-items mgh)
+                     unless (eq k exec-stmt-helper-func-name)
+                     do (funcall *exec-stmt-globals-update-func* k v))))))
     
     #+(or)(warn "EXEC-STMT: lambda-body: ~A" f)
     
@@ -709,7 +723,10 @@ GENSYMS are made gensym'd Lisp vars."
                             (format t "[Error occured inside an `exec' statement:]"))))
       (block run-exec-body
         (restart-case
-            (funcall f)
+            (let* ((mod-func (funcall f))
+                   (*exec-stmt-initial-globals* globals-alist)
+                   (*exec-stmt-globals-update-func* (lambda (k v) (setf (py-subs globals k) v))))
+              (funcall mod-func)) ;;:initial-globals globals-alist))
           (return-from-exec ()
               :report "Abort evaluation of the `exec' statement, but continue execution."
             (warn "Evaluation of `exec' body was aborted.")
@@ -890,7 +907,7 @@ LOCALS shares share tail structure with input arg locals."
 	((with-matching (fname ([identifier-expr] ?name))
            (setf fname ?name)
            t))
-	((break :unexpected) ))
+	((break "unexpected") ))
   
   (multiple-value-bind (lambda-pos-args lambda-key-args tuples-destruct-form
                         normal-pos-key-args destruct-nested-vars)
@@ -1008,77 +1025,60 @@ LOCALS shares share tail structure with input arg locals."
              (not (get-pydecl :inside-function-p e)))
     (warn "Bogus `global' statement found at top-level.")))
 
+(defun variable-level (name e)
+  "One of :MODULE-LEVEL :FUNCTION-LEVEL :CLASS-LEVEL"
+  (check-type name symbol)
+  #+allegro (check-type e system::augmentable-environment)
+  (ecase (get-pydecl :context e)
+    (:module    :module-level)
+    (:function  (if (or (member name (get-pydecl :lexically-declared-globals e))
+                        (not (member name (get-pydecl :lexically-visible-vars e))))
+                    :module-level
+                  :function-level))
+    (:class     (if (member name (get-pydecl :lexically-declared-globals e))
+                    :module-level 
+                  :class-level))))
+
 (define-setf-expander [identifier-expr] (name &environment e)
   ;; As looking up identifiers is side-effect free, the valuable
   ;; functionality here is the "store form" (fourth value).
   ;; As a bonus the "delete form" is given (sixth value).
-  (let ((glob-ix (position name (get-pydecl :mod-globals-names e))))
-    (with-gensyms (val)
-      (let* ((level (ecase (get-pydecl :context e)
-                      (:module    :module-level)
-                      (:function  (if (or (member name (get-pydecl :lexically-declared-globals e))
-                                          (not (member name (get-pydecl :lexically-visible-vars e))))
-                                      :module-level
-                                    :local-level))
-                      (:class     (if (member name (get-pydecl :lexically-declared-globals e))
-                                      :module-level 
-                                    :class-level))))
-             
-             (store-form (ecase level
-                           (:module-level (if glob-ix
-                                              `(setf (svref +mod-static-globals-values+ ,glob-ix) ,val)
-                                            `(setf (gethash ',name +mod-dyn-globals+) ,val)))
-                           (:local-level `(setf ,name ,val))
-                           (:class-level `(sub/dict-set +cls-namespace+ ',name ,val))))
-             
-             (del-form (ecase level
-                         (:module-level `(delete-identifier-at-module-level ',name ,glob-ix +mod+))
-                         (:local-level `(progn (unless ,name
-                                                 (unbound-variable-error ',name nil))
-                                               (setf ,name ,(when (builtin-value name)
-                                                              `(builtin-value ',name)))))
-                         (:class-level `(unless (py-del-subs +cls-namespace+ ,name)
-                                          (unbound-variable-error ',name nil))))))
-        (values
-         () ;; temps
-         () ;; values
-         (list val) ;; stores
-         store-form
-         `([identifier-expr] ,name) ;; name is literal symbol, thus no side-effect
-         del-form))))) ;; bonus
+  (with-gensyms (val)
+    (multiple-value-bind (store-form del-form)
+        (ecase (variable-level name e)
+          (:module-level (values `(module-set ',name ,val)
+                                 `(module-del ',name)))
+          (:function-level (values `(setf ,name ,val)
+                                `(progn (unless ,name
+                                          (unbound-variable-error ',name nil))
+                                        (setf ,name ,(when (builtin-value name)
+                                                       `(builtin-value ',name))))))
+          (:class-level (values `(sub/dict-set +cls-namespace+ ',name ,val)
+                                `(unless (py-del-subs +cls-namespace+ ,name)
+                                   (unbound-variable-error ',name nil)))))
+      (values
+       () ;; temps
+       () ;; values
+       (list val) ;; stores
+       store-form
+       `([identifier-expr] ,name) ;; name is literal symbol, thus no side-effect
+       del-form)))) ;; bonus
 
 (defmacro [identifier-expr] (name &environment e)
-  ;; The identifier is used for its value; it is not an assignent
-  ;; target (as the latter case is handled by the setf expander for ID..-EXPR.
+  ;; The identifier is used for its value.
+  ;; (Assignent targets are handled by the setf expander.)
   (check-type name symbol)
-  (flet ((module-lookup ()
-	   (let ((ix (position name (get-pydecl :mod-globals-names e))))
-	     (if ix
-		 `(or (fast (svref +mod-static-globals-values+ ,ix))
-		      (unbound-variable-error ',name))
-	       `(identifier-expr-module-lookup-dyn ',name +mod-dyn-globals+))))
-	 
-	 (local-lookup ()
-	   (if (member name (get-pydecl :safe-lex-visible-vars e))
-	       (progn (compiler-message "Safe lexical var `~A' in context `~A': skipped boundness check."
-                                        name (format nil "~{~A~^.~}" (reverse (get-pydecl :context-stack e))))
-                      name)
-	     `(or ,name
-		  (unbound-variable-error ',name)))))
-    
-    (ecase (get-pydecl :context e)
-      
-      (:function (if (or (member name (get-pydecl :lexically-declared-globals e))
-			 (not (member name (get-pydecl :lexically-visible-vars e))))
-		     (module-lookup)
-		   (local-lookup)))
-		 
-      (:module   (module-lookup))
-      
-      (:class    `(or (sub/dict-get +cls-namespace+ ',(symbol-name name))
-		      ,(if (member name (get-pydecl :lexically-visible-vars e))
-			   (local-lookup)
-			 (module-lookup)))))))
+  (ecase (variable-level name e)
+    (:module-level `(module-get ',name))
+    (:function-level (if (member name (get-pydecl :safe-lex-visible-vars e))
+                         (progn (comp-msg "Safe lexical var `~A' in context `~A': skipped boundness check."
+                                          name (format nil "~{~A~^.~}" (reverse (get-pydecl :context-stack e))))
+                                name)
+                       `(or ,name (unbound-variable-error ',name))))
+    (:class-level `(or (sub/dict-get +cls-namespace+ ',(symbol-name name))
+                       ,(if (member name (get-pydecl :lexically-visible-vars e))
+                            name
+                          `(module-get ',name))))))
 
 (defmacro [if-expr] (condition then else)
   `(if (py-val->lisp-bool ,condition) ,then ,else))
@@ -1094,7 +1094,7 @@ LOCALS shares share tail structure with input arg locals."
 		   (loop for m in mod-name-as-list
                        for toplevel = t then nil ;; Ensure topleve module is imported relative to +mod+
 		       for res = (list m) then (nconc res (list m)) collect
-			 `(let ((module-obj (py-import ',res ,@(when toplevel `(:within-mod +mod+)))))
+			 `(let ((module-obj (py-import ',res ,@(when toplevel `(:within-mod (+mod+))))))
 			    (declare (ignorable module-obj))
 			    ,(cond ((= (length res) 1)
 				    (if (= 1 (length mod-name-as-list))
@@ -1108,15 +1108,15 @@ LOCALS shares share tail structure with input arg locals."
 			       `module-obj))))))
 
 (defmacro [import-from-stmt] (mod-name-as-list items)
-  `(let ((m (py-import '(,(car mod-name-as-list)) :within-mod +mod+)))
+  `(let ((m (py-import '(,(car mod-name-as-list)) :within-mod (+mod+))))
      (declare (ignorable m)) ;; Ensure topleve module is imported relative to +mod+
      (whereas ((mod-obj ,(if (= (length mod-name-as-list) 1)
                              `m
                            `(py-import ',mod-name-as-list))))
        ,@(cond ((eq items '[*])
-                `((let ((src-items (py-module-get-items mod-obj :import-* t)))
+                `((let ((src-items (mgh-all-items (module-mgh mod-obj) :import-* t)))
                     (loop for (k . v) in src-items
-                        do (py-module-set-kv +mod+ k v)))))
+                        do (py-module-set-kv (+mod+) k v)))))
                (t (loop for (item bind-name) in items
                       collect `([assign-stmt] ([attributeref-expr] mod-obj ([identifier-expr] ,item))
                                               (([identifier-expr] ,(or bind-name item))))))))))
@@ -1146,86 +1146,68 @@ LOCALS shares share tail structure with input arg locals."
 (define-setf-expander [list-expr] (items &environment e)
   (get-setf-expansion `(list/tuple-expr ,items) e))
 
-(defmacro with-this-module-context ((module) &body body)
-  ;; Used by REPL
-  (check-type module py-module)
-  (with-slots (globals-names globals-values dyn-globals) module
-    ;; XXX CMUCL rightly complains here that the globals are passed as literal objects,
-    ;; and in BODY there may be assignment statements that modify them using (setf svref)
-    ;; or (setf gethash). This is strictly not allowed. Should be fixed.
-    `(with-module-context (,globals-names ,globals-values ,dyn-globals :existing-mod ,module)
-       ,@body)))
+(defstruct (module-globals-handler (:conc-name mgh-) (:constructor make-mgh))
+  (ht (make-hash-table :test 'eq)) 
+  get    ;; Called with args NAME
+  set    ;; Called with args NAME, VAL 
+  del    ;; Called with args NAME
+  names  ;; Called without args, returns bound names as sequence
+  module
+  module-name
+  module-path)
 
-(defparameter *module-hook* nil)
+(defun make-standard-mgh (module-name module-path)
+  (let* ((mgh (make-mgh :module-name module-name :module-path module-path))
+         (mod (make-py-module :mgh mgh)))
+    (setf (mgh-module mgh) mod)
+    (flet ((do-get (name)
+             (or (gethash name (mgh-ht mgh))
+                 (builtin-value name)
+                 (py-raise '{NameError} "Variable `~A' is unbound." name)))
+           (do-set (name val)
+             (setf (gethash name (mgh-ht mgh)) val))
+           (do-del (name)
+             (unless (gethash name (mgh-ht mgh))
+               (with-simple-restart (continue "Continue as if `~A' is currently bound." name)
+                 (py-raise '{NameError} "Variable `~A' is unbound." name)))
+             (remhash name (mgh-ht mgh)))
+           (do-names ()
+             (loop for x being the hash-key in (mgh-ht mgh) collect x)))
+      (setf (mgh-get mgh) #'do-get
+            (mgh-set mgh) #'do-set
+            (mgh-del mgh) #'do-del
+            (mgh-names mgh) #'do-names))
+    mgh))
 
-(defmacro with-module-context ((glob-names glob-values dyn-glob
-				&key set-builtins call-hook create-mod existing-mod
-				     module-name module-path)
-			       &body body)
-  (check-type glob-names vector)
-  ;;(check-type dyn-glob hash-table)
-  (assert (or create-mod existing-mod))
-  (assert (not (and create-mod existing-mod)))
+(defun mgh-all-items (mgh &key import-*)
+  "If IMPORT-*, then returns either (1) the variables in __all__ (if present),
+or (2) all names not starting with underscore."
+  (check-type mgh module-globals-handler)
+  (flet ((return-name-p (name)
+	   (when (symbolp name)
+	     (setf name (symbol-name name)))
+	   (check-type name string)
+	   (or (not import-*)
+	       (char/= (aref name 0) #\_))))
+    (let ((full-list (loop for k in (funcall (mgh-names mgh))
+                         when (return-name-p k)
+                         collect (cons k (funcall (mgh-get mgh) k)))))
+      (when import-*
+	;; XXX Raise error when a name in __all__ is not bound?
+	(let* ((__all__ (cdr (assoc '{__all__} full-list))))
+	  (when __all__
+	    (let ((all-names-list (py-iterate->lisp-list __all__)))
+	      (setf full-list 
+		(delete-if-not (lambda (kv) (member (car kv) all-names-list :test #'string=))
+			       full-list))))))
+      full-list)))
 
-  `(let* ((clpython::*habitat* (or clpython::*habitat*
-                                   (make-habitat :search-paths '("."))))
-          (+mod-static-globals-names+  ,glob-names)
-          (+mod-static-globals-values+ ,glob-values)
-          (+mod-static-globals-builtin-values+
-           (make-array ,(length glob-names)
-                       :initial-contents (mapcar 'builtin-value ',(coerce glob-names 'list))))
-          (+mod-dyn-globals+ ,dyn-glob)
-          (+mod+ ,(if create-mod
-                      
-                      `(make-module :globals-names  +mod-static-globals-names+
-                                    :globals-values +mod-static-globals-values+
-                                    :dyn-globals    +mod-dyn-globals+
-                                    :name ,module-name
-                                    :path ,module-path)
-                    existing-mod)))
-     (declare (special clpython::*habitat*))
-     (declare (ignorable +mod-static-globals-names+
-                         +mod-static-globals-values+
-                         +mod-static-globals-builtin-values+
-                         +mod-dyn-globals+
-                         +mod+)
-              (optimize (debug 3))) ;; WB
-     
-     (progn ;; Initialize global value arrays
-       ,@(when set-builtins
-           `((replace +mod-static-globals-values+ +mod-static-globals-builtin-values+)))
-       
-       ,@(loop with res
-             for (k v) in `(({__name__}  ,(or module-name "__main__"))
-                            ({__debug__}  1))
-             unless (and set-builtins (builtin-value k))
-             do (let ((ix (position k glob-names)))
-                  (when ix
-                    (push `(setf (svref +mod-static-globals-values+ ,ix) ,v) res)))
-             finally (return res))
-       
-       #+(or) ;; debug
-       (loop for n across +mod-static-globals-names+
-           for v across +mod-static-globals-values+
-           do (format t "~A: ~A~%" n v)))
-     
-     ,@(when call-hook
-         `((when *module-hook*
-             (funcall *module-hook* +mod+))))
-     
-     (with-pydecl
-         ((:mod-globals-names  ,glob-names)
-          (:context            :module)
-          (:mod-futures        :todo-parse-module-ast-future-imports))
-       
-       
-       (with-py-errors (:name (python-module ,(or module-name '__main__)))
-         ,@body))))
+(defvar *habitat* nil)
+(defvar *module-preload-hook*)
 
 (defmacro create-module-globals-dict ()
   ;; Updating this dict really modifies the globals.
-  `(module-make-globals-dict +mod+
-			     +mod-static-globals-names+ +mod-static-globals-values+ +mod-dyn-globals+))
+  `(module-make-globals-dict (+mod+)))
 
 (defun unbound-variable-error (name &optional (expect-value t))
   (declare (special *py-signal-conditions*))
@@ -1242,23 +1224,7 @@ LOCALS shares share tail structure with input arg locals."
     (with-simple-restart (continue "Continue as if `~A' is currently bound." name)
       (py-raise '{NameError} "Variable `~A' is unbound." name))))
 
-(defun identifier-expr-module-lookup-dyn (name +mod-dyn-globals+)
-  (or (gethash name +mod-dyn-globals+)
-      (builtin-value name)
-      (unbound-variable-error name)))
-
-(defun delete-identifier-at-module-level (name ix +mod+)
-  ;; Reset module-level vars with built-in names to their built-in value
-  (with-slots (globals-values dyn-globals) +mod+
-    (let ((biv (builtin-value name))  ;; maybe NIL
-	  (old-val (if ix
-		       (svref globals-values ix) 
-		     (remhash name dyn-globals))))
-      (unless old-val
-	(unbound-variable-error name nil))
-      (cond (ix  (setf (svref globals-values ix) biv))
-	    (biv (setf (gethash name dyn-globals) biv))
-	    (t   (remhash name dyn-globals))))))
+(defvar *module-function*)
 
 (defmacro [module-stmt] (suite) ;; &environment e)
   ;; A module is translated into a lambda that creates and returns a
@@ -1271,19 +1237,44 @@ LOCALS shares share tail structure with input arg locals."
   ;; If we are inside an EXEC-STMT, PYDECL assumptions
   ;; :exec-mod-locals-ht and :exec-mod-globals-ht are assumed declared
   ;; (hash-tables containing local and global scope).
-  
-  (let* ((ast-globals (module-stmt-suite-globals suite)))
-    
-    `(with-module-context (,(make-array (length ast-globals) :initial-contents ast-globals)
-			   (make-array ,(length ast-globals) :initial-element nil) ;; not eval now
-			   (make-hash-table :test #'eq)
-			   :set-builtins t
-			   :create-mod t
-			   :call-hook t
-			   :module-name *current-module-name* ;; load time
-			   :module-path ,*current-module-path*) ;; compile time
-       (declare (optimize (debug 3)))
-       ,suite)))
+  `(let ((f (lambda (&key globals-handler #+(or)initial-globals (call-preload-hook t)
+                          (module-name ',*current-module-name*) (module-path ',*current-module-path*))
+              "GLOBALS-HANDLER determines how references to globals (module-level variables) are handled.
+INITIAL-GLOBALS is an alist containing pre-set global variables: ((sym . val) ..)
+CALL-PRELOAD-HOOK specifies whether *module-preload-hook* is called before the body is run.
+MODULE-NAME is stored in __name__.
+MODULE-PATH ...
+DETERMINE-BODY-GLOBALS
+"
+              (with-pydecl
+                  ((:context      :module)
+                   (:mod-globals-names ,(coerce (module-stmt-suite-globals suite) 'vector))
+                   #+(or)(:mod-futures  :todo-parse-module-ast-future-imports)) ;; todo
+                
+                (let* ((*habitat* (or *habitat* (make-habitat :search-paths '("."))))
+                       (mgh (or globals-handler (make-standard-mgh module-name module-path))))
+                  
+                  (macrolet ((module-get (name)
+                               `(funcall (mgh-get mgh) ,name))
+                             (module-set (name val)
+                               `(funcall (mgh-set mgh) ,name ,val))
+                             (module-del (name)
+                               `(funcall (mgh-del mgh) ,name))
+                             (module-names ()
+                               `(funcall (mgh-names mgh)))
+                             (+mod+ ()  `(mgh-module mgh)))
+                    
+                    ;; Is there a situation in which these globals should not be set?
+                    (module-set '{__name__}  (or module-name "__main__"))
+                    (module-set '{__debug__} *the-true*)
+                    
+                    (when (and call-preload-hook (boundp '*module-preload-hook*))
+                      (funcall *module-preload-hook* (mgh-module mgh)))
+                    
+                    (with-py-errors (:name (python-module ,*current-module-name*))
+                      ,suite)))))))
+     (when (boundp '*module-function*)
+       (funcall *module-function* f))))
 
 (defmacro [pass-stmt] ()
   nil)
@@ -1320,6 +1311,7 @@ LOCALS shares share tail structure with input arg locals."
 
 (define-compiler-macro [suite-stmt] (&whole whole stmts &environment e)
   ;; Skip checks for bound-ness, when a lexical variable is certainly bound.
+  (format t ";; in compiler macro for SUITE-STMT")
   
   (unless (eq (get-pydecl :context e) :function)
     (return-from [suite-stmt] whole))
@@ -1358,7 +1350,7 @@ LOCALS shares share tail structure with input arg locals."
                                                 () "Bug: variable ~A both lexicaly-visible and lexically-global." v)
                                             (unless (member v (get-pydecl :safe-lex-visible-vars e))
                                               (push v new-safe-vars)
-                                              (compiler-message "New safe-lev-vars in ~A, after assignment \"~A\": ~A."
+                                              (comp-msg "New safe-lev-vars in ~A, after assignment \"~A\": ~A."
                                                                 (get-pydecl :context e)
                                                                 (clpython.parser::py-pprint ass-stmt)
                                                                 v)))))))
@@ -1657,13 +1649,13 @@ finally:
   (make-dict-from-symbol-alist
    (delete nil (mapcar #'cons name-list value-list) :key #'cdr)))
 
-(defun module-make-globals-dict (mod names-vec values-vec dyn-globals-ht)
+(defun module-make-globals-dict (mod)
   (flet ((make-regular-dict ()
            (make-dict-from-symbol-alist
-	    (nconc (loop for name across names-vec and val across values-vec
-		       unless (null val) collect (cons name val))
-		   (loop for k being the hash-key in dyn-globals-ht using (hash-value v)
-		       collect (cons k v))))))
+            (loop with mgh = (module-mgh mod)
+                with names = (funcall (mgh-names mgh))
+                with getter = (mgh-get mgh)
+                for k in names collect (cons k (funcall getter k))))))
     
   (let* ((d (make-regular-dict))
          (updater (lambda () 

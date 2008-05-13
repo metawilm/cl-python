@@ -12,8 +12,6 @@
 (in-package :clpython)
 ;(in-syntax *ast-user-readtable*)
 
-(defvar *habitat* nil "The current execution context")
-
 (defclass habitat ()
   ((stdin           :initform *standard-input*
 		    :initarg :stdin
@@ -100,15 +98,21 @@
 (defvar *compile-python-ast-before-running* t
   "Whether to compile an AST before running it.")
     
-(defun run-python-ast (ast &key habitat (compile *compile-python-ast-before-running*))
+(defun run-python-ast (ast &key (habitat *habitat*) (compile *compile-python-ast-before-running*) run-args)
   "Run Python AST in freshly bound habitat.
 If COMPILE is true, the AST is compiled into a function before running."
   (let* ((*habitat* habitat)
-         (f `(lambda () ,ast))
+         (get-module-f `(lambda () ,ast))
 	 (fc (if compile
-                 (compile nil f)
-               (coerce f 'function))))
-    (funcall fc)))
+                 (compile nil get-module-f)
+               (coerce get-module-f 'function))))
+    (let* (module-function
+           (*module-function* (lambda (f) (setf module-function f))))
+      (declare (special *module-function*))
+      (funcall fc)
+      (unless module-function
+        (break "Module ~A did not call *module-function*." fc))
+      (apply module-function run-args))))
 
 (defun run (thing &rest args)
   (apply #'run-python-ast (parse thing) args))
