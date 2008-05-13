@@ -82,8 +82,15 @@ All these symbols are in the clpython.user package.")
 ;;  VECTOR is NIL <=> HASH-TABLE is used.
 ;;  VECTOR not NIL => all keys are symbols (representing Python strings)
 
-(eval-when (:compile-toplevel :load-toplevel :execute)
-  
+(defmacro with-perhaps-eval-when (() &body body)
+  ;; SBCL gives strange STREAM-ELEMENT-TYPE error if the stuff below is included in EVAL-WHEN,
+  ;; so leave it out, as suggested by Leonardo Varuzza.
+  ;; Note that the eval-when is strictly necessary the make this code portable (or more specific,
+  ;; make it run on Allegro).
+  #+sbcl `(progn ,@body)
+  #-sbcl `(eval-when (:compile-toplevel :load-toplevel :execute) ,@body))
+
+(with-perhaps-eval-when ()
   (defclass py-early-dict () ())
   
   (defvar *early-dicts* ())
