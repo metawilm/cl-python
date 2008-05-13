@@ -395,10 +395,17 @@ None, use identity function (multiple sequences -> list of tuples)."
   (py-** x y z))
 
 (defun {range} (x &optional y z)
-  (let ((lst (cond (z (error "todo: range with 3 args"))
-		   (y (loop for i from x below (py-val->integer y) collect i))
-		   (x (loop for i from 0 below x collect i)))))
-    (make-py-list-from-list lst)))
+  (make-py-list-from-list
+   (cond ((not (or y z))
+          (loop for i from 0 below (py-val->integer x) collect i))
+         ((not z)
+          (loop for i from (py-val->integer x) below (py-val->integer y) collect i))
+         ((plusp z)
+          (loop for i from (py-val->integer x) below (py-val->integer y) by z collect i))
+         ((minusp z)
+          (loop for i downfrom (py-val->integer x) above (py-val->integer y) by (- z) collect i))
+         ((zerop z)
+          (py-raise '{ValueError} "Range step size can't be zero.")))))
 
 (defun {raw_input} (&optional prompt)
   "Pops up a GUI entry window to type text; returns entered string"
