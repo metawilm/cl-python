@@ -453,9 +453,10 @@
 
 (defun classp (x)
   #+allegro (excl::classp x)
-  #+lispworks (clos::classp x)
   #+cmu (pcl::classp x)
-  #-(or allegro lispworks cmu) (typep x 'class))
+  #+lispworks (clos::classp x)
+  #+sbcl (sb-pcl::classp x)
+  #-(or allegro cmu lispworks sbcl) (typep x 'class))
   
 (def-py-method py-class-method.__get__ (x inst class)
   (let ((arg (if (classp inst) inst (py-class-of inst))))
@@ -3591,10 +3592,14 @@ finished; F will then not be called again."
 	  (setf (gethash ',syntax *binary-comparison-funcs-ht*) ',func)))
 
 (defun py-id (x)
+  "Return pointer address. This might change during the life time of the object,
+e.g. due to moving by the GC. Python has reference counting, and guarantees a
+fixed id during the object's lifetime."
   #+allegro (excl:lispval-to-address x)
-  #+lispworks (system:object-address x)
   #+cmu (kernel:get-lisp-obj-address x)
-  #-(or allegro lispworks cmu) (error "TODO: id() not implemented for this Lisp implementation"))
+  #+lispworks (system:object-address x)
+  #+sbcl (sb-kernel:get-lisp-obj-address x)
+  #-(or allegro cmu lispworks sbcl) (error "TODO: id() not implemented for this Lisp implementation"))
 
 (defgeneric py-cmp (x y)
   (:documentation
@@ -3865,8 +3870,8 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
 
 (defvar *circle-detection-mechanism*
     #+allegro :hash-table
-    #+lispworks :level
-    #-(or allegro lispworks) :level)
+    #+(or cmu sbcl lispworks) :level
+    #-(or allegro cmu lispworks sbcl) :level)
 
 (defvar *circle-print-abbrev* "...")
 
@@ -4108,23 +4113,36 @@ the lisp list will be returned).")
 ;; At this point, we have redefined the functions PY-== and PY-HASH.
 ;; Therefore we need to rehash all dicts.
 
+(defun sweep-all-objects (fun)
+  (declare (ignorable fun))
+  #+lispworks 
+  (hcl:sweep-all-objects fun)
+  #+(or cmu sbcl) 
+  (dolist (space '(:static :dynamic :read-only))
+    (sb-vm::map-allocated-objects
+     (lambda (obj type size)
+       (declare (ignore type size))
+       (funcall fun obj))
+     space))
+  #-(or cmu lispworks sbcl)
+  (error "SWEEP-ALL-OBJECTS not implemented on this implementation"))
+
 (defun rehash-py-dicts ()
   (flet ((get-py-hts ()
            #+allegro
-           (loop for d across
-                 (excl::get-objects #.(sys::typecode (make-py-hash-table)))
+           (loop for d across (excl::get-objects #.(sys::typecode (make-py-hash-table)))
                when (and (hash-table-p d)
                          (eq (hash-table-test d) 'py-==->lisp-val))
                collect d)
-           #+lispworks
+	   #+(or cmu lispworks sbcl)
            (let (res)
-             (hcl:sweep-all-objects 
-              (lambda (x)
+             (sweep-all-objects
+	      (lambda (x)
                 (when (and (hash-table-p x)
                            (eq (hash-table-test x) 'py-==->lisp-val))
-                  (push x res))))
+		  (push x res))))
              res)
-           #-(or allegro lispworks)
+           #-(or allegro cmu lispworks sbcl)
            (error "Required rehashing of dicts not possible in this implementation."))
                                   
          (fix-ht (ht)

@@ -305,10 +305,15 @@ Returns the loaded module, or NIL on error."
           (add-loaded-module new-module habitat)
           (return-from py-import new-module))))))
 
+(defun directory-p (pathname)
+  (check-type pathname pathname)
+  #+allegro (excl:file-directory-p pathname)
+  #+lispworks (lispworks:file-directory-p path)
+  #+(or cmu sbcl) (null (pathname-type pathname))
+  #-(or allegro cmu lispworks sbcl) (error "TODO: No DIRECTORY-P for this implementation."))
+
 (defun path-kind (path)
   "The file kind, which is either :FILE, :DIRECTORY or NIL"
-  (assert (stringp path))
-  (cond ((not (probe-file path))                       nil)
-        #+allegro   ((excl:file-directory-p path)      :directory)
-        #+lispworks ((lispworks:file-directory-p path) :directory)
-        (t                                             :file)))
+  (check-type path string)
+  (whereas ((pathname (probe-file path)))
+    (if (directory-p pathname) :directory :file)))
