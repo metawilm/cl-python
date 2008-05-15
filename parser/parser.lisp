@@ -80,6 +80,8 @@ Most important options:
                        (invoke-restart (find-restart 'muffle)))))
        ,@body)))
 
+(defgeneric handle-parser-condition (yacc-version condition lexer))
+
 (defmacro with-parser-conditions-handled ((yacc-version lexer) &body body)
   `(handler-bind ((condition (lambda (c)
                                (when *catch-yacc-conditions*
