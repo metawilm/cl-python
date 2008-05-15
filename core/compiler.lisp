@@ -901,13 +901,10 @@ LOCALS shares share tail structure with input arg locals."
   ;;
   ;; You can rely on the whole function body being included in
   ;;  (block function-body ...).
-  
-  (cond ((keywordp fname)
-	 (assert (null decorators)))
-	((with-matching (fname ([identifier-expr] ?name))
-           (setf fname ?name)
-           t))
-	((break "unexpected") ))
+  (if (keywordp fname)
+      (assert (null decorators))
+    (with-matching (fname ([identifier-expr] ?name))
+      (setf fname ?name)))
   
   (multiple-value-bind (lambda-pos-args lambda-key-args tuples-destruct-form
                         normal-pos-key-args destruct-nested-vars)
@@ -968,7 +965,7 @@ LOCALS shares share tail structure with input arg locals."
 		      (flet
 			  (,@(when (funcdef-should-save-locals-p suite e)
 			       `((.locals. () 
-					   ;; lambdas and gen-exprs have 'locals()' too
+                                           ;; lambdas and gen-exprs have 'locals()' too
 					   (make-locals-dict 
 					    ',all-nontuple-func-locals
 					    (list ,@all-nontuple-func-locals))))))
@@ -991,26 +988,24 @@ LOCALS shares share tail structure with input arg locals."
 		(setf art-deco `([call-expr] ,x ((,art-deco) () nil nil))))
 	      
 	      `(let ((,undecorated-func (make-py-function :name ',fname
-							  :context-name ',context-fname
-							  :lambda ,func-lambda)))
-		 
-		 ([assign-stmt] ,art-deco (([identifier-expr] ,fname)))
-		 
-		 ;; Ugly special case:
-		 ;;  class C:
-		 ;;   def __new__(..):    <-- the __new__ method inside a class
-		 ;;      ...                  automatically becomes a 'static-method'
-		 ;; XXX check whether this works correctly when user does same explicitly
-		 ,@(when (and (eq (get-pydecl :context e) :class)
-			      (eq fname '{__new__}))
-		     `(([assign-stmt] 
-			([call-expr] ([identifier-expr] {staticmethod})
-				     ((([identifier-expr] ,fname)) nil nil nil))
-			(([identifier-expr] ,fname)))))
-		 
-		 (record-source-file-loc ',context-fname :operator)
-                 ;; return the function
-		 ([identifier-expr] ,fname)))))))))
+                                                          :context-name ',context-fname
+                                                          :lambda ,func-lambda)))
+                 ([assign-stmt] ,art-deco (([identifier-expr] ,fname)))
+
+                 ;; Ugly special case:
+                 ;;  class C:
+                 ;;   def __new__(..):    <-- the __new__ method inside a class
+                 ;;      ...                  automatically becomes a 'static-method'
+                 ;; XXX check whether this works correctly when user does same explicitly
+                 ,@(when (and (eq (get-pydecl :context e) :class)
+                              (eq fname '{__new__}))
+                     `(([assign-stmt] 
+                        ([call-expr] ([identifier-expr] {staticmethod})
+                                     ((([identifier-expr] ,fname)) nil nil nil))
+                        (([identifier-expr] ,fname)))))
+                            
+                 (record-source-file-loc ',context-fname :operator)
+                 ([identifier-expr] ,fname))))))))) ;; return the function
 
 
 (defmacro [generator-expr] (&whole whole item for-in/if-clauses)
@@ -1807,34 +1802,22 @@ Non-negative integer denoting the number of args otherwise."
 	 (some-args-p (or pos-args key-args *-arg **-arg))
 	 (pos-key-arg-names (nconc (copy-list pos-args) (mapcar #'first key-args)))
 	 (key-arg-default-asts (mapcar #'second key-args))
-         (arg-kwname-vec (make-array
-			  num-pos-key-args
-			  :initial-contents (loop for x in pos-key-arg-names
-						collect (intern (string x) :keyword))))
-         
-	 (fa (make-fa :func-name        name
-		      :num-pos-args     num-pos-args
-		      :num-key-args     num-key-args
-		      :num-pos-key-args num-pos-key-args
-		      :pos-key-arg-names (make-array (length pos-key-arg-names)
-						     :initial-contents pos-key-arg-names)
-		      :key-arg-default-vals nil ;; If there are any key args, this will be filled at load time.
-		      :arg-kwname-vec   arg-kwname-vec
-		      :*-arg            *-arg
-		      :**-arg           **-arg)))
-    
-    `(progn
-       ;; Maybe LOAD-TIME-VALUE could be used for default argument values; but only
-       ;; for top-level functions: for inner functions like `g' below, the default
-       ;; value `bar()' is calculated when the outer function is called, not at
-       ;; module loading time.
-       ;;
-       ;;    def f(x=foo()):
-       ;;       def g(y=bar()): pass
-       ,@(when (> num-key-args 0)
-	   `((setf (fa-key-arg-default-vals ,fa)
-	       (make-array ,num-key-args :initial-contents (list ,@key-arg-default-asts)))))
-       
+         (arg-kwname-vec (make-array num-pos-key-args
+                                     :initial-contents (loop for x in pos-key-arg-names
+                                                           collect (intern (string x) :keyword)))))
+    `(let (,@(when (or *-arg **-arg some-args-p)
+               `((fa (make-fa
+                      :func-name        ',name
+                      :num-pos-args     ,num-pos-args
+                      :num-key-args     ,num-key-args
+                      :num-pos-key-args ,num-pos-key-args
+                      :pos-key-arg-names ',(make-array (length pos-key-arg-names)
+                                                       :initial-contents pos-key-arg-names)
+                      :key-arg-default-vals (make-array ,num-key-args
+                                                        :initial-contents (list ,@key-arg-default-asts))
+                      :arg-kwname-vec   ,arg-kwname-vec
+                      :*-arg            ',*-arg
+                      :**-arg           ',**-arg)))))
        (named-function ,name
 	 (lambda (&rest %args)
 	   (declare (dynamic-extent %args)
@@ -1842,46 +1825,35 @@ Non-negative integer denoting the number of args otherwise."
            (let (,@pos-key-arg-names ,@(when *-arg `(,*-arg)) ,@(when **-arg `(,**-arg))
 		 ,@(when (and some-args-p (not *-arg) (not **-arg))
 		     `((only-pos-args (only-pos-args %args)))))
-	     
-	     ;; There are two ways to parse the argument list:
-	     ;;    
-	     ;; - The pop way, which quickly assigns the variables a
-	     ;;   local name (only usable when there are only
-	     ;;   positional arguments supplied, and the number of
-	     ;;   them is correct);
-	     ;;   
-	     ;; - The array way, where a temporary array is created
-	     ;;   and a arg-parse function is called (used everywhere
-	     ;;   else).
-	    
-	     ,(let ((the-array-way
-		     
-		     `(let ((arg-val-vec (make-array ,(+ num-pos-key-args
+             ;; There are two ways to parse the argument list:
+             ;; - The pop way, which quickly assigns the variables a local name (only usable
+             ;;   when there are a correct number of positional arguments).
+             ;; - The array way, where a temporary array is created and a arg-parse function
+             ;;   is called (used everywhere else).
+             ,(let ((the-array-way
+                     `(let ((arg-val-vec (make-array ,(+ num-pos-key-args
 							 (if (or *-arg **-arg) 1 0)
 							 (if **-arg 1 0)) :initial-element nil)))
 			(declare (dynamic-extent arg-val-vec))
-			(parse-py-func-args %args arg-val-vec ,fa)
-			
-			,@(loop for p in pos-key-arg-names and i from 0
+			(parse-py-func-args %args arg-val-vec fa)
+                        ,@(loop for p in pos-key-arg-names and i from 0
 			      collect `(setf ,p (svref arg-val-vec ,i)))
 			,@(when  *-arg
 			    `((setf ,*-arg (svref arg-val-vec ,num-pos-key-args))))
-                        
-			,@(when **-arg
+                        ,@(when **-arg
 			    `((setf ,**-arg (svref arg-val-vec ,(1+ num-pos-key-args)))))))
-		    
-		    (the-pop-way
+                    (the-pop-way
 		     `(progn ,@(loop for p in pos-key-arg-names collect `(setf ,p (pop %args))))))
 		
 		(cond ((or *-arg **-arg)  the-array-way)
-		      (some-args-p        `(if (or (null only-pos-args)
-                                                   (/= (the fixnum only-pos-args) ,num-pos-key-args))
-					       ,the-array-way
-					     ,the-pop-way))
+		      (some-args-p        `(if (and only-pos-args
+                                                    (= (the fixnum only-pos-args) ,num-pos-key-args))
+					       ,the-pop-way
+					     ,the-array-way))
 		      (t `(when %args (raise-wrong-args-error)))))
 	     
 	     (locally #+(or)(declare (optimize (safety 3) (debug 3)))
-	       ,@body)))))))
+                      ,@body)))))))
 
 #+allegro
 (progn
