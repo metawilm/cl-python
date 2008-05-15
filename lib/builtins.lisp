@@ -261,7 +261,7 @@ POS-ARGS is any iterable object; KW-DICT must be of type PY-DICT."
 		   (typep x cls)
 		   (subtypep (py-class-of x) cls))))))
 
-(defmethod isinstance-1 (x cls)
+(defun isinstance-1 (x cls)
   ;; CLS is either a class or a _tuple_ of classes (only tuple is
   ;; allowed, not other iterables).
   (if (typep cls 'py-tuple)
