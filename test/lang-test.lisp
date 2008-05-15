@@ -93,6 +93,7 @@
   (run-error "a,b = 3" {TypeError} :fail-info "Iteration over non-sequence.")
   (run-error "a,b = 3,4,5" {ValueError})
   (run-error "a,b = [3,4,5]" {ValueError})
+  (run-no-error "def f(): pass")
   (run-no-error "
 g = 3
 def f():
