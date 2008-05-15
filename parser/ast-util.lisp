@@ -58,15 +58,16 @@ starts a new top-level statement. Uses an extra heuristic if *use-ast-return-stm
            (with-matching (ast ([funcdef-stmt] ?decorators ([identifier-expr] ?fname) ?fargs
                                                ([suite-stmt] ?stmts)))
              (let ((last-stmt (car (last ?stmts))))
-               (case (car last-stmt)
-                 ([return-stmt] (return-from funcdef-complete-p t)) ;; Pattern 1.
-                 ([if-stmt]     (with-matching (last-stmt ([if-stmt] ?if-clauses ?else-clause)) ;; Pattern 2.
-                                  (and (loop for ic in ?if-clauses
-                                           always (with-matching (ic (?cond ([suite-stmt] ?stmts)))
-                                                    ([return-stmt-p] (car (last ?stmts)))))
-                                       ?else-clause ;; The `else' clause is always allowed.
-                                       (with-matching (?else-clause ([suite-stmt] ?stmts))
-                                         ([return-stmt-p] (car (last ?stmts))))))))))))
+               (when (listp last-stmt)
+                 (case (car last-stmt)
+                   ([return-stmt] (return-from funcdef-complete-p t)) ;; Pattern 1.
+                   ([if-stmt]     (with-matching (last-stmt ([if-stmt] ?if-clauses ?else-clause)) ;; Pattern 2.
+                                    (and (loop for ic in ?if-clauses
+                                             always (with-matching (ic (?cond ([suite-stmt] ?stmts)))
+                                                      ([return-stmt-p] (car (last ?stmts)))))
+                                         ?else-clause ;; The `else' clause is always allowed.
+                                         (with-matching (?else-clause ([suite-stmt] ?stmts))
+                                           ([return-stmt-p] (car (last ?stmts)))))))))))))
     (etypecase ast
       ((or string number) t)
       (list (cond ((not (member (car ast) *multi-line-statements*))
