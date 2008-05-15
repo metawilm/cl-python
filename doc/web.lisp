@@ -101,13 +101,10 @@ are available to Python code, and Python libraries can be accessed by Lisp code.
      (:h2 "Requirements")
      (:p "CLPython runs successfully on the following platforms:")
      (:ul (:li ((:a href "http://franz.com/products/allegrocl/" class "external") "Allegro CL 8.1"))
-          (:li ((:a href "http://www.lispworks.com/" class "external") "LispWorks 5.0")))
-     (:p "CLPython does not run yet on the following platforms (at least not on Mac OS X 10.4, on which most development takes place):")
-     (:ul (:li ((:a href "http://sbcl.sourceforge.net/" class "external") "SBCL") 
-               " and " ((:a href "http://www.cons.org/cmucl/" class "external") "CMUCL"):
-               ": the source compiles fine, but creating a Python function object fails (see "
-               ((:a href "http://common-lisp.net/pipermail/clpython-devel/2008-May/000045.html") "this post")
-               ")"))
+          (:li ((:a href "http://www.lispworks.com/" class "external") "LispWorks 5.0"))
+          (:li ((:a href "http://sbcl.sourceforge.net/" class "external") "SBCL 1.0.16")))
+     (:p "CLPython does not run yet on the following platforms::")
+     (:ul (:li ((:a href "http://www.cons.org/cmucl/" class "external") "CMUCL")))
      (:p "There are dependencies on "
          ((:a href "http://common-lisp.net/project/closer/closer-mop.html" class "external") "Closer to MOP")
          " and " ((:a href "http://www.cliki.net/ptester" class "external") "ptester") ".")
