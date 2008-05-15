@@ -10,7 +10,6 @@
 ;;;; Habitat: "Where the snakes live"
 
 (in-package :clpython)
-;(in-syntax *ast-user-readtable*)
 
 (defclass habitat ()
   ((stdin           :initform *standard-input*
@@ -97,13 +96,16 @@
 
 (defvar *compile-python-ast-before-running* t
   "Whether to compile an AST before running it.")
-    
-(defun run-python-ast (ast &key (habitat *habitat*) (compile *compile-python-ast-before-running*) run-args)
+
+
+(defun run-python-ast (ast &key (habitat *habitat*)
+                                (compile *compile-python-ast-before-running*)
+                                run-args)
   "Run Python AST in freshly bound habitat.
 If COMPILE is true, the AST is compiled into a function before running."
   (let* ((*habitat* habitat)
          (get-module-f `(lambda () ,ast))
-	 (fc (if compile
+         (fc (if compile
                  (compile nil get-module-f)
                (coerce get-module-f 'function))))
     (let* (module-function
