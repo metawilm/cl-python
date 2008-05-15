@@ -819,6 +819,8 @@ In case of empty range, returns (0,0,1)."
 ;; empty-slice-bogus, this means only the empty list (or another
 ;; iterable containing 0 items) can be assigned to it.
 
+(defgeneric slice-indices (x length))
+
 (defmethod slice-indices ((x py-slice) (length integer))
   "Return three integers: START, STOP, STEP.
 START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
@@ -2158,6 +2160,8 @@ But if RELATIVE-TO package name is given, result may contains dots."
   (print-unreadable-object (x stream :type t :identity t)
     (format stream ":dikt ~A" (py-dict-dikt x))))
 
+(defgeneric (setf py-subs) (val x key))
+
 (defmethod (setf py-subs) :after (val (x py-dict-moduledictproxy) key)
   ;; Modifying this dict modifies the module globals.
   (py-module-set-kv (mdp-module x) (py-string->symbol key) val))
@@ -2169,7 +2173,7 @@ But if RELATIVE-TO package name is given, result may contains dots."
 
 (defvar *module-dict-update-level* 0)
 
-(defmethod py-repr ((x py-dict-moduledictproxy))
+(def-py-method py-dict-moduledictproxy.__str__ (x)
   (with-output-to-string (s)
     (print-unreadable-object (x s :identity t)
       (format s "dict-proxy for the globals of module `~A'" (module-name (mdp-module x))))))
@@ -3253,7 +3257,14 @@ finished; F will then not be called again."
 	   (apply #'py-static-method.__call__ f args))
   
   ;; Avoid infinite recursion:
-  (:method ((f function) &rest args) (apply f args)))
+  (:method ((f function) &rest args) (apply f args))
+
+  #+sbcl
+  (:method ((x sb-pcl::condition-class) &rest args)
+           (assert (not *exceptions-are-python-objects*) ()
+             "Should not come in (py-call <condition-type> ..) if ~A = T."
+             '*exceptions-are-python-objects*)
+           (make-condition x)))
 
 
 (defun py-classlookup-bind-call (x attr &rest args)
@@ -3331,25 +3342,22 @@ finished; F will then not be called again."
 		 (py-call gi x item)
 	       (py-raise '{TypeError} "Object ~S does not support item extraction" x)))))
 
-(defgeneric (setf py-subs) (new-val x item)
-  (:method (new-val x item)
-	   #+(or)(warn "(setf py-subs) T T: ~S ~S" x item)
-	   
-	   (if (null new-val)
-	       
-	       ;; delete item
-	       (let* ((x.cls (py-class-of x))
-			   (__delitem__ (recursive-class-dict-lookup x.cls '{__delitem__})))
-		      (if __delitem__
-			    (py-call __delitem__ x item)
-			(py-raise '{TypeError}
-				  "Object ~A (a ~A) has no `__delitem__' method."
-				  x (class-name (py-class-of x)))))
-	     
-	     (let ((si (recursive-class-dict-lookup (py-class-of x) '{__setitem__})))
-	       (if si
-		   (py-call si x item new-val)
-		 (py-raise '{TypeError} "Object ~S does not support item assignment" x))))))
+(defmethod (setf py-subs) (new-val x item)
+  (if (null new-val)
+      
+      ;; delete item
+      (let* ((x.cls (py-class-of x))
+             (__delitem__ (recursive-class-dict-lookup x.cls '{__delitem__})))
+        (if __delitem__
+            (py-call __delitem__ x item)
+          (py-raise '{TypeError}
+                    "Object ~A (a ~A) has no `__delitem__' method."
+                    x (class-name (py-class-of x)))))
+    
+    (let ((si (recursive-class-dict-lookup (py-class-of x) '{__setitem__})))
+      (if si
+          (py-call si x item new-val)
+        (py-raise '{TypeError} "Object ~S does not support item assignment" x)))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
