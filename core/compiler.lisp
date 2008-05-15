@@ -889,6 +889,18 @@ LOCALS shares share tail structure with input arg locals."
   
     (values locals new-locals globals)))
 
+
+;; Temporary (?) hack to get things running on SBCL 1.0.16, 
+;; where instantiating a py-function leads to strange errors.
+;; See <http://common-lisp.net/pipermail/clpython-devel/2008-May/000048.html>
+(defvar *create-simple-lambdas-for-python-functions*
+    #+(or allegro lispworks) nil
+    #+sbcl t
+    #-(or allegro lispworks sbcl) t
+    "Whether Python function are real CLOS funcallable instances, or just normal lambdas.
+Note that in the latter case, functions miss their name and attribute dict, but should
+otherwise work well.")
+
 (defmacro [funcdef-stmt] (decorators
 			  fname (pos-args key-args *-arg **-arg)
 			  suite
@@ -987,9 +999,12 @@ LOCALS shares share tail structure with input arg locals."
 	      (dolist (x (reverse decorators))
 		(setf art-deco `([call-expr] ,x ((,art-deco) () nil nil))))
 	      
-	      `(let ((,undecorated-func (make-py-function :name ',fname
-                                                          :context-name ',context-fname
-                                                          :lambda ,func-lambda)))
+	      `(let ((,undecorated-func 
+                      ,(if *create-simple-lambdas-for-python-functions*
+                           func-lambda
+                         `(make-py-function :name ',fname
+                                            :context-name ',context-fname
+                                            :lambda ,func-lambda))))
                  ([assign-stmt] ,art-deco (([identifier-expr] ,fname)))
 
                  ;; Ugly special case:
