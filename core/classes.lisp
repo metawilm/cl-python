@@ -4125,7 +4125,7 @@ the lisp list will be returned).")
   (declare (ignorable fun))
   #+lispworks 
   (hcl:sweep-all-objects fun)
-  #+(or cmu sbcl) 
+  #+sbcl
   (dolist (space '(:static :dynamic :read-only))
     (sb-vm::map-allocated-objects
      (lambda (obj type size)
