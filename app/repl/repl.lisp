@@ -336,11 +336,12 @@ KIND can be :ptime, :time, :space, :pspace or NIL."
 		   (locally (declare (special *stdout-softspace*))
 		     (setf *stdout-softspace* (py-bool nil)))
                    
-                   (unless #+allegro(input-available-p)
+                   (unless #+allegro (input-available-p)
                            #-allegro nil
                      ;; When copy-pasting multiple lines of Python source code into the REPL,
                      ;; prevent several prompts being printed below the copied code.
-                     (format t (nth (if acc 1 0) *prompts*)))
+                     (format t (nth (if acc 1 0) *prompts*))
+                     (force-output *standard-output*)) ;; stream T would mean *terminal-io*
 
 		   (let ((x (read-line)))
 		     (cond
