@@ -14,17 +14,22 @@
   (:import-from :clpython #:in-syntax)
   (:import-from :clpython.parser #:parse)
   (:import-from :ptester #:*announce-test* #:with-tests
-                #:test #:test-error #:test-warning)
+                #:test #:test-warning)
   (:export #:run))
 
 (in-package :clpython.test)
 
+(defun form-without-compiler-warnings (form)
+  ;; Prevent warnings and compiler notes from failing a test.
+  `(handler-bind ((warning #'muffle-warning)
+                  #+sbcl (sb-int:simple-compiler-note #'muffle-warning))
+     ,form))
+
 (defmacro test-no-error (form &rest args)
-  ;; A (compiler) warning should not make the test fail.
-  (setf form `(handler-bind ((warning #'muffle-warning)
-                             #+sbcl (sb-int:simple-compiler-note #'muffle-warning))
-                ,form))
-  `(ptester:test-no-error ,form ,@args))
+  `(ptester:test-no-error ,(form-without-compiler-warnings form) ,@args))
+
+(defmacro test-error (form &rest args)
+  `(ptester:test-error ,(form-without-compiler-warnings form) ,@args))
     
 (defmacro test-true (val &rest options)
   "Only tests first value returned"
