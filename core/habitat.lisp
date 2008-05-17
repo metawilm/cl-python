@@ -126,8 +126,9 @@
               'do-nothing-for-syntax-errors
               ;; ARG-LIST and BASIC-DEFINITION are special variables, but
               ;; not declared as globals by SBCL, and declaring them special
-              ;; here results in package lock violation.
-              ;; Therefore using symbol-value.
+              ;; here results in package lock violation. Using 
+              ;; SB-EXT:WITHOUT-PACKAGE-LOCKS leads to a whole bunch of
+              ;; error messages. Therefore simply using symbol-value.
               `(let ((c (find-if (lambda (x) (typep x '{SyntaxError})) 
                                  (symbol-value 'sb-int:arg-list))))
                  (if c
