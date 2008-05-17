@@ -77,10 +77,10 @@ http://groups.google.nl/group/comp.lang.lisp/msg/2520fe9bc7749328?dmode=source"
 
 (defmacro named-function (name lambda-form)
   (declare (ignorable name))
-  #+allegro
-  `(excl:named-function ,name ,lambda-form)
-  #-allegro
-  lambda-form)
+  (assert (eq (car lambda-form) 'lambda))
+  #+allegro `(excl:named-function ,name ,lambda-form)
+  #+sbcl `(sb-int:named-lambda ,name ,@(cdr lambda-form)) ;; skip 'lambda symbol
+  #-(or allegro sbcl) lambda-form)
 
 (defmacro with-stack-list ((name &rest items) &body body)
   (check-type name symbol)
