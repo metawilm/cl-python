@@ -28,13 +28,14 @@
 #+allegro
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (defparameter *repl-restart-aliases*
-      '((:pt . return-python-toplevel)
-        (:re . retry-repl-eval)))
+      '(("pt" . return-python-toplevel)
+        ("re" . retry-repl-eval)))
   
   #+allegro
-  (defun abbrev-for-restart (r)
-    (or (car (rassoc r *repl-restart-aliases*))
-        (error "No such Python repl restart: ~A." r)))
+  (defun abbrev-for-restart (r &optional fmt)
+    (let ((str (or (car (rassoc r *repl-restart-aliases*))
+                   (error "No such Python repl restart: ~A." r))))
+      (if fmt (format nil fmt str) str)))
 )
 
 (defun try-invoke-restart (rname)
@@ -46,11 +47,11 @@
 (defmacro with-repl-toplevel-aliases (&body body)
   #+allegro
   `(progn (progn ,@(loop for (abbrev . restart) in *repl-restart-aliases*
-                       collect `(setf (top-level:alias ,(string abbrev))
+                       collect `(setf (top-level:alias ,abbrev)
                                   (lambda () (try-invoke-restart ',restart)))))
           (unwind-protect (progn ,@body)
             (with-output-to-string (*terminal-io*) ;; suppress "removed `pt' alias" messages
-              (tpl:remove-alias ,@(loop for (abbrev . nil) in *repl-restart-aliases* collect abbrev)))))
+              (tpl:remove-alias ,@(mapcar #'car *repl-restart-aliases*)))))
   #-allegro
   `(progn ,@body))
 
@@ -80,8 +81,8 @@ In the Python interpreter:
                      #+allegro
                      (format nil "
 In the Lisp debugger:
-     ~S            => back to Python top level
-     ~S            => retry the last (failed) Python command
+     ~A            => back to Python top level
+     ~A            => retry the last (failed) Python command
 " 
                              (abbrev-for-restart 'return-python-toplevel)
                              (abbrev-for-restart 'retry-repl-eval))
@@ -206,9 +207,9 @@ KIND can be :ptime, :time, :space, :pspace or NIL."
                               (block :val 
                                 (loop (let ((helper-func (run-ast-func ast)))
                                         (loop (with-simple-restart
-                                                  (retry-repl-eval (concatenate 'string "Retry the expression: \"~A\"" #+allegro " (~S).")
+                                                  (retry-repl-eval (concatenate 'string "Retry the expression: \"~A\"" #+allegro " ~A.")
                                                                    (nice-one-line-input-abbrev total)
-                                                                   #+allegro (abbrev-for-restart 'retry-repl-eval))
+                                                                   #+allegro (abbrev-for-restart 'retry-repl-eval "(:~A)"))
                                                 (return-from :val
                                                   (profile helper-func *repl-prof*))))))))))
                    (when (car vals) ;; skip NIL
@@ -329,8 +330,8 @@ KIND can be :ptime, :time, :space, :pspace or NIL."
 	  initially (format t "[CLPython -- type `:q' to quit, `:help' for help]~%")
 	  do (loop 
 	       (with-simple-restart (return-python-toplevel
-                                     (concatenate 'string "Return to Python top level" #+allegro " (~S).")
-                                     #+allegro (abbrev-for-restart 'return-python-toplevel))
+                                     (concatenate 'string "Return to Python top level" #+allegro " ~A.")
+                                     #+allegro (abbrev-for-restart 'return-python-toplevel "(:~A)"))
 		 (setf acc ())
 		 (loop 
 		   (locally (declare (special *stdout-softspace*))
