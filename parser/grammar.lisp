@@ -274,11 +274,11 @@
 
 (p print-stmt :or
    (([print])                             `([print-stmt] nil nil nil))
-   (([print] test |,--test*| comma?)      `([print-stmt] nil (,$2 . ,$3) ,$4))
-   (([print] [>>] test |,--test*| comma?)  `([print-stmt] ,$3 ,$4 ,$5)))
+   (([print] test comma--test* comma?)      `([print-stmt] nil (,$2 . ,$3) ,$4))
+   (([print] [>>] test comma--test* comma?)  `([print-stmt] ,$3 ,$4 ,$5)))
 
-(gp |,--test+|)
-(p |,--test| ([,] test) $2)
+(gp comma--test+)
+(p comma--test ([,] test) $2)
 
 (p del-stmt      ([del] exprlist)     `([del-stmt] ,$2))
 (p pass-stmt     ([pass])             `([pass-stmt] ))
@@ -351,7 +351,6 @@
 (p exec-stmt ([exec] expr [in] test [,] test) `([exec-stmt] ,$2 ,$4 ,$6))
 
 (p assert-stmt ([assert] test comma--test?) `([assert-stmt] ,$2 ,$3))
-(p comma--test ([,] test) $2)
 
 (p compound-stmt :or
    ((if-stmt) $1)
@@ -474,8 +473,6 @@
 (p listmaker (test list-for) `([listcompr-expr] ,$1 ,$2))
 (p listmaker (test comma--test* comma?) `([list-expr] ,(cons $1 $2)))
 
-(gp comma--test+)
-
 (p testlist-gexp (test gen-for) `([generator-expr] ,$1 ,$2))
 (p testlist-gexp (test comma--test* comma?) (if (or $2 $3) `([tuple-expr] (,$1 . ,$2)) $1))
 
@@ -548,7 +545,7 @@
 (p classdef ([class] [identifier] inheritance [:] suite)
    `([classdef-stmt] ([identifier-expr] ,$2) ,$3 ,$5))
 
-(p inheritance ([(]          [)]) '([tuple-expr] nil))
+(p inheritance ([(]          [)]) `([tuple-expr] nil))
 (p inheritance ([(] testlist [)]) (if (eq (car $2) '[tuple-expr]) $2 `([tuple-expr] (,$2))))
 
 (p arglist (arglist-2) (handle-arglist () $1))
@@ -601,7 +598,7 @@
 (p gen-for ([for] exprlist [in] binop-expr gen-iter?) `(([for-in-clause] ,$2 ,$4) . ,$5))
 (p gen-if  ([if]  old-test                 gen-iter?) `(([if-clause] ,$2) . ,$3))
 
-(p testlist1 (test |,--test*|) (if $2 `([tuple-expr] (,$1 . ,$2)) $1))
+(p testlist1 (test comma--test*) (if $2 `([tuple-expr] (,$1 . ,$2)) $1))
 
 
 (defun parse-trailers (item trailers)
