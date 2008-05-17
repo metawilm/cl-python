@@ -30,7 +30,7 @@ Most important options:
   
   (:method :around (x &rest options &key (one-expr nil) (incl-module (not one-expr)))
            (assert (not (and incl-module one-expr)) ()
-             "PARSE options :ONE-EXPR and :INCL-MODULE are practically mutually exclusive.")
+             "PARSE options :ONE-EXPR and :INCL-MODULE are mutually exclusive.")
            (let ((res (apply #'call-next-method x :incl-module incl-module (sans options :one-expr))))
              (when one-expr
                (assert (= (length res) 1) ()
