@@ -1162,13 +1162,11 @@ otherwise work well.")
   set    ;; Called with args NAME, VAL 
   del    ;; Called with args NAME
   names  ;; Called without args, returns bound names as sequence
-  module
-  module-name
-  module-path)
+  module)
 
 (defun make-standard-mgh (module-name module-path)
-  (let* ((mgh (make-mgh :module-name module-name :module-path module-path))
-         (mod (make-py-module :mgh mgh)))
+  (let* ((mgh (make-mgh))
+         (mod (make-py-module :mgh mgh :name (string module-name) :path module-path)))
     (setf (mgh-module mgh) mod)
     (flet ((do-get (name)
              (or (gethash name (mgh-ht mgh))
