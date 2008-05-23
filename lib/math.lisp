@@ -31,7 +31,7 @@
 (def-unary-conv-func |cosh| cl:cosh)
 (def-unary-conv-func |tanh| cl:tanh)
 
-(set-impl-status '(|tan| |asin| |acos| |atan| |sinh| |cosh| |tanh|) t)
+(set-impl-status '(|sin| |cos| |tan| |asin| |acos| |atan| |sinh| |cosh| |tanh|) t)
 (set-impl-status '|atan2| :todo "CL does not have it?")
 
 (defun |ceil| (x) (ceiling (conv x)))
