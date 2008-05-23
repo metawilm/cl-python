@@ -58,12 +58,12 @@
 (defconstant-once |lowercase| #.(chars-satisfying #'lower-case-p))
 (defconstant-once |uppercase| #.(chars-satisfying #'upper-case-p))
 (defconstant-once |letters| (concatenate 'string |lowercase| |uppercase|))
-(set-impl-status '(|lowercase| |uppercase| |letters|) t)
+(set-impl-status '(|lowercase| |uppercase| |letters|) t
+                 "Note that values differ from CPython values")
 
-(defconstant-once |punctuation| "'!\"#$%&\'()*+,-./:;<=>?@[\\]^_`{|}~'")
+(defconstant-once |punctuation| "!\"#$%&\'()*+,-./:;<=>?@[\\]^_`{|}~")
 (defconstant-once |whitespace| #.(coerce '(#\Space #\Tab #\Newline #\Return #\Page) 'string))
 (defconstant-once |printable| (concatenate 'string |digits| |letters| |punctuation| |whitespace|))
 
-(set-impl-status '(|punctuation| |printable|)
-                 :incomplete "Value of punctuation copied from CPython; need to verify")
-(set-impl-status '|whitespace| t)
+(set-impl-status '|punctuation| t "Value copied from CPython.")
+(set-impl-status '(|printable| |whitespace|) t)
