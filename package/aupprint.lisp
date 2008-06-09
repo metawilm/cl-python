@@ -16,16 +16,16 @@
 
 (defun ast-user-print-symbol (stream s)
   (check-type s symbol)
-  (loop while *print-pretty*
-      for (pkg pre post) in (load-time-value `((,(find-package :clpython.ast)  #\[ #\])
-                                               (,(find-package :clpython.user) #\{ #\})))
-      when (and s ;; prevent nil being printed as [nil]
-                (eq s (find-symbol (symbol-name s) pkg)))
-      do (when *ast-user-print-delims* (write-char pre stream))
-         (write-string (symbol-name s) stream)
-         (when *ast-user-print-delims* (write-char post stream))
-         (return)
-      finally (with-standard-io-syntax (format stream "~A" s))))
+  (when *print-pretty*
+    (loop for (pkg pre post) in (load-time-value `((,(find-package :clpython.ast)  #\[ #\])
+                                                   (,(find-package :clpython.user) #\{ #\})))
+        when (and s ;; prevent nil being printed as [nil]
+                  (eq s (find-symbol (symbol-name s) pkg)))
+        do (when *ast-user-print-delims* (write-char pre stream))
+           (write-string (symbol-name s) stream)
+           (when *ast-user-print-delims* (write-char post stream))
+           (return-from ast-user-print-symbol)))
+  (with-standard-io-syntax (format stream "~A" s)))
 
 (defun dummy (stream x)
   (format stream "dummy ~A" x))

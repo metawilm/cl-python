@@ -355,7 +355,7 @@ C must be either a character or NIL."
 (defvar *reserved-words-vector*
     (loop with vec = (make-array 128 :initial-element nil)
         with pkg = (find-package :clpython.ast.reserved)
-        for rw being the external-symbol in pkg
+        for rw being each external-symbol in pkg
         for rw.name = (symbol-name rw)
         do (assert (>= (length rw.name) 2))
            (let ((key (char-code (aref rw.name 0)))

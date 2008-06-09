@@ -2065,10 +2065,11 @@ Non-negative integer denoting the number of args otherwise."
 
 (defmacro with-py-errors ((&key (name 'with-py-errors-func)) &body body)
   (check-type name (or symbol list))
-  `(let ((f (named-function ,name
-              (lambda () ,@body))))
-     (declare (dynamic-extent f))
-     (call-with-py-errors f)))
+  (with-gensyms (f)
+    `(let ((,f (named-function ,name
+                 (lambda () ,@body))))
+       (declare (dynamic-extent ,f))
+       (call-with-py-errors ,f))))
 
 (defun call-with-py-errors (f)
   (let ((*with-py-error-level* (fast (1+ (the fixnum *with-py-error-level*)))))

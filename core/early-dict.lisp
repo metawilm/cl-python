@@ -14,7 +14,7 @@
 (in-syntax *user-readtable*)
 
 (defparameter *magic-methods*
-    '#.(sort (loop for s being the external-symbol in :clpython.user
+    '#.(sort (loop for s being each external-symbol in :clpython.user
                  for sn = (symbol-name s)
                  when (and (> (length sn) 0)
                            (or (char= (char sn 0) #\_)
@@ -373,7 +373,7 @@ All these symbols are in the clpython.user package.")
          (let ((ht1 (dikt-hash-table d1))
                (ht2 (dikt-hash-table d2)))
            (and (= (the fixnum (hash-table-count ht1)) (the fixnum (hash-table-count ht2)))
-                (loop for d1.k being the hash-key in ht1 using (hash-value d1.v)
+                (loop for d1.k being each hash-key in ht1 using (hash-value d1.v)
                     for d2.v = (gethash d1.k ht2)
                     when (not d2.v) return nil
                     when (py-val->lisp-bool (py-!= d1.v d2.v)) return nil
@@ -396,9 +396,9 @@ All these symbols are in the clpython.user package.")
              (rotatef d1 d2))
            ;; Now d1 is the hash-table; d2 is the vector
            (and (= (dikt-count d2) (dikt-count d1))
-                (loop for d1.k being the hash-key in (dikt-hash-table d1)
+                (loop for d1.k being each hash-key in (dikt-hash-table d1)
                     always (or (symbolp d1.k) (stringp d1.k)))
-                (loop for d1.k being the hash-key in (dikt-hash-table d1)
+                (loop for d1.k being each hash-key in (dikt-hash-table d1)
                     using (hash-value d1.v)
                     always (py-== (dikt-get d2 d1.k) d1.v))))))
 
@@ -419,7 +419,7 @@ This is not guaranteed due to the following in ANSI:
   "Return the I-th entry in the hashtable (I >= 0), using its internal order."
   (declare (optimize (speed 3) (safety 0) (debug 0)))
   (loop for ix from 0 to i
-      for k being the hash-key in ht
+      for k being each hash-key in ht
       when (= ix i) return (values k (gethash k ht))
       finally (return (values nil nil))))
 

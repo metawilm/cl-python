@@ -42,7 +42,7 @@
 (defparameter *terminals*
     (sort (loop for pkg in '(:clpython.ast.reserved :clpython.ast.operator
                              :clpython.ast.punctuation :clpython.ast.token)
-              nconc (loop for s being the external-symbol in pkg
+              nconc (loop for s being each external-symbol in pkg
                         collect s))
           #'string<)
   "Terminal tokens")

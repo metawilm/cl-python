@@ -392,9 +392,10 @@
 (defun parse-poskey-arglist (func-name formal-pos-args actual-args)
   (let ((pos-args (loop until (symbolp (car actual-args))
 		      collect (pop actual-args)))
-	(kw-args (loop while actual-args
+	(kw-args (loop for aa = actual-args then (cddr aa)
 		     for key = (pop actual-args)
 		     for val = (pop actual-args)
+                     while aa
 		     unless (and (symbolp key) val)
 		     do (error "Invalid arglist: ~S" actual-args)
 		     collect (cons key val))))
@@ -409,10 +410,7 @@
 	(py-raise '{TypeError} "Too many arguments for function ~A (got: ~A)" 
 		  func-name))
       
-      (loop while kw-args
-	  for kwa = (pop kw-args)
-	  for key = (car kwa)
-	  for val = (cdr kwa)
+      (loop for (key . val) in kw-args
 	  do (let ((fkw (find key formal-pos-args :test #'string=))) ;; (string= |:a| '|a|)
 	       (if fkw
 		   (progn (setf formal-pos-args (delete fkw formal-pos-args :test #'eq))

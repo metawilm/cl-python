@@ -44,27 +44,25 @@ it will be interned if INTERN, otherwise an error is raised."
   
   (lambda (stream ch)
     (assert (char= ch start-char))
-    (loop with finished = nil
-	with name = (make-array 5 :element-type 'character
-				:adjustable t :fill-pointer 0)
-	until finished
+    (loop with name = (make-array 5 :element-type 'character
+                                  :adjustable t :fill-pointer 0)
 	for prev-char = ch
 	for ch = (read-char stream)
 	do (cond ((and prev-char (char= prev-char #\\))
 		  (setf (aref name (1- (length name))) ch))
-		 ((char= ch end-char)
-		  (setf finished t))
-		 (t
-		  (vector-push-extend ch name)))
-	finally 
-	  (return (or (find-symbol name package)
-		      (when intern
-			(intern name package))
-		      (apply #'error 'reader-error :stream stream
-			     (when +reader-error-has-format+
-                               (list :format-control "No symbol named ~S in package ~S"
-                                     :format-arguments (list name (find-package package))))))))))
-
+		 ((char/= ch end-char)
+                  (vector-push-extend ch name))
+                 (t 
+                  (return (or (find-symbol name package)
+                              (when intern
+                                (intern name package))
+                              (apply #'error 'reader-error :stream stream
+                                     (when +reader-error-has-format+
+                                       (list :format-control
+                                             "No symbol named ~S in package ~S"
+                                             :format-arguments
+                                             (list name (find-package package))))))))))))
+    
 (defun setup-ast-readmacro (&optional (readtable *readtable*))
   (let ((read-[-func (read-package-symbol-func (find-package :clpython.ast) #\[ #\] :intern nil)))
     (set-macro-character #\[ read-[-func t readtable))

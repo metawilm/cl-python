@@ -22,7 +22,7 @@
                                          :non-associative)
      (:lexemes ,@*terminals*))
 
-#.`(progn ,@(loop for name being the hash-key in *python-prods*
+#.`(progn ,@(loop for name being each hash-key in *python-prods*
                 using (hash-value rules)
                 nconc (loop for (terms outcome options) in rules
                           collect `(excl.yacc:defproduction (,name python-grammar) ,terms (,outcome)
