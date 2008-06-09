@@ -170,7 +170,8 @@ with " ((:a href "http://docs.python.org/whatsnew/whatsnew25.html" class "extern
            #+(or)(html (:princ (format nil "~A" status)))
            (html (:br)
                  ((:img src (format nil "http://chart.apis.google.com/chart?chd=t:~{~A~^,~}&chg=25,0,1,3&chs=200x300&cht=bhs&chxl=0:||100%|1:|~{~A|~}&chxt=x,y&chf=bg,s,dddddd"
-                                    (mapcar #'cdr status)
+                                    ;; for some reason, labels and data in reverse order...?!
+                                    (reverse (mapcar #'cdr status))
                                     (mapcar #'car status)))))))
      #+(or)((:h2 "Performance")
             (:p "CLPython is as fast as CPython for numerical calculations, but slower in object handling.")))
