@@ -1,7 +1,7 @@
 2008-06-09  Willem Broekema  <metawilm@gmail.com>
 
-	* /: In LOOP clauses, FOR must come before WHILE, and use EACH instead of
-	     THE in "BEING THE EXTERNAL-SYMBOL". (Robert Brown)
+	* /: In LOOP clauses, FOR must come before WHILE, and use EACH
+	     instead of THE in "BEING THE EXTERNAL-SYMBOL". (Robert Brown)
 
 2008-06-09  Willem Broekema  <metawilm@gmail.com>
 
