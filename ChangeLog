@@ -1,7 +1,23 @@
+2008-06-11  Willem Broekema  <willem@Banaan>
+
+	* parser/grammar-clyacc.lisp: at :compile-toplevel time
+	print message that grammar is calculated, taking a while.
+
+2008-06-11  Willem Broekema  <metawilm@gmail.com>
+
+	* depend/cl-yacc/yacc.lisp: add a few (speed 3) declarations
+	to speed up grammar calculation.
+
+2008-06-11  Willem Broekema  <metawilm@gmail.com>
+
+	* core/classes.lisp (def-py-method, register-method): 
+	move duplicated code in def-py-method expansion to function
+	register-method.
+
 2008-06-09  Willem Broekema  <metawilm@gmail.com>
 
 	* /: In LOOP clauses, FOR must come before WHILE, and use EACH
-	     instead of THE in "BEING THE EXTERNAL-SYMBOL". (Robert Brown)
+	instead of THE in "BEING THE EXTERNAL-SYMBOL". (Robert Brown)
 
 2008-06-09  Willem Broekema  <metawilm@gmail.com>
 
