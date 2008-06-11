@@ -142,12 +142,12 @@
 	   (dot-pos (or (position #\. cm)
 			(error "Need dot in name: (def-py-method classname.methodname ..); got: ~A"
 			       cls.meth)))
-	   ;; The class names must be a symbol defined in the same pkg
-	   ;; as the `cls.meth' argument to this macro.
+           ;; The class names must be a symbol defined in the same pkg
+           ;; as the `cls.meth' argument to this macro.
 	   (cls  (intern (subseq cm 0 dot-pos) (symbol-package cls.meth)))
 	   (meth (let ((methname (subseq cm (1+ dot-pos))))
 		   (when (not (some #'lower-case-p methname))
-		     ;; Can't use (every #'upper-case-p) because of dashes
+                     ;; Can't use (every #'upper-case-p) because of dashes
 		     (setf methname (nstring-downcase methname)))
 		   (ensure-user-symbol methname)))
 	   (modifiers (loop while (keywordp (car args)) collect (pop args)))
@@ -158,74 +158,74 @@
       (assert (<= (length modifiers) 1) ()
 	"Multiple modifiers for a py-method: ~A. Todo?" modifiers)
 
-      `(progn
-	 ,(destructuring-bind (func-args &body func-body) args
-	    (loop with real-args
-		with body = `(locally ,@func-body) ;; allows DECLARE forms at head
-			    
-		for sym in func-args
-		for sym-name = (when (symbolp sym) (symbol-name sym))
+      `(progn ,(destructuring-bind (func-args &body func-body) args
+                 (loop with real-args
+                     with body = `(locally ,@func-body) ;; allows DECLARE forms at head
+                                 
+                     for sym in func-args
+                     for sym-name = (when (symbolp sym) (symbol-name sym))
+                                    
+                     if (not (symbolp sym))
+                     do (push sym real-args)
+                     else if (char= #\^ (aref sym-name (1- (length sym-name))))
+                     do (let ((real-name (intern (subseq sym-name 0 (1- (length sym-name)))
+                                                 #.*package*)))
+                          (push real-name real-args)
+                          (setf body `(let ((,real-name (deproxy ,real-name)))
+                                        (declare (ignorable ,real-name))
+                                        ,body)))
+                     else do (push sym real-args)
+                          
+                     finally (return (progn (setf real-args (nreverse real-args))
+                                            `(defun ,func-name ,real-args
+                                               ;; Make all args ignorable. Otherwise there will be warnings for
+                                               ;; unused variables even if there is (declare (ignore ..)) in the
+                                               ;; function body: function body is wrapped in a LOCALLY.
+                                               ;; XXX Ugly, should parse declare-ignore declarations.
+                                               ,(let ((sym-args (remove-if-not (lambda (s) (and (symbolp s)
+                                                                                                (not (char= (aref (string s) 0) #\&))))
+                                                                               real-args)))
+                                                  `(declare (ignorable ,@sym-args)))
+                                               (block ,cls.meth
+                                                 ,body))))))
+              (register-method ',cls ',meth
+                               ,(ecase (car modifiers)
+                                  ((nil)             `(let ((f (function ,cls.meth)))
+                                                        f))
+                                  
+                                  (:static           `(make-instance 'py-static-method
+                                                        :func (function ,cls.meth)))
+                                  
+                                  (:attribute        `(make-instance 'py-attribute-method
+                                                        :func (function ,cls.meth)))
+                                  
+                                  (:class-attribute  `(make-instance 'py-class-attribute-method
+                                                        :func (function ,cls.meth)))
+                                  
+                                  (:attribute-read   `(let ((x (make-instance 'py-writable-attribute-method
+                                                                 :func (function ,cls.meth))))
+                                                        (setf (gethash ',cls.meth *writable-attribute-methods*) x)
+                                                        x))
+                                  
+                                  (:attribute-write  `(let ((f (function ,func-name))
+                                                            (read-f (or (gethash ',cls.meth
+                                                                                 *writable-attribute-methods*)
+                                                                        (error "Attribute read function ~A not defined yet"
+                                                                               ',cls.meth))))
+                                                        (setf (slot-value read-f 'write-func) f)
+                                                        nil ;; read function is already stored in dict
+                                                        ))))))))
 
-		if (not (symbolp sym))
-		do (push sym real-args)
-		   
-		else if (char= #\^ (aref sym-name (1- (length sym-name))))
-		do (let ((real-name (intern (subseq sym-name 0 (1- (length sym-name)))
-					    #.*package*)))
-		     (push real-name real-args)
-		     (setf body `(let ((,real-name (deproxy ,real-name)))
-                                   (declare (ignorable ,real-name))
-				   ,body)))
-		   
-		else do (push sym real-args)
-		     
-		finally (return (progn (setf real-args (nreverse real-args))
-                                       `(defun ,func-name ,real-args
-                                          ;; Make all args ignorable. Otherwise there will be warnings for
-                                          ;; unused variables even if there is (declare (ignore ..)) in the
-                                          ;; function body: function body is wrapped in a LOCALLY.
-                                          ;; XXX Ugly, should parse declare-ignore declarations.
-                                          ,(let ((sym-args (remove-if-not (lambda (s) (and (symbolp s)
-                                                                                           (not (char= (aref (string s) 0) #\&))))
-                                                                          real-args)))
-                                             `(declare (ignorable ,@sym-args)))
-                                          (block ,cls.meth
-                                            ,body))))))
-	 
-	 (let* ((cls (or (find-class ',cls) (error "No such class: ~A" ',cls)))
-                (dict (or (dict cls)
-                          (error "Class ~A has no dict (to store method ~A)"
-                                 cls ',cls.meth))))
+
+(defun register-method (cls attr val)
+  (let* ((c (or (find-class cls) (error "No such class: ~A" cls)))
+         (dict (or (dict c)
+                   (error "Class ~A has no dict (to store method ~A)." c attr))))
+    (when val
+      (sub/dict-set dict attr val))))
 	   
-	   (let ((obj
-		  ,(ecase (car modifiers)
-		     ((nil)             `(let ((f (function ,cls.meth)))
-					   f))
-		     
-		     (:static           `(make-instance 'py-static-method
-					   :func (function ,cls.meth)))
-		     
-		     (:attribute        `(make-instance 'py-attribute-method
-					   :func (function ,cls.meth)))
-		     
-		     (:class-attribute  `(make-instance 'py-class-attribute-method
-					   :func (function ,cls.meth)))
-		     
-		     (:attribute-read   `(let ((x (make-instance 'py-writable-attribute-method
-						    :func (function ,cls.meth))))
-					   (setf (gethash ',cls.meth *writable-attribute-methods*) x)
-					   x))
-		     
-		     (:attribute-write  `(let ((f (function ,func-name))
-					       (read-f (or (gethash ',cls.meth
-								    *writable-attribute-methods*)
-							   (error "Attribute read function ~A not defined yet"
-								  ',cls.meth))))
-					   (setf (slot-value read-f 'write-func) f)
-					   nil ;; read function is already stored in dict
-					   )))))
-	     (when obj
-	       (sub/dict-set dict ',meth obj))))))))
+	 
+  
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;
