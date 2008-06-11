@@ -11,6 +11,9 @@
 
 (in-package :clpython.parser)
 
+(eval-when (:compile-toplevel)
+  (format t ";;; Compiling Python grammar for CL-Yacc: this may take a while...~%"))
+            
 #+(or) ;; Disabled while cl-yacc is included in the CLPython distribution
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (asdf:operate 'asdf:load-op :yacc))
