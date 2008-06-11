@@ -1,0 +1,26 @@
+--- yacc.lisp	01 Apr 2008 21:01:45 +0200	1.1
++++ yacc.lisp	11 Jun 2008 23:26:33 +0200	
+@@ -116,6 +116,7 @@
+ 
+ (defun terminal-p (symbol grammar)
+   (declare (symbol symbol) (type grammar grammar))
++  (declare (optimize (speed 3)))
+   (or (eq symbol 'propagate)
+       (and (member symbol (grammar-terminals grammar)) t)))
+ 
+@@ -139,6 +140,7 @@
+ 
+ (defun derives-epsilon (symbol grammar &optional seen)
+   "True if symbol derives epsilon."
++  (declare (optimize (speed 3)))
+   (declare (symbol symbol) (type grammar grammar) (list seen))
+   (let ((e (assoc symbol (grammar-derives-epsilon grammar))))
+     (cond
+@@ -595,6 +597,7 @@
+ (defun compute-goto (kernel symbol grammar)
+   "Compute the kernel of goto(KERNEL, SYMBOL)"
+   (declare (type kernel kernel) (symbol symbol) (type grammar grammar))
++  (declare (optimize (speed 3)))
+   (let ((result '()))
+     (dolist (item (kernel-items kernel))
+       (when (not (item-dot-right-p item))
