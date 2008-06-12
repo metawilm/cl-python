@@ -551,8 +551,16 @@ GENSYMS are made gensym'd Lisp vars."
     `(let ,(mapcar #'list temps values)
        ,del-form)))
 
+(defun init-dict (kv-list)
+  (let ((dict (make-dict)))
+    (loop for (k v) on kv-list by #'cddr
+        do (sub/dict-set dict k v))
+    dict))
+
 (defmacro [dict-expr] (alist)
-  `(make-dict-unevaled-list ,alist))
+  (with-gensyms (list)
+    `(with-stack-list (,list ,@(loop for (k . v) in alist nconc (list k v)))
+       (init-dict ,list))))
 
 (defmacro [exec-stmt] (code-string globals locals &key (allowed-stmts t) &environment e)
   ;; TODO:

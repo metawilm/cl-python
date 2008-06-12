@@ -1946,14 +1946,6 @@ But if RELATIVE-TO package name is given, result may contains dots."
       (symbol-name x)
     x))
 
-(defmacro make-dict-unevaled-list (items)
-  ;; XXX move to compiler
-  (let ((dict '#:dict))
-    `(let* ((,dict (make-dict)))
-       ,@(loop for (k . v) in items
-	     collect `(sub/dict-set ,dict ,k ,v))
-       ,dict)))
-
 (defun make-dict-from-symbol-alist (alist)
   (loop with d = (make-dict)
       for (k . v) in alist 
