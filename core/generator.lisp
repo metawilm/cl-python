@@ -333,6 +333,15 @@
                         ,final-tag
 			(return-from function-body nil)))))))))))))
 
+(defun apply-splits (form)
+  (cond ((atom form)
+         (values form))
+        ((eq (car form) :split)
+	 (values-list (loop for elm in (cdr form)
+			  nconc (multiple-value-list (apply-splits elm)))))
+        (t (loop for elm in form
+	       nconc (multiple-value-list (apply-splits elm))))))
+
 (defun rewrite-generator-expr-ast (ast)
   ;; rewrite:  (x*y for x in bar if y)
   ;; into:     def f(src):  for x in src:  if y:  yield x*y

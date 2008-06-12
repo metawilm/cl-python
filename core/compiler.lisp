@@ -2158,15 +2158,6 @@ be bound."
       (t form)))
   nil)
 
-(defun apply-splits (form)
-  (cond ((atom form)
-         (values form))
-        ((eq (car form) :split)
-	 (values-list (loop for elm in (cdr form)
-			  nconc (multiple-value-list (apply-splits elm)))))
-        (t (loop for elm in form
-	       nconc (multiple-value-list (apply-splits elm))))))
-
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;  Source locations of classes and functions
 
