@@ -110,7 +110,7 @@
                    (if stack
                        (values `(go ,(cdr (car stack))) t)
                      (py-raise '{SyntaxError} "Statement `break' was found outside loop.")))
-		    
+                  
 		  ([continue-stmt]
                    (if stack
                        (values `(go ,(car (car stack))) t)
@@ -130,7 +130,7 @@
 		       (push generator vars)
 		       
 		       (values
-			`(:split
+			`(:splice
                           ;; create generator; request first value
                           (setf ,generator (get-py-iterate-fun ,source)
 				,loop-var  (funcall ,generator))
@@ -138,7 +138,7 @@
                           ;; handle a value
 			  ,repeat-tag
 			  ([assign-stmt] ,loop-var (,target))
-			  (:split ,(walk suite stack2))
+			  (:splice ,(walk suite stack2))
                           (go ,continue-tag) ;; prevent warnings
 			  ,continue-tag
                           ;; request new value
@@ -147,7 +147,7 @@
 			  
 			  ,else-tag
 			  ,@(when else-suite
-			      `((:split ,(walk else-suite stack2))))
+			      `((:splice ,(walk else-suite stack2))))
 			  
 			  ,end-tag
 			  (setf ,loop-var nil
@@ -165,25 +165,25 @@
                    ;;        continue
 		   (destructuring-bind (clauses else-suite) (cdr form)
 		     (loop with else-tag = (new-tag :else) and after-tag = (new-tag :after)
-									 
+                                                                           
 			 for (expr suite) in clauses
 			 for then-tag = (new-tag :then)
 					
 			 collect `((py-val->lisp-bool ,expr) (go ,then-tag)) into tests
-			 collect `(:split ,then-tag
-					  (:split ,(walk suite stack))
-					  (go ,after-tag)) into suites
+			 collect `(:splice ,then-tag
+                                           (:splice ,(walk suite stack))
+                                           (go ,after-tag)) into suites
 			 finally
 			   (return
-			     (values `(:split (cond ,@tests
-						    (t (go ,else-tag)))
-					      (:split ,@suites)
-					      ,else-tag
-					      ,@(when else-suite
-						  `((:split ,(walk else-suite stack))))
-					      ,after-tag)
+			     (values `(:splice (cond ,@tests
+                                                     (t (go ,else-tag)))
+                                               (:splice ,@suites)
+                                               ,else-tag
+                                               ,@(when else-suite
+                                                   `((:splice ,(walk else-suite stack))))
+                                               ,after-tag)
 				     t)))))
-		    
+                  
 		  ([return-stmt]
 		   (when (second form)
 		     (py-raise '{SyntaxError}
@@ -193,8 +193,8 @@
 		   (values `(generator-finished) t))
 
 		  ([suite-stmt]
-		   (values `(:split ,@(loop for stmt in (second form)
-					  collect (walk stmt stack)))
+		   (values `(:splice ,@(loop for stmt in (second form)
+                                           collect (walk stmt stack)))
 			   t))
 
                   ([try-except-stmt]
@@ -212,7 +212,7 @@
 			 with else-tag = (new-tag :else)
 			 with after-tag = (new-tag :after)
 			 with gen = (gensym "helper-gen")
-									
+                                    
 			 initially (push gen vars)
 				   
 			 for (exc var suite) in except-clauses
@@ -227,7 +227,7 @@
                               ;; By creating a dummy function for the suite, and iterating over
                               ;; the values that function yields, the suite itself does not have
                               ;; to be analyzed and rewritten.
-			      `(:split
+			      `(:splice
 				(setf ,gen (get-py-iterate-fun
 					    (funcall ,(suite->generator `(,fname :try-suite) try-suite))))
 				(setf .state. ,try-tag)
@@ -246,7 +246,7 @@
 				,@exc-bodies ;; handler bodies
 				
 				,else-tag
-				,@(when else-suite `((:split ,(walk else-suite stack))))
+				,@(when else-suite `((:splice ,(walk else-suite stack))))
 				
 				,after-tag
 				(setf ,gen nil))
@@ -261,7 +261,7 @@
                      (let ((fin-catched-exp (gensym "fin-catched-exc")))
                        (pushnew fin-catched-exp vars)
 		       (values
-			`(:split
+			`(:splice
 			  (multiple-value-bind (val cond)
 			      (ignore-errors ,try-suite ;; no need to walk
 					     (values))
@@ -276,12 +276,12 @@
 		     (let ((repeat-tag (new-tag :repeat))
 			   (else-tag   (new-tag :else))
 			   (after-tag  (new-tag :end+break-target)))
-		       (values `(:split
+		       (values `(:splice
 				 (unless (py-val->lisp-bool ,test)
 				   (go ,else-tag))
 
 				 ,repeat-tag
-				 (:split
+				 (:splice
 				  ,(walk suite
 					 (cons (cons repeat-tag after-tag)
 					       stack)))
@@ -291,7 +291,7 @@
 				 
 				 ,else-tag
 				 ,@(when else-suite
-				     `((:split ,(walk else-suite stack))))
+				     `((:splice ,(walk else-suite stack))))
 				 
                                  (go ,after-tag)
 				 ,after-tag)
@@ -299,9 +299,9 @@
 		  
 		  ([yield-stmt]
 		   (let ((tag (new-tag :yield)))
-		     (values `(:split (setf .state. ,tag)
-				      (return-from function-body ,(or (second form) '*the-none*))
-				      ,tag)
+		     (values `(:splice (setf .state. ,tag)
+                                       (return-from function-body ,(or (second form) '*the-none*))
+                                       ,tag)
 			     t)))
                   
                   (t (values form t))))
@@ -336,7 +336,7 @@
 (defun apply-splits (form)
   (cond ((atom form)
          (values form))
-        ((eq (car form) :split)
+        ((eq (car form) :splice)
 	 (values-list (loop for elm in (cdr form)
 			  nconc (multiple-value-list (apply-splits elm)))))
         (t (loop for elm in form
