@@ -26,6 +26,7 @@
   (error "todo"))
 
 (def-py-method reg-exp.split (re string &optional (maxsplit 0))
+  maxsplit
   (error "todo"))
 
 (def-py-method reg-exp.findall (re string &optional start end)
@@ -35,9 +36,11 @@
   (error "todo"))
 
 (def-py-method reg-exp.sub (re repl string  &optional (count 0))
+  count
   (error "todo"))
 
 (def-py-method reg-exp.subn (re repl string  &optional (count 0))
+  count
   (error "todo"))
 
 (def-py-method reg-exp.flags :attribute (re)
