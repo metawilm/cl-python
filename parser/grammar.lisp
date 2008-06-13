@@ -135,8 +135,8 @@
 (p one-stmt-input (stmt [newline])      $1)
 
 (p decorator ([@] dotted-name                 [newline]) (dotted-name-to-attribute-ref $2))
-(p decorator ([@] dotted-name [(]         [)] [newline]) `([call-expr] ,(dotted-name-to-attribute-ref $2) (nil nil nil nil)))
-(p decorator ([@] dotted-name [(] arglist [)] [newline]) `([call-expr] ,(dotted-name-to-attribute-ref $2) ,$4))
+(p decorator ([@] dotted-name [(]         [)] [newline]) `([call-expr] ,(dotted-name-to-attribute-ref $2) nil nil nil nil))
+(p decorator ([@] dotted-name [(] arglist [)] [newline]) `([call-expr] ,(dotted-name-to-attribute-ref $2) ,@$4))
 
 (gp decorator+)
 
@@ -470,8 +470,8 @@
 (p old-lambdef ([lambda] parameters [:] old-test) `([lambda-expr] ,$2 ,$4))
 
 (p trailer :or
-   (( [(] [)]                ) `([call-expr] (nil nil nil nil)))
-   (( [(] arglist [)]        ) `([call-expr] ,$2))
+   (( [(] [)]                ) `([call-expr] nil nil nil nil))
+   (( [(] arglist [)]        ) `([call-expr] ,@$2))
    (( [[] subscriptlist [\]] ) `([subscription-expr] ,$2))
    (( [.] [identifier]       ) `([attributeref-expr] ([identifier-expr] ,$2))))
 
@@ -641,7 +641,7 @@
     (rp [binary-expr] op left right)
     (rp [binary-lazy-expr] op left right)
     (rp [break-stmt])
-    (rp [call-expr] primary all-args)
+    (rp [call-expr] primary pos key *a **a)
     (rp [classdef-stmt] name inheritance suite)
     (rp [comparison-expr] cmp left right)
     (rp [continue-stmt])

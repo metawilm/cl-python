@@ -338,7 +338,7 @@ GENSYMS are made gensym'd Lisp vars."
 
 (defvar *special-calls* '({locals} {globals} {eval}))
 
-(defmacro [call-expr] (&whole whole primary all-args &environment e)
+(defmacro [call-expr] (&whole whole primary pos-args kwd-args *-arg **-arg &environment e)
   ;; For complete Python semantics, we should check for every call if
   ;; the function being called is one of the built-in functions EVAL,
   ;; LOCALS or GLOBALS, because they access the variable scope of the
@@ -350,49 +350,46 @@ GENSYMS are made gensym'd Lisp vars."
   ;;
   ;; But when *allow-indirect-special-call* is true, all calls
   ;; are checked regardless the primitive's name
-  (destructuring-bind (pos-args kwd-args *-arg **-arg)
-      all-args
+  (labels ((%there-are-args ()
+              (cond ((or pos-args kwd-args) `t)
+                   ((and *-arg **-arg)     `(or (py-iterate->lisp-list ,*-arg)
+                                                (py-iterate->lisp-list ,**-arg)))
+                   (*-arg                  `(py-iterate->lisp-list ,*-arg))
+                   (**-arg                 `(py-iterate->lisp-list ,**-arg))
+                   (t                      `nil)))
+           (%pos-args ()
+             `(nconc (list ,@pos-args) ,(when *-arg `(py-iterate->lisp-list ,*-arg))))
+           (%there-are-key-args ()
+             (cond (kwd-args  `t)
+                   (**-arg    `(py-iterate->lisp-list ,**-arg))
+                   (t         `nil)))
+           (%locals-dict ()
+             (if (get-pydecl :inside-function-p e)
+                 (progn `(.locals.))
+               `(create-module-globals-dict)))
+           (%globals-dict ()
+             `(create-module-globals-dict))
+           (%do-maybe-special-call (prim which)
+             `(cond ,@(when (member '{locals} which)
+                        `(((eq ,prim (function {locals}))
+                           (call-expr-locals ,(%locals-dict) ,(%there-are-args)))))
+                    ,@(when (member '{globals} which)
+                        `(((eq ,prim (function {globals}))
+                           (call-expr-globals ,(%globals-dict) ,(%there-are-args)))))
+                    ,@(when (member '{eval} which)
+                        `(((eq ,prim (function {eval}))
+                           (call-expr-eval ,(%locals-dict) ,(%globals-dict)
+                                           ,(%pos-args) ,(%there-are-key-args)))))
+                    (t (call-expr-1 ,prim ,@(cddr whole))))))
     
-    (labels ((%there-are-args ()
-	       (cond ((or pos-args kwd-args) `t)
-		     ((and *-arg **-arg)     `(or (py-iterate->lisp-list ,*-arg)
-						  (py-iterate->lisp-list ,**-arg)))
-		     (*-arg                  `(py-iterate->lisp-list ,*-arg))
-		     (**-arg                 `(py-iterate->lisp-list ,**-arg))
-		     (t                      `nil)))
-	     (%pos-args ()
-	       `(nconc (list ,@pos-args) ,(when *-arg `(py-iterate->lisp-list ,*-arg))))
-	     (%there-are-key-args ()
-	       (cond (kwd-args  `t)
-		     (**-arg    `(py-iterate->lisp-list ,**-arg))
-		     (t         `nil)))
-	     (%locals-dict ()
-	       (if (get-pydecl :inside-function-p e)
-		   (progn `(.locals.))
-		 `(create-module-globals-dict)))
-	     (%globals-dict ()
-	       `(create-module-globals-dict))
-	     (%do-maybe-special-call (prim which)
-	       `(cond ,@(when (member '{locals} which)
-			  `(((eq ,prim (function {locals}))
-			     (call-expr-locals ,(%locals-dict) ,(%there-are-args)))))
-		      ,@(when (member '{globals} which)
-			  `(((eq ,prim (function {globals}))
-			     (call-expr-globals ,(%globals-dict) ,(%there-are-args)))))
-		      ,@(when (member '{eval} which)
-			  `(((eq ,prim (function {eval}))
-			     (call-expr-eval ,(%locals-dict) ,(%globals-dict)
-					     ,(%pos-args) ,(%there-are-key-args)))))
-		      (t (call-expr-1 ,prim ,@(cddr whole))))))
-      
-      (let ((specials-to-check (if *allow-indirect-special-call*
-                                   *special-calls*
-                                 (with-perhaps-matching (primary ([identifier-expr] ?name))
-                                   (intersection (list ?name) *special-calls*)))))
-        (if specials-to-check
-	    `(let* ((.prim ,primary))
-	       ,(%do-maybe-special-call '.prim specials-to-check))
-	  `(call-expr-1 ,@(cdr whole)))))))
+    (let ((specials-to-check (if *allow-indirect-special-call*
+                                 *special-calls*
+                               (with-perhaps-matching (primary ([identifier-expr] ?name))
+                                 (intersection (list ?name) *special-calls*)))))
+      (if specials-to-check
+          `(let* ((.prim ,primary))
+             ,(%do-maybe-special-call '.prim specials-to-check))
+        `(call-expr-1 ,@(cdr whole))))))
 
 (defun call-expr-locals (locals-dict args-p)
   (when args-p
@@ -404,7 +401,7 @@ GENSYMS are made gensym'd Lisp vars."
     (py-raise '{TypeError} "Built-in function `globals' does not take args."))
   globals-dict)
 
-(defmacro call-expr-1 (primary (pos-args kwd-args *-arg **-arg))
+(defmacro call-expr-1 (primary pos-args kwd-args *-arg **-arg)
   (let ((kw-args (loop for ((i-e key) val) in kwd-args
 		     do (assert (eq i-e '[identifier-expr]))
 		     collect (intern (symbol-name key) :keyword)
@@ -445,7 +442,7 @@ GENSYMS are made gensym'd Lisp vars."
   (when *inline-builtin-methods*
     (with-perhaps-matching (whole
                             ([call-expr] ([attributeref-expr] ?obj ([identifier-expr] ?attr-name))
-                                         (?pos-args () nil nil)))
+                                         ?pos-args () nil nil))
       (when (inlineable-method-p ?attr-name (length ?pos-args))
         (comp-msg "Inlining call to builtin method `~A'." ?attr-name)
         (return-from [call-expr]
@@ -454,8 +451,8 @@ GENSYMS are made gensym'd Lisp vars."
   ;; Optimize "getattr(OBJ, ATTR)(POSARGS...)", to save allocation of bound method.
   (when *inline-getattr-call*
     (with-perhaps-matching (whole ([call-expr]
-                                   ([call-expr] ?id-getattr ((?obj ?attr) () nil nil))
-                                   (?pos-args () nil nil)))
+                                   ([call-expr] ?id-getattr (?obj ?attr) () nil nil)
+                                   ?pos-args () nil nil))
       (with-perhaps-matching (?id-getattr ([identifier-expr] {getattr}))
         (assert (multi-eval-safe ?id-getattr))
         (comp-msg "Optimizing \"getattr(x,y)(...)\" call, skipping bound method.")
@@ -704,8 +701,7 @@ GENSYMS are made gensym'd Lisp vars."
                             (return-from helper res)))))))
                 
                 ;; Call helper function
-                ([make-call-expr] :primary ([make-identifier-expr*] 'exec-stmt-helper-func)
-                                  :all-args '(() () nil nil))
+                ([make-call-expr] :primary ([make-identifier-expr*] 'exec-stmt-helper-func))
 
                 ;; Update `globals'.
                 ;; Using *exec-stmt-globals-update-func* so that we don't have to include
@@ -1005,7 +1001,7 @@ otherwise work well.")
 	  (with-gensyms (undecorated-func)
 	    (let ((art-deco undecorated-func))
 	      (dolist (x (reverse decorators))
-		(setf art-deco `([call-expr] ,x ((,art-deco) () nil nil))))
+		(setf art-deco `([call-expr] ,x (,art-deco) () nil nil)))
 	      
 	      `(let ((,undecorated-func 
                       ,(if *create-simple-lambdas-for-python-functions*
@@ -1024,7 +1020,7 @@ otherwise work well.")
                               (eq fname '{__new__}))
                      `(([assign-stmt] 
                         ([call-expr] ([identifier-expr] {staticmethod})
-                                     ((([identifier-expr] ,fname)) nil nil nil))
+                                     (([identifier-expr] ,fname)) nil nil nil)
                         (([identifier-expr] ,fname)))))
                             
                  (record-source-file-loc ',context-fname :operator)
@@ -2152,7 +2148,7 @@ be bound."
   
   (with-py-ast (form ast)
     (case (car form)
-      ([call-expr] (destructuring-bind (primary args)
+      ([call-expr] (destructuring-bind (primary . args)
 		       (cdr form)
 		     (declare (ignore args))
 		     ;; `locals()' or `globals()'

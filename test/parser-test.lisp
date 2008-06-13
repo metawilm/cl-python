@@ -65,7 +65,7 @@
     (test-equal '([attributeref-expr]
 		  ([call-expr]
 		   ([subscription-expr] ([identifier-expr] {x}) 1)
-		   ((2) nil nil nil))
+		   (2) nil nil nil)
 		  ([identifier-expr] {a3}))
 		(ps "x[1](2).a3" nil))
       
@@ -73,15 +73,15 @@
     (test-equal '([attributeref-expr]
 		  ([call-expr] ([subscription-expr] ([identifier-expr] {x})
 				1)
-		   (nil ((([identifier-expr] {len}) 2)) nil nil))
+		   nil ((([identifier-expr] {len}) 2)) nil nil)
 		  ([identifier-expr] {a3}))
 		(ps "x[1](len=2).a3" nil))
       
     (test-equal '([call-expr] 
 		  ([identifier-expr] {f})
-		  ((1 2) ((([identifier-expr] {y}) 3))
-		   ([identifier-expr] {args})
-		   ([identifier-expr] {kw})))
+		  (1 2) ((([identifier-expr] {y}) 3))
+                  ([identifier-expr] {args})
+                  ([identifier-expr] {kw}))
 		(ps "f(1,2, y=3, *args, **kw)" nil))
 
     ;; order of args: pos, key, *, **
@@ -99,7 +99,7 @@
     ;; function decorators
     (test-equal '([funcdef-stmt]
 		  ;; list of decorators: first foo(bar)
-		  (([call-expr] ([identifier-expr] {foo}) ((([identifier-expr] {bar})) nil nil nil))
+		  (([call-expr] ([identifier-expr] {foo}) (([identifier-expr] {bar})) nil nil nil)
 		   ;; second deco: zut
 		   ([identifier-expr] {zut}))
 		  ([identifier-expr] {f})

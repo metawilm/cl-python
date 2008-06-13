@@ -204,8 +204,7 @@ CLASSDEF, FUNCDEF or LAMBDA."
 (def-ast-node [binary-lazy-expr] (op (left +normal-value+) (right +normal-value+)))
 (def-ast-node [break-stmt] ())
 
-#+(or) ;; arg handling
-(def-ast-node [call-expr] (primary +normal-value+) ((&rest pos-arg +normal-value+)
+(def-ast-node [call-expr] ((primary +normal-value+) (&rest pos-arg +normal-value+)
                                                     (&rest kv &key second +normal-value+)
                                                     (&optional *-a +normal-value+)
                                                     (&optional **-a +normal-value+)))
@@ -270,15 +269,6 @@ CLASSDEF, FUNCDEF or LAMBDA."
   
   (case (car ast)
     
-    ([call-expr] (destructuring-bind (primary (p-a k-a *-a **-a)) (cdr ast)
-                   `([call-expr] ,(funcall f primary :value +normal-value+)
-                                 (,(mapcar (lambda (pos-arg) (funcall f pos-arg :value +normal-value+)) p-a)
-                                  ,(mapcar (lambda (kv)
-                                             (list (first kv) (funcall f (second kv) :value +normal-value+)))
-                                           k-a)
-                                  ,(when *-a  (funcall f *-a  :value +normal-value+))
-                                  ,(when **-a (funcall f **-a :value +normal-value+))))))
-
     ([classdef-stmt] 
      (destructuring-bind (cname inheritance suite) (cdr ast)
        (assert (eq (car inheritance) '[tuple-expr]))

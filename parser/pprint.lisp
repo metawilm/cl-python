@@ -159,9 +159,9 @@ output to a string does not start with a newline."
     
     ([break-stmt] (format stream "break"))
     
-    ([call-expr] (destructuring-bind (primary args) (cdr x)
+    ([call-expr] (destructuring-bind (primary pos key *a **a) (cdr x)
 		 (format stream "~A(" primary)
-		 (apply #'print-arg-list stream args)
+		 (print-arg-list stream pos key *a **a)
 		 (format stream ")")))
 
     ([classdef-stmt] (destructuring-bind (name supers suite) (cdr x)
