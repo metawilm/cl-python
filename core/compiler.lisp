@@ -336,6 +336,8 @@ GENSYMS are made gensym'd Lisp vars."
       `(go .break)
     (py-raise '{SyntaxError} "Statement `break' was found outside loop.")))
 
+;;; `Call' expression
+
 (defvar *special-calls* '({locals} {globals} {eval}))
 
 (defmacro [call-expr] (&whole whole primary pos-args kwd-args *-arg **-arg &environment e)
@@ -350,37 +352,31 @@ GENSYMS are made gensym'd Lisp vars."
   ;;
   ;; But when *allow-indirect-special-call* is true, all calls
   ;; are checked regardless the primitive's name
-  (labels ((%there-are-args ()
-              (cond ((or pos-args kwd-args) `t)
-                   ((and *-arg **-arg)     `(or (py-iterate->lisp-list ,*-arg)
-                                                (py-iterate->lisp-list ,**-arg)))
-                   (*-arg                  `(py-iterate->lisp-list ,*-arg))
-                   (**-arg                 `(py-iterate->lisp-list ,**-arg))
-                   (t                      `nil)))
-           (%pos-args ()
-             `(nconc (list ,@pos-args) ,(when *-arg `(py-iterate->lisp-list ,*-arg))))
-           (%there-are-key-args ()
-             (cond (kwd-args  `t)
-                   (**-arg    `(py-iterate->lisp-list ,**-arg))
-                   (t         `nil)))
-           (%locals-dict ()
-             (if (get-pydecl :inside-function-p e)
-                 (progn `(.locals.))
-               `(create-module-globals-dict)))
-           (%globals-dict ()
-             `(create-module-globals-dict))
-           (%do-maybe-special-call (prim which)
+  (flet ((do-maybe-special-call (prim which)
+           (let ((there-are-args (cond ((or pos-args kwd-args) t)
+                                       ((and *-arg **-arg)     `(or (py-iterate->lisp-list ,*-arg)
+                                                                    (py-iterate->lisp-list ,**-arg)))
+                                       (*-arg                  `(py-iterate->lisp-list ,*-arg))
+                                       (**-arg                 `(py-iterate->lisp-list ,**-arg))
+                                       (t                      nil)))
+                 (there-are-key-args (cond (kwd-args  t)
+                                           (**-arg    `(py-iterate->lisp-list ,**-arg))
+                                           (t         nil)))
+                 (pos-args `(nconc (list ,@pos-args) ,(when *-arg `(py-iterate->lisp-list ,*-arg))))
+                 (locals-dict (if (get-pydecl :inside-function-p e) '(.locals.) '(create-module-globals-dict)))
+                 (globals-dict '(create-module-globals-dict)))
+               
              `(cond ,@(when (member '{locals} which)
                         `(((eq ,prim (function {locals}))
-                           (call-expr-locals ,(%locals-dict) ,(%there-are-args)))))
+                           (call-expr-locals ,locals-dict ,there-are-args))))
                     ,@(when (member '{globals} which)
                         `(((eq ,prim (function {globals}))
-                           (call-expr-globals ,(%globals-dict) ,(%there-are-args)))))
+                           (call-expr-globals ,globals-dict ,there-are-args))))
                     ,@(when (member '{eval} which)
                         `(((eq ,prim (function {eval}))
-                           (call-expr-eval ,(%locals-dict) ,(%globals-dict)
-                                           ,(%pos-args) ,(%there-are-key-args)))))
-                    (t (call-expr-1 ,prim ,@(cddr whole))))))
+                           (call-expr-eval ,locals-dict ,globals-dict
+                                           ,pos-args ,there-are-key-args))))
+                    (t (call-expr-1 ,prim ,@(cddr whole)))))))
     
     (let ((specials-to-check (if *allow-indirect-special-call*
                                  *special-calls*
@@ -388,18 +384,34 @@ GENSYMS are made gensym'd Lisp vars."
                                  (intersection (list ?name) *special-calls*)))))
       (if specials-to-check
           `(let* ((.prim ,primary))
-             ,(%do-maybe-special-call '.prim specials-to-check))
+             ,(do-maybe-special-call '.prim specials-to-check))
         `(call-expr-1 ,@(cdr whole))))))
 
 (defun call-expr-locals (locals-dict args-p)
-  (when args-p
-    (py-raise '{TypeError} "Built-in function `locals' does not take args."))
+  (when args-p (py-raise '{TypeError} "Built-in function `locals' does not take args."))
   locals-dict)
 
 (defun call-expr-globals (globals-dict args-p)
-  (when args-p
-    (py-raise '{TypeError} "Built-in function `globals' does not take args."))
+  (when args-p (py-raise '{TypeError} "Built-in function `globals' does not take args."))
   globals-dict)
+
+(defun call-expr-eval (locals-dict globals-dict pos-args key-args-p)
+  "Handle call to `Eval' at runtime."
+  ;; Uses exec-stmt, therefore below it.
+  (when (or key-args-p 
+	    (not pos-args)
+	    (> (length pos-args) 3))
+    (py-raise '{TypeError} "Built-in function `eval' takes from 1 to three positional args."))
+  (let* ((string (pop pos-args))
+	 (glob-d (or (pop pos-args) globals-dict))
+	 (loc-d  (or (pop pos-args) locals-dict)))
+    
+    ;; Make it an EXEC stmt, but be sure to save the result.
+    (let* ((res nil)
+	   (*exec-stmt-result-handler* (lambda (val) (setf res val))))
+      (declare (special *exec-stmt-result-handler*))
+      ([exec-stmt] string glob-d loc-d :allowed-stmts ([module-stmt] [suite-stmt]))
+      res)))
 
 (defmacro call-expr-1 (primary pos-args kwd-args *-arg **-arg)
   (let ((kw-args (loop for ((i-e key) val) in kwd-args
@@ -735,26 +747,6 @@ GENSYMS are made gensym'd Lisp vars."
               :report "Abort evaluation of the `exec' statement, but continue execution."
             (warn "Evaluation of `exec' body was aborted.")
             (return-from run-exec-body)))))))
-
-;;; `Call' expression
-
-(defun call-expr-eval (locals-dict globals-dict pos-args key-args-p)
-  "Handle call to `Eval' at runtime."
-  ;; Uses exec-stmt, therefore below it.
-  (when (or key-args-p 
-	    (not pos-args)
-	    (> (length pos-args) 3))
-    (py-raise '{TypeError} "Built-in function `eval' takes from 1 to three positional args."))
-  (let* ((string (pop pos-args))
-	 (glob-d (or (pop pos-args) globals-dict))
-	 (loc-d  (or (pop pos-args) locals-dict)))
-    
-    ;; Make it an EXEC stmt, but be sure to save the result.
-    (let* ((res nil)
-	   (*exec-stmt-result-handler* (lambda (val) (setf res val))))
-      (declare (special *exec-stmt-result-handler*))
-      ([exec-stmt] string glob-d loc-d :allowed-stmts ([module-stmt] [suite-stmt]))
-      res)))
 
 (defmacro with-iterator ((target source) &body body)
   ;; (with-iterator (var object) (...var...))
