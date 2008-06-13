@@ -1023,12 +1023,15 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 
 (defun none-p (x) (eq x *the-none*))
 
+(def-py-method py-none.__hash__ (x)
+  12345)
+
 (def-py-method py-none.__repr__ (x)
   "None")
 
 (def-py-method py-none.__nonzero__ (x)
   *the-false*)
-   
+
 ;; Ellipsis
 
 (defclass py-ellipsis (py-core-type) () (:metaclass py-core-type))

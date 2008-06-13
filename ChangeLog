@@ -1,3 +1,7 @@
+2008-06-13  Willem Broekema  <metawilm@gmail.com>
+
+	* core/classes.lisp: (py-none.__hash__): make None hashable.
+
 2008-06-12  Willem Broekema  <metawilm@gmail.com>
 
 	* core/compiler.lisp (dict-expr): simplify expansion of

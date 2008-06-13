@@ -208,7 +208,10 @@ class C(int):
 x = C()
 assert x.__class__ == C
 assert C.__class__ == type
-assert C.__mro__ == (C, int, object)")))
+assert C.__mro__ == (C, int, object)"))
+    (run-no-error "
+class C( type(1+2)): pass
+assert C() == 0"))
 
 (defmethod test-lang ((kind (eql :comparison-expr)))
   ;; Ensure py-list.__eq__ can handle non-lists, etc.
@@ -287,7 +290,8 @@ y = C('b')
 assert d.get(y) == None
 d[y] = 42
 assert d[y] == 42
-assert d['b'] == 42"))
+assert d['b'] == 42")
+  (run-no-error "assert {None: 3}[None] == 3"))
 
 (defmethod test-lang ((kind (eql :exec-stmt)))
   (run-no-error "
