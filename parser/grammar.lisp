@@ -72,11 +72,6 @@
                (check-type suffix character)
                (let ((s (remove-token-suffix x)))
                  (intern (format nil "~A~C" s suffix) #.*package*)))
-             (number-token-p (x)
-               (when (symbolp x)
-                 (let ((sn (symbol-name x)))
-                   (when (char= (aref sn 0) #\$)
-                     (parse-integer sn :start 1)))))
              (make-number-token (n)
                (check-type n (integer 1 #.most-positive-fixnum))
                (intern (format nil "$~D" n) #.*package*)))
@@ -89,19 +84,12 @@
                      (position suffix terms
                                :test 'eql 
                                :key (lambda (x) (token-suffix x))))
-                   (shift-outcome (removed-n)
-                     (labels ((shift-tree (tree)
-                                (typecase tree
-                                  (list (loop for x in tree collect (shift-tree x)))
-                                  (symbol (let (($n (number-token-p tree)))
-                                            (cond ((not $n)         tree)
-                                                  ((= (1- $n) removed-n) nil)
-                                                  ((< (1- $n) removed-n) tree)
-                                                  ((> (1- $n) removed-n) (make-number-token (1- $n)))
-                                                  (t (assert nil)))))
-                                  (t tree))))
-                       (shift-tree outcome))))
-        
+                   (shift-outcome (removed-$)
+                     `(let ((,(make-number-token removed-$) nil)
+                            ,@(loop for i from (1+ removed-$) to (length terms)
+                                  collect (list (make-number-token i) (make-number-token (1- i)))))
+                        (declare (ignorable ,@(loop for i from removed-$ to (length terms) collect (make-number-token i))))
+                        ,outcome)))
             (let* ((?-token (find-suffix-token #\?))
                    (*-token (unless ?-token (find-suffix-token #\*))))
               (cond (?-token (let ((with-?-token (nconc (subseq terms 0 ?-token)
@@ -109,13 +97,13 @@
                                                         (subseq terms (1+ ?-token))))
                                    (without-?-token (nconc (subseq terms 0 ?-token) (subseq terms (1+ ?-token)))))
                                `(progn (p ,name ,with-?-token ,outcome ,@options)
-                                       (p ,name ,without-?-token ,(shift-outcome ?-token) ,@options))))
+                                       (p ,name ,without-?-token ,(shift-outcome (1+ ?-token)) ,@options))))
                     (*-token (let ((with-+-token (nconc (subseq terms 0 *-token)
                                                         (list (change-token-suffix (nth *-token terms) #\+))
                                                         (subseq terms (1+ *-token))))
                                    (without-token (nconc (subseq terms 0 *-token) (subseq terms (1+ *-token)))))
                                `(progn (p ,name ,with-+-token ,outcome ,@options)
-                                       (p ,name ,without-token ,(shift-outcome *-token) ,@options))))))))))))
+                                       (p ,name ,without-token ,(shift-outcome (1+ *-token)) ,@options))))))))))))
 
 (defun add-rule (name terms outcome &rest options)
   (pushnew (list terms outcome options) (gethash name *python-prods*) :test 'equal))
@@ -536,7 +524,10 @@
                                       $2
                                     (cons $2 $3))))
 
-(p dictmaker (test [:] test comma--test--\:--test* comma?) (cons (cons $1 $3) $4))
+(p dictmaker (test [:] test comma--test--\:--test* comma?)
+   ;; Store items in order of eval: v1, k1, v2, k2, ..
+   (loop for (k . v) in (acons $1 $3 $4) collect v collect k))
+
 (gp comma--test--\:--test+)
 (p comma--test--\:--test ([,] test [:] test) (cons $2 $4))
 

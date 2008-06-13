@@ -551,15 +551,15 @@ GENSYMS are made gensym'd Lisp vars."
     `(let ,(mapcar #'list temps values)
        ,del-form)))
 
-(defun init-dict (kv-list)
+(defun init-dict (vk-list)
   (let ((dict (make-dict)))
-    (loop for (k v) on kv-list by #'cddr
+    (loop for (v k) on vk-list by #'cddr
         do (sub/dict-set dict k v))
     dict))
 
-(defmacro [dict-expr] (alist)
+(defmacro [dict-expr] (vk-list)
   (with-gensyms (list)
-    `(with-stack-list (,list ,@(loop for (k . v) in alist nconc (list k v)))
+    `(with-stack-list (,list ,@vk-list)
        (init-dict ,list))))
 
 (defmacro [exec-stmt] (code-string globals locals &key (allowed-stmts t) &environment e)
@@ -1739,7 +1739,7 @@ finally:
 	 ;; name of this class, but don't recurse
          (with-matching ((cdr form) (([identifier-expr] ?cname) ?inhericance ?csuite))
 	   (pushnew ?cname globals))
-	 (values nil t))
+	 (values :dummmy-classdef t))
 
 	([funcdef-stmt]
 	 ;; name of this function, but don't recurse
@@ -1749,7 +1749,7 @@ finally:
 	
 	([identifier-expr] (let ((name (second form)))
 			     (pushnew name globals))
-			   (values nil t))
+			   (values :dummy-funcdef t))
 	
 	(t form)))
     
@@ -1760,7 +1760,7 @@ finally:
 	([global-stmt] (with-matching ((second form) ([tuple-expr] ?identifiers))
                          (dolist (name (mapcar #'second ?identifiers))
                            (pushnew name globals))
-                         (values nil t)))
+                         (values :dummy-global t)))
 	
 	(t form)))
     

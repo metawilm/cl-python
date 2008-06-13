@@ -180,7 +180,7 @@ output to a string does not start with a newline."
     
     ([dict-expr]      (let ((*tuple-must-have-brackets* t))
 			(format stream "{~{~A: ~A~}}"
-				(loop for (k . v) in (second x)
+				(loop for (v k) on (second x) by #'cddr
 				    collect k
 				    collect v))))
 		      
