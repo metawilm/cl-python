@@ -1,3 +1,4 @@
+
 ;; -*- package: clpython.parser; readtable: py-ast-readtable -*-
 ;; 
 ;; This software is Copyright (c) Franz Inc. and Willem Broekema.
@@ -30,7 +31,7 @@
 (defconstant +normal-value+    t          "An expression that is used for its value.")
 (defconstant +augassign-value+ :augassign "A place that is an augmented assignment value and target.")
 (defconstant +no-value+        nil        "An expression that is not used for its value.")
-(defconstant +all-values-names+ '(+normal-value+ +augassign-value+ +no-value+))
+(defconstant-once +all-values-names+ '(+normal-value+ +augassign-value+ +no-value+))
 
 (defvar *walk-debug* nil
   "Print every walk step")

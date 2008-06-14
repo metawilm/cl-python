@@ -1,4 +1,4 @@
-;; -*- package: clpython; readtable: py-ast-user-readtable -*-
+; -*- package: clpython; readtable: py-ast-user-readtable -*-
 ;;
 ;; This software is Copyright (c) Franz Inc. and Willem Broekema.
 ;; Franz Inc. and Willem Broekema grant you the rights to
@@ -336,6 +336,187 @@ GENSYMS are made gensym'd Lisp vars."
       `(go .break)
     (py-raise '{SyntaxError} "Statement `break' was found outside loop.")))
 
+;; EXEC-STMT here, because CALL-EXPR needs it
+
+(defmacro [exec-stmt] (code-string globals locals &key (allowed-stmts t) &environment e)
+  ;; TODO:
+  ;;   - allow code object etc as CODE
+  ;;
+  ;; An EXEC-STMT is translated into a Python suite containing a
+  ;; function definition and a subsequent call of the function.
+  ;;
+  ;; ALLOWED-STMTS: if T:      allow all statements
+  ;;                   a list: allow only those statements
+  ;;                   NIL:    allow no statements
+  ;;  (not evaluated)
+
+  `(multiple-value-bind (glo loc)
+       ,(cond ((and globals locals) `(values ,globals ,locals))
+              (globals              `(let ((.x ,globals))
+                                       (values .x .x))) ;; globals also used for locals
+              (t                    `(let ((.g (create-module-globals-dict)))
+                                       (values .g
+                                               ,(if (eq (get-pydecl :context e) :module)
+                                                    `.g
+                                                  `(.locals.))))))
+     (exec-stmt-check-namespaces glo loc)
+     ;; ensure dicts reflect current namespace
+     (dolist (x (list glo loc))
+       (when (typep x 'py-dict-moduledictproxy)
+         (funcall (mdp-updater x))))
+     (exec-stmt-string ,code-string glo loc ',allowed-stmts)))
+
+(defun exec-stmt-check-namespaces (globals locals)
+  (check-type globals py-dict) ;; todo: support any mapping for globals, locals
+  (check-type locals py-dict)
+  (flet ((check-is-namespace-dict (d)
+           ;; Ensure dict has only string keys.
+           (check-type d py-dict)
+           (dikt-map (py-dict-dikt d)
+                     (lambda (k v)
+                       (declare (ignore v))
+                       (unless (typep k '(or string symbol))
+                         (py-raise
+                          '{TypeError}
+                          "Cannot use ~A as namespace dict for `exec', due to non-string key: ~A."
+                          d k))))))
+    (check-is-namespace-dict globals)
+    (unless (eq globals locals)
+      (check-is-namespace-dict locals))))
+
+(defun exec-stmt-string (code-string globals locals allowed-stmts)
+  (check-type code-string string)
+  (let ((ast (parse code-string)))
+    (exec-stmt-check-ast code-string ast allowed-stmts)
+    (exec-stmt-ast ast globals locals)))
+
+(define-compiler-macro exec-stmt-string (&whole whole code-string globals locals allowed-stmts)
+  (assert (and (listp allowed-stmts)
+               (eq (car allowed-stmts) 'quote)))
+  ;; Move compilation of string to compile-time. Warn if string contains errors.
+  (labels ((warn-static-error (error)
+             (let ((nice-code (if (> (length code-string) 40)
+                                  (concatenate 'string (subseq code-string 0 40) "...")
+                                code-string)))
+               (warn "Invalid argument for `exec': parsing ~S will raise [~A]."
+                     nice-code error))))
+    (when (and *exec-early-parse-constant-string*
+               (stringp code-string))
+      (multiple-value-bind (ast error)
+          (ignore-errors (parse code-string))
+        (if error
+            (warn-static-error error)
+          (multiple-value-bind (ok error)
+              (ignore-errors (exec-stmt-check-ast code-string ast (second allowed-stmts)))
+            (declare (ignore ok))
+            (if error
+                (warn-static-error error)
+              (return-from exec-stmt-string
+                `(exec-stmt-ast ',ast ,globals ,locals)))))))
+    whole))
+
+(defun exec-stmt-check-ast (string ast allowed-stmts)
+  (whereas ((s (ast-contains-stmt-p ast :allowed-stmts allowed-stmts)))
+    (py-raise '{TypeError}
+              "Statements are not allowed in this Python code string (found `~A' in \"~A\")." s string))
+  
+  (with-py-ast (form ast :into-nested-namespaces nil)
+    (case (car form)
+      ([return-stmt] (py-raise '{SyntaxError}
+                               "Statement `return' was found outside function (in `exec')."))
+      (t form)))
+  
+  t)
+
+(defconstant exec-stmt-helper-func-name 'exec-stmt-helper-func)
+(defvar *exec-stmt-globals-update-func*)
+(defvar *exec-stmt-initial-globals*)
+    
+(defun exec-stmt-ast (ast globals locals)
+  (assert ([module-stmt-p] ast))
+  (let* ((globals-alist (let (res)
+                          (dict-map globals (lambda (k v) (push (cons (if (stringp k)
+                                                                          (intern k :clpython.user)
+                                                                        k)
+                                                                      v)
+                                                                res)))
+                          res))
+         (f `([module-stmt]
+              ,([make-suite-stmt*]
+
+                ;; Define helper function
+                ([make-funcdef-stmt]
+                 :fname ([make-identifier-expr*] exec-stmt-helper-func-name)
+                 :args '(() () nil nil)
+                 :suite
+                 ([make-suite-stmt*]
+                  `(block helper
+                     ,([make-suite-stmt*]
+                       
+                       `(loop for (k . v) in *exec-stmt-initial-globals*
+                            do (check-type k symbol)
+                               (module-set k v))
+                       
+                       `([suite-stmt]
+                         ;; Set local variables
+                         (,@(let (res)
+                            (dict-map locals
+                                      (lambda (k v)
+                                        (assert (not (null v)) () 
+                                          "Local var `~A' (passed as EXEC local) is NIL." k)
+                                        (push ([make-assign-stmt*]
+                                               :value `',v
+                                               :target ([make-identifier-expr*]
+                                                        (py-string->symbol k)))
+                                              res)))
+                            res)
+                            ;; Include pass stmt, because suite stmt may not be empty (walker requirement)
+                            ([pass-stmt])))
+                         
+                       `(progn ;; Execute exec suite, save result
+                          (let ((res ,(with-matching (ast ([module-stmt] ?suite))
+                                        (assert (match-p ?suite '([suite-stmt] ?stmts)))
+                                        ?suite)))
+                            (when *exec-stmt-result-handler*
+                              (funcall *exec-stmt-result-handler* res))
+                            (return-from helper res)))))))
+                
+                ;; Call helper function
+                ([make-call-expr] :primary ([make-identifier-expr*] 'exec-stmt-helper-func))
+
+                ;; Update `globals'.
+                ;; Using *exec-stmt-globals-update-func* so that we don't have to include
+                ;; GLOBALS as literal (so read-only) object in the function.
+                `(loop for (k . v) in (mgh-all-items mgh)
+                     unless (eq k exec-stmt-helper-func-name)
+                     do (funcall *exec-stmt-globals-update-func* k v))))))
+    
+    #+(or)(warn "EXEC-STMT: lambda-body: ~A" f)
+    
+    (setf f `(lambda ()
+               (locally (declare (optimize (debug 3)))
+                 ;; When this is compiled, the environment object is NIL.
+                 (with-pydecl ((:function-must-save-locals t))
+                   ,f))))
+    
+    (when *exec-stmt-compile-before-run*
+      (setf f (compile nil f)))
+    
+    (handler-bind ((error (lambda (c)
+                            ;; Only print header line if condition not handled in outer scope.
+                            (signal c)
+                            (format t "[Error occured inside an `exec' statement:]"))))
+      (block run-exec-body
+        (restart-case
+            (let* ((mod-func (funcall f))
+                   (*exec-stmt-initial-globals* globals-alist)
+                   (*exec-stmt-globals-update-func* (lambda (k v) (setf (py-subs globals k) v))))
+              (funcall mod-func)) ;;:initial-globals globals-alist))
+          (return-from-exec ()
+              :report "Abort evaluation of the `exec' statement, but continue execution."
+            (warn "Evaluation of `exec' body was aborted.")
+            (return-from run-exec-body)))))))
+
 ;;; `Call' expression
 
 (defvar *special-calls* '({locals} {globals} {eval}))
@@ -441,8 +622,8 @@ GENSYMS are made gensym'd Lisp vars."
 (defun call-expr-* (prim *-args)
   (apply #'py-call prim (py-iterate->lisp-list *-args)))
 
-(define-compiler-macro [call-expr] (&whole whole  primary args)
-  (declare (ignore primary args))
+(define-compiler-macro [call-expr] (&whole whole primary pos-args kwd-args *-arg **-arg)
+  (declare (ignore primary pos-args kwd-args *-arg **-arg))
 
   ;; The transformations below inline common cases, but
   ;; there are still run-time checks to verify whether
@@ -570,183 +751,6 @@ GENSYMS are made gensym'd Lisp vars."
   (with-gensyms (list)
     `(with-stack-list (,list ,@vk-list)
        (init-dict ,list))))
-
-(defmacro [exec-stmt] (code-string globals locals &key (allowed-stmts t) &environment e)
-  ;; TODO:
-  ;;   - allow code object etc as CODE
-  ;;
-  ;; An EXEC-STMT is translated into a Python suite containing a
-  ;; function definition and a subsequent call of the function.
-  ;;
-  ;; ALLOWED-STMTS: if T:      allow all statements
-  ;;                   a list: allow only those statements
-  ;;                   NIL:    allow no statements
-  ;;  (not evaluated)
-
-  `(multiple-value-bind (glo loc)
-       ,(cond ((and globals locals) `(values ,globals ,locals))
-              (globals              `(let ((.x ,globals))
-                                       (values .x .x))) ;; globals also used for locals
-              (t                    `(let ((.g (create-module-globals-dict)))
-                                       (values .g
-                                               ,(if (eq (get-pydecl :context e) :module)
-                                                    `.g
-                                                  `(.locals.))))))
-     (exec-stmt-check-namespaces glo loc)
-     ;; ensure dicts reflect current namespace
-     (dolist (x (list glo loc))
-       (when (typep x 'py-dict-moduledictproxy)
-         (funcall (mdp-updater x))))
-     (exec-stmt-string ,code-string glo loc ',allowed-stmts)))
-
-(defun exec-stmt-check-namespaces (globals locals)
-  (check-type globals py-dict) ;; todo: support any mapping for globals, locals
-  (check-type locals py-dict)
-  (flet ((check-is-namespace-dict (d)
-           ;; Ensure dict has only string keys.
-           (check-type d py-dict)
-           (dikt-map (py-dict-dikt d)
-                     (lambda (k v)
-                       (declare (ignore v))
-                       (unless (typep k '(or string symbol))
-                         (py-raise
-                          '{TypeError}
-                          "Cannot use ~A as namespace dict for `exec', due to non-string key: ~A."
-                          d k))))))
-    (check-is-namespace-dict globals)
-    (unless (eq globals locals)
-      (check-is-namespace-dict locals))))
-
-(defun exec-stmt-string (code-string globals locals allowed-stmts)
-  (check-type code-string string)
-  (let ((ast (parse code-string)))
-    (exec-stmt-check-ast code-string ast allowed-stmts)
-    (exec-stmt-ast ast globals locals)))
-
-(define-compiler-macro exec-stmt-string (&whole whole code-string globals locals allowed-stmts)
-  (assert (and (listp allowed-stmts)
-               (eq (car allowed-stmts) 'quote)))
-  ;; Move compilation of string to compile-time. Warn if string contains errors.
-  (labels ((warn-static-error (error)
-             (let ((nice-code (if (> (length code-string) 40)
-                                  (concatenate 'string (subseq code-string 0 40) "...")
-                                code-string)))
-               (warn "Invalid argument for `exec': parsing ~S will raise [~A]."
-                     nice-code error))))
-    (when (and *exec-early-parse-constant-string*
-               (stringp code-string))
-      (multiple-value-bind (ast error)
-          (ignore-errors (parse code-string))
-        (if error
-            (warn-static-error error)
-          (multiple-value-bind (ok error)
-              (ignore-errors (exec-stmt-check-ast code-string ast (second allowed-stmts)))
-            (declare (ignore ok))
-            (if error
-                (warn-static-error error)
-              (return-from exec-stmt-string
-                `(exec-stmt-ast ',ast ,globals ,locals)))))))
-    whole))
-
-(defun exec-stmt-check-ast (string ast allowed-stmts)
-  (whereas ((s (ast-contains-stmt-p ast :allowed-stmts allowed-stmts)))
-    (py-raise '{TypeError}
-              "Statements are not allowed in this Python code string (found `~A' in \"~A\")." s string))
-  
-  (with-py-ast (form ast :into-nested-namespaces nil)
-    (case (car form)
-      ([return-stmt] (py-raise '{SyntaxError}
-                               "Statement `return' was found outside function (in `exec')."))
-      (t form)))
-  
-  t)
-
-(defconstant exec-stmt-helper-func-name 'exec-stmt-helper-func)
-(defvar *exec-stmt-globals-update-func*)
-(defvar *exec-stmt-initial-globals*)
-    
-(defun exec-stmt-ast (ast globals locals)
-  (assert ([module-stmt-p] ast))
-  (let* ((globals-alist (let (res)
-                          (dict-map globals (lambda (k v) (push (cons (if (stringp k)
-                                                                          (intern k :clpython.user)
-                                                                        k)
-                                                                      v)
-                                                                res)))
-                          res))
-         (f `([module-stmt]
-              ,([make-suite-stmt*]
-
-                ;; Define helper function
-                ([make-funcdef-stmt]
-                 :fname ([make-identifier-expr*] exec-stmt-helper-func-name)
-                 :args '(() () nil nil)
-                 :suite
-                 ([make-suite-stmt*]
-                  `(block helper
-                     ,([make-suite-stmt*]
-                       
-                       `(loop for (k . v) in *exec-stmt-initial-globals*
-                            do (check-type k symbol)
-                               (module-set k v))
-                       
-                       `([suite-stmt]
-                         ;; Set local variables
-                         ,(let (res)
-                            (dict-map locals
-                                      (lambda (k v)
-                                        (assert (not (null v)) () 
-                                          "Local var `~A' (passed as EXEC local) is NIL." k)
-                                        (push ([make-assign-stmt*]
-                                               :value `',v
-                                               :target ([make-identifier-expr*]
-                                                        (py-string->symbol k)))
-                                              res)))
-                            res))
-                         
-                       `(progn ;; Execute exec suite, save result
-                          (let ((res ,(with-matching (ast ([module-stmt] ?suite))
-                                        (assert (match-p ?suite '([suite-stmt] ?stmts)))
-                                        ?suite)))
-                            (when *exec-stmt-result-handler*
-                              (funcall *exec-stmt-result-handler* res))
-                            (return-from helper res)))))))
-                
-                ;; Call helper function
-                ([make-call-expr] :primary ([make-identifier-expr*] 'exec-stmt-helper-func))
-
-                ;; Update `globals'.
-                ;; Using *exec-stmt-globals-update-func* so that we don't have to include
-                ;; GLOBALS as literal (so read-only) object in the function.
-                `(loop for (k . v) in (mgh-all-items mgh)
-                     unless (eq k exec-stmt-helper-func-name)
-                     do (funcall *exec-stmt-globals-update-func* k v))))))
-    
-    #+(or)(warn "EXEC-STMT: lambda-body: ~A" f)
-    
-    (setf f `(lambda ()
-               (locally (declare (optimize (debug 3)))
-                 ;; When this is compiled, the environment object is NIL.
-                 (with-pydecl ((:function-must-save-locals t))
-                   ,f))))
-    
-    (when *exec-stmt-compile-before-run*
-      (setf f (compile nil f)))
-    
-    (handler-bind ((error (lambda (c)
-                            ;; Only print header line if condition not handled in outer scope.
-                            (signal c)
-                            (format t "[Error occured inside an `exec' statement:]"))))
-      (block run-exec-body
-        (restart-case
-            (let* ((mod-func (funcall f))
-                   (*exec-stmt-initial-globals* globals-alist)
-                   (*exec-stmt-globals-update-func* (lambda (k v) (setf (py-subs globals k) v))))
-              (funcall mod-func)) ;;:initial-globals globals-alist))
-          (return-from-exec ()
-              :report "Abort evaluation of the `exec' statement, but continue execution."
-            (warn "Evaluation of `exec' body was aborted.")
-            (return-from run-exec-body)))))))
 
 (defmacro with-iterator ((target source) &body body)
   ;; (with-iterator (var object) (...var...))
