@@ -615,7 +615,16 @@ with C() as y:
 assert x == ['enter', 42, 'exit']"))
 
 (defmethod test-lang ((kind (eql :yield-stmt)))
-  )
+  (run-no-error "
+def f():
+  i = 0
+  while 1:
+    yield i
+    i += 1
+g = f()
+assert g.next() == 0
+assert g.next() == 1
+"))
 
 (defmethod test-lang ((kind (eql :attribute-semantics)))
   (run-no-error "
