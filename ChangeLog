@@ -1,3 +1,8 @@
+2008-06-15  Willem Broekema  <metawilm@gmail.com>
+
+	* core/compiler.lisp, parser/walk.lisp: fix bugs
+	introduced with the new code walker (while, exec)
+
 2008-06-13  Willem Broekema  <metawilm@gmail.com>
 
 	* parser/*, core/compiler.lisp: code walker now based on
