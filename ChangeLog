@@ -1,3 +1,13 @@
+2008-06-23  Willem Broekema  <willem@Banaan>
+
+	* parser/walk.lisp: fix walking assignment statements.
+
+2008-06-23  Willem Broekema  <metawilm@gmail.com>
+
+	* core/compiler.lisp, app/repl/repl.lisp: repl namespace
+	is now a package that has access to common-lisp and 
+	clpython packages, to ease interaction.
+
 2008-06-15  Willem Broekema  <metawilm@gmail.com>
 
 	* core/compiler.lisp, parser/walk.lisp: fix bugs
