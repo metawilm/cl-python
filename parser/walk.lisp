@@ -123,7 +123,7 @@ CLASSDEF, FUNCDEF or LAMBDA."
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (defstruct (ast-walker-node (:conc-name awn-))
-    arg-structs targetable)
+    arg-structs targetable subtargetable)
   
   (defmethod make-load-form ((x ast-walker-node) &optional env)
     (make-load-form-saving-slots x :environment env))
@@ -188,17 +188,19 @@ CLASSDEF, FUNCDEF or LAMBDA."
     (let ((structs (loop for a in args and i from 0
                        collect (parse-clause a i) into s
                        finally (return (sort s #'< :key #'awna-prio))))
-          (targetable (loop for o in options when (and (listp o) (eq (car o) :targetable)) return (second o))))
+          (targetable (loop for o in options when (and (listp o) (eq (car o) :targetable)) return (second o)))
+          (subtargetable (loop for o in options when (and (listp o) (eq (car o) :subtargetable)) return (second o))))
       `(setf (gethash ',node *ast-node-walk-structs*)
          ,(make-ast-walker-node :arg-structs structs
-                                :targetable targetable)))))
+                                :targetable targetable
+                                :subtargetable subtargetable)))))
 
 
 ;;; AST node definitions
 
 (def-ast-node [assert-stmt] ((test +normal-value+) (&optional raise-arg +normal-value+)))
 (def-ast-node [assign-stmt] ((value +normal-value+) (&rest targets +normal-target+)))
-(def-ast-node [attributeref-expr] ((item +normal-value+) attr) (:targetable t))
+(def-ast-node [attributeref-expr] ((item +normal-value+) attr) (:targetable t) (:subtargetable nil))
 (def-ast-node [augassign-stmt] (op (place +augassign-target/value+) (val +normal-value+)))
 (def-ast-node [backticks-expr] ((val +normal-value+)))
 (def-ast-node [binary-expr]      (op (left +normal-value+) (right +normal-value+)))
@@ -237,8 +239,8 @@ CLASSDEF, FUNCDEF or LAMBDA."
 ;; [import-from-stmt] ...
 ;; [lambda-expr] ...
 
-(def-ast-node [list-expr]  ((&rest names +normal-value+)) (:targetable t))
-(def-ast-node [tuple-expr] ((&rest names +normal-value+)) (:targetable t))
+(def-ast-node [list-expr]  ((&rest names +normal-value+)) (:targetable t) (:subtargetable t))
+(def-ast-node [tuple-expr] ((&rest names +normal-value+)) (:targetable t) (:subtargetable t))
 
 ;; [module-stmt]
 
@@ -248,7 +250,7 @@ CLASSDEF, FUNCDEF or LAMBDA."
 (def-ast-node [return-stmt] ((&optional value +normal-value+)))
 (def-ast-node [slice-expr] ((&optional start +normal-value+) (&optional stop +normal-value+) (&optional step +normal-value+)))
 
-(def-ast-node [subscription-expr] ((prim +normal-value+) (sub +normal-value+)) (:targetable t))
+(def-ast-node [subscription-expr] ((prim +normal-value+) (sub +normal-value+)) (:targetable t) (:subtargetable nil))
 (def-ast-node [suite-stmt] ((&rest suite-stmts +normal-value+)))
 
 ;; [try-except-stmt]
@@ -374,7 +376,8 @@ CLASSDEF, FUNCDEF or LAMBDA."
       (unless present-p
         (error "No walker structs defined for node ~S." node))
       
-      (flet ((walk-arg (ast awna targetable)
+      (flet ((walk-arg (ast awna subtargetable)
+               #+(or)(warn "walk-arg: ~A  rest=~A key=~A" ast (awna-rest-p awna) (awna-key awna))
                (setf ast (copy-tree ast))
                (unless (awna-walk awna)
                  (return-from walk-arg ast))
@@ -384,40 +387,37 @@ CLASSDEF, FUNCDEF or LAMBDA."
                    (error "Required argument ~A for node ~A is NIL" (awna-var awna) node)))
                (when (eq (awna-tg/val awna) '+suite+)
                  (return-from walk-arg (funcall f ast)))
-               (let ((ast-item (ecase (awna-key awna) ;; apply key for reading
-                                 ((nil)  ast)
-                                 (second (setf ast (copy-tree ast)) (second ast))
-                                 (cdr    (setf ast (copy-tree ast)) (cdr ast)))))
-                 (multiple-value-bind (value target)
-                     (if (and targetable target)
-                         (values nil target) ;; overrule +normal-value+ (e.g. list expr) 
-                       (case (awna-tg/val awna)
-                         (+normal-value+              (values +normal-value+ nil))
-                         (+normal-target+             (values nil +normal-target+))
-                         (+namespace-suite+           (values nil nil))
-                         (+global-decl-target+        (values nil +global-decl-target+))
-                         (+augassign-target/value+    (values +augassign-value+ +augassign-target+))
-                         (+delete-target+             (values nil +delete-target+))
-                         (t                           (values value target)))) ;; as passed to ast-recurse-fun
-                   (let ((replacement (cond ((awna-rest-p awna)
-                                             (mapcar (lambda (x) (funcall f x :value value :target target))
-                                                     ast-item))
-                                            ((eq (awna-tg/val awna) '+suite+)
-                                             (mapcar (lambda (x) (funcall f x :value value :target target))
-                                                     (second ast-item))
-                                             #+(or)(funcall f ast-item :value value :target target))
-                                            (t                                           
-                                             (funcall f ast-item :value value :target target)))))
-                     (ecase (awna-key awna) ;; apply key for writing
-                       ((nil)  (setf ast replacement))
-                       (second (setf (second ast) replacement))
-                       (cdr    (setf (cdr ast) replacement))))))
+               (multiple-value-bind (value target)
+                   (if (and subtargetable target)
+                       (values nil target) ;; overrule +normal-value+ (e.g. list expr) 
+                     (case (awna-tg/val awna)
+                       (+normal-value+              (values +normal-value+ nil))
+                       (+normal-target+             (values nil +normal-target+))
+                       (+namespace-suite+           (values nil nil))
+                       (+global-decl-target+        (values nil +global-decl-target+))
+                       (+augassign-target/value+    (values +augassign-value+ +augassign-target+))
+                       (+delete-target+             (values nil +delete-target+))
+                       (t                           (values value target)))) ;; as passed to ast-recurse-fun
+                 
+                 (setf ast (cond ((and (awna-rest-p awna) (awna-key awna))
+                                  (check-type (awna-key awna) (eql second))
+                                  (loop for x in ast do (assert (= (length x) 2)))
+                                  (loop for (a b) in ast
+                                      collect (list a (funcall f b :value value :target target))))
+                                 ((awna-rest-p awna)
+                                  (mapcar (lambda (x) (funcall f x :value value :target target))
+                                          ast))
+                                 ((eq (awna-tg/val awna) '+suite+)
+                                  (mapcar (lambda (x) (funcall f x :value value :target target))
+                                          (second ast)))
+                                 (t                                           
+                                  (funcall f ast :value value :target target)))))
                ast))
-           
+        
         (loop with ast-copy = (copy-tree ast)
             for s in (awn-arg-structs walker-node)
             for ix = (awna-ix s)
-            for repl = (walk-arg (nth ix args) s (awn-targetable walker-node))
+            for repl = (walk-arg (nth ix args) s (awn-subtargetable walker-node))
             do (unless (eq (nth (1+ ix) ast-copy) repl) ;; catches setting nil as last cdr when it is already set
                  (setf (nth (1+ ix) ast-copy) repl))
             finally (return ast-copy))))))
@@ -454,11 +454,15 @@ CLASSDEF, FUNCDEF or LAMBDA."
 
 ;;; Printing walker, for debugging
 
-(defun walk-print (ast &rest walk-options)
-  (prog1 (apply #'walk-py-ast
-                ast
-                (lambda (ast &key value target)
-                  (format t "> ~A ~@[:value(~S) ~]~@[:target(~S)~]~%" ast value target)
-                  ast)
-                walk-options)
-    (terpri)))
+(defgeneric walk-print (ast &rest walk-options)
+  (:method ((ast list) &rest walk-options)
+           (setf walk-options (append walk-options '(:lists-only nil))) 
+           (prog1 (apply #'walk-py-ast
+                         ast
+                         (lambda (ast &key value target)
+                           (format t "> ~A ~@[:value(~S) ~]~@[:target(~S)~]~%" ast value target)
+                           ast)
+                         walk-options)
+             (terpri)))
+  (:method ((ast string) &rest walk-options)
+           (apply #'walk-print (parse ast) walk-options)))
