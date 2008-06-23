@@ -455,7 +455,7 @@ GENSYMS are made gensym'd Lisp vars."
                        
                        `(loop for (k . v) in *exec-stmt-initial-globals*
                             do (check-type k symbol)
-                               (module-set k v))
+                               (%module-set k v))
                        
                        `([suite-stmt]
                          ;; Set local variables
@@ -706,7 +706,7 @@ GENSYMS are made gensym'd Lisp vars."
                         :supers ,(with-matching (inheritance ([tuple-expr] ?supers))
                                    `(list ,@?supers))
                         :cls-metaclass (sub/dict-get new-cls-dict "__metaclass__")
-                        :mod-metaclass (handler-case (module-get '{__metaclass__})
+                        :mod-metaclass (handler-case (%module-get '{__metaclass__})
                                          ({NameError} () nil)))))
              (record-source-file-loc ',context-cname :type)
              ([assign-stmt] ,cls (,name))))))))
@@ -1056,16 +1056,16 @@ otherwise work well.")
   (with-gensyms (val)
     (multiple-value-bind (store-form del-form)
         (ecase (variable-level name e)
-          (:module-level (values `(module-set ',name ,val)
-                                 `(module-del ',name)))
+          (:module-level (values `(%module-set ',name ,val)
+                                 `(%module-del ',name)))
           (:function-level (values `(setf ,name ,val)
                                 `(progn (unless ,name
-                                          (unbound-variable-error ',name nil))
+                                          (unbound-variable-error ',name :expect-value nil))
                                         (setf ,name ,(when (builtin-value name)
                                                        `(builtin-value ',name))))))
           (:class-level (values `(sub/dict-set +cls-namespace+ ',name ,val)
                                 `(unless (py-del-subs +cls-namespace+ ,name)
-                                   (unbound-variable-error ',name nil)))))
+                                   (unbound-variable-error ',name :expect-value nil)))))
       (values
        () ;; temps
        () ;; values
@@ -1079,16 +1079,16 @@ otherwise work well.")
   ;; (Assignent targets are handled by the setf expander.)
   (check-type name symbol)
   (ecase (variable-level name e)
-    (:module-level `(module-get ',name))
+    (:module-level `(%module-get ',name))
     (:function-level (if (member name (get-pydecl :safe-lex-visible-vars e))
                          (progn (comp-msg "Safe lexical var `~A' in context `~A': skipped boundness check."
                                           name (format nil "~{~A~^.~}" (reverse (get-pydecl :context-stack e))))
                                 name)
-                       `(or ,name (unbound-variable-error ',name))))
+                       `(or ,name (unbound-variable-error ',name :debug-info (format nil "(identifier-expr func-level; names=~A)" (funcall (mgh-names mgh)))))))
     (:class-level `(or (sub/dict-get +cls-namespace+ ',(symbol-name name))
                        ,(if (member name (get-pydecl :lexically-visible-vars e))
                             name
-                          `(module-get ',name))))))
+                          `(%module-get ',name))))))
 
 (defmacro [if-expr] (condition then else)
   `(if (py-val->lisp-bool ,condition) ,then ,else))
@@ -1102,9 +1102,9 @@ otherwise work well.")
 (defmacro [import-stmt] (items)
   `(values ,@(loop for (mod-name-as-list bind-name) in items nconc
 		   (loop for m in mod-name-as-list
-                       for toplevel = t then nil ;; Ensure topleve module is imported relative to +mod+
+                       for toplevel = t then nil ;; Ensure topleve module is imported relative to current mod
 		       for res = (list m) then (nconc res (list m)) collect
-			 `(let ((module-obj (py-import ',res ,@(when toplevel `(:within-mod (+mod+))))))
+			 `(let ((module-obj (py-import ',res ,@(when toplevel `(:within-mod-path module-path)))))
 			    (declare (ignorable module-obj))
 			    ,(cond ((= (length res) 1)
 				    (if (= 1 (length mod-name-as-list))
@@ -1118,15 +1118,15 @@ otherwise work well.")
 			       `module-obj))))))
 
 (defmacro [import-from-stmt] (mod-name-as-list items)
-  `(let ((m (py-import '(,(car mod-name-as-list)) :within-mod (+mod+))))
-     (declare (ignorable m)) ;; Ensure topleve module is imported relative to +mod+
+  `(let ((m (py-import '(,(car mod-name-as-list)) :within-mod-path module-path)))
+     (declare (ignorable m)) ;; Ensure topleve module is imported relative to current mod
      (whereas ((mod-obj ,(if (= (length mod-name-as-list) 1)
                              `m
                            `(py-import ',mod-name-as-list))))
        ,@(cond ((eq items '[*])
                 `((let ((src-items (mgh-all-items (module-mgh mod-obj) :import-* t)))
                     (loop for (k . v) in src-items
-                        do (py-module-set-kv (+mod+) k v)))))
+                        do (%module-set k v)))))
                (t (loop for (item bind-name) in items
                       collect `([assign-stmt] ([attributeref-expr] mod-obj ([identifier-expr] ,item))
                                               (([identifier-expr] ,(or bind-name item))))))))))
@@ -1157,36 +1157,94 @@ otherwise work well.")
   (get-setf-expansion `(list/tuple-expr ,items) e))
 
 (defstruct (module-globals-handler (:conc-name mgh-) (:constructor make-mgh))
-  (ht (make-hash-table :test 'eq)) 
   get    ;; Called with args NAME
   set    ;; Called with args NAME, VAL 
   del    ;; Called with args NAME
   names  ;; Called without args, returns bound names as sequence
+  )
+
+(defun global-get (mgh name)
+  (funcall (mgh-get mgh) name))
+
+(defun global-set (mgh name val)
+  (funcall (mgh-set mgh) name val))
+
+(defun (setf global-get) (val mgh name)
+  (global-set mgh name val))
+
+(defun global-del (mgh name)
+  (funcall (mgh-del mgh) name))
+
+(defun global-names (mgh)
+  (funcall (mgh-names mgh)))
+
+(defstruct (dict-mgh (:include module-globals-handler) (:conc-name dmgh-) (:constructor make-dmgh))
+  (ht (make-hash-table :test 'eq)) 
   module)
 
-(defun make-standard-mgh (module-name module-path)
-  (let* ((mgh (make-mgh))
+(defstruct (pkg-mgh (:include module-globals-handler) (:conc-name pmgh-) (:constructor make-pmgh))
+  package)
+
+(defun make-dict-mgh (module-name module-path)
+  (let* ((mgh (make-dmgh))
          (mod (make-py-module :mgh mgh :name (string module-name) :path module-path)))
-    (setf (mgh-module mgh) mod)
+    (setf (dmgh-module mgh) mod)
     (flet ((do-get (name)
-             (or (gethash name (mgh-ht mgh))
+             (or (gethash name (dmgh-ht mgh))
                  (builtin-value name)
-                 (py-raise '{NameError} "Variable `~A' is unbound." name)))
+                 (py-raise '{NameError} "Variable `~A' is unbound (dict mgh).~_Bound names are: ~A." 
+                           name (loop for x being the hash-key in (dmgh-ht mgh) collect x))))
            (do-set (name val)
-             (setf (gethash name (mgh-ht mgh)) val))
+             (setf (gethash name (dmgh-ht mgh)) val)
+             (values))
            (do-del (name)
-             (unless (gethash name (mgh-ht mgh))
+             (unless (gethash name (dmgh-ht mgh))
                (with-simple-restart (continue "Continue as if `~A' is currently bound." name)
                  (py-raise '{NameError} "Variable `~A' is unbound." name)))
-             (remhash name (mgh-ht mgh)))
+             (remhash name (dmgh-ht mgh))
+             (values))
            (do-names ()
-             (loop for x being the hash-key in (mgh-ht mgh) collect x)))
+             (loop for x being the hash-key in (dmgh-ht mgh) collect x)))
       (setf (mgh-get mgh) #'do-get
             (mgh-set mgh) #'do-set
             (mgh-del mgh) #'do-del
             (mgh-names mgh) #'do-names))
     mgh))
 
+(defconstant +pkg-mgh-py-val-indicator+ 'python-value-p
+  "Indicator used on symbols to indicate that it has an associated Python value,
+presumably set by a pkg-mgh.")
+
+(defun make-pkg-mgh (pkg &optional module-name)
+  (check-type pkg package)
+  (flet ((do-get (name) (multiple-value-bind (sym kind)
+                            (find-symbol (string name) pkg)
+                          (or (when kind
+                                (or (and (boundp sym) (symbol-value sym))
+                                    (builtin-value name)
+                                    (and (fboundp sym) (symbol-function sym))
+                                    (find-class sym nil)))
+                              (builtin-value name)
+                              (py-raise '{NameError} "Variable `~A' is unbound (pkg mgh)." name))))
+         (do-set (name val) (let ((sym (intern (string name) pkg)))
+                              (setf (symbol-value sym) val
+                                    (get sym +pkg-mgh-py-val-indicator+) t)
+                              (values)))
+         (do-del (name) (let ((sym (find-symbol (string name) pkg)))
+                          (when (or (not sym) (not (boundp sym)))
+                            (py-raise '{NameError} "Cannot delete variable `~A': it is unbound." name))
+                          (if (remprop sym +pkg-mgh-py-val-indicator+)
+                              (makunbound sym)
+                            (warn "Ignoring attempt to make variable `~A' unbound: its value `~A' was not assigned from within Python."
+                                  name (symbol-value sym)))
+                          (values)))
+         (do-names () (loop for sym being each symbol in pkg
+                          when (get sym +pkg-mgh-py-val-indicator+)
+                          collect sym)))
+    (when module-name
+      (do-set "__name__" module-name))
+    (make-pmgh :get #'do-get :set #'do-set :del #'do-del :names #'do-names)))
+         
 (defun mgh-all-items (mgh &key import-*)
   "If IMPORT-*, then returns either (1) the variables in __all__ (if present),
 or (2) all names not starting with underscore."
@@ -1215,10 +1273,12 @@ or (2) all names not starting with underscore."
 
 (defmacro create-module-globals-dict ()
   ;; Updating this dict really modifies the globals.
-  `(module-make-globals-dict (+mod+)))
+  `(module-make-globals-dict mgh))
 
-(defun unbound-variable-error (name &optional (expect-value t))
+(defun unbound-variable-error (name &key (expect-value t) debug-info)
   (declare (special *py-signal-conditions*))
+  (when debug-info
+    (warn "Unbound variable debug info: ~A." debug-info))
   (if expect-value
       (restart-case
 	  (py-raise '{NameError} "Variable `~A' is unbound." name)
@@ -1260,24 +1320,18 @@ DETERMINE-BODY-GLOBALS
                    #+(or)(:mod-futures  :todo-parse-module-ast-future-imports)) ;; todo
                 
                 (let* ((*habitat* (or *habitat* (make-habitat :search-paths '("."))))
-                       (mgh (or globals-handler (make-standard-mgh module-name module-path))))
+                       (mgh (or globals-handler (make-dict-mgh module-name module-path))))
                   
-                  (macrolet ((module-get (name)
-                               `(funcall (mgh-get mgh) ,name))
-                             (module-set (name val)
-                               `(funcall (mgh-set mgh) ,name ,val))
-                             (module-del (name)
-                               `(funcall (mgh-del mgh) ,name))
-                             (module-names ()
-                               `(funcall (mgh-names mgh)))
-                             (+mod+ ()  `(mgh-module mgh)))
-                    
+                  (macrolet ((%module-get (name)      `(funcall (mgh-get mgh) ,name))
+                             (%module-set (name val)  `(funcall (mgh-set mgh) ,name ,val))
+                             (%module-del (name)      `(funcall (mgh-del mgh) ,name))
+                             #+(or)(%module-names ()        `(funcall (mgh-names mgh))))
                     ;; Is there a situation in which these globals should not be set?
-                    (module-set '{__name__}  (or module-name "__main__"))
-                    (module-set '{__debug__} *the-true*)
+                    (%module-set '{__name__}  (or module-name "__main__"))
+                    (%module-set '{__debug__} *the-true*)
                     
                     (when (and call-preload-hook (boundp '*module-preload-hook*))
-                      (funcall *module-preload-hook* (mgh-module mgh)))
+                      (funcall *module-preload-hook* (dmgh-module mgh)))
                     
                     (with-py-errors (:name (python-module ,*current-module-name*))
                       ,suite)))))))
@@ -1655,13 +1709,10 @@ finally:
   (make-dict-from-symbol-alist
    (delete nil (mapcar #'cons name-list value-list) :key #'cdr)))
 
-(defun module-make-globals-dict (mod)
+(defun module-make-globals-dict (mgh)
   (flet ((make-regular-dict ()
            (make-dict-from-symbol-alist
-            (loop with mgh = (module-mgh mod)
-                with names = (funcall (mgh-names mgh))
-                with getter = (mgh-get mgh)
-                for k in names collect (cons k (funcall getter k))))))
+            (loop for k in (global-names mgh) collect (cons k (global-get mgh k))))))
     
   (let* ((d (make-regular-dict))
          (updater (lambda () 
@@ -1670,7 +1721,7 @@ finally:
                       (dict-map new-d (lambda (k v)
                                         (sub/dict-set d k v)))
                       d))))
-    (change-class d 'py-dict-moduledictproxy :module mod :updater updater)
+    (change-class d 'py-dict-moduledictproxy :mgh mgh :updater updater)
     d)))
 
 (defun py-**-mapping->lisp-arg-list (**-arg)

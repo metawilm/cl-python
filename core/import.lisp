@@ -149,7 +149,7 @@ Returns NIL if nothing found."
 				  &key (mod-name (error ":mod-name required"))
                                        #+(or)(dotted-name (error ":dotted-name required")) 
 				       (context-mod-name mod-name)
-                                       within-mod
+                                       within-mod-path
 				       (habitat (error "habitat required"))
 				       (update-existing-mod t)
 				  &allow-other-keys)
@@ -202,8 +202,8 @@ Returns the loaded module, or NIL on error."
         (if success
             (return-from load-compiled-python-file new-module)
           (progn
-            (warn "Loading of module \"~A\" failed~@[ (within ~A)~]."
-                  mod-name within-mod)
+            (warn "Loading of module \"~A\" failed~@[ (import from ~A)~]."
+                  mod-name within-mod-path)
             (remove-loaded-module mod-name habitat)
             (return-from load-compiled-python-file nil)))))))
 
@@ -236,11 +236,11 @@ Returns the loaded module, or NIL on error."
 		  &rest options
 		  &key (habitat (or *habitat* (error "PY-IMPORT called without habitat")))
 		       (force-reload *import-force-reload*)
-                       within-mod
+                       within-mod-path
 		       (search-paths (when habitat (habitat-search-paths habitat))))
   "Returns the module, which may have been imported before."
   
-  ;; If WITHIN-MOD is supplied, then the directory of that
+  ;; If WITHIN-MOD-PATH is supplied, then the directory of that
   ;; module's .py file is the first directory in the search path.
   (declare (special *habitat*)
            (optimize (debug 3)))
@@ -281,11 +281,8 @@ Returns the loaded module, or NIL on error."
     ;; 3. Find a source or binary file somewhere in the collection of search paths
     (multiple-value-bind (kind src-file bin-file)
         (let ((find-paths search-paths))
-          (when within-mod
-            (if (module-filepath within-mod)
-                (push (module-filepath within-mod) find-paths)
-              ;; Module __main__ is allowed to not have a module path. (Fix?)
-              (assert (string= (module-name within-mod) "__main__"))))
+          (when within-mod-path
+            (push within-mod-path find-paths))
           (find-py-file just-mod-name find-paths))
       (unless kind
         (py-raise '{ImportError}
@@ -299,7 +296,7 @@ Returns the loaded module, or NIL on error."
         (compile-py-file src-file :mod-name dotted-name :output-file bin-file))
       (let ((new-module (load-compiled-python-file bin-file
                                                    :mod-name dotted-name
-                                                   :within-mod within-mod
+                                                   :within-mod-path within-mod-path
                                                    :habitat habitat)))
         (when new-module ;; Maybe loading failed (which already gave a warning)
           (add-loaded-module new-module habitat)

@@ -13,7 +13,7 @@
   (:documentation "Python read-eval-print loop")
   (:use :common-lisp :clpython :clpython.parser)
   (:export #:repl #:*repl-compile* #:*repl-prof*)
-  (:import-from :clpython #:with-matching)
+  (:import-from :clpython #:with-matching #:global-get #:global-set)
   (:import-from :clpython.ast #:|suite-stmt-p| #:|module-stmt-p|))
 
 (in-package :clpython.app.repl)
@@ -154,16 +154,14 @@ KIND can be :ptime, :time, :space, :pspace or NIL."
   (values))
   
 (defun repl-1 ()
-  (let* ((mgh (clpython::make-standard-mgh "__main__" "<repl>"))
-         (*repl-mod* (clpython::mgh-module mgh))
+  (let* ((pkg (make-package (gensym "py-repl-") :use '(:common-lisp :clpython)))
+         (mgh (clpython::make-pkg-mgh pkg "__main__"))
          (clpython::*habitat* (clpython::make-habitat))
          (*truncation-explain* t)
 	 acc)
     (declare (special clpython::*habitat*))
     (dolist (x '(_ __ ___))
-      (setf (py-attr* *repl-mod* x) *the-none*))
-    (setf (py-attr* *repl-mod* "__name__") "__main__")
-    
+      (global-set mgh x *the-none*))
     (labels ((print-cmds ()
 	       (format t *repl-doc*))
 	     
@@ -172,18 +170,15 @@ KIND can be :ptime, :time, :space, :pspace or NIL."
                ;; for both Python (repl module namespace) and Lisp (dynamic vars).
                (when val ;; don't save NIL (which can be return value for Lisp eval)
                  (shiftf ___ __ _ val)
-                 (shiftf (py-attr* *repl-mod* '___)
-                         (py-attr* *repl-mod* '__)
-                         (py-attr* *repl-mod* '_)
+                 (shiftf (global-get mgh '___)
+                         (global-get mgh '__)
+                         (global-get mgh '_)
                          val)))
 
 	     (run-ast-func (suite)
-               (lambda () (clpython::run-python-ast suite :run-args (list :globals-handler mgh)))
-               #+(or)(let ((f `(lambda ()
-                                 ,suite)))
-                       (if *repl-compile*
-                           (setf f (compile nil f))
-                         (coerce f 'function)))) ;; coerce, as lambda expr is not funcallable
+               (lambda () (clpython::run-python-ast suite :run-args
+                                                    (list :globals-handler mgh)
+                                                    :compile *repl-compile*)))
 	     
              (nice-one-line-input-abbrev (total)
                (check-type total string)
@@ -286,7 +281,7 @@ KIND can be :ptime, :time, :space, :pspace or NIL."
 	       (multiple-value-bind (lisp-form error)
                    (ignore-errors (with-standard-io-syntax
                                     ;; Bind package, so symbols _, __, ___ are present.
-                                    (let ((*package* #.*package*))
+                                    (let ((*package* pkg #+(or) #.*package*))
                                       (read-from-string total nil nil))))
                  (cond ((and (null lisp-form)
                              (typep error 'error))
@@ -339,10 +334,10 @@ KIND can be :ptime, :time, :space, :pspace or NIL."
                    
                    (unless #+allegro (input-available-p)
                            #-allegro nil
-                     ;; When copy-pasting multiple lines of Python source code into the REPL,
-                     ;; prevent several prompts being printed below the copied code.
-                     (format t (nth (if acc 1 0) *prompts*))
-                     (force-output *standard-output*)) ;; stream T would mean *terminal-io*
+                           ;; When copy-pasting multiple lines of Python source code into the REPL,
+                           ;; prevent several prompts being printed below the copied code.
+                           (format t (nth (if acc 1 0) *prompts*))
+                           (force-output *standard-output*)) ;; stream T would mean *terminal-io*
 
 		   (let ((x (read-line)))
 		     (cond

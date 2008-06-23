@@ -646,9 +646,9 @@
 
 (defclass py-function (standard-generic-function py-core-object py-dict-mixin)
   ;; mop:funcallable-standard-class defines :name initarg, but I don't know how to access it...
-  ((name         :initarg :fname        :accessor py-function-name)
-   (context-name :initarg :context-name :accessor py-function-context-name)
-   (lambda       :initarg :lambda       :accessor py-function-lambda))
+  ((name         :initarg :fname        :initform nil :accessor py-function-name)
+   (context-name :initarg :context-name :initform nil :accessor py-function-context-name)
+   (lambda       :initarg :lambda       :initform nil :accessor py-function-lambda))
   (:metaclass funcallable-python-class))
 
 (defun set-funcallable-instance-function (inst func)
@@ -664,19 +664,20 @@
   (py-lisp-function.__get__ func inst cls))
 
 (def-py-method py-function.__repr__ (func)
-  (with-output-to-string (s)
-    (print-unreadable-object (func s :identity t)
-      (if (typep func 'py-function)
-	  
-	  (progn
-	    (format s "python-function ~A~@[ (~A)~]"
-                    (py-function-name func)
-                    (unless (compiled-function-p (py-function-lambda func)) "interpreted"))
-	    (when (string/= (py-function-name func)
-			    (py-function-context-name func))
-	      (format s " (~A)" (py-function-context-name func))))
-	
-	(format s "function ~A" (py-function-name func))))))
+  (if (typep func 'py-function)
+      (with-output-to-string (s)
+        (print-object func s))
+    (with-output-to-string (s)
+      (format s "function ~A" (py-function-name func)))))
+
+(defmethod print-object ((x py-function) stream)
+  (print-unreadable-object (x stream :identity t)
+    (format stream "python-function ~A~@[ (~A)~]"
+            (py-function-name x)
+            (unless (compiled-function-p (py-function-lambda x)) "interpreted"))
+    (when (string/= (py-function-name x)
+                    (py-function-context-name x))
+      (format stream " (~A)" (py-function-context-name x)))))
 
 (def-py-method py-function.__name__ :attribute (func)
   (py-function-name func))
@@ -1386,13 +1387,13 @@ but the latter two classes are not in CPython.")
 (defmethod print-object ((x py-module) stream)
   (write-string (py-module.__repr__ x) stream))
 
-(defun py-module-set-kv (x k v)
+(defun py-mgh-set-kv (m k v)
   ;; V may be null, to remove item
-  (check-type x py-module)
+  (check-type m module-globals-handler)
   (check-type k symbol)
   (if v
-      (funcall (mgh-set (module-mgh x)) k v)
-    (funcall (mgh-del (module-mgh x)) k)))
+      (global-set m k v)
+    (global-del m k)))
 
 (defun py-module-get (x attr)
   (let ((attr.sym (py-string-val->symbol attr :intern nil)))
@@ -1413,10 +1414,10 @@ but the latter two classes are not in CPython.")
   "Returns new value"
   (check-type x py-module)
   (let* ((attr.sym (py-string-val->symbol attr)) ;; always sym
-         (ht (mgh-ht (module-mgh x))))
+         (mgh (module-mgh x)))
     (if val
-        (setf (gethash attr.sym ht) val)
-      (remhash attr.sym ht))
+        (global-set mgh attr.sym val)
+      (global-del mgh attr.sym))
     (or val *the-none*)))
   
 (def-py-method py-module.__delattr__ (x^ attr)
@@ -2145,7 +2146,7 @@ But if RELATIVE-TO package name is given, result may contains dots."
 ;; Dictionaries that act as proxy for module can be accessed using
 ;; "globals()"; apply changes to module too.
 (defclass py-dict-moduledictproxy (py-dict)
-  ((module :initarg :module :accessor mdp-module)
+  ((mgh     :initarg :mgh     :accessor mdp-mgh)
    (updater :initarg :updater :accessor mdp-updater))
   (:metaclass py-core-type))
 
@@ -2157,7 +2158,7 @@ But if RELATIVE-TO package name is given, result may contains dots."
 
 (defmethod (setf py-subs) :after (val (x py-dict-moduledictproxy) key)
   ;; Modifying this dict modifies the module globals.
-  (py-module-set-kv (mdp-module x) (py-string->symbol key) val))
+  (py-mgh-set-kv (mdp-mgh x) (py-string->symbol key) val))
 
 ;; The dict returned by globals should reflect the current global module
 ;; variables. This is enforced by triggering an update of globals dicts
@@ -2169,7 +2170,7 @@ But if RELATIVE-TO package name is given, result may contains dots."
 (def-py-method py-dict-moduledictproxy.__str__ (x)
   (with-output-to-string (s)
     (print-unreadable-object (x s :identity t)
-      (format s "dict-proxy for the globals of module `~A'" (module-name (mdp-module x))))))
+      (format s "dict-proxy for the globals of globals handler `~A'" (mdp-mgh x)))))
 
 (defun update-dict-and-call-func (original-method args)
   (let* ((check-upd (= *module-dict-update-level* 0))
