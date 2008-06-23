@@ -176,13 +176,13 @@
 (p ni-**-ident ([,] **-ident     ) $2)
 (p    **-ident ([**] [identifier]) $2)
 
-(p parameter-list5 (defparameter+                       ) (list  $1 nil nil))
-(p parameter-list5 (defparameter+ ni-*-ident ni-**-ident) (list  $1  $2  $3))
-(p parameter-list5 (defparameter+ ni-*-ident            ) (list  $1  $2 nil))
-(p parameter-list5 (defparameter+            ni-**-ident) (list  $1 nil  $2))
-(p parameter-list5 (              *-ident    ni-**-ident) (list nil  $1  $2))
-(p parameter-list5 (              *-ident               ) (list nil  $1 nil))
-(p parameter-list5 (                         **-ident   ) (list nil nil  $1))
+(p parameter-list5 (defparameter+                        comma?) (list  $1 nil nil))
+(p parameter-list5 (defparameter+ ni-*-ident ni-**-ident comma?) (list  $1  $2  $3))
+(p parameter-list5 (defparameter+ ni-*-ident             comma?) (list  $1  $2 nil))
+(p parameter-list5 (defparameter+            ni-**-ident comma?) (list  $1 nil  $2))
+(p parameter-list5 (              *-ident    ni-**-ident comma?) (list nil  $1  $2))
+(p parameter-list5 (              *-ident                comma?) (list nil  $1 nil))
+(p parameter-list5 (                         **-ident    comma?) (list nil nil  $1))
 
 ;; Can't use symbol vs. cons for distinguishing positional and
 ;; keyword arguments, as as positional args may be a structure:
