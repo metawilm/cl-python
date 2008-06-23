@@ -211,7 +211,20 @@ assert C.__class__ == type
 assert C.__mro__ == (C, int, object)"))
     (run-no-error "
 class C( type(1+2)): pass
-assert C() == 0"))
+assert C() == 0")
+    (run-no-error "
+x = []
+class Meta(type):
+  def __init__(cls,*args,**kw):
+    Meta   ## check no name error
+    x.append(cls)
+    type.__init__(cls, *args, **kw)
+
+class C():
+  __metaclass__ = Meta
+
+assert len(x) == 1
+assert x[0] == C"))
 
 (defmethod test-lang ((kind (eql :comparison-expr)))
   ;; Ensure py-list.__eq__ can handle non-lists, etc.
@@ -396,7 +409,10 @@ def f((x,y)=[1,2]): return x+y
 assert f() == 3
 assert f((1,2)) == 3
 x = (1,2)
-assert f(x) == 3"))
+assert f(x) == 3")
+  (run-no-error "
+def f(x, **kw): return x, kw
+assert f(1,a=3) == (1, {'a': 3})"))
 
 (defmethod test-lang ((kind (eql :generator-expr)))
   )
@@ -615,6 +631,16 @@ with C() as y:
 assert x == ['enter', 42, 'exit']"))
 
 (defmethod test-lang ((kind (eql :yield-stmt)))
+  (run-no-error "
+def f():
+  return
+  yield 1
+g = f()
+try:
+  g.next()
+  assert False
+except StopIteration:
+  pass")
   (run-no-error "
 def f():
   i = 0
