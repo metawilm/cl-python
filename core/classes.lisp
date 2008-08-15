@@ -2570,8 +2570,11 @@ But if RELATIVE-TO package name is given, result may contains dots."
 	string))))
 
 
-(def-py-method py-string.__add__ (x^ y^) (concatenate 'string
-					   (the string x) (the string y)))
+(def-py-method py-string.__add__ (x^ y^)
+  (if (stringp y)
+      (concatenate 'string x y)
+    *the-notimplemented*))
+
 (def-py-method py-string.__cmp__ (x^ y^)
   (cond ((not (stringp y)) -1) ;; whatever
 	((string< x y) -1)
@@ -2706,6 +2709,14 @@ But if RELATIVE-TO package name is given, result may contains dots."
 (def-py-method py-string.upper (x^)
   (string-upcase x))
    
+;; Symbols
+
+(def-proxy-class py-symbol)
+
+(def-py-method py-symbol.__repr__ (x)
+  (with-output-to-string (s)
+    (print-unreadable-object (x s :type nil :identity nil)
+      (format s "symbol ~S" x))))
 
 ;; Tuple (Lisp object: consed list)
 
@@ -2829,6 +2840,7 @@ But if RELATIVE-TO package name is given, result may contains dots."
   (:method ((x string))  (ltv-find-class 'py-string ))
   (:method ((x vector))  (ltv-find-class 'py-list   ))
   (:method ((x list))    (ltv-find-class 'py-tuple  ))
+  (:method ((x symbol))  (ltv-find-class 'py-symbol ))
   (:method ((x function))    (ltv-find-class 'py-function))
   (:method ((x py-function)) (ltv-find-class 'py-function))
   (:method ((x package)) (ltv-find-class 'lisp-package))
