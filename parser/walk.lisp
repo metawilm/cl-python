@@ -1,4 +1,3 @@
-
 ;; -*- package: clpython.parser; readtable: py-ast-readtable -*-
 ;; 
 ;; This software is Copyright (c) Franz Inc. and Willem Broekema.
@@ -240,9 +239,12 @@ CLASSDEF, FUNCDEF or LAMBDA."
 ;; [lambda-expr] ...
 
 (def-ast-node [list-expr]  ((&rest names +normal-value+)) (:targetable t) (:subtargetable t))
+
+;; listcompr-expr : hairy
+
 (def-ast-node [tuple-expr] ((&rest names +normal-value+)) (:targetable t) (:subtargetable t))
 
-;; [module-stmt]
+(def-ast-node [module-stmt] ((body +normal-value+)))
 
 (def-ast-node [pass-stmt] ())
 (def-ast-node [print-stmt] ((&optional dest +normal-value+) (&rest items +normal-value+) comma?))
@@ -254,7 +256,8 @@ CLASSDEF, FUNCDEF or LAMBDA."
 (def-ast-node [suite-stmt] ((&rest suite-stmts +normal-value+)))
 
 ;; [try-except-stmt]
-;; [try-finally-stmt]
+
+(def-ast-node [try-finally-stmt] ((try-suite +suite+) (finally-suite +suite+)))
 
 (def-ast-node [unary-expr] ((val +normal-value+)))
 (def-ast-node [while-stmt] ((test +normal-value+) (suite +suite+) (&optional else-suite +suite+)))
@@ -317,12 +320,9 @@ CLASSDEF, FUNCDEF or LAMBDA."
                                   collect (list (funcall f test :value +normal-value+)
                                                 (funcall f suite)))
                              ,(when else-suite (funcall f else-suite)))))
-    ([import-stmt]
-     ;; IMPORT statement is not walked into; name handling is a bit tricky.
-     (values ast t))
     
-    ([import-from-stmt]
-     ;; IMPORT-FROM statement is not walked into; name handling is a bit tricky.
+    (([import-stmt] [import-from-stmt])
+     ;; IMPORT statements are not walked into; name handling is a bit tricky.
      (values ast t))
     
     ([lambda-expr]
@@ -338,9 +338,6 @@ CLASSDEF, FUNCDEF or LAMBDA."
                             (funcall f expr :value +normal-value+)
                           expr))))
     
-    ([module-stmt]
-     `([module-stmt] ,(funcall f (second ast) :value +normal-value+)))
-
     ([try-except-stmt]
      (destructuring-bind (suite except-clauses else-suite) (cdr ast)
        `([try-except-stmt]
@@ -351,11 +348,6 @@ CLASSDEF, FUNCDEF or LAMBDA."
                            ,(funcall f handler-form))))
          ,(when else-suite
             (funcall f else-suite)))))
-    
-    ([try-finally-stmt]
-     (destructuring-bind (try-suite finally-suite) (cdr ast)
-       `([try-finally-stmt]
-         ,(funcall f try-suite) ,(funcall f finally-suite))))
     
     (t 
      (cond ((and (symbolp (car ast))
@@ -410,7 +402,7 @@ CLASSDEF, FUNCDEF or LAMBDA."
                                  ((eq (awna-tg/val awna) '+suite+)
                                   (mapcar (lambda (x) (funcall f x :value value :target target))
                                           (second ast)))
-                                 (t                                           
+                                 (t
                                   (funcall f ast :value value :target target)))))
                ast))
         
@@ -420,7 +412,9 @@ CLASSDEF, FUNCDEF or LAMBDA."
             for repl = (walk-arg (nth ix args) s (awn-subtargetable walker-node))
             do (unless (eq (nth (1+ ix) ast-copy) repl) ;; catches setting nil as last cdr when it is already set
                  (setf (nth (1+ ix) ast-copy) repl))
-            finally (return ast-copy))))))
+            finally (progn #+(or)(unless (equalp ast ast-copy)
+                                   (warn "Replacing ast ~S by ~S" ast ast-copy))
+                           (return ast-copy)))))))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
