@@ -12,6 +12,27 @@
 
 ;;;; Abstract Syntax Tree Utilities
 
+(defun symbol-ends-with-p (symbol suffix)
+  (check-type symbol symbol)
+  (let* ((name (symbol-name symbol))
+         (name.len (length name))
+         (suffix.len (length suffix)))
+    (and (>= name.len suffix.len)
+         (string= (subseq name (- name.len suffix.len)) suffix))))
+           
+(defun stmt-node-p (symbol)
+  (symbol-ends-with-p symbol "-stmt"))
+
+(defun expr-node-p (symbol)
+  (symbol-ends-with-p symbol "-expr"))
+
+(defparameter *expr-stmt-nodes*
+    (sort (loop for x being each external-symbol in :clpython.ast.node
+              when (or (stmt-node-p x) (expr-node-p x))
+              collect x)
+          'string<)
+  "List of all ..-STMT and ..-EXPR symbols that can occur in ASTs.")
+
 (defvar *multi-line-statements* '([classdef-stmt] [for-in-stmt] [funcdef-stmt]
                                   [if-stmt] [try-except-stmt] [try-finally-stmt]
                                   [while-stmt] [with-stmt])
