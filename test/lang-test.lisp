@@ -142,7 +142,14 @@ assert `x` == 'r'"))
   (run-no-error "assert not (0 or 0)")
   (run-no-error "assert not (0 and 0)")
   (run-no-error "1 or 3 / 0")
-  (run-no-error "0 and 3/0"))
+  (run-no-error "0 and 3/0")
+  (run-no-error "assert ([] or '') == ''")
+  (run-no-error "assert (1 or '') == 1")
+  (run-no-error "assert ('' or 1) == 1")
+  (run-no-error "assert (1 or 2) == 1")
+  (run-no-error "assert (1 and 2) == 2")
+  (run-no-error "assert (0 and 2) == 0")
+  (run-no-error "assert (1 and []) == []"))
 
 (defmethod test-lang ((kind (eql :break-stmt)))
   (run-error "break" {SyntaxError})
@@ -412,7 +419,10 @@ x = (1,2)
 assert f(x) == 3")
   (run-no-error "
 def f(x, **kw): return x, kw
-assert f(1,a=3) == (1, {'a': 3})"))
+assert f(1,a=3) == (1, {'a': 3})")
+  ;; todo: check evaluation order of decorators vs. keyword argument default values.
+  )
+
 
 (defmethod test-lang ((kind (eql :generator-expr)))
   )
