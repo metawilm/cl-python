@@ -321,11 +321,7 @@ GENSYMS are made gensym'd Lisp vars."
     ([or] `(let ((.left ,left))
 	     (if (py-val->lisp-bool .left)
 		 .left
-	       (let ((.right ,right))
-		 (if (py-val->lisp-bool .right)
-		     .right
-		   *the-false*)))))
-    
+               ,right)))
     ([and] `(let ((.left ,left))
 	      (if (py-val->lisp-bool .left)
 		  ,right
