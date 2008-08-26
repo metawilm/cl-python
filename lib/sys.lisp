@@ -1,18 +1,11 @@
-(defpackage :clpython.module.sys
-  (:use :clpython :common-lisp)
-  (:export #:|argv| #:|byteorder| #:|exc_info| #:|copyright|
-	   #:|builtin_module_names| #:|displayhook| #:|excepthook|
-	   #:|__displayhook__| #:|exc_info| #:|__excepthook__| #:|exit| #:|exitfunc|
-	   #:|setcheckinterval| #:|getcheckinterval|
-	   #:|getdefaultencoding| #:|setdefaultencoding|
-	   #:|getfilesystemencoding|
-	   #:|getrecursionlimit| #:|setrecursionlimit|
-	   #:|hexversion| #:|maxint|
-	   #:|maxunicode| #:|modules| #:|path| #:|platform|
-	   #:|prefix| #:|ps1| #:|ps2| #:|stdin| #:|stdout| #:|stderr|
-	   #:|__stdin__| #:|__stdout__| #:|__stderr__|
-	   #:|api_version| #:|version_info| #:|version| )
-  (:import-from :clpython #:*try-except-currently-handled-exception*))
+;; -*- Mode: LISP; Syntax: COMMON-LISP; Package: CLPYTHON.MODULE.SYS -*-
+;;
+;; This software is Copyright (c) Franz Inc. and Willem Broekema.
+;; Franz Inc. and Willem Broekema grant you the rights to
+;; distribute and use this software as governed by the terms
+;; of the Lisp Lesser GNU Public License
+;; (http://opensource.franz.com/preamble.html),
+;; known as the LLGPL.
 
 (in-package :clpython.module.sys)
 

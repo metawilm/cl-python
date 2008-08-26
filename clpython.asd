@@ -1,4 +1,4 @@
-;; -*- package: cl-user -*-
+;; -*- Mode: LISP; Syntax: COMMON-LISP; Package: CL-USER -*-
 ;;
 ;; This software is Copyright (c) Franz Inc. and Willem Broekema.
 ;; Franz Inc. and Willem Broekema grant you the rights to
@@ -68,15 +68,17 @@
     :description "Python module library"
     :depends-on (:clpython.package :clpython.parser :clpython.core)
     :components ((:module "lib"
-			  :components ((:file "builtins")
-				       (:file "sys")
-				       (:file "time")
-				       (:file "os")
-				       (:file "array")
-				       (:file "math")
-                                       (:file "string")
+                          :serial t
+                          :components ((:file "lsetup")
+                                       (:file "array")
+                                       (:file "builtins")
+                                       (:file "gc")
+                                       (:file "math")
+                                       (:file "os")
                                        (:file "re")
-                                       (:file "gc")))))
+                                       (:file "sys")
+                                       (:file "string")
+                                       (:file "time")))))
 
 ;;; Application systems
 

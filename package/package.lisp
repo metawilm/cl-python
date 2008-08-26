@@ -1,3 +1,5 @@
+;; -*- Mode: LISP; Syntax: COMMON-LISP; Package: CL-USER -*-
+;;
 ;; This software is Copyright (c) Franz Inc. and Willem Broekema.
 ;; Franz Inc. and Willem Broekema grant you the rights to
 ;; distribute and use this software as governed by the terms
@@ -263,3 +265,12 @@
   (cascade-external-symbols :clpython))
  
 
+;;; CLPYTHON.TEST - Test suite
+
+(defpackage :clpython.test
+  (:use :common-lisp :clpython)
+  (:import-from :clpython #:in-syntax)
+  (:import-from :clpython.parser #:parse)
+  (:import-from :ptester #:*announce-test* #:with-tests
+                #:test #:test-warning)
+  (:export #:run))

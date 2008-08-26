@@ -1,4 +1,4 @@
-;; -*- package: clpython.test -*-
+;; -*- Mode: LISP; Syntax: COMMON-LISP; Package: CLPYTHON.TEST -*-
 ;;
 ;; This software is Copyright (c) Franz Inc. and Willem Broekema.
 ;; Franz Inc. and Willem Broekema grant you the rights to
@@ -8,14 +8,6 @@
 ;; known as the LLGPL.
 
 ;;;; CLPython test harness setup
-
-(defpackage :clpython.test
-  (:use :common-lisp :clpython)
-  (:import-from :clpython #:in-syntax)
-  (:import-from :clpython.parser #:parse)
-  (:import-from :ptester #:*announce-test* #:with-tests
-                #:test #:test-warning)
-  (:export #:run))
 
 (in-package :clpython.test)
 

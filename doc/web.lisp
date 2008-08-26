@@ -1,3 +1,5 @@
+;; -*- Mode: LISP; Syntax: COMMON-LISP -*-
+
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (require :aserve))
 

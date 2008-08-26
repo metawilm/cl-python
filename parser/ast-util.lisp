@@ -1,4 +1,4 @@
-;; -*- package: clpython.parser; readtable: py-ast-readtable -*-
+;; -*- Mode: LISP; Syntax: COMMON-LISP; Package: CLPYTHON.PARSER; Readtable: PY-AST-READTABLE -*-
 ;;
 ;; This software is Copyright (c) Franz Inc. and Willem Broekema.
 ;; Franz Inc. and Willem Broekema grant you the rights to

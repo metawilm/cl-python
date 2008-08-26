@@ -1,11 +1,11 @@
-(defpackage :clpython.module.math
-  (:use :clpython :common-lisp)
-  (:export #:|pi| #:|e|
-           #:|pow| #:|exp| #:|log| #:|log10| #:|sqrt|
-           #:|sin| #:|cos| #:|tan| #:|asin| #:|acos| #:|atan| #:|sinh| #:|cosh| #:|tanh| #:|atan2|
-           #:|ceil| #:|floor| #:|degrees| #:|radians|
-           #:|fmod| #:|fabs| #:|modf| #:|frexp| #:|hypot| #:|ldexp| )
-  (:shadow #:|sin| #:|cos| #:|tan| #:|asin| #:|acos| #:|atan| #:|sinh| #:|cosh| #:|tanh|))
+;; -*- Mode: LISP; Syntax: COMMON-LISP; Package: CLPYTHON.MODULE.MATH -*-
+;;
+;; This software is Copyright (c) Franz Inc. and Willem Broekema.
+;; Franz Inc. and Willem Broekema grant you the rights to
+;; distribute and use this software as governed by the terms
+;; of the Lisp Lesser GNU Public License
+;; (http://opensource.franz.com/preamble.html),
+;; known as the LLGPL.
 
 (in-package :clpython.module.math)
 

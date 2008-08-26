@@ -1,10 +1,12 @@
-(defpackage :clpython.module.string
-  (:use :clpython :common-lisp)
-  (:export "ascii_letters" "ascii_lowercase" "ascii_uppercase" "digits"
-           "hexdigits" "octdigits" "lowercase" "uppercase" "letters"
-           "punctuation" "whitespace" "printable")
-  (:import-from :clpython.package #:defconstant-once))
-  
+;; -*- Mode: LISP; Syntax: COMMON-LISP; Package: CLPYTHON.MODULE.STRING -*-
+;;
+;; This software is Copyright (c) Franz Inc. and Willem Broekema.
+;; Franz Inc. and Willem Broekema grant you the rights to
+;; distribute and use this software as governed by the terms
+;; of the Lisp Lesser GNU Public License
+;; (http://opensource.franz.com/preamble.html),
+;; known as the LLGPL.
+
 (in-package :clpython.module.string)
 
 (eval-when (:compile-toplevel :load-toplevel :execute)

@@ -1,4 +1,4 @@
-;; -*- package: clpython.app.repl; readtable: py-ast-user-readtable -*-
+;; -*- Mode: LISP; Syntax: COMMON-LISP; Package: CLPYTHON.APP.REPL; Readtable: PY-AST-USER-READTABLE -*-
 ;;
 ;; This software is Copyright (c) Franz Inc. and Willem Broekema.
 ;; Franz Inc. and Willem Broekema grant you the rights to
