@@ -1,3 +1,7 @@
+2008-08-26  Willem Broekema  <willem@Banaan.local>
+
+	* /: Give every file complete mode line.
+
 2008-06-23  Willem Broekema  <metawilm@gmail.com>
 
 	* parser/walk.lisp: fix walking assignment statements.
