@@ -264,13 +264,3 @@
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (cascade-external-symbols :clpython))
  
-
-;;; CLPYTHON.TEST - Test suite
-
-(defpackage :clpython.test
-  (:use :common-lisp :clpython)
-  (:import-from :clpython #:in-syntax)
-  (:import-from :clpython.parser #:parse)
-  (:import-from :ptester #:*announce-test* #:with-tests
-                #:test #:test-warning)
-  (:export #:run))

@@ -9,6 +9,14 @@
 
 ;;;; CLPython test harness setup
 
+(defpackage :clpython.test
+  (:use :common-lisp :clpython)
+  (:import-from :clpython #:in-syntax)
+  (:import-from :clpython.parser #:parse)
+  (:import-from :ptester #:*announce-test* #:with-tests
+                #:test #:test-warning)
+  (:export #:run))
+
 (in-package :clpython.test)
 
 (defun form-without-compiler-warnings (form)
