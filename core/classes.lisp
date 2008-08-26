@@ -7,9 +7,6 @@
 ;; (http://opensource.franz.com/preamble.html),
 ;; known as the LLGPL.
 
-;;;; Python classes and metaclasses; the built-in classes including
-;;;; their methods.
-
 ;;; To have Emacs properly indent the DEF-PY-METHOD form, add to .emacs:
 ;;;  (put 'def-py-method 'fi:common-lisp-indent-hook (get 'defmethod 'fi:common-lisp-indent-hook))
 
