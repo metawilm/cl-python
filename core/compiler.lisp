@@ -1561,6 +1561,23 @@ inside an `except' clause.")
     .break
      ))
 
+(defmacro [with-stmt] (expr var block)
+  `(let* ((mgr ,expr)
+          (exit (py-attr mgr '{__exit__}))
+          (value (py-call (py-attr mgr '{__enter__})))
+          (exc t))
+     (unwind-protect
+         (handler-case (progn ,@(when var `((setf ,var value)))
+                              ,block)
+           ({Exception} (c)
+             (setf exc nil)
+             (unless (py-val->lisp-bool
+                      (py-apply exit (py-call (clpython.module.sys:|exc_info|))))
+               (error c))))
+       (when exc
+         (py-call exit *the-none* *the-none* *the-none*)))))
+                    
+#+(or)
 (def-py-macro [with-stmt] (expr var block)
   :code (format nil "
 #import sys as __clpy_sys ## ugly
