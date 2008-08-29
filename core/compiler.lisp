@@ -177,29 +177,6 @@ Disabled by default, to not confuse the test suite.")
         (t
          nil)))
 
-;;; Python code templates
-
-(defmacro def-py-macro (name params &key code gensyms)
-  "CODE (a string) forms the template. All uppercase identifiers in CODE equal to
-a parameter name are replaced by that PARAM's value. The identifiers given in
-GENSYMS are made gensym'd Lisp vars."
-  (check-type name symbol)
-  (check-type params list)
-  (check-type gensyms list)
-  `(defmacro ,name ,params
-     (let* ((param-repl (list ,@(loop for p in params
-                                    collect `(cons ',([make-identifier-expr] :name (intern (string-upcase p) :clpython.user))
-                                                   ,p))))
-            (gensym-repl (list ,@(loop for g in gensyms
-                                     do (check-type g string)
-                                     collect `(cons ',([make-identifier-expr] :name (intern g :clpython.user))
-                                                    (gensym ,g)))))
-            (ast (clpython.parser::parse-with-replacements ,code (nconc param-repl gensym-repl) 
-                                                           :warn-unused nil
-                                                           :parse-options '(:incl-module nil))))
-       `(let ,(mapcar #'cdr gensym-repl)
-          ,@ast))))
-                   
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; 
 ;;;  The macros corresponding to AST nodes
@@ -1562,6 +1539,26 @@ inside an `except' clause.")
      ))
 
 (defmacro [with-stmt] (expr var block)
+  "
+mgr = (EXPR)
+exit = mgr.__exit__  # Not calling it yet
+value = mgr.__enter__()
+exc = True
+try:
+  try:
+    VAR = value ## Only if 'as VAR' is present
+    BLOCK
+  except:
+    # The exceptional case is handled here
+    exc = False
+    if not exit(*__clpy_sys.exc_info()):
+      raise
+    # The exception is swallowed if exit() returns true
+finally:
+  # The normal and non-local-goto cases are handled here
+  if exc:
+    exit(None, None, None)
+"
   `(let* ((mgr ,expr)
           (exit (py-attr mgr '{__exit__}))
           (value (py-call (py-attr mgr '{__enter__})))
@@ -1576,30 +1573,6 @@ inside an `except' clause.")
                (error c))))
        (when exc
          (py-call exit *the-none* *the-none* *the-none*)))))
-                    
-#+(or)
-(def-py-macro [with-stmt] (expr var block)
-  :code (format nil "
-#import sys as __clpy_sys ## ugly
-mgr = (EXPR)
-exit = mgr.__exit__  # Not calling it yet
-value = mgr.__enter__()
-exc = True
-try:
-  try: ~@[
-    VAR = value ~]  # Only if 'as VAR' is present
-    BLOCK
-  except:
-    # The exceptional case is handled here
-    exc = False
-    if not exit(*__clpy_sys.exc_info()):
-      raise
-    # The exception is swallowed if exit() returns true
-finally:
-  # The normal and non-local-goto cases are handled here
-  if exc:
-    exit(None, None, None)" var)
-  :gensyms ("mgr" "exit" "value" "exc"))
 
 (defmacro [yield-expr] (val)
   (declare (ignore val))
