@@ -3233,6 +3233,13 @@ finished; F will then not be called again."
 
 ;;; Calling objects (functions, classes, instances)
 
+(defun py-apply (f &rest args)
+  "Like APPLY, but accepting any python sequence as last arg, and using PY-CALL instead of FUNCALL."
+  (apply #'py-call f (nconc (butlast args) (py-iterate->lisp-list (car (last args))))))
+
+(define-compiler-macro py-apply (f &rest args)
+  `(apply #'py-call ,f ,@(butlast args) (py-iterate->lisp-list ,(car (last args)))))
+
 (defgeneric py-call (f &rest args)
 
   (:method ((f null) &rest args)
