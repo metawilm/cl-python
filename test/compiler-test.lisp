@@ -44,7 +44,7 @@
     (test-comp-decl :context-stack)
     (test-comp-decl :inside-loop-p)
     (test-comp-decl :mod-futures)
-    (test-comp-decl :mod-globals-names)
+    #+(or)(test-comp-decl :mod-globals-names)
     (test-comp-decl :lexically-visible-vars)
     (test-comp-decl :lexically-declared-globals)
     (test-comp-decl :inside-function-p)

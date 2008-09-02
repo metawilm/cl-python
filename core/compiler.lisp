@@ -634,7 +634,12 @@ Disabled by default, to not confuse the test suite.")
   ;; XXX todo: Optimize obj.__get__(...)
   whole)
 
-(defmacro [classdef-stmt] (name inheritance suite &environment e)
+(defmacro [classdef-stmt] (&whole whole &rest args)
+  ;; Enable reuse by CPS version of macro
+  (declare (ignore args))
+  `(classdef-stmt-1 ,@(cdr whole)))
+
+(defmacro classdef-stmt-1 (name inheritance suite &environment e)
   ;; todo: define .locals. containing class vars
   (multiple-value-bind (all-class-locals new-locals class-cumul-declared-globals)
       (classdef-stmt-suite-globals-locals suite (get-pydecl :lexically-declared-globals e))
@@ -874,10 +879,15 @@ LOCALS shares share tail structure with input arg locals."
 Note that in the latter case, functions miss their name and attribute dict, but should
 otherwise work well.")
 
-(defmacro [funcdef-stmt] (decorators
-			  fname (pos-args key-args *-arg **-arg)
-			  suite
-			  &environment e)
+(defmacro [funcdef-stmt] (&whole whole &rest args)
+  ;; Enable reuse by CPS version of macro
+  (declare (ignore args))
+  `(funcdef-stmt-1 ,@(cdr whole)))
+
+(defmacro funcdef-stmt-1 (decorators
+                          fname (pos-args key-args *-arg **-arg)
+                          suite
+                          &environment e)
   ;; The resulting function is returned.
   ;; 
   ;; If FNAME is a keyword symbol (like :lambda), then an anonymous
@@ -965,7 +975,7 @@ otherwise work well.")
 				     (load-time-value *the-none*))))))))))
 	  
 	  (when (keywordp fname)
-	    (return-from [funcdef-stmt] func-lambda))
+	    (return-from funcdef-stmt-1 func-lambda))
 	  
 	  (with-gensyms (undecorated-func)
 	    (let ((art-deco undecorated-func))
@@ -1289,7 +1299,7 @@ DETERMINE-BODY-GLOBALS
 "
               (with-pydecl
                   ((:context      :module)
-                   (:mod-globals-names ,(coerce (module-stmt-suite-globals suite) 'vector))
+                   #+(or)(:mod-globals-names ,(coerce (module-stmt-suite-globals suite) 'vector))
                    #+(or)(:mod-futures  :todo-parse-module-ast-future-imports)) ;; todo
                 
                 (let* ((*habitat* (or *habitat* (make-habitat :search-paths '("."))))
@@ -1569,7 +1579,7 @@ finally:
            ({Exception} (c)
              (setf exc nil)
              (unless (py-val->lisp-bool
-                      (py-apply exit (py-call (clpython.module.sys:|exc_info|))))
+                      (py-apply exit (py-call (find-symbol '|exc_info| :clpython.module.sys))))
                (error c))))
        (when exc
          (py-call exit *the-none* *the-none* *the-none*)))))

@@ -25,7 +25,7 @@
       :lexically-declared-globals ;; List of variable names declared global in an outer scope (also global in inner scopes).
       :lexically-visible-vars     ;; List of variable names that can be closed over (excludes globals).
       :mod-futures                ;; The features imported from the __future__ module.
-      :mod-globals-names          ;; Vector of variable names at the module level.
+      #+(or):mod-globals-names          ;; Vector of variable names at the module level.
       :safe-lex-visible-vars      ;; List of all variables guaranteed to be lexically visible and bound; subset of :LEX-VIS-VARS.
       
       ;; in development (?):
