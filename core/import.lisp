@@ -305,7 +305,7 @@ Returns the loaded module, or NIL on error."
 (defun directory-p (pathname)
   (check-type pathname pathname)
   #+allegro (excl:file-directory-p pathname)
-  #+lispworks (lispworks:file-directory-p path)
+  #+lispworks (lispworks:file-directory-p pathname)
   #+(or cmu sbcl) (null (pathname-type pathname))
   #-(or allegro cmu lispworks sbcl) (error "TODO: No DIRECTORY-P for this implementation."))
 
