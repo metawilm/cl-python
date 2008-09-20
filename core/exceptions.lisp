@@ -49,6 +49,7 @@
 (defparameter *exception-tree* ;; XXX CPython has explanation string for every exception
     `({SystemExit}
       {StopIteration}
+      {GeneratorExit}
       ({StandardError} {KeyboardInterrupt} 
 		       {ImportError}
 		       ({EnvironmentError} {IOError} 
