@@ -1401,7 +1401,7 @@ DETERMINE-BODY-GLOBALS
 
 (defvar *last-raised-exception* nil)
 
-(defun raise-stmt-1 (exc var tb)
+(defun raise-stmt-1 (exc &optional var tb)
   (when tb (warn "Traceback arg to RAISE ignored"))
   
   ;; ERROR does not support _classes_ as first condition argument; it
