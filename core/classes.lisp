@@ -2383,6 +2383,9 @@ But if RELATIVE-TO package name is given, result may contains dots."
   (vector-push-extend y x)
   *the-none*)
 
+(defmacro real-py-list.append (list item)
+  "For internal use, e.g. list comprehensions."
+  `(vector-push-extend ,item ,list))
 
 (def-py-method py-list.pop (x^ &optional index)
   "Remove and return item at index (default: last item)"
