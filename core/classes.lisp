@@ -2436,6 +2436,9 @@ But if RELATIVE-TO package name is given, result may contains dots."
 (defun make-py-list-from-vec (vec)
   vec)
 
+(defun make-py-list-from-tuple (tuple)
+  (make-py-list-from-list (if (eq tuple *the-empty-tuple*) () tuple)))
+
 ;; String (Lisp object: string)
 
 (def-proxy-class py-string)
