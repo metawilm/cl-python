@@ -977,33 +977,31 @@ otherwise work well.")
 	  (when (keywordp fname)
 	    (return-from funcdef-stmt-1 func-lambda))
 	  
-	  (with-gensyms (undecorated-func)
-	    (let ((art-deco undecorated-func))
-	      (dolist (x (reverse decorators))
-		(setf art-deco `([call-expr] ,x (,art-deco) () nil nil)))
-	      
-	      `(let ((,undecorated-func 
-                      ,(if *create-simple-lambdas-for-python-functions*
-                           func-lambda
-                         `(make-py-function :name ',fname
-                                            :context-name ',context-fname
-                                            :lambda ,func-lambda))))
-                 ([assign-stmt] ,art-deco (([identifier-expr] ,fname)))
-
-                 ;; Ugly special case:
-                 ;;  class C:
-                 ;;   def __new__(..):    <-- the __new__ method inside a class
-                 ;;      ...                  automatically becomes a 'static-method'
-                 ;; XXX check whether this works correctly when user does same explicitly
-                 ,@(when (and (eq (get-pydecl :context e) :class)
-                              (eq fname '{__new__}))
-                     `(([assign-stmt] 
-                        ([call-expr] ([identifier-expr] {staticmethod})
-                                     (([identifier-expr] ,fname)) nil nil nil)
-                        (([identifier-expr] ,fname)))))
-                            
-                 (record-source-file-loc ',context-fname :operator)
-                 ([identifier-expr] ,fname))))))))) ;; return the function
+          (let ((art-deco '.undecorated-func))
+            (dolist (x (reverse decorators))
+              (setf art-deco `(py-call ,x ,art-deco)))
+            
+            `(let* ((.undecorated-func 
+                     ,(if *create-simple-lambdas-for-python-functions*
+                          func-lambda
+                        `(make-py-function :name ',fname
+                                           :context-name ',context-fname
+                                           :lambda ,func-lambda)))
+                    (.decorated-func ,art-deco))
+               
+               ;; Ugly special case:
+               ;;  class C:
+               ;;   def __new__(..):    <-- the __new__ method inside a class
+               ;;      ...                  automatically becomes a 'static-method'
+               ;; XXX check whether this works correctly when user does same explicitly
+               ,@(when (and (eq (get-pydecl :context e) :class)
+                            (eq fname '{__new__}))
+                   `((setf .decorated-func (py-call (find-class 'py-static-method) .decorated-func))))
+               
+               (setf ([identifier-expr] ,fname) .decorated-func)
+               
+               (record-source-file-loc ',context-fname :operator)
+               .decorated-func))))))) ;; return the function
 
 
 (defmacro [generator-expr] (&whole whole item for-in/if-clauses)
