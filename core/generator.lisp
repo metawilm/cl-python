@@ -367,7 +367,7 @@
 			  ([suite-stmt]
 			   (([for-in-stmt] ,(second first-for) ([identifier-expr] ,first-source)
 					   ,iteration-stuff nil))))
-          ((,(third first-for)) nil nil nil))))))
+          (,(third first-for)) nil nil nil)))))
 
 ;;; Processes
 
