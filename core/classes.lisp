@@ -2436,6 +2436,8 @@ But if RELATIVE-TO package name is given, result may contains dots."
 (defun make-py-list-from-vec (vec)
   vec)
 
+(defvar *the-empty-tuple* (make-instance 'py-tuple :lisp-object nil))
+
 (defun make-py-list-from-tuple (tuple)
   (make-py-list-from-list (if (eq tuple *the-empty-tuple*) () tuple)))
 
@@ -2736,9 +2738,6 @@ But if RELATIVE-TO package name is given, result may contains dots."
 			  x))
 		       
 		       (t (error "invalid py-tuple.__new__ cls: ~A" cls)))))
-
-
-(defvar *the-empty-tuple* (make-instance 'py-tuple :lisp-object nil))
 
 (defun make-tuple-from-list (list)
   (or list *the-empty-tuple*))
@@ -3275,6 +3274,7 @@ finished; F will then not be called again."
 
   #+sbcl
   (:method ((x sb-pcl::condition-class) &rest args)
+	   (declare (ignore args))
            (assert (not *exceptions-are-python-objects*) ()
              "Should not come in (py-call <condition-type> ..) if ~A = T."
              '*exceptions-are-python-objects*)
@@ -3755,15 +3755,7 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
 	       (return-from py-cmp
 		 (if (string< (class-name x.class) (class-name y.class))
 		     -1
-		   1))
-      
-	       ;; Finally, we have either two instances of different non-number
-	       ;; classes, or two instances that are of incomparable numeric
-	       ;; types.
-	       (return-from py-cmp
-		 (cond ((eq x y)                   0)
-		       ((< (py-id x) (py-id y))   -1)
-		       (t                          1)))))))
+		   1))))))
 
 
 (def-comparison  [<]  py-<   (=  (the (integer -1 1) (py-cmp x y)) -1))
