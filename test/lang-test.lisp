@@ -231,7 +231,11 @@ class C():
   __metaclass__ = Meta
 
 assert len(x) == 1
-assert x[0] == C"))
+assert x[0] == C")
+    (run-no-error "
+class C:
+  a = 3
+  assert locals()['a'] == 3"))
 
 (defmethod test-lang ((kind (eql :comparison-expr)))
   ;; Ensure py-list.__eq__ can handle non-lists, etc.
@@ -347,7 +351,11 @@ def f():
     exec 'assert x == 3'
   g()
 f()")
-  )
+  #+(or) ;; Updating locals() is not allowed, so not a potential bug
+  (run-no-error "
+class C:
+  exec 'a = 3'
+assert C.a == 3"))
 
 (defmethod test-lang ((kind (eql :for-in-stmt)))
   (run-no-error "for i in []: 1/0")

@@ -517,7 +517,9 @@ Disabled by default, to not confuse the test suite.")
                                            (**-arg    `(py-iterate->lisp-list ,**-arg))
                                            (t         nil)))
                  (pos-args `(nconc (list ,@pos-args) ,(when *-arg `(py-iterate->lisp-list ,*-arg))))
-                 (locals-dict (if (get-pydecl :inside-function-p e) '(.locals.) '(create-module-globals-dict)))
+                 (locals-dict (if (eq (get-pydecl :context e) :module)
+				  '(create-module-globals-dict)
+				'(.locals.)))
                  (globals-dict '(create-module-globals-dict)))
                
              `(cond ,@(when (member '{locals} which)
@@ -656,22 +658,21 @@ Disabled by default, to not confuse the test suite.")
 		;; Need a nested LET, as +cls-namespace+ may not be set when the ASSIGN-STMT
 		;; below is executed, as otherwise nested classes don't work.
 		(let ((+cls-namespace+ (make-dict)))
-		  
-		  ;; First, run the statements in the body of the class
-		  ;; definition. This will fill +cls-namespace+ with the
-		  ;; class attributes and methods.
+                  ;; First, run the statements in the body of the class
+                  ;; definition. This will fill +cls-namespace+ with the
+                  ;; class attributes and methods.
 		  
                   ;; Note that the local class variables are not locally visible
                   ;; i.e. they don't extend ":lexically-visible-vars".
-                                    
-		  (with-pydecl ((:context :class)
-				(:context-stack ,new-context-stack)
-				(:lexically-declared-globals
-				 ,class-cumul-declared-globals))
-		    		    
-		    ,(if *mangle-private-variables-in-class*
-			(mangle-suite-private-variables cname suite)
-		       suite))
+		  (flet ((.locals. () +cls-namespace+))
+		    (with-pydecl ((:context :class)
+				  (:context-stack ,new-context-stack)
+				  (:lexically-declared-globals
+				   ,class-cumul-declared-globals))
+                      
+                      ,(if *mangle-private-variables-in-class*
+                           (mangle-suite-private-variables cname suite)
+                         suite)))
 		  
 		  +cls-namespace+)))
 	   
