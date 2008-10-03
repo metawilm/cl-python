@@ -2436,11 +2436,6 @@ But if RELATIVE-TO package name is given, result may contains dots."
 (defun make-py-list-from-vec (vec)
   vec)
 
-(defvar *the-empty-tuple* (make-instance 'py-tuple :lisp-object nil))
-
-(defun make-py-list-from-tuple (tuple)
-  (make-py-list-from-list (if (eq tuple *the-empty-tuple*) () tuple)))
-
 ;; String (Lisp object: string)
 
 (def-proxy-class py-string)
@@ -2738,6 +2733,11 @@ But if RELATIVE-TO package name is given, result may contains dots."
 			  x))
 		       
 		       (t (error "invalid py-tuple.__new__ cls: ~A" cls)))))
+
+(defvar *the-empty-tuple* (make-instance 'py-tuple :lisp-object nil))
+
+(defun make-py-list-from-tuple (tuple)
+  (make-py-list-from-list (if (eq tuple *the-empty-tuple*) () tuple)))
 
 (defun make-tuple-from-list (list)
   (or list *the-empty-tuple*))
