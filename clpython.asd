@@ -78,6 +78,7 @@
                                        (:file "re")
                                        (:file "sys")
                                        (:file "string")
+				       (:file "symbol")
                                        (:file "time")))))
 
 ;;; Application systems
