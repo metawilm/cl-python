@@ -60,6 +60,24 @@
     (test-equal 0.5d0 (ps ".5" nil))
     (test-equal #C(0.0 0.5d0) (ps "0.5j" nil))
     (test-equal #C(0.0 0.5d0) (ps ".5j" nil))
+
+    (assert (not (eq clpython.parser::+normal-float-representation-type+
+                     clpython.parser::+enormous-float-representation-type+))
+        () "Invalid float representation types: outside a FLOAT range an INTEGER should take over.")
+    (destructuring-bind (min-f max-f)
+        clpython.parser::+normal-float-range+
+      (assert (< min-f 0))
+      (assert (< (expt 10 3) max-f) () "Really small float range in this Lisp implementation?!")
+      (test-equal 1D3 (ps "1e3" nil)) ;; 1e3 is small enough to be a regular ..-FLOAT
+      (let* ((n-expt (1+ (floor (log max-f 10))))
+             (s (format nil "1E~A" n-expt)))
+        (test-error (ps s nil) :condition-type '{SyntaxError}) ;; "too large to represent as ..-FLOAT"
+        (test-equal (handler-bind (({SyntaxError} (lambda (c)
+                                                    (declare (ignore c))
+                                                    (test-true (find-restart 'continue))
+                                                    (invoke-restart (find-restart 'continue)))))
+                      (ps s nil))
+                    (expt 10 n-expt))))
     
     ;; suffix operations
     (test-equal '([attributeref-expr]

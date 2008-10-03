@@ -575,6 +575,16 @@ C must be either a character or NIL."
 ;; convert the result to a long). We ignore any difference between
 ;; regular and long integers.
 
+(defconstant +normal-float-representation-type+ 'double-float
+  "The Lisp type normally used for representing Python floats.")
+
+(defconstant +normal-float-range+ (list most-negative-double-float most-positive-double-float)
+  "Python float values in this range are represented by +NORMAL-FLOAT-REPRESENTATION-TYPE+.
+Values outside this range are represented by +ENORMOUS-FLOAT-REPRESENTATION-TYPE+.")
+
+(defconstant +enormous-float-representation-type+ 'integer
+  "The Lisp type used for representing Python float values outside +NORMAL-FLOAT-RANGE+.")
+
 (defun read-number (&optional (first-char (lex-read-char)))
   (assert (digit-char-p first-char 10))
   (flet ((read-int (base)
@@ -628,11 +638,20 @@ C must be either a character or NIL."
           ;; Exponent marker
           (case (lex-read-char :eof-error nil)
             ((nil) )
-            ((#\e #\E) (let ((expo-value (read-int 10)))
+            ((#\e #\E) (let ((expo-value (read-int 10))
+                             (primary res))
                          (setf has-exp t)
                          (setf res (* res (expt 10 expo-value)))
                          ;; CPython: 1e10 -> float, even though it's an int
-                         (setf res (coerce res 'double-float))))
+                         (if (<= (first +normal-float-range+) res (second +normal-float-range+))
+                             (setf res (coerce res +normal-float-representation-type+))
+                           (with-simple-restart (continue "Represent the value by an ~A instead. ~
+                                                           (Beware obscure bugs!)"
+                                                          (string-upcase +enormous-float-representation-type+))
+                             (raise-syntax-error "Literal Python float value `~Ae~A' falls outside the ~A ~
+                                                  range of this Lisp implementation (line ~A)."
+                                                 primary expo-value (string-upcase +normal-float-representation-type+)
+                                                 %lex-curr-line-no%)))))
             (t (lex-unread-char))))
           
         ;; CPython allows `j' (imaginary) for decimal, not for hex (SyntaxError) or octal
