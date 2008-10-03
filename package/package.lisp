@@ -139,9 +139,9 @@
   (:use )
   (:export "ArithmeticError" "AssertionError" "AttributeError" "DeprecationWarning"
 	   "EOFError" "EnvironmentError" "Exception" "FloatingPointError"
-	   "FutureWarning" "IOError" "ImportError" "IndentationError" "IndexError"
-	   "KeyError" "KeyboardInterrupt" "LookupError" "MemoryError" "NameError"
-	   "NotImplementedError" "OSError" "OverflowError" "OverflowWarning"
+	   "FutureWarning" "IOError" "ImportError" "ImportWarning" "IndentationError"
+           "IndexError" "KeyError" "KeyboardInterrupt" "LookupError" "MemoryError"
+           "NameError" "NotImplementedError" "OSError" "OverflowError" "OverflowWarning"
 	   "PendingDeprecationWarning" "ReferenceError" "RuntimeError"
 	   "RuntimeWarning" "StandardError" "StopIteration" "SyntaxError"
 	   "SyntaxWarning" "SystemError" "SystemExit" "TabError" "TypeError"

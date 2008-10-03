@@ -75,13 +75,14 @@
 		       {SystemError}
 		       {MemoryError} )
       
-      ({Warning} {UserWarning}
-		 {DeprecationWarning} 
-		 {PendingDeprecationWarning} 
-		 {SyntaxWarning} 
-		 {OverflowWarning} 
-		 {RuntimeWarning}   
-		 {FutureWarning} )))
+      ({Warning} {DeprecationWarning}
+		 {FutureWarning}
+                 {ImportWarning}
+		 {OverflowWarning}
+		 {PendingDeprecationWarning}
+		 {SyntaxWarning}
+		 {RuntimeWarning}
+		 {UserWarning} )))
 
 (defvar *exception-classes* ())
 
