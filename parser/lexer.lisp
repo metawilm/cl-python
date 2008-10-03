@@ -352,21 +352,6 @@ C must be either a character or NIL."
               (mapc #'lex-unread-char chs-seen)
               (return ch-correct)))
 
-(defvar *reserved-words-vector*
-    (loop with vec = (make-array 128 :initial-element nil)
-        with pkg = (find-package :clpython.ast.reserved)
-        for rw being each external-symbol in pkg
-        for rw.name = (symbol-name rw)
-        do (assert (>= (length rw.name) 2))
-           (let ((key (char-code (aref rw.name 0)))
-                 (val (list (aref rw.name 1)
-                            (length rw.name)
-                            rw.name
-                            rw)))
-             (push val (svref vec key)))
-        finally (return vec))
-  "Handy lookup table: indexed by first char; entries of the form (2nd char, length, string, symbol)")
-
 (defun read-identifier (first-char)
   "Returns the identifier (which might be a reserved word) as symbol."
   (declare (optimize speed))
