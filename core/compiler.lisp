@@ -665,6 +665,7 @@ Disabled by default, to not confuse the test suite.")
                   ;; Note that the local class variables are not locally visible
                   ;; i.e. they don't extend ":lexically-visible-vars".
 		  (flet ((.locals. () +cls-namespace+))
+                    (declare (ignorable #'.locals.))
 		    (with-pydecl ((:context :class)
 				  (:context-stack ,new-context-stack)
 				  (:lexically-declared-globals
