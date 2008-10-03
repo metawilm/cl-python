@@ -3511,7 +3511,8 @@ finished; F will then not be called again."
 	res
       nil)))
 
-(setf (gethash '**= *binary-iop-funcs-ht*) 'py-**=)
+(setf (gethash '[**=] *binary-iop-funcs-ht*) 'py-**=)
+(setf (gethash '[**=] *binary-iop->op-ht*) '[**])
 
 
 (defvar *unary-op-funcs-ht* (make-hash-table :test #'eq))
