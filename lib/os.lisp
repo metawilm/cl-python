@@ -13,9 +13,15 @@
 
 (defvar |name| "common lisp")
 (defvar |error| (find-class '{OSError}))
-(set-impl-status '(|name| |error|) t)
 
-(set-impl-status '(|path|) :todo)
+(defun |urandom| (n)
+  "Return string of N random bytes"
+  (let ((s (make-string n)))
+    (dotimes (i n)
+      (setf (aref s i) (code-char (random 256))))
+    s))
+
+(set-impl-status '(|name| |error| |urandom|) t)
 
 (do-external-symbols (s :clpython.module.os)
   (unless (clpython::impl-status s)
