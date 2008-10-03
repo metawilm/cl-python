@@ -159,3 +159,5 @@
 
   (set-impl-status '|version_info| t (format nil "Set to `~A'" |version_info|))
   (set-impl-status '|version| t (format nil "Set to `~A'" |version|)))
+
+(defvar |warnoptions| (clpython::make-py-list-from-list ()))

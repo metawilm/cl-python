@@ -97,6 +97,9 @@
            "punctuation" "whitespace" "printable")
   (:import-from :clpython.package #:defconstant-once))
 
+(defpackage :clpython.module.symbol
+  (:use :clpython :common-lisp))
+
 (defpackage :clpython.module.sys
   (:use :clpython :common-lisp)
   (:export #:|argv| #:|byteorder| #:|exc_info| #:|copyright|
@@ -110,7 +113,8 @@
 	   #:|maxunicode| #:|modules| #:|path| #:|platform|
 	   #:|prefix| #:|ps1| #:|ps2| #:|stdin| #:|stdout| #:|stderr|
 	   #:|__stdin__| #:|__stdout__| #:|__stderr__|
-	   #:|api_version| #:|version_info| #:|version| )
+	   #:|api_version| #:|version_info| #:|version|
+           #:|warnoptions|)
   (:import-from :clpython #:*try-except-currently-handled-exception*))
 
 (defpackage :clpython.module.time
