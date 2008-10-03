@@ -71,6 +71,7 @@
                           :serial t
                           :components ((:file "lsetup")
                                        (:file "array")
+                                       (:file "binascii")
                                        (:file "builtins")
                                        (:file "gc")
                                        (:file "math")

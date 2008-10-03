@@ -15,6 +15,10 @@
   (:shadow #:|array|)
   (:export #:|array|))
 
+(defpackage :clpython.module.binascii
+  (:use :clpython :common-lisp)
+  (:export #:|hexlify|))
+
 (defpackage :clpython.module.gc
   (:use :clpython :common-lisp)
   (:export #:|disable| )
