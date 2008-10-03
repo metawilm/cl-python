@@ -685,6 +685,10 @@
   (assert (functionp x))
   x)
 
+(def-py-method py-function.func_code :attribute (x)
+  "Read-only attribute: the underlying lambda. (In CPython the bytecode vector.)"
+  (py-function-lambda x))
+  
 (def-py-method py-function._dis :attribute (x)
   ;; CLPython-specific attribute, to ease debugging.
   ;;
