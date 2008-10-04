@@ -58,7 +58,6 @@ starts a new top-level statement. Uses an extra heuristic if *use-ast-return-stm
   ;;       return 42  (`return' at the end of function body)
   ;;
   ;;  2. def f():
-  ;;       ...
   ;;       if c:
   ;;          return X  (`return' at the end of every `if' clause (think `fact')
   ;;       else:
@@ -67,6 +66,10 @@ starts a new top-level statement. Uses an extra heuristic if *use-ast-return-stm
   ;;  3. def f():
   ;;        ...
   ;;        pass
+  ;;
+  ;;  4. def f():
+  ;;        ...
+  ;;        raise
   ;;
   ;; The heuristic fails if the user tries to define a generator in this way:
   ;;
@@ -97,10 +100,11 @@ starts a new top-level statement. Uses an extra heuristic if *use-ast-return-stm
                                     (and (loop for ic in ?if-clauses
                                              always (with-matching (ic (?cond ([suite-stmt] ?stmts)))
                                                       ([return-stmt-p] (car (last ?stmts)))))
-                                         ?else-clause ;; The `else' clause is always allowed.
+                                         ?else-clause ;; The `else' clause must be preesnt
                                          (with-matching (?else-clause ([suite-stmt] ?stmts))
                                            ([return-stmt-p] (car (last ?stmts)))))))
-                   ([pass-stmt] t)))))))
+                   ([pass-stmt] t) ;; Pattern 3
+                   ([raise-stmt] t))))))) ;; Pattern 4
     (etypecase ast
       ((or string number) t)
       (list (cond ((not (member (car ast) (mapcar #'car *multi-line-statements*)))
