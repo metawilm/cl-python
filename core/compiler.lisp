@@ -155,7 +155,7 @@ Disabled by default, to not confuse the test suite.")
 (defvar *current-module-name* +__main__-module-name+
   "The name of the module now being compiled; module.__name__ is set to it.")
 
-(defvar *current-module-path* ""
+(defvar *current-module-path* nil
   "The path of the Python file being compiled; saved in module's `filepath' slot.")
 
 
