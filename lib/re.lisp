@@ -31,11 +31,11 @@
 (def-py-method reg-exp.finditer (re string &optional start end)
   (error "todo"))
 
-(def-py-method reg-exp.sub (re repl string  &optional (count 0))
+(def-py-method reg-exp.sub (re replacement string  &optional (count 0))
   count
   (error "todo"))
 
-(def-py-method reg-exp.subn (re repl string  &optional (count 0))
+(def-py-method reg-exp.subn (re replacement string  &optional (count 0))
   count
   (error "todo"))
 
