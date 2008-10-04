@@ -96,7 +96,7 @@ As for case: both MODNAME's own name its upper-case variant are tried."
                          (find-package v))))
         (return-from lisp-package-as-py-module pkg)))))
 
-(defun find-py-file (name search-paths)
+(defun find-py-file (name search-paths &key must-be-package)
   "Returns pathnames of SRC and/or BINARY file found earliest.
 Returns (values KIND SRC-PATH BIN-PATH), where KIND one of :module, :package.
 Returns NIL if nothing found."
@@ -106,7 +106,8 @@ Returns NIL if nothing found."
       for pkg-src-path = (find-if #'probe-file (source-file-names :package name path))
       for pkg-bin-path = (find-if #'probe-file (list (compiled-file-name :package name path)))
 			 
-      if (or src-path bin-path)
+      if (and (not must-be-package)
+              (or src-path bin-path))
       return (values :module src-path bin-path)
       else if (or pkg-src-path pkg-bin-path)
       return (values :package pkg-src-path pkg-bin-path)))
@@ -183,6 +184,7 @@ Returns the loaded module, or NIL on error."
 		 (let ((*current-module-name* mod-name))
 		   (declare (special *current-module-name*))
 		   (unless (load filename :verbose *import-load-verbose*)
+                     ;; Might happen if loading fails and there is a restart that lets LOAD return NIL.
                      (return-from do-loading))))
                (unless module-function
                  (break "CLPython bug: module ~A did not call *module-function*" mod-name))
@@ -202,7 +204,7 @@ Returns the loaded module, or NIL on error."
                    (assert success) ;; Second value is sanity check
                    new-module)
           (unless success
-            (warn "Loading of module \"~A\" was aborted.~@[~:@_Module source: ~A~]~@[~:@_Imported by: ~A~]"
+            (warn "Loading of module `~A' was aborted.~@[~:@_Module source: ~A~]~@[~:@_Imported by: ~A~]"
                   mod-name src-file within-mod-path)
             (remove-loaded-module mod-name habitat)))))))
 
@@ -233,7 +235,9 @@ Returns the loaded module, or NIL on error."
 
 (defun py-import (mod-name-as-list 
 		  &rest options
-		  &key (habitat (or *habitat* (error "PY-IMPORT called without habitat")))
+		  &key must-be-package
+                       (outer-mod-name-as-list mod-name-as-list)
+                       (habitat (or *habitat* (error "PY-IMPORT called without habitat")))
 		       (force-reload *import-force-reload*)
                        within-mod-path
 		       (search-paths (when habitat (habitat-search-paths habitat))))
@@ -272,11 +276,14 @@ Returns the loaded module, or NIL on error."
     (when (> (length mod-name-as-list) 1)
       (let (success)
         (unwind-protect
-            (setf success (apply #'py-import (butlast mod-name-as-list) options))
+            (setf success (apply #'py-import (butlast mod-name-as-list)
+                                 :must-be-package t
+                                 :outer-mod-name-as-list outer-mod-name-as-list
+                                 options))
           (unless success
             ;; PY-IMPORT did not import successfully, and we are unwinding.
             ;; No need for an additional ImportError.
-            (warn "Could not import attribute `~A' as importing `~A' failed.~@[~:@_Import attempted by: ~A~]"
+            (warn "Could not import module `~A' as importing package `~A' failed.~@[~:@_Import attempted by: ~A~]"
                   dotted-name (module-dotted-name (butlast mod-name-as-list))
                   within-mod-path))))
       (setf search-paths (list (parent-package-local-search-path mod-name-as-list))))
@@ -286,11 +293,14 @@ Returns the loaded module, or NIL on error."
         (let ((find-paths search-paths))
           (when within-mod-path
             (push within-mod-path find-paths))
-          (find-py-file just-mod-name find-paths))
+          (find-py-file just-mod-name find-paths :must-be-package must-be-package))
       (unless kind
         (py-raise '{ImportError}
-                  "Could not find module `~A'.~:@_Search paths tried: ~{~S~^, ~}~@[~:@_Imported by: ~A~]"
-                  just-mod-name search-paths within-mod-path))
+                  "Could not find ~A `~A'.~:@_Search paths tried: ~{~S~^, ~}~@[~:@_Import of `~A' attempted by: ~A~]"
+                  (if must-be-package "package" "module/package")
+                  just-mod-name search-paths
+                  (when within-mod-path (module-dotted-name outer-mod-name-as-list))
+                  within-mod-path))
       (assert (member kind '(:module :package)))
       (assert (or src-file bin-file))
 
