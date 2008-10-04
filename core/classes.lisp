@@ -3250,31 +3250,43 @@ finished; F will then not be called again."
   `(apply #'py-call ,f ,@(butlast args) (py-iterate->lisp-list ,(car (last args)))))
 
 (defgeneric py-call (f &rest args)
-
+  ;; XXX Speed up slot value lookup by using
+  ;; MOP:SLOT-DEFINITION-LOCATION, MOP:STANDARD-INSTANCE-ACCESS.
   (:method ((f null) &rest args)
-           (declare (ignore args))
+           (declare (ignore args) (dynamic-extent args))
 	   (error "PY-CALL of NIL"))
   
   (:method ((f t) &rest args)
+           (declare (dynamic-extent args)
+                    (optimize (speed 3) (safety 0) (debug 0)))
 	   (let ((__call__ (recursive-class-lookup-and-bind f '{__call__})))
 	     (if __call__
-		 (apply #'py-call __call__ args)
+		 (apply 'py-call __call__ args)
 	       (error "Don't know how to call: ~S (args: ~A)" f args))))
 
   ;; XXX For bound/unbound/static method: need to check if object is
   ;; not instance of (user-defined) subclass?
   
   (:method ((f py-bound-method) &rest args)
-	   (apply #'py-bound-method.__call__ f args))
+           (declare (dynamic-extent args)
+                    (optimize (speed 3) (safety 0) (debug 0)))
+	   (apply 'py-bound-method.__call__ f args))
   
   (:method ((f py-unbound-method) &rest args)
-	   (apply #'py-unbound-method.__call__ f args))
+           (declare (dynamic-extent args)
+                    (optimize (speed 3) (safety 0) (debug 0)))
+	   (apply 'py-unbound-method.__call__ f args))
   
   (:method ((f py-static-method) &rest args)
-	   (apply #'py-static-method.__call__ f args))
+           (declare (dynamic-extent args)
+                    (optimize (speed 3) (safety 0) (debug 0)))
+	   (apply 'py-static-method.__call__ f args))
   
   ;; Avoid infinite recursion:
-  (:method ((f function) &rest args) (apply f args))
+  (:method ((f function) &rest args)
+           (declare (dynamic-extent args)
+                    (optimize (speed 3) (safety 0) (debug 0)))
+           (apply f args))
 
   #+sbcl
   (:method ((x sb-pcl::condition-class) &rest args)
