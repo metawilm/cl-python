@@ -102,7 +102,7 @@ POS-ARGS is any iterable object; KW-DICT must be of type PY-DICT."
       (py-raise '{TypeError}
 		"Built-in function chr() should be given an integer in ~
                  range 0..255 (got: ~A)" x))
-    (string (code-char i))))
+    (svref #.(coerce (loop for i from 0 to 255 collect (string (code-char i))) 'simple-vector) i)))
 
 (defun {cmp} (x y)
   (py-cmp x y))
