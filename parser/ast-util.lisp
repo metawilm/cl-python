@@ -33,10 +33,15 @@
           'string<)
   "List of all ..-STMT and ..-EXPR symbols that can occur in ASTs.")
 
-(defvar *multi-line-statements* '([classdef-stmt] [for-in-stmt] [funcdef-stmt]
-                                  [if-stmt] [try-except-stmt] [try-finally-stmt]
-                                  [while-stmt] [with-stmt])
-  "Statements that can occupy several lines.")
+(defvar *multi-line-statements* '(([classdef-stmt] "class")
+                                  ([for-in-stmt]   "for")
+                                  ([funcdef-stmt]  "def")
+                                  ([if-stmt]       "if")
+                                  ([try-except-stmt]  "try")
+                                  ([try-finally-stmt] "try")
+                                  ([while-stmt]    "while")
+                                  ([with-stmt]     "with"))
+  "Statements that can occupy several lines, with their start token.")
 
 (defvar *use-ast-return-stmt-heuristic* t
   "Whether MODULE-STMT-FINISHED-P should apply a heuristic that is correct
@@ -46,16 +51,22 @@ about 99% of the cases.")
   "Determine if the (interactively entered) AST is complete, in that the next line in the input ~
 starts a new top-level statement. Uses an extra heuristic if *use-ast-return-stmt-heuristic*."
 
-  ;; The RETURN-STMT-HEURISTIC recognizes two common function patterns:
+  ;; This heuristic recognizes the following common function patterns:
   ;;
   ;;  1. def f():
+  ;;       ...
   ;;       return 42  (`return' at the end of function body)
   ;;
   ;;  2. def f():
+  ;;       ...
   ;;       if c:
   ;;          return X  (`return' at the end of every `if' clause (think `fact')
   ;;       else:
   ;;          return Y
+  ;;
+  ;;  3. def f():
+  ;;        ...
+  ;;        pass
   ;;
   ;; The heuristic fails if the user tries to define a generator in this way:
   ;;
@@ -81,17 +92,18 @@ starts a new top-level statement. Uses an extra heuristic if *use-ast-return-stm
              (let ((last-stmt (car (last ?stmts))))
                (when (listp last-stmt)
                  (case (car last-stmt)
-                   ([return-stmt] (return-from funcdef-complete-p t)) ;; Pattern 1.
+                   ([return-stmt] t) ;; Pattern 1.
                    ([if-stmt]     (with-matching (last-stmt ([if-stmt] ?if-clauses ?else-clause)) ;; Pattern 2.
                                     (and (loop for ic in ?if-clauses
                                              always (with-matching (ic (?cond ([suite-stmt] ?stmts)))
                                                       ([return-stmt-p] (car (last ?stmts)))))
                                          ?else-clause ;; The `else' clause is always allowed.
                                          (with-matching (?else-clause ([suite-stmt] ?stmts))
-                                           ([return-stmt-p] (car (last ?stmts)))))))))))))
+                                           ([return-stmt-p] (car (last ?stmts)))))))
+                   ([pass-stmt] t)))))))
     (etypecase ast
       ((or string number) t)
-      (list (cond ((not (member (car ast) *multi-line-statements*))
+      (list (cond ((not (member (car ast) (mapcar #'car *multi-line-statements*)))
                    t)
                   ((and *use-ast-return-stmt-heuristic* ([funcdef-stmt-p] ast))
                    (funcdef-complete-p ast))

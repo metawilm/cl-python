@@ -290,8 +290,10 @@ KIND can be :ptime, :time, :space, :pspace or NIL."
                           (format t ";; Lisp parse failed:  ~A~%" error))
                         nil)
                        
-		       ((member lisp-form '(nil def class for while if try))
-                        ;; Multi-line Python form
+		       ((or (null lisp-form)
+                            (member lisp-form (mapcar #'second clpython.parser::*multi-line-statements*)
+                                    :test 'string=))
+                        ;; Start of a multi-line Python form
                         nil)
                        
 		       ((and (symbolp lisp-form)
