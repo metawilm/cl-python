@@ -263,14 +263,11 @@ Returns the loaded module, or NIL on error."
         (return-from py-import m)))
     
     (unless search-paths
-      ;; Use current directory and `sys.path' as search paths
-      (setf search-paths '("."))
+      ;; Use current directory and `sys.path' as search paths (in that order)
       ;; XXX sys.path is now shared between all habitats; should perhaps be habitat-specific
-      (when (find-package :clpython.module.sys)
-        (setf search-paths (nconc (reverse (py-iterate->lisp-list 
-                                            (symbol-value
-                                             (find-symbol "path" :clpython.module.sys))))
-                                  search-paths))))
+      (setf search-paths (py-iterate->lisp-list 
+                          (symbol-value (find-symbol "path" :clpython.module.sys))))
+      (push "." search-paths))
     
     ;; In case of a dotted import ("import a.b"), search only in parent ("a") directory.
     (when (> (length mod-name-as-list) 1)
