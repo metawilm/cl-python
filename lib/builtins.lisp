@@ -252,9 +252,18 @@ POS-ARGS is any iterable object; KW-DICT must be of type PY-DICT."
   (declare (ignore args))
   (error "todo: py-input"))
 
+(defvar *intern-warned* nil)
+(defvar *intern-hashtable* nil)
+
 (defun {intern} (x)
-  (declare (ignore x))
-  (error "Function 'intern' is deprecated; it is not implemented."))
+  (unless *intern-warned*
+    (warn "Function 'intern' is deprecated.")
+    (setf *intern-warned* t))
+  (unless *intern-hashtable*
+    (setf *intern-hashtable* (make-hash-table :test 'equal)))
+  (or (gethash x *intern-hashtable*)
+      (setf (gethash x *intern-hashtable*) x)))
+  
 
 (defun {isinstance} (x cls)
   (let ((cls (deproxy cls)))
