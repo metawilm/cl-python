@@ -76,6 +76,7 @@
                                        (:file "gc")
                                        (:file "math")
                                        (:file "os")
+                                       (:file "_random")
                                        (:file "re")
                                        (:file "sys")
                                        (:file "string")

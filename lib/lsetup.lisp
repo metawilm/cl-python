@@ -81,6 +81,10 @@
            #:|stat| #:|stat_float_times| #:|statvfs| #:|symlink| #:|tempnam| #:|tmpnam|
            #:|TMP_MAX| #:|unlink| #:|utime| #:|walk| ))
 
+(defpackage :clpython.module._random
+  (:use :clpython :common-lisp)
+  (:export #:|Random|))
+
 (defpackage :clpython.module.re
   (:use :clpython :common-lisp)
   (:export #:|compile| #:|search| #:|match| #:|split| #:|findall|
