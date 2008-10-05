@@ -291,8 +291,9 @@ KIND can be :ptime, :time, :space, :pspace or NIL."
                         nil)
                        
 		       ((or (null lisp-form)
-                            (member lisp-form (mapcar #'second clpython.parser::*multi-line-statements*)
-                                    :test 'string=))
+                            (and (symbolp lisp-form)
+                                 (member lisp-form (mapcar #'second clpython.parser::*multi-line-statements*)
+                                         :test 'string=)))
                         ;; Start of a multi-line Python form
                         nil)
                        
