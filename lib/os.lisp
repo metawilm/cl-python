@@ -21,7 +21,10 @@
       (setf (aref s i) (code-char (random 256))))
     s))
 
-(set-impl-status '(|name| |error| |urandom|) t)
+#+allegro
+(defvar |environ| (clpython::make-dict-from-symbol-alist (excl.osi:environment)))
+
+(set-impl-status '(|name| |error| |urandom| #+allegro |environ|) t)
 
 (do-external-symbols (s :clpython.module.os)
   (unless (clpython::impl-status s)
