@@ -1047,12 +1047,12 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 
 ;; Ellipsis
 
-(defclass py-ellipsis (py-core-type) () (:metaclass py-core-type))
+(defclass py-ellipsis (py-core-object) () (:metaclass py-core-type))
 (defvar *the-ellipsis* (make-instance 'py-ellipsis))
 
 ;; NotImlemented
 
-(defclass py-notimplemented (py-core-type) () (:metaclass py-core-type))
+(defclass py-notimplemented (py-core-object) () (:metaclass py-core-type))
 (defvar *the-notimplemented* (make-instance 'py-notimplemented))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -1294,6 +1294,7 @@ but the latter two classes are not in CPython.")
   "Whether to show class names without `py-' prefix: `int' instead of `py-int' etc.")
 
 (def-py-method py-type.__repr__ (x) ;; XXX deproxy not needed
+  (check-type x class)
   (let ((name (if *class-display-without-py-prefix*
                   (let ((n (symbol-name (class-name x))))
                     (if (and (> (length n) 3)
