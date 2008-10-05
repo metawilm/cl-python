@@ -430,7 +430,11 @@ assert f(x) == 3")
 def f(x, **kw): return x, kw
 assert f(1,a=3) == (1, {'a': 3})")
   ;; todo: check evaluation order of decorators vs. keyword argument default values.
-  )
+  (run-no-error "
+def f():
+  pass
+f.__name__ = 'g'
+assert f.__name__ == 'g'" :known-failure t :fail-info "Function name attrbute not writable yet"))
 
 
 (defmethod test-lang ((kind (eql :generator-expr)))
