@@ -266,10 +266,6 @@ On EOF returns: eof-token, eof-token."
 
 ;; Identifier
 
-(deftype char-code-type ()
-  "CHAR-CODE return value type"
-  '(integer 0 #.char-code-limit))
-
 (defun identifier-char1-p (c)
   "Is C a character with which an identifier can start?
 C must be either a character or NIL."

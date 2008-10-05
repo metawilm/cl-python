@@ -99,7 +99,7 @@
   (:export "ascii_letters" "ascii_lowercase" "ascii_uppercase" "digits"
            "hexdigits" "octdigits" "lowercase" "uppercase" "letters"
            "punctuation" "whitespace" "printable")
-  (:import-from :clpython.package #:defconstant-once))
+  (:import-from :clpython.package #:defconstant-once +max-char-code+))
 
 (defpackage :clpython.module.symbol
   (:use :clpython :common-lisp))

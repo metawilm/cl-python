@@ -11,34 +11,43 @@
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (defun char-range (from to)
-    (declare (optimize (speed 3)))
-    (let ((f (lambda (ch) (<= (the fixnum (char-code from))
-                              (the fixnum (char-code ch))
-                              (the fixnum (char-code to))))))
-      (declare (dynamic-extent f))
-      (chars-satisfying f)))
+    "Bounds are inclusive."
+    (check-type from character)
+    (check-type to character)
+    (let* ((min (char-code from))
+           (max (char-code to))
+           (arr (make-array (1+ (- max min)) :element-type 'character)))
+      (loop for i from min to max
+          for arr-i from 0
+          do (setf (schar arr arr-i) (code-char i)))
+      arr))
   
   (defun chars-satisfying (pred)
-    (declare (optimize (speed 3)))
     ;; Allegro does stack allocation if size is a literal number, but not if
     ;; it is a constant number; therefore #. of char-code-limit. Also,
     ;; stack-allocated bit vectors can't have an initializer.
-    (let ((bit-arr (make-array #.char-code-limit :element-type 'bit)))
+    (let ((bit-arr (make-array +max-char-code+
+                               :element-type 'bit
+                               :initial-element 0)))
       (declare (dynamic-extent bit-arr))
-      (do ((i (1- char-code-limit) (1- i)))
-          ((< i 0))
-        (declare (fixnum i))
-        (setf (sbit bit-arr i)
-          (if (funcall pred (code-char i)) 1 0)))
-      (let* ((num-chars (loop for i across bit-arr sum i))
+      (let* ((num-chars 
+              (do* ((i (1- (1- +max-char-code+)) (1- i))
+                    (ch (code-char i) (code-char i))
+                    (num-chars 0))
+                  ((< i 0) num-chars)
+                #+(or)(declare (type (integer 0 (#.char-code-limit)) i)
+                               fixnum num-chars)
+                (when (and ch ;; CHAR-CODE-LIMIT could be > actual num chars
+                           (funcall pred (code-char i)))
+                  (setf (sbit bit-arr i) 1)
+                  (incf num-chars))))
              (char-arr (make-array num-chars :element-type 'character)))
-        (declare (fixnum num-chars))
-        (loop for i fixnum from 0 below char-code-limit
-            with ci fixnum = 0
+        (loop for i fixnum from 0
+            with res-i fixnum = 0
             when (= (sbit bit-arr i) 1)
-            do (setf (schar char-arr ci) (code-char i))
-               (incf ci)
-               (when (= ci num-chars)
+            do (setf (schar char-arr res-i) (code-char i))
+               (incf res-i)
+               (when (= res-i num-chars)
                  (return)))
         char-arr))))
 
@@ -51,7 +60,7 @@
 
 (defconstant-once |digits| #.(char-range #\0 #\9))
 (defconstant-once |hexdigits| #.(concatenate 'string
-                                  (char-range #\0 #\9)
+                                  |digits|
                                   (char-range #\a #\f)
                                   (char-range #\A #\F)))
 (defconstant-once |octdigits| #.(char-range #\0 #\7))
@@ -64,8 +73,10 @@
                  "Note that values differ from CPython values")
 
 (defconstant-once |punctuation| "!\"#$%&\'()*+,-./:;<=>?@[\\]^_`{|}~")
-(defconstant-once |whitespace| #.(coerce '(#\Space #\Tab #\Newline #\Return #\Page) 'string))
-(defconstant-once |printable| (concatenate 'string |digits| |letters| |punctuation| |whitespace|))
+(defconstant-once |whitespace|
+    #.(coerce '(#\Space #\Tab #\Newline #\Return #\Page) 'string))
+(defconstant-once |printable|
+    (concatenate 'string |digits| |letters| |punctuation| |whitespace|))
 
 (set-impl-status '|punctuation| t "Value copied from CPython.")
 (set-impl-status '(|printable| |whitespace|) t)

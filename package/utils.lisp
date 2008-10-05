@@ -107,3 +107,17 @@ http://groups.google.nl/group/comp.lang.lisp/msg/2520fe9bc7749328?dmode=source"
   `(eval-when (:compile-toplevel :load-toplevel :execute)
      (unless (boundp ',name)
        (defconstant ,name ,@args))))
+
+
+(defconstant-once +max-char-code+
+    ;; On Allegro CHAR-CODE-LIMIT is the largest value across all
+    ;; implementations, while EXCL:REAL-CHAR-CODE-LIMIT. is "a better estimate".
+    ;; http://www.franz.com/support/documentation/8.1/doc/variables/excl/real-char-code-limit.htm
+    #+allegro (progn (assert (<= excl:real-char-code-limit char-code-limit))
+                     excl:real-char-code-limit)
+    #-allegro char-code-limit
+    "Like CHAR-CODE-LIMIT, but possible lower.")
+
+(deftype char-code-type ()
+  "CHAR-CODE return value type"
+  '(integer 0 (#.+max-char-code+)))
