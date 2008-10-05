@@ -1612,6 +1612,7 @@ But if RELATIVE-TO package name is given, result may contains dots."
                       (symbol-value sym))
                      ((fboundp sym)
                       (symbol-function sym))
+                     ((find-class sym nil))
                      (t nil))))
     ;(declare (dynamic-extent todo-error n/a-error unbound-error no-attr-error))
     (multiple-value-bind (sym kind)
