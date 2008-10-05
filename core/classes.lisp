@@ -1823,11 +1823,11 @@ But if RELATIVE-TO package name is given, result may contains dots."
 
 (def-proxy-class py-int (py-real))
 
-(def-py-method py-int.__new__ :static (cls &optional (arg 0) (base 0))
+(def-py-method py-int.__new__ :static (cls &optional (arg 0) (base 0 base-provided))
   ;; If base = 0, then derive base from literal ARG, or use base = 10.
-  
   (flet ((invalid-arg-error (a)
-	   (py-raise '{TypeError} "Invalid arg for int.__new__: ~S" a)))
+	   (py-raise '{TypeError} "Invalid arg for int.__new__: ~S ~@[with base ~S~]."
+                     a (when base-provided base))))
     
     (let ((val (typecase arg
 		 (integer arg)
@@ -1850,18 +1850,21 @@ But if RELATIVE-TO package name is given, result may contains dots."
 			   (cond ((and (>= (length arg) 2)
 				       (char= (aref arg 0) #\0)
 				       (member (aref arg 1) '(#\x #\X) :test #'char=))
-				  (read-arg (subseq arg 2) 16))
+                                  (when (and base-provided (/= base 16))
+                                    (invalid-arg-error arg))
+                                  (read-arg (subseq arg 2) 16))
 			  
 				 ((and (= (length arg) 1))
-				  (or (digit-char-p (aref arg 0))
-				      (invalid-arg-error arg)))
+				  (or (digit-char-p (aref arg 0) 10)
+                                      (invalid-arg-error arg)))
 			  
 				 ((and (>= (length arg) 1)
-				       (char= (aref arg 0) #\0))
+				       (char= (aref arg 0) #\0)
+                                       (zerop base))
 				  (read-arg (subseq arg 1) 8))
 				 
 				 ((= base 0)
-				  (read-arg arg))
+				  (read-arg arg 10))
 				 
 				 ((/= base 0)
 				  (check-type base (integer 2 36))

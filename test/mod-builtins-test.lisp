@@ -13,7 +13,7 @@
 
 (defun run-builtin-test ()
   (with-subtest (:name "CLPython-Builtins")
-    (dolist (x '(:globals :hash :range))
+    (dolist (x '(:globals :hash :range :int))
       (test-builtin x))))
 
 (defgeneric test-builtin (kind))
@@ -54,3 +54,13 @@ assert len(hashes) > 1000"
   (run-no-error "assert range(1,3) == [1,2]")
   (run-no-error "assert range(1,10,2) == [1,3,5,7,9]")
   (run-no-error "assert range(10,1,-2) == [10,8,6,4,2]"))
+
+(defmethod test-builtin ((x (eql :int)))
+  (run-no-error "assert int(3) == 3")
+  (run-no-error "assert int('3') == 3")
+  (run-no-error "assert int('03') == 3")
+  (run-no-error "assert int('09', 10) == 9")
+  (run-no-error "assert int('09', 16) == 9")
+  (run-no-error "assert (2 == 2 == 2)" :known-failure t :fail-info "x == y == z compiled incorectly")
+  (run-no-error "assert 2 == 2 == 2" :known-failure t :fail-info "x == y == z compiled incorectly")
+  (run-no-error "assert int('0FF', 16) == 0xFF == 255" :known-failure t :fail-info "x == y == z compiled incorectly"))
