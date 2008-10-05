@@ -659,11 +659,8 @@
   (py-lisp-function.__get__ func inst cls))
 
 (def-py-method py-function.__repr__ (func)
-  (if (typep func 'py-function)
-      (with-output-to-string (s)
-        (print-object func s))
-    (with-output-to-string (s)
-      (format s "function ~A" (py-function-name func)))))
+  (with-output-to-string (s)
+    (print-object func s)))
 
 (defmethod print-object ((x py-function) stream)
   (print-unreadable-object (x stream :identity t)
@@ -713,6 +710,22 @@
 
 (def-py-method py-function.__call__ (func &rest args)
   (apply func args))
+
+(defun function-arglist (f)
+  (check-type f function)
+  #+allegro (excl:arglist f)
+  #-allegro nil)
+
+(def-py-method py-function.__doc__ :attribute (func^)
+  (let ((fname (py-function-name func))
+        (arglist (function-arglist func))
+        (documentation (documentation func 'function)))
+    (with-output-to-string (s)
+      (when fname (write-string fname s))
+      (when arglist (format s "~A" arglist))
+      (when (and documentation (or fname arglist))
+        (terpri s))
+      (when documentation (write-string documentation s)))))
 
 ;; Enumerate (core object)
 
