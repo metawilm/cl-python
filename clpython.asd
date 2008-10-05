@@ -120,10 +120,11 @@
 (defmethod asdf:perform :after ((op asdf:load-op) (c (eql (asdf:find-system :clpython))))
   (unless *shown-clpython-usage*
     (terpri)
-    (format t "CLPython quick start:~%")
-    (format t "  Run a string of Python code: (~S \"for i in range(4): print i\")~%" (find-symbol (string '#:run) :clpython))
-    (format t "  Run a Python file:           (~S #p\"~~/example/foo.py\")~%" (find-symbol (string '#:run) :clpython))
-    (format t "  Start the Python repl:       (~S)~%~%" (find-symbol (string '#:repl) :clpython.app.repl))
+    (format t "CLPython quick start guide:~%")
+    (format t "  Run a string of Python code:           (~S \"for i in range(4): print i\")~%" (find-symbol (string '#:run) :clpython))
+    (format t "  Run a Python file:                     (~S #p\"~~/example/foo.py\")~%" (find-symbol (string '#:run) :clpython))
+    (format t "  Start the Python \"interpreter\" (REPL): (~S)~%" (find-symbol (string '#:repl) :clpython.app.repl))
+    (format t "  Run the test suite:                    ~S~%~%" '(asdf:operate 'asdf:test-op :clpython))
     (setf *shown-clpython-usage* t)))
 
 
