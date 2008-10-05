@@ -16,8 +16,9 @@
 
 (defun def-builtin-types ()
   (loop for (sym cls-name) in
-	'(({basestring}   py-string       )
+	`(({basestring}   py-string       )
 	  ({bool}         py-bool         )
+          ({buffer}       ,*the-notimplemented*)
 	  ({classmethod}  py-class-method )
 	  ({complex}      py-complex      )
 	  ({dict}         py-dict         )
@@ -38,7 +39,9 @@
 	  ({type}         py-type         )
 	  ({unicode}      py-string       )
 	  ({xrange}       py-xrange       ))
-      do (setf (symbol-value sym) (find-class cls-name))))
+      do (setf (symbol-value sym) (if (eq cls-name *the-notimplemented*)
+                                      *the-notimplemented*
+                                    (find-class cls-name)))))
 
 (def-builtin-types)
 
