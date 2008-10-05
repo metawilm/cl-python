@@ -83,7 +83,8 @@
 
 (defpackage :clpython.module._random
   (:use :clpython :common-lisp)
-  (:export #:|Random|))
+  (:export #:|Random|)
+  (:import-from :clpython #:def-py-method))
 
 (defpackage :clpython.module.re
   (:use :clpython :common-lisp)
