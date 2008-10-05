@@ -10,8 +10,6 @@
 (in-package :clpython)
 (in-syntax *ast-user-readtable*)
 
-(declaim (optimize (debug 3)))
-
 ;;; Python compiler
 
 ;; Translates a Python module AST into a Lisp function.
