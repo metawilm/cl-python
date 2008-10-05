@@ -129,6 +129,8 @@ KIND can be :ptime, :time, :space, :pspace or NIL."
     ((nil)   (funcall f))))
 
 (defun repl ()
+  (format t "[CLPython -- type `:q' to quit, `:help' for help]~%")
+  (clpython::maybe-warn-set-search-paths nil)
   (with-repl-toplevel-aliases
       (clpython::with-python-compiler-style-warnings
           (with-ast-user-readtable ()
@@ -154,7 +156,7 @@ KIND can be :ptime, :time, :space, :pspace or NIL."
   (values))
   
 (defun repl-1 ()
-  (let* ((pkg (make-package (gensym "py-repl-") :use '(:common-lisp :clpython)))
+  (let* ((pkg (make-package (gensym "py-repl-") :use '(:common-lisp)))
          (mgh (clpython::make-pkg-mgh pkg "__main__"))
          (clpython::*habitat* (clpython::make-habitat))
          (*truncation-explain* t)
@@ -324,71 +326,69 @@ KIND can be :ptime, :time, :space, :pspace or NIL."
                  (when ch
                    (prog1 t (unread-char ch))))))
       
-      (loop
-	  initially (format t "[CLPython -- type `:q' to quit, `:help' for help]~%")
-	  do (loop 
-	       (with-simple-restart (return-python-toplevel
-                                     (concatenate 'string "Return to Python top level" #+allegro " ~A.")
-                                     #+allegro (abbrev-for-restart 'return-python-toplevel "(:~A)"))
-		 (setf acc ())
-		 (loop 
-		   (locally (declare (special *stdout-softspace*))
-		     (setf *stdout-softspace* (py-bool nil)))
-                   
-                   (unless #+allegro (input-available-p)
-                           #-allegro nil
-                           ;; When copy-pasting multiple lines of Python source code into the REPL,
-                           ;; prevent several prompts being printed below the copied code.
-                           (format t (nth (if acc 1 0) *prompts*))
-                           (force-output *standard-output*)) ;; stream T would mean *terminal-io*
+      (loop 
+        (with-simple-restart (return-python-toplevel
+                              (concatenate 'string "Return to Python top level" #+allegro " ~A.")
+                              #+allegro (abbrev-for-restart 'return-python-toplevel "(:~A)"))
+          (setf acc ())
+          (loop 
+            (locally (declare (special *stdout-softspace*))
+              (setf *stdout-softspace* (py-bool nil)))
+            
+            (unless #+allegro (input-available-p)
+                    #-allegro nil
+                    ;; When copy-pasting multiple lines of Python source code into the REPL,
+                    ;; prevent several prompts being printed below the copied code.
+                    (format t (nth (if acc 1 0) *prompts*))
+                    (force-output *standard-output*)) ;; stream T would mean *terminal-io*
 
-		   (let ((x (read-line)))
-		     (cond
-                      ((and (> (length x) 0)
-			    (char= (aref x 0) #\:))
-		       (multiple-value-bind (cmd ix)
-			   (read-from-string (string-downcase x))
-			 (declare (ignore ix))
-			 (case cmd
-			   (:help
-                            (print-cmds))
-			   (:q
-                            (return-from repl-1 (values)))
-                           ((:time :ptime :space :pspace)
-                            (if (eq *repl-prof* cmd)
-                                (progn (setf *repl-prof* nil)
-                                       (format t ";; Stopped profiling.~%"))
-                              (progn (setf *repl-prof* cmd)
-                                     (format t ";; Set profiling to ~A.~%" cmd))))
-			   (t
-                            (warn "Unknown command: ~S" cmd)))))
-		      
-		      ((string= x "")
-                       (let ((total (apply #'concatenate 'string (nreverse acc))))
-			 (setf acc ())
-			 (loop
-			   (restart-case
-                               (progn (or (eq t (handle-as-python-code total :print-error t :ast-finished t))
-                                          (handle-as-lisp-code total :print-error t))
-                                      (return))
-			     (try-parse-again ()
-				 :report "Parse string again into AST")))))
-		      
-                      ((and (> (length x) 0)
-                            (char= (aref x 0) #\#))
-                       ;; skip comment line
-                       )
-                      
-		      (t (push (concatenate 'string x (string #\Newline)) acc)
-			 (let* ((total (apply #'concatenate 'string (reverse acc))))
-                           (ecase (handle-as-python-code total)
-                             ((t) ) ;; handled)
-                             ((nil) (handle-as-lisp-code total))
-                             (:syntax-error (unless (handle-as-lisp-code total)
-                                              (handle-as-python-code total :print-error t) ;; print python error
-                                              (handle-as-lisp-code total :print-error t) ;; print lisp error
-                                              (format t ";; Current input is therefore ignored.~%")
-                                              (setf acc nil)))))))))))))))
+            (let ((x (read-line)))
+              (cond
+               ((and (> (length x) 0)
+                     (char= (aref x 0) #\:))
+                (multiple-value-bind (cmd ix)
+                    (read-from-string (string-downcase x))
+                  (declare (ignore ix))
+                  (case cmd
+                    (:help
+                     (print-cmds))
+                    (:q
+                     (return-from repl-1 (values)))
+                    ((:time :ptime :space :pspace)
+                     (if (eq *repl-prof* cmd)
+                         (progn (setf *repl-prof* nil)
+                                (format t ";; Stopped profiling.~%"))
+                       (progn (setf *repl-prof* cmd)
+                              (format t ";; Set profiling to ~A.~%" cmd))))
+                    (t
+                     (warn "Unknown command: ~S" cmd)))))
+               
+               ((string= x "")
+                (let ((total (apply #'concatenate 'string (nreverse acc))))
+                  (setf acc ())
+                  (loop
+                    (restart-case
+                        (progn (or (eq t (handle-as-python-code total :print-error t :ast-finished t))
+                                   (handle-as-lisp-code total :print-error t))
+                               (return))
+                      (try-parse-again ()
+                          :report "Parse string again into AST")))))
+               
+               ((and (> (length x) 0)
+                     (char= (aref x 0) #\#))
+                ;; skip comment line
+                )
+               
+               (t (push (concatenate 'string x (string #\Newline)) acc)
+                  (let* ((total (apply #'concatenate 'string (reverse acc))))
+                    (ecase (handle-as-python-code total)
+                      ((t) ) ;; handled)
+                      ((nil) (handle-as-lisp-code total))
+                      (:syntax-error (unless (handle-as-lisp-code total)
+                                       (handle-as-python-code total :print-error t) ;; print python error
+                                       (handle-as-lisp-code total :print-error t) ;; print lisp error
+                                       (format t ";; Current input is therefore ignored.~%")
+                                       (setf acc nil))))))))))))))
 
 (defun remove-interpreter-prompts (str prompts)
   "Remove all `>>>' and `...' at the start of lines. ~

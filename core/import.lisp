@@ -186,17 +186,20 @@ Returns the loaded module, or NIL on error."
 		   (unless (load filename :verbose *import-load-verbose*)
                      ;; Might happen if loading fails and there is a restart that lets LOAD return NIL.
                      (return-from do-loading))))
-               (unless module-function
-                 (break "CLPython bug: module ~A did not call *module-function*" mod-name))
-               (funcall module-function) ;; Execute the module toplevel forms
-               (unless new-module
-		 (break "CLPython bug: module ~A did not call *module-preload-hook* upon loading"
-                        mod-name))
-               (when (and old-module update-existing-mod)
-		 (copy-module-contents :from new-module :to old-module)
-		 (setf new-module old-module))
-               (values new-module t))))
-      
+               (if module-function
+                   (progn (funcall module-function) ;; Execute the module toplevel forms
+                          (unless new-module
+                            (break "CLPython bug: module ~A did not call *module-preload-hook* upon loading"
+                                   mod-name))
+                          (when (and old-module update-existing-mod)
+                            (copy-module-contents :from new-module :to old-module)
+                            (setf new-module old-module))
+                          (values new-module t))
+                 (progn (warn "The FASL of module ~A was not produced by CLPython ~
+                               (or CLPython bug: module did not call *module-function*)." mod-name)
+                        (values (make-py-module :name "non-Python fasl"
+                                                :path filename)
+                                t))))))
       (let (new-module success)
         (unwind-protect
             (progn (multiple-value-setq (new-module success)
@@ -233,6 +236,22 @@ Returns the loaded module, or NIL on error."
 (defun module-dotted-name (list-name)
   (format nil "~{~A~^.~}" list-name))
 
+(defvar cl-user::*clpython-module-search-paths* ()
+  "Default search paths for imported modules. Should at least contain the location
+of the Python stanard libraries. (This variable is in the CL-USER package to allow
+it being set before CLPython is loaded.)")
+
+(defun maybe-warn-set-search-paths (at-error)
+  (cond ((not cl-user::*clpython-module-search-paths*)
+         (warn "Please customize variable ~A which should be a list of module ~
+search paths. At a minimum it should include the location of the Python (2.5) ~
+standard libraries (as those modules are not included in CLPython)."
+               'cl-user::*clpython-module-search-paths*))
+        ((not at-error)
+         (format t ";; Default module search paths are in ~A (~A).~%"
+                 'cl-user::*clpython-module-search-paths*
+                 (length cl-user::*clpython-module-search-paths*)))))
+
 (defun py-import (mod-name-as-list 
 		  &rest options
 		  &key must-be-package
@@ -267,7 +286,8 @@ Returns the loaded module, or NIL on error."
       ;; XXX sys.path is now shared between all habitats; should perhaps be habitat-specific
       (setf search-paths (py-iterate->lisp-list 
                           (symbol-value (find-symbol "path" :clpython.module.sys))))
-      (push "." search-paths))
+      (push "." search-paths)
+      (setf search-paths (nconc search-paths cl-user::*clpython-module-search-paths*)))
     
     ;; In case of a dotted import ("import a.b"), search only in parent ("a") directory.
     (when (> (length mod-name-as-list) 1)
@@ -292,8 +312,10 @@ Returns the loaded module, or NIL on error."
             (push within-mod-path find-paths))
           (find-py-file just-mod-name find-paths :must-be-package must-be-package))
       (unless kind
+        (maybe-warn-set-search-paths t)
         (py-raise '{ImportError}
-                  "Could not find ~A `~A'.~:@_Search paths tried: ~{~S~^, ~}~@[~:@_Import of `~A' attempted by: ~A~]"
+                  "Could not find ~A `~A'.~:@_Search paths tried: ~{~S~^, ~}~@[~:@_Import ~
+                   of `~A' attempted by: ~A~]"
                   (if must-be-package "package" "module/package")
                   just-mod-name search-paths
                   (when within-mod-path (module-dotted-name outer-mod-name-as-list))
