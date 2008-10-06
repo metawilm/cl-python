@@ -30,17 +30,14 @@
                                :element-type 'bit
                                :initial-element 0)))
       (declare (dynamic-extent bit-arr))
-      (let* ((num-chars 
-              (do* ((i (1- (1- +max-char-code+)) (1- i))
-                    (ch (code-char i) (code-char i))
-                    (num-chars 0))
-                  ((< i 0) num-chars)
-                #+(or)(declare (type (integer 0 (#.char-code-limit)) i)
-                               fixnum num-chars)
-                (when (and ch ;; CHAR-CODE-LIMIT could be > actual num chars
-                           (funcall pred (code-char i)))
-                  (setf (sbit bit-arr i) 1)
-                  (incf num-chars))))
+      (let* ((num-chars (loop with num-chars = 0
+                            for i from 0 below +max-char-code+
+                            for ch = (code-char i)
+                            when (and ch ;; CHAR-CODE-LIMIT could be > actual num chars
+                                      (funcall pred ch))
+                            do (setf (sbit bit-arr i) 1)
+                               (incf num-chars)
+                            finally (return num-chars)))
              (char-arr (make-array num-chars :element-type 'character)))
         (loop for i fixnum from 0
             with res-i fixnum = 0
