@@ -248,7 +248,26 @@ class C:
   (run-no-error "assert [] != None")
   (run-no-error "assert '' != None")
   (run-no-error "assert [] != 3")
-  (run-no-error "assert 3 != None"))
+  (run-no-error "assert 3 != None")
+  (run-no-error "assert (1 < 2 < 3)")
+  (run-no-error "assert 1 < 2 < 3")
+  (run-no-error "assert (3 > 2 > 1)")
+  (run-no-error "assert 3 >=3 > 2 > 1 < 2 <= 2 < 3 > 2 >= 1")
+  (run-no-error "
+for x in range(5):
+  for y in range(5):
+    for z in range(5):
+      assert (x == y == z) == ((x == y) and (y == z)) == (x == y and y == z)
+      assert (x <= y <= z) == ((x <= y) and (y <= z)) == (x <= y and y <= z)
+      assert (x < y > z) == ((x < y) and (y > z)) == (x < y and y > z)")
+  (run-no-error "
+for x in range(5):
+  for y in range(5):
+    for z in range(5):
+      if x < y:
+        assert ((x < y) < z) == (1 < z)
+      else:
+        assert ((x < y) < z) == (0 < z)"))
 
 (defmethod test-lang ((kind (eql :continue-stmt)))
   (run-error "break" {SyntaxError})

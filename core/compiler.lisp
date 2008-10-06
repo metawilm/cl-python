@@ -702,9 +702,39 @@ Disabled by default, to not confuse the test suite.")
     `(let ((hook *runtime-line-number-hook*))
        (when hook (funcall hook ,line-no)))))
 
-(defmacro [comparison-expr] (cmp left right)
-  (let ((py-@ (get-binary-comparison-func-name cmp)))
-    `(,py-@ ,left ,right)))
+(defmacro [comparison-expr] (&whole whole cmp left right)
+  ;; "Formally, if a, b, c, ..., y, z are expressions and
+  ;; op1, op2, ..., opN are comparison operators, then
+  ;; a op1 b op2 c ... y opN z is equivalent to
+  ;; a op1 b and b op2 c and ... y opN z,
+  ;; except that each expression is evaluated at most once."
+  ;; http://python.org/doc/current/reference/expressions.html
+  (declare (ignore cmp left right))
+  (flet ((bracketize ()
+           (let (args cmps)
+             (labels ((apply-brackets (form)
+                        (cond ((not ([comparison-expr-p] form))
+                               (push form args))
+                              ((and (not (eq form whole))
+                                    (gethash form clpython.parser::*bracketed-cmp-expr-hack*))
+                               (push form args))
+                              (t (with-matching (form ([comparison-expr] ?cmp ?left ?right))
+                                   (apply-brackets ?left)
+                                   (push ?cmp cmps)
+                                   (apply-brackets ?right))))))
+               (apply-brackets whole)
+               (values (nreverse args) (nreverse cmps))))))
+    (multiple-value-bind (args cmps)
+        (bracketize)
+      (with-gensyms (x y)
+        `(let ((,x ,(pop args))
+               (,y ,(pop args)))
+           (py-bool (and ,(let ((py-@ (get-binary-comparison-func-name (pop cmps))))
+                            `(py-val->lisp-bool (,py-@ ,x ,y)))
+                         ,@(loop while cmps
+                               for py-@ = (get-binary-comparison-func-name (pop cmps))
+                               collect `(progn (shiftf ,x ,y ,(pop args))
+                                               (py-val->lisp-bool (,py-@ ,x ,y)))))))))))
 
 (defmacro [continue-stmt] (&environment e)
   (if (get-pydecl :inside-loop-p e)

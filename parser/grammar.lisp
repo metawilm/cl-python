@@ -50,6 +50,9 @@
 (defparameter *python-prods* (make-hash-table :test 'eq)
   "Hashtable containing all grammar rules")
 
+(defvar *bracketed-cmp-expr-hack* (make-hash-table :test 'eq #+allegro #+allegro :weak-keys t)
+  "Hack to compile code like (a < b) < c) correctly.")
+
 (defmacro p (name &rest rules)
   ;; Abbreviated rule rewriting:
   ;;  (p myrule (x y? z) (list $1 $2 $3))  =>  (x z) or (x y z)
@@ -465,7 +468,11 @@
 (p listmaker (test comma--test* comma?) `([list-expr] ,(cons $1 $2)))
 
 (p testlist-gexp (test gen-for) `([generator-expr] ,$1 ,$2))
-(p testlist-gexp (test comma--test* comma?) (if (or $2 $3) `([tuple-expr] (,$1 . ,$2)) $1))
+(p testlist-gexp (test comma--test* comma?) (if (or $2 $3)
+                                                `([tuple-expr] (,$1 . ,$2))
+                                              (progn (when ([comparison-expr-p] $1)
+                                                       (setf (gethash $1 *bracketed-cmp-expr-hack*) t))
+                                                     $1)))
 
 (p lambdef ([lambda] [:] test)                    `([lambda-expr] (nil nil nil nil) ,$3))
 (p lambdef ([lambda] parameters [:] test)         `([lambda-expr] ,$2 ,$4))
