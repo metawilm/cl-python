@@ -772,6 +772,7 @@ Disabled by default, to not confuse the test suite.")
              do (locally (declare #.+optimize-std+)
                   ,@body))))))
 
+#-sbcl ;; bracketed (target source) triggers lambda list parsing error in SBCL
 (define-compiler-macro with-iterator (&whole whole (target source) &body body)
   "Optimize some common iteration patterns."
   (with-perhaps-matching (source ([call-expr] ([identifier-expr] {range}) ?pos-args () () ()))
