@@ -574,7 +574,7 @@ C must be either a character or NIL."
 (defconstant +normal-float-representation-type+ 'double-float
   "The Lisp type normally used for representing Python floats.")
 
-(defconstant +normal-float-range+ (list most-negative-double-float most-positive-double-float)
+(defconstant-once +normal-float-range+ (list most-negative-double-float most-positive-double-float)
   "Python float values in this range are represented by +NORMAL-FLOAT-REPRESENTATION-TYPE+.
 Values outside this range are represented by +ENORMOUS-FLOAT-REPRESENTATION-TYPE+.")
 
