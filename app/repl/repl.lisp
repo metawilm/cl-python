@@ -70,25 +70,34 @@ Possible values: :time :ptime :space :pspace nil")
   "Whether to remove initial `>>>' and `...' on the input line.
 If true, previous input can be copy-pasted as new input easily.")
                                 
-(defvar *repl-doc* (concatenate 'string
+(defparameter *repl-doc* (concatenate 'string
+                           "CLPython - an implementation of Python in Common Lisp
+http://common-lisp.net/project/clpython
+
+CLPython is licensed under the terms of the Lisp Lesser GNU
+Public License (http://opensource.franz.com/preamble.html), known as
+the LLGPL.  The LLGPL consists of a preamble (see above URL) and the
+LGPL.  Where these conflict, the preamble takes precedence. 
+CLPython is referenced in the preamble as the \"LIBRARY.\"~%"
                      "
-In the Python interpreter:
-     :help          => print (this) help
+Keyboard commands in this Python interpreter:
+     :h             => print (this) help
      :q             => quit
+     :lic           => license
   <command>         => execute Python or Lisp <command>
   <space><command>  => execute Lisp <command>
 "
                      #+allegro
                      (format nil "
-In the Lisp debugger:
-     ~A            => back to Python top level
-     ~A            => retry the last (failed) Python command
+Restart shortcuts in the Lisp debugger:
+     :~A           => back to Python top level
+     :~A           => retry evaluation of the last Python command
 " 
                              (abbrev-for-restart 'return-python-toplevel)
                              (abbrev-for-restart 'retry-repl-eval))
                      
                      (format nil "
-Relevant Lisp variables (exported from package :clpython.app.repl):
+Relevant Lisp variables (exported from package ~A):
    *repl-compile*   => whether source code is compiled into assembly
                        before running (current value: ~A)
    *repl-prof*      => profile execution of Python code (current value: ~A)
@@ -99,6 +108,7 @@ Relevant Lisp variables (exported from package :clpython.app.repl):
                          :pspace  = space call graph
                          nil      = no profiling
 "
+                             #.(package-name *package*)
                              *repl-compile*          
                              *repl-prof*)))
 
@@ -129,7 +139,9 @@ KIND can be :ptime, :time, :space, :pspace or NIL."
     ((nil)   (funcall f))))
 
 (defun repl ()
-  (format t "[CLPython -- type `:q' to quit, `:help' for help]~%")
+  (format t "Welcome to CLPython, an implementation of Python in Common Lisp.~%")
+  (format t "[~A ~A]~%" (lisp-implementation-type) (lisp-implementation-version))
+  (format t "Type `:q' to quit, `:h' for help.~%~%")
   (clpython::maybe-warn-set-search-paths nil)
   (with-repl-toplevel-aliases
       (clpython::with-python-compiler-style-warnings
@@ -350,7 +362,7 @@ KIND can be :ptime, :time, :space, :pspace or NIL."
                     (read-from-string (string-downcase x))
                   (declare (ignore ix))
                   (case cmd
-                    (:help
+                    (:h
                      (print-cmds))
                     (:q
                      (return-from repl-1 (values)))
