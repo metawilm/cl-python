@@ -2160,47 +2160,49 @@ But if RELATIVE-TO package name is given, result may contains dots."
   (check-type x py-dict)
   (dikt-clear (py-dict-dikt x)))
 
-;; Dictionaries that act as proxy for module can be accessed using
-;; "globals()"; apply changes to module too.
-(defclass py-dict-moduledictproxy (py-dict)
-  ((mgh     :initarg :mgh     :accessor mdp-mgh)
-   (updater :initarg :updater :accessor mdp-updater))
+;; Dictionaries that act as proxy for a (module/class) namespace
+(defclass py-dict-proxy (py-dict)
+  ((desc    :initarg :desc   :accessor mdp-desc) ;;
+   (setter  :initarg :setter  :accessor mdp-setter) ;; (lambda (k v) ..)
+   (updater :initarg :updater :accessor mdp-updater)) ;; (lambda () ..)
   (:metaclass py-core-type))
 
-(defmethod print-object ((x py-dict-moduledictproxy) stream)
+(defmethod print-object ((x py-dict-proxy) stream)
   (print-unreadable-object (x stream :type t :identity t)
-    (format stream ":dikt ~A" (py-dict-dikt x))))
+    (write-string (mdp-desc x) stream)))
 
 (defgeneric (setf py-subs) (val x key))
 
-(defmethod (setf py-subs) :after (val (x py-dict-moduledictproxy) key)
-  ;; Modifying this dict modifies the module globals.
-  (py-mgh-set-kv (mdp-mgh x) (py-string->symbol key) val))
+(defmethod (setf py-subs) :after (val (x py-dict-proxy) key)
+  ;; Modifying this dict modifies the module globals, both set and delete (val = nil)
+  (whereas ((s (mdp-setter x)))
+    (funcall s (py-string->symbol key) val)))
+
+;  (py-mgh-set-kv (mdp-mgh x) (py-string->symbol key) val))
 
 ;; The dict returned by globals should reflect the current global module
 ;; variables. This is enforced by triggering an update of globals dicts
 ;; every time they are accessed. The assumption is that all accesses
 ;; call at some point a py-dict.xxx function.
 
-(defvar *module-dict-update-level* 0)
+(defvar *dict-proxy-update-level* 0)
 
-(def-py-method py-dict-moduledictproxy.__str__ (x)
+(def-py-method py-dict-proxy.__str__ (x)
   (with-output-to-string (s)
-    (print-unreadable-object (x s :identity t)
-      (format s "dict-proxy for the globals of globals handler `~A'" (mdp-mgh x)))))
+    (print-object x s)))
 
 (defun update-dict-and-call-func (original-method args)
-  (let* ((check-upd (= *module-dict-update-level* 0))
-         (*module-dict-update-level* (1+ *module-dict-update-level*)))
+  (let* ((check-upd (= *dict-proxy-update-level* 0))
+         (*dict-proxy-update-level* (1+ *dict-proxy-update-level*)))
     (when check-upd
       (dolist (a args)
-        (when (typep a 'py-dict-moduledictproxy)
+        (when (typep a 'py-dict-proxy)
           (funcall (mdp-updater a)))))
     (apply #'py-call original-method args)))
 
 (defun set-py-moduledictproxy-methods ()
   (let ((py-dict.d (dict (find-class 'py-dict)))
-        (py-m-dict.d (dict (find-class 'py-dict-moduledictproxy))))
+        (py-m-dict.d (dict (find-class 'py-dict-proxy))))
     (dict-map py-dict.d 
               (lambda (meth-name meth-val)
                 (assert (and meth-name meth-val))

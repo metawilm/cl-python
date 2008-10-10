@@ -371,11 +371,14 @@ def f():
     exec 'assert x == 3'
   g()
 f()")
-  #+(or) ;; Updating locals() is not allowed, so not a potential bug
-  (run-no-error "
+  (run-no-error "# http://mail.python.org/pipermail/python-dev/2008-October/082951.html
 class C:
-  exec 'a = 3'
-assert C.a == 3"))
+  a = 3
+  assert locals().has_key('a')
+  exec 'b = 4'
+  assert locals().has_key('b')
+assert C.a == 3
+assert C.b == 4"))
 
 (defmethod test-lang ((kind (eql :for-in-stmt)))
   (run-no-error "for i in []: 1/0")

@@ -399,32 +399,25 @@ Disabled by default, to not confuse the test suite.")
   
   t)
 
-(defconstant exec-stmt-helper-func-name 'exec-stmt-helper-func)
-(defvar *exec-stmt-globals-update-func*)
-(defvar *exec-stmt-initial-globals*)
-    
 (defun exec-stmt-ast (ast globals locals)
   (assert ([module-stmt-p] ast))
-  (let* ((globals-alist (let (res)
-                          (dict-map globals (lambda (k v) (push (cons (if (stringp k)
-                                                                          (intern k :clpython.user)
-                                                                        k)
-                                                                      v)
-                                                                res)))
-                          res))
-         (f `([module-stmt]
-              ,([make-suite-stmt*]
+  (let ((f `(lambda (.initial-globals .globals-update-func)
+               (locally (declare (optimize (debug 3)))
+                 ;; When this is compiled, the environment object is NIL.
+                 (with-pydecl ((:function-must-save-locals t))
+                   ([module-stmt]
+                    ,([make-suite-stmt*]
 
                 ;; Define helper function
                 ([make-funcdef-stmt]
-                 :fname ([make-identifier-expr*] exec-stmt-helper-func-name)
+                 :fname ([make-identifier-expr*] 'exec-stmt-helper-func)
                  :args '(() () nil nil)
                  :suite
                  ([make-suite-stmt*]
                   `(block helper
                      ,([make-suite-stmt*]
                        
-                       `(loop for (k . v) in *exec-stmt-initial-globals*
+                       `(loop for (k . v) in .initial-globals
                             do (check-type k symbol)
                                (%module-set k v))
                        
@@ -458,35 +451,30 @@ Disabled by default, to not confuse the test suite.")
                 ;; Update `globals'.
                 ;; Using *exec-stmt-globals-update-func* so that we don't have to include
                 ;; GLOBALS as literal (so read-only) object in the function.
-                `(loop for (k . v) in (mgh-all-items mgh)
-                     unless (eq k exec-stmt-helper-func-name)
-                     do (funcall *exec-stmt-globals-update-func* k v))))))
-    
-    #+(or)(warn "EXEC-STMT: lambda-body: ~A" f)
-    
-    (setf f `(lambda ()
-               (locally (declare (optimize (debug 3)))
-                 ;; When this is compiled, the environment object is NIL.
-                 (with-pydecl ((:function-must-save-locals t))
-                   ,f))))
-    
+                `(loop for (k . v) in (mgh-all-items .mgh)
+                     unless (eq k 'exec-stmt-helper-func)
+                     do (funcall .globals-update-func k v)))))))))
     (when *exec-stmt-compile-before-run*
       (setf f (compile nil f)))
-    
-    (handler-bind ((error (lambda (c)
+    (let ((globals-alist
+           (let (res)
+             (dict-map globals
+                       (lambda (k v)
+                         (push (cons (if (stringp k) (intern k :clpython.user) k) v)
+                               res)))
+             res)))
+      (handler-bind ((error (lambda (c)
                             ;; Only print header line if condition not handled in outer scope.
-                            (signal c)
-                            (format t "[Error occured inside an `exec' statement:]"))))
-      (block run-exec-body
-        (restart-case
-            (let* ((mod-func (funcall f))
-                   (*exec-stmt-initial-globals* globals-alist)
-                   (*exec-stmt-globals-update-func* (lambda (k v) (setf (py-subs globals k) v))))
-              (funcall mod-func)) ;;:initial-globals globals-alist))
-          (return-from-exec ()
-              :report "Abort evaluation of the `exec' statement, but continue execution."
-            (warn "Evaluation of `exec' body was aborted.")
-            (return-from run-exec-body)))))))
+                              (signal c)
+                              (format t "[Error occured inside an `exec' statement:]"))))
+        (block run-exec-body
+          (restart-case
+              (let ((mod-func (funcall f globals-alist (lambda (k v) (setf (py-subs globals k) v)))))
+                (funcall mod-func))
+            (return-from-exec ()
+                :report "Abort evaluation of the `exec' statement, but continue execution."
+              (warn "Evaluation of `exec' body was aborted.")
+              (return-from run-exec-body))))))))
 
 ;;; `Call' expression
 
@@ -1122,7 +1110,7 @@ otherwise work well.")
                          (progn (comp-msg "Safe lexical var `~A' in context `~A': skipped boundness check."
                                           name (format nil "~{~A~^.~}" (reverse (get-pydecl :context-stack e))))
                                 name)
-                       `(or ,name (unbound-variable-error ',name :debug-info (format nil "(identifier-expr func-level; names=~A)" (funcall (mgh-names mgh)))))))
+                       `(or ,name (unbound-variable-error ',name :debug-info (format nil "(identifier-expr func-level; names=~A)" (funcall (mgh-names .mgh)))))))
     (:class-level `(or (sub/dict-get +cls-namespace+ ',(symbol-name name))
                        ,(if (member name (get-pydecl :lexically-visible-vars e))
                             name
@@ -1313,7 +1301,7 @@ or (2) all names not starting with underscore."
 
 (defmacro create-module-globals-dict ()
   ;; Updating this dict really modifies the globals.
-  `(module-make-globals-dict mgh))
+  `(module-make-globals-dict .mgh))
 
 (defun unbound-variable-error (name &key (expect-value t) debug-info)
   (declare (special *py-signal-conditions*))
@@ -1360,18 +1348,18 @@ DETERMINE-BODY-GLOBALS
                    #+(or)(:mod-futures  :todo-parse-module-ast-future-imports)) ;; todo
                 
                 (let* ((*habitat* (or *habitat* (make-habitat :search-paths '("."))))
-                       (mgh (or globals-handler (make-dict-mgh module-name module-path))))
+                       (.mgh (or globals-handler (make-dict-mgh module-name module-path))))
                   
-                  (macrolet ((%module-get (name)      `(funcall (mgh-get mgh) ,name))
-                             (%module-set (name val)  `(funcall (mgh-set mgh) ,name ,val))
-                             (%module-del (name)      `(funcall (mgh-del mgh) ,name))
-                             #+(or)(%module-names ()        `(funcall (mgh-names mgh))))
+                  (macrolet ((%module-get (name)      `(funcall (mgh-get .mgh) ,name))
+                             (%module-set (name val)  `(funcall (mgh-set .mgh) ,name ,val))
+                             (%module-del (name)      `(funcall (mgh-del .mgh) ,name))
+                             #+(or)(%module-names ()        `(funcall (mgh-names .mgh))))
                     ;; Is there a situation in which these globals should not be set?
                     (%module-set '{__name__}  (or module-name "__main__"))
                     (%module-set '{__debug__} *the-true*)
                     
                     (when (and call-preload-hook (boundp '*module-preload-hook*))
-                      (funcall *module-preload-hook* (dmgh-module mgh)))
+                      (funcall *module-preload-hook* (dmgh-module .mgh)))
                     
                     (with-py-errors (:name (python-module ,*current-module-name*))
                       ,suite)))))))
@@ -1763,19 +1751,22 @@ finally:
    (delete nil (mapcar #'cons name-list value-list) :key #'cdr)))
 
 (defun module-make-globals-dict (mgh)
-  (flet ((make-regular-dict ()
-           (make-dict-from-symbol-alist
-            (loop for k in (global-names mgh) collect (cons k (global-get mgh k))))))
-    
-  (let* ((d (make-regular-dict))
-         (updater (lambda () 
-                    (let ((new-d (make-regular-dict)))
-                      (clear-dict d) ;; closes over D itself
-                      (dict-map new-d (lambda (k v)
-                                        (sub/dict-set d k v)))
-                      d))))
-    (change-class d 'py-dict-moduledictproxy :mgh mgh :updater updater)
-    d)))
+  (let* ((d (make-dict))
+         (updater (lambda () ;; closes over D
+                    (clear-dict d)
+                    (loop for k in (global-names mgh)
+                        for v = (global-get mgh k)
+                        do (sub/dict-set d (string k) v))
+                    d))
+         (setter (lambda (key val)
+                   (py-mgh-set-kv mgh (py-string->symbol key) val))))
+    ;; Initialize (at least to satisfy possible use in exec stmt)
+    (funcall updater) 
+    (change-class d 'py-dict-proxy
+                  :setter setter
+                  :updater updater
+                  :desc "(module globals)")
+    d))
 
 (defun py-**-mapping->lisp-arg-list (**-arg)
   ;; Return list: ( :|key1| <val1> :|key2| <val2> ... )
