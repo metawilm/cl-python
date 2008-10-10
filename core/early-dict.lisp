@@ -504,7 +504,7 @@ This is not guaranteed due to the following in ANSI:
   (cond ((dikt-vector d)
          (do ((i 0 (1+ i)))
              ((= i +dikt-hash-vector-size+) )
-           (setf (svref d i) nil)))
+           (setf (svref (dikt-vector d) i) nil)))
         (t (setf (dikt-vector d)
              (make-array +dikt-hash-vector-size+ :initial-element nil))))
   d)
