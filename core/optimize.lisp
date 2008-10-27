@@ -27,6 +27,7 @@
 (defmethod py-iterate->lisp-list ((x list))
   x)
 
+#+(or)
 (defmethod map-over-py-object ((f function) (fi py-func-iterator))
   (with-slots (stopped-yet func) fi
     (unless stopped-yet
@@ -42,14 +43,17 @@
 		(val (funcall f val))
 		(t   (return-from map-over-py-object))))))))
 
+#+(or)
 (defmethod map-over-py-object ((f function) (v string))
   (loop for ch across v
       for str = (py-string-from-char ch)
       do (funcall f str)))
 
+#+(or)
 (defmethod map-over-py-object ((f function) (v vector))
   (loop for x across v do (funcall f x)))
 
+#+(or)
 (defmethod map-over-py-object ((f function) (x list))
   (mapc f x))
 
@@ -61,6 +65,7 @@
     (declare (dynamic-extent map-func))
     (dict-map x map-func)))
 
+#+(or)
 (defmethod map-over-py-object ((f function) (x py-xrange))
   (with-slots (start stop step) x
     (cond ((and (<= start stop) (> step 0))
@@ -232,7 +237,7 @@
   `(define-compiler-macro ,op (&whole whole x y)
      (if (and (numberp x) (numberp y))
          (let ((val (,op x y)))
-           (assert (member val (list *the-true* *the-false*)) ()
+           (assert (member val (list +the-true+ +the-false+)) ()
              "Constant comparison of two numbers should result in True or False (got ~A ~A ~A => ~S)"
              x ',op y val)
            `,val)
@@ -246,14 +251,6 @@
 ;(py-<= 1 2)
     
 ;;; Arithmetic: + * // etc
-
-(defmacro fixnump (x)
-  `(typep ,x 'fixnum))
-
-(define-compiler-macro fixnump (&whole whole x)
-  (if (numberp x)
-      (typep x 'fixnum)
-    whole))
 
 (define-compiler-macro py-+ (&whole whole x y)
   (if (and *inline-fixnum-arithmetic*

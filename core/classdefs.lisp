@@ -25,12 +25,9 @@
   (declare (ignore x))
   nil)
 
-(defmethod has-dict ((x dict-mixin))
-  t)
-
-(defmethod has-dict (x)
-  (declare (ignore x))
-  nil)
+(defgeneric has-dict (x)
+  (:method ((x dict-mixin)) t)
+  (:method (x)              (declare (ignore x)) nil))
 
 (defclass py-meta-type (dict-mixin standard-class)
   ())

@@ -96,6 +96,12 @@ like .join (string.join), .sort (list.sort), etc")
   #+allegro `(excl::fixnump ,x)
   #-allegro `(typep ,x 'fixnum))
 
+(define-compiler-macro fixnump (&whole whole x)
+  (typecase x
+    (number (typep x 'fixnum))
+    (string nil)
+    (t     whole)))
+
 ;;; `Exex' statement handling
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
@@ -182,6 +188,7 @@ Disabled by default, to not confuse the test suite.")
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; Namespaces
 
+(defgeneric ns.expand-with (namespace body-form environment))
 (defgeneric ns.read-form (namespace name))
 (defgeneric ns.write-form (namespace name val-form))
 (defgeneric ns.write-runtime-form (namespace name-form val-form))
@@ -1390,7 +1397,7 @@ DETERMINE-BODY-GLOBALS"
                       (declare (ignorable #'%globals))
                       
                       (namespace-set {__name__} module-name)
-                      (namespace-set {__debug__} *the-true*)
+                      (namespace-set {__debug__} +the-true+)
                       
                       (when (and call-preload-hook (boundp '*module-preload-hook*))
                         (let ((%module (make-instance 'module

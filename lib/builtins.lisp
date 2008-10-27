@@ -509,6 +509,6 @@ None, use identity function (multiple sequences -> list of tuples)."
 
 (defvar {None}           *the-none*           )
 (defvar {Ellipsis}       *the-ellipsis*       )
-(defvar {True}           *the-true*           )
-(defvar {False}          *the-false*          )
+(defvar {True}           +the-true+           )
+(defvar {False}          +the-false+          )
 (defvar {NotImplemented} *the-notimplemented* )

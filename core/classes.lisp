@@ -309,14 +309,14 @@
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(defconstant *the-true* 1)
-(defconstant *the-false* 0)
+(defconstant +the-true+ 1)
+(defconstant +the-false+ 0)
 
 (defun py-bool (lisp-val)
-  (if lisp-val *the-true* *the-false*))
+  (if lisp-val +the-true+ +the-false+))
 
 (define-compiler-macro py-bool (lisp-val)
-  `(if ,lisp-val *the-true* *the-false*))
+  `(if ,lisp-val +the-true+ +the-false+))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -1010,7 +1010,7 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
   "None")
 
 (def-py-method py-none.__nonzero__ (x)
-  *the-false*)
+  +the-false+)
 
 ;; Ellipsis
 
@@ -1250,6 +1250,8 @@ but the latter two classes are not in CPython.")
 		(when builtinp "builtin")
 		name
 		(unless builtinp filepath))))))
+
+(defgeneric dir-items (item &rest args))
 
 (defmethod dir-items ((x module) &key (use-all t))
   (whereas ((all (and use-all (attr x '{__all__}))))
@@ -1751,7 +1753,7 @@ But if RELATIVE-TO package name is given, result may contains dots."
 (def-proxy-class py-bool (py-int))
 
 (def-py-method py-bool.__new__ :static (cls &optional (val 0))
-  (let ((bool-val (if (py-val->lisp-bool val) *the-true* *the-false*)))
+  (let ((bool-val (if (py-val->lisp-bool val) +the-true+ +the-false+)))
     (if (eq cls (ltv-find-class 'py-bool))
 	bool-val
       (make-instance cls :lisp-object bool-val))))
@@ -2962,6 +2964,8 @@ finished; F will then not be called again."
 		 (py-call gi x item)
 	       (py-raise '{TypeError} "Object ~S does not support item extraction" x)))))
 
+(defgeneric (setf py-subs) (new-val x item))
+
 (defmethod (setf py-subs) (new-val x item)
   "New-val = NIL means deletion."
   (if (null new-val)
@@ -3158,14 +3162,14 @@ finished; F will then not be called again."
 	   (let ((contains-meth (class.attr-no-magic (py-class-of seq) '{__contains__})))
 	     (if contains-meth
 		 (let ((res (py-call contains-meth seq x)))
-		   (cond ((eq res t)   (load-time-value *the-true*))
-			 ((eq res nil) (load-time-value *the-false*))
+		   (cond ((eq res t)   +the-true+)
+			 ((eq res nil) +the-false+)
 			 (t            res)))
 	       (loop with f = (get-py-iterate-fun seq)
 		   for seq-item = (funcall f)
 		   while seq-item
-		   when (py-==->lisp-val x seq-item) return (load-time-value *the-true*)
-		   finally (return (load-time-value *the-false*)))))))
+		   when (py-==->lisp-val x seq-item) return +the-true+
+		   finally (return +the-false+))))))
 	     
 (defgeneric py-not-in (x seq)
   (:method ((x t) (seq t))
@@ -3176,11 +3180,11 @@ finished; F will then not be called again."
 
 (defgeneric py-is (x y)
   (:method ((x t) (y t))
-	   (if (eq x y) *the-true* *the-false*)))
+	   (if (eq x y) +the-true+ +the-false+)))
 
 (defgeneric py-is-not (x y)
   (:method ((x t) (y t))
-	   (if (eq x y) *the-false* *the-true*)))
+	   (if (eq x y) +the-false+ +the-true+)))
 
 (setf (gethash '[is] *binary-op-funcs-ht*) 'py-is)
 (setf (gethash '[is not] *binary-op-funcs-ht*) 'py-is-not)
@@ -3213,8 +3217,8 @@ finished; F will then not be called again."
   `(progn (defgeneric ,func (x y)
 	    (:method ((x t) (y t))
 		     (if ,test-x-y
-			 (load-time-value *the-true*)
-		       (load-time-value *the-false*))))
+			 +the-true+
+		       +the-false+)))
 	  (setf (gethash ',syntax *binary-comparison-funcs-ht*) ',func)))
 
 (defun py-id (x)
