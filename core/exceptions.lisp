@@ -23,7 +23,7 @@
   (error exc-type))
 
 #+clpython-exceptions-are-python-objects
-(defclass {Exception} (py-object error)
+(defclass {Exception} (object error)
   ((args :initarg :args :initform nil :documentation "Arguments as Lisp list"
 	 :accessor exception-args))
   (:metaclass py-type))

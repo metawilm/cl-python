@@ -12,81 +12,125 @@
 
 (in-package :clpython.module.re)
 
-(clpython::def-proxy-class reg-exp ()
+(clpython::def-proxy-class |reg-exp| ()
   ())
 
-(def-py-method reg-exp.match (re string &optional start end)
-  (error "todo"))
+(defun |compile| (&rest args)
+  (declare (ignore args))
+  (cl:error "todo"))
 
-(def-py-method reg-exp.search (re string &optional start end)
-  (error "todo"))
+(defun |match| (&rest args)
+  (declare (ignore args))
+  (cl:error "todo"))
 
-(def-py-method reg-exp.split (re string &optional (maxsplit 0))
+(defun |search| (&rest args)
+  (declare (ignore args))
+  (cl:error "todo"))
+
+(defun |split| (&rest args)
+  (declare (ignore args))
+  (cl:error "todo"))
+
+(defun |findall| (&rest args)
+  (declare (ignore args))
+  (cl:error "todo"))
+
+(defun |finditer| (&rest args)
+  (declare (ignore args))
+  (cl:error "todo"))
+
+(defun |sub| (&rest args)
+  (declare (ignore args))
+  (cl:error "todo"))
+
+(defun |subn| (&rest args)
+  (declare (ignore args))
+  (cl:error "todo"))
+
+(defun |escape| (&rest args)
+  (declare (ignore args))
+  (cl:error "todo"))
+
+(defun |error| (&rest args)
+  (declare (ignore args))
+  (cl:error "todo"))
+
+
+(def-py-method |reg-exp.compile| (re pattern &optional flags)
+  (cl:error "todo"))
+
+(def-py-method |reg-exp.match| (re string &optional start end)
+  (cl:error "todo"))
+
+(def-py-method |reg-exp.search| (re string &optional start end)
+  (cl:error "todo"))
+
+(def-py-method |reg-exp.split| (re string &optional (maxsplit 0))
   maxsplit
-  (error "todo"))
+  (cl:error "todo"))
 
-(def-py-method reg-exp.findall (re string &optional start end)
-  (error "todo"))
+(def-py-method |reg-exp.findall| (re string &optional start end)
+  (cl:error "todo"))
 
-(def-py-method reg-exp.finditer (re string &optional start end)
-  (error "todo"))
+(def-py-method |reg-exp.finditer| (re string &optional start end)
+  (cl:error "todo"))
 
-(def-py-method reg-exp.sub (re replacement string  &optional (count 0))
+(def-py-method |reg-exp.sub| (re replacement string  &optional (count 0))
   count
-  (error "todo"))
+  (cl:error "todo"))
 
-(def-py-method reg-exp.subn (re replacement string  &optional (count 0))
+(def-py-method |reg-exp.subn| (re replacement string  &optional (count 0))
   count
-  (error "todo"))
+  (cl:error "todo"))
 
-(def-py-method reg-exp.flags :attribute (re)
-  (error "todo"))
+(def-py-method |reg-exp.flags| :attribute (re)
+  (cl:error "todo"))
 
-(def-py-method reg-exp.groupindex :attribute (re)
-  (error "todo"))
+(def-py-method |reg-exp.groupindex| :attribute (re)
+  (cl:error "todo"))
 
-(def-py-method reg-exp.pattern :attribute (re)
-  (error "todo"))
+(def-py-method |reg-exp.pattern| :attribute (re)
+  (cl:error "todo"))
 
 
-(clpython::def-proxy-class reg-exp-match ()
+(clpython::def-proxy-class |reg-exp-match| ()
   ())
 
-(def-py-method reg-exp-match.expand (rm template)
-  (error "todo"))
+(def-py-method |reg-exp-match.expand| (rm template)
+  (cl:error "todo"))
 
-(def-py-method reg-exp-match.group (rm &rest groups)
-  (error "todo"))
+(def-py-method |reg-exp-match.group| (rm &rest groups)
+  (cl:error "todo"))
 
-(def-py-method reg-exp-match.groups (rm &optional default)
-  (error "todo"))
+(def-py-method |reg-exp-match.groups| (rm &optional default)
+  (cl:error "todo"))
 
-(def-py-method reg-exp-match.groupdict (rm &optional default)
-  (error "todo"))
+(def-py-method |reg-exp-match.groupdict| (rm &optional default)
+  (cl:error "todo"))
 
-(def-py-method reg-exp-match.start (rm &optional group)
-  (error "todo"))
+(def-py-method |reg-exp-match.start| (rm &optional group)
+  (cl:error "todo"))
 
-(def-py-method reg-exp-match.end (rm &optional group)
-  (error "todo"))
+(def-py-method |reg-exp-match.end| (rm &optional group)
+  (cl:error "todo"))
 
-(def-py-method reg-exp-match.span (rm &optional group)
-  (error "todo"))
+(def-py-method |reg-exp-match.span| (rm &optional group)
+  (cl:error "todo"))
 
-(def-py-method reg-exp-match.pos :attribute (rm)
-  (error "todo"))
+(def-py-method |reg-exp-match.pos| :attribute (rm)
+  (cl:error "todo"))
 
-(def-py-method reg-exp-match.endpos :attribute (rm)
-  (error "todo"))
+(def-py-method |reg-exp-match.endpos| :attribute (rm)
+  (cl:error "todo"))
 
-(def-py-method reg-exp-match.lastindex :attribute (rm)
-  (error "todo"))
+(def-py-method |reg-exp-match.lastindex| :attribute (rm)
+  (cl:error "todo"))
 
-(def-py-method reg-exp-match.lastgroup :attribute (rm)
-  (error "todo"))
+(def-py-method |reg-exp-match.lastgroup| :attribute (rm)
+  (cl:error "todo"))
 
-(def-py-method reg-exp-match.re :attribute (rm)
-  (error "todo"))
+(def-py-method |reg-exp-match.re| :attribute (rm)
+  (cl:error "todo"))
 
-(def-py-method reg-exp-match.string :attribute (rm)
-  (error "todo"))
+(def-py-method |reg-exp-match.string| :attribute (rm)
+  (cl:error "todo"))

@@ -9,12 +9,12 @@
 
 (in-package :clpython.module.array)
 
-(defclass |array| (py-core-object)
+(defclass |array| (clpython::object)
   ((kind    :type character :initarg :kind    :accessor py-array-kind)
    (array   :type cl:array  :initarg :array   :accessor py-array-array)
    (elmtype :type t         :initarg :elmtype :accessor py-array-elmtype)
    (elmsize :type fixnum    :initarg :elmsize :accessor py-array-elmsize))
-  (:metaclass py-core-type))
+  (:metaclass clpython::py-type))
 
 (defparameter *py-array-types*
     ;; code  type              item size

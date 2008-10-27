@@ -209,7 +209,7 @@
            #:setup-omnivore-readmacro
            #:with-auto-mode-recompile #:whereas #:sans #:named-function
            #:with-stack-list #:without-redefinition-warnings #:defconstant-once
-           #:+max-char-code+ #:char-code-type))
+           #:+max-char-code+ #:char-code-type #:ltv-find-class))
 
 ;;; CLPYTHON.PARSER - Parser and Lexer
 

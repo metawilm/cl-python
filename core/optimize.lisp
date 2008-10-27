@@ -53,7 +53,8 @@
 (defmethod map-over-py-object ((f function) (x list))
   (mapc f x))
 
-(defmethod map-over-py-object ((f function) (x py-dict))
+#+(or)
+(defmethod map-over-py-object ((f function) (x dict))
   (let ((map-func (lambda (k v)
                     (declare (ignore v))
                     (funcall f k))))
@@ -95,9 +96,9 @@
 
 ;; Membership test
 
-(defmethod py-in (x (d py-dict))
-  (if (eq (class-of d) (ltv-find-class 'py-dict))
-      (py-bool (sub/dict-get d x))
+(defmethod py-in (x (d dict))
+  (if (eq (class-of d) (ltv-find-class 'dict))
+      (py-bool (gethash x (deproxy d)))
     (call-next-method)))
     
 (defmethod py-in ((item string) (seq string))
@@ -134,7 +135,7 @@
   (let* ((x.len (length x))
 	 (i2 (if (< item 0) (+ item x.len) item)))
     (if (<= 0 i2 (1- x.len))
-	(string (char x i2))
+	(py-string-from-char (char x i2))
       (call-next-method))))
 
 (defmethod py-subs ((x list) (item fixnum)) ;; tuple
@@ -158,16 +159,16 @@
 	    (setf (aref x i2) val)))
       (call-next-method)))) ;; error
 
-(defmethod py-subs ((x py-dict) item)
-  (if (eq (class-of x) (ltv-find-class 'py-dict))
-      (py-dict.__getitem__ x item)
+(defmethod py-subs ((x dict) item)
+  (if (eq (class-of x) (ltv-find-class 'dict))
+      (dict.__getitem__ x item)
     (call-next-method)))
 
-(defmethod (setf py-subs) (val (x py-dict) item)
-  (if (eq (class-of x) (ltv-find-class 'py-dict))
+(defmethod (setf py-subs) (val (x dict) item)
+  (if (eq (class-of x) (ltv-find-class 'dict))
       (if val
-          (py-dict.__setitem__ x item val)
-        (py-dict.__delitem__ x item))
+          (dict.__setitem__ x item val)
+        (dict.__delitem__ x item))
     (call-next-method)))
 
 ;;; Comparison: ==
@@ -218,10 +219,14 @@
 
 (defmethod py-<  ((x fixnum) (y fixnum)) (py-bool (<  x y)))
 (defmethod py-<= ((x fixnum) (y fixnum)) (py-bool (<= x y)))
-(defmethod py-<= ((x string) (y string)) (py-bool (string<= x y)))
 
 (defmethod py->  ((x fixnum) (y fixnum)) (py-bool (>  x y)))
 (defmethod py->= ((x fixnum) (y fixnum)) (py-bool (>= x y)))
+
+(defmethod py->  ((x string) (y string)) (py-bool (string>  x y)))
+(defmethod py->= ((x string) (y string)) (py-bool (string>= x y)))
+(defmethod py-<= ((x string) (y string)) (py-bool (string<= x y)))
+(defmethod py-<  ((x string) (y string)) (py-bool (string<  x y)))
 
 (defmacro generate-cmp-cm (op)
   `(define-compiler-macro ,op (&whole whole x y)
@@ -324,6 +329,8 @@
 (defmethod py--  ((x integer) (y integer)) (- x y))
 (defmethod py-// ((x integer) (y integer)) (floor x y))
 
+(defmethod py-/ ((x integer) (y integer)) (floor x y))
+                                           
 ;; Augmented assignment
 
 (defmethod py-+= ((x string) y) 
@@ -373,6 +380,7 @@
   ;; #+allegro `(excl::fast-write-char ,char ,stream)
   `(write-char ,char ,stream))
 
+#+(or)
 (define-compiler-macro py-print (&whole whole dest items comma?)
   (if (and *inline-print*
            (null dest)

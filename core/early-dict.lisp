@@ -7,504 +7,375 @@
 ;; (http://opensource.franz.com/preamble.html),
 ;; known as the LLGPL.
 
-;;;; Python dictionary
-
 (in-package :clpython)
-
 (in-syntax *user-readtable*)
 
-(defparameter *magic-methods*
-    '#.(sort (loop for s being each external-symbol in :clpython.user
-                 for sn = (symbol-name s)
-                 when (and (> (length sn) 0)
-                           (or (char= (char sn 0) #\_)
-                               (string= sn "next")))
-                 collect s)
-             #'string<
-             :key #'symbol-name)
-    "All methods names for the form `__xxx__' that have special ~
-meaning in the language, plus the (oddly named) method name `next'.
-All these symbols are in the clpython.user package.")
+#+lispworks
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (progn
+    (defun closer-mop::standard-instance-access (&rest args)
+      (apply 'clos::standard-instance-access args))
+    (export '(closer-mop::standard-instance-access) :closer-mop)))
 
-(defconstant +attr-cache-ix-property+ 'attr-cache-ix)
+
+;;; Funky dict: alist or hashtable
+
+(defun funky-dict-get (dict attr)
+  (if (hash-table-p dict)
+      (gethash attr dict)
+    (cdr (assoc attr dict :test #'eq))))
+
+(defun funky-dict-set (dict attr val)
+  (declare (optimize (speed 3) (safety 0) (debug 0)))
+  (if (hash-table-p dict)
+      (progn (setf (gethash attr dict) val)
+             dict)
+    (let ((old (assoc attr dict :test #'eq)))
+      (cond (old
+             (progn (setf (cdr old) val)
+                    dict))
+            ((< (length dict) clpython.package::+dict-alist-to-hashtable-threshold+)
+             (acons attr val dict))
+            (t (loop with ht = (make-eq-hash-table (format nil "dict #keys > ~A [~A]"
+                                                           clpython.package::+dict-alist-to-hashtable-threshold+ dict))
+                   for (k . v) in dict
+                   do (setf (gethash k ht) v)
+                   finally (setf (gethash attr ht) val)
+                           (return ht)))))))
+
+(defun funky-dict-del (dict attr)
+  (if (hash-table-p dict)
+      (values dict (remhash attr dict))
+    (clpython.package::alist-remove-prop dict attr)))
+
+;;; Class dict handling
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
-  (defconstant +dikt-hash-vector-size+ 32))
+  (defun class-slot-ix (name &rest classes)
+    (flet ((slot-ix-in (cls-name)
+             (let* ((cls (find-class cls-name))
+                    (slot (or (find name (closer-mop:class-slots cls) :key #'closer-mop:slot-definition-name)
+                             (error "Class ~A has no slot named ~A." cls name))))
+               (closer-mop:slot-definition-location slot))))
+      (assert (apply #'= (mapcar #'slot-ix-in classes)))
+      (slot-ix-in (car classes)))))
 
-(deftype attr-hash-type () '(integer 0 #.+dikt-hash-vector-size+))
+(defconstant-once +py-class-dict-slot-index+
+    (class-slot-ix 'dict 'py-type 'py-meta-type))
 
-(defparameter *attr-cache-iter* -1)
-(declaim (type fixnum *attr-cache-iter*))
+(defconstant-once +py-class-classname-slot-index+
+    (class-slot-ix #+allegro 'excl::name
+                   #+lispworks 'clos::name
+		   #+sbcl 'sb-pcl::name
+                   #-(or allegro lispworks sbcl) (break "Define slot name containing class name, for this implementation.")
+                   'py-type 'py-meta-type))
 
-(eval-when (:compile-toplevel :load-toplevel :execute)
-  (defparameter *dict-optimize-settings* 
-      '(optimize (speed 3) (safety 1) (debug 0))))
+(defconstant-once +dicted-object-dict-index+
+    (class-slot-ix 'dict 'dicted-object))
 
-(defun get-sym-attr-hash (x)
-  (declare #.*dict-optimize-settings*
-           (symbol x))
-  (let ((plist (symbol-plist (the symbol x))))
-    (if (eq (pop plist) +attr-cache-ix-property+)
-        (pop plist)
-      ;; Not set as first property, or not set at all
-      (or (get x +attr-cache-ix-property+)
-           (setf (get x +attr-cache-ix-property+)
-             (mod (the fixnum (incf (the fixnum *attr-cache-iter*))) +dikt-hash-vector-size+))))))
-
-(defun set-magic-methods-attr-hashes ()
-  (mapcar #'get-sym-attr-hash *magic-methods*)
-  (let ((sym '{__init__})
-        (hash 1)) ;; hardcoded, yeah
-    (assert (= (get-sym-attr-hash sym) hash) ()
-      "Sanity check for attribute hash codes failed: hash of ~S is ~A, expected ~A."
-      sym (get-sym-attr-hash sym) hash)))
-
-(set-magic-methods-attr-hashes)
-
-(defun get-attr-hash (x)
-  "X either symbol, string, or user-defined subclass of string"
-  (declare #.*dict-optimize-settings*)
-  (typecase x
-    (symbol (get-sym-attr-hash x))
-    (string (let ((s (find-symbol x :clpython.user)))
-              (and s (get-sym-attr-hash s))))
-    (t (mod (py-hash x) +dikt-hash-vector-size+))))
-
-
-;;;; Set up the core classes, including PY-DICT.
+;; Dave Fox on Lispworks' standard-instance-access functionality:
+;;   http://thread.gmane.org/gmane.lisp.lispworks.general/1818/focus=1830
+;; "CLOS::STANDARD-INSTANCE-ACCESS is slightly different to the AMOP
+;; function STANDARD-INSTANCE-ACCESS, in that it deals with class
+;; slots. It allows slot names as well as integers for its LOCATION
+;; argument (and so tests that argument). Also it provides a writer.
+;; 
+;; CLOS::FAST-STANDARD-INSTANCE-ACCESS is essentially the same as the
+;; AMOP function STANDARD-INSTANCE-ACCESS, though it also offers a
+;; writer."
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
-  (defstruct (dikt (:type vector))
-    (vector (make-array +dikt-hash-vector-size+ :initial-element nil))
-    (hash-table nil)))
+  (defconstant +standard-instance-access-func+
+    #+lispworks 'clos::fast-standard-instance-access
+    #-lispworks 'closer-mop:standard-instance-access))
 
-;; Invariant:
-;;  VECTOR is NIL <=> HASH-TABLE is used.
-;;  VECTOR not NIL => all keys are symbols (representing Python strings)
+(defun class.raw-dict (class)
+  (#.+standard-instance-access-func+ class +py-class-dict-slot-index+))
 
-(defmacro with-perhaps-eval-when (() &body body)
-  ;; SBCL gives strange STREAM-ELEMENT-TYPE error if the stuff below is included in EVAL-WHEN,
-  ;; so leave it out, as suggested by Leonardo Varuzza.
-  ;; Note that the eval-when is strictly necessary the make this code portable (or more specific,
-  ;; make it run on Allegro).
-  #+sbcl `(progn ,@body)
-  #-sbcl `(eval-when (:compile-toplevel :load-toplevel :execute) ,@body))
+(define-compiler-macro class.raw-dict (class)
+  `(#.+standard-instance-access-func+ ,class +py-class-dict-slot-index+))
 
-(with-perhaps-eval-when ()
-  (defclass py-early-dict () ())
-  
-  (defvar *early-dicts* ())
-  
-  (defvar *make-dict-type* 'py-early-dict)
-  
-  (defun make-dict ()
-    ;;(break "make-dict ~A" *make-dict-type*)
-    ;;(declare #.*dict-optimize-settings*)
-    (let* ((type *make-dict-type*)
-           (d (make-instance type)))
-      (when (eq type 'py-early-dict)
-        (push d *early-dicts*))
-      d))
-  
-  (defclass py-dict-mixin ()
-    ((dict :initarg :dict :initform (make-dict) :accessor dict)))
-  
-  (defmethod dict ((x t))
-    nil)
-  
-  (defclass py-meta-type (py-dict-mixin standard-class)
-    ())
-  
-  (defmethod closer-mop:validate-superclass ((class py-meta-type) superclass)
-    (declare (ignorable class superclass))
-    t)
-  
-  (defclass py-type (py-dict-mixin standard-class)
-    ()      
-    (:metaclass py-meta-type))
-  
-  (defmethod closer-mop:validate-superclass ((class py-type) superclass)
-    (declare (ignorable class superclass))
-    t)
-  
-  (defmethod closer-mop:validate-superclass ((class standard-class) (superclass py-type))
-    (declare (ignorable class superclass))
-    t)
-  
-  (defclass py-dictless-object (standard-object)
-    ()
-    (:metaclass py-type))
-  
-  (defclass py-object (py-dict-mixin py-dictless-object)
-    ()
-    (:metaclass py-type))
-  
-  (defclass py-core-object (py-dictless-object) ())
-  
-  (defmethod closer-mop:validate-superclass (class (superclass py-meta-type))
-    (declare (ignorable class superclass))
-    t)
-  
-  (defmethod closer-mop:validate-superclass ((class standard-class) (superclass py-meta-type))
-    (declare (ignorable class superclass))
-    t)
-  
-  (defclass py-core-type   (py-type)   ())
+(defun class.raw-classname (class)
+  (#.+standard-instance-access-func+ class +py-class-classname-slot-index+))
 
-  (defclass py-dict (py-core-object)
-    ((dikt :accessor py-dict-dikt :initform (make-dikt)))
-    (:metaclass py-core-type))
+(define-compiler-macro class.raw-classname (class)
+  `(#.+standard-instance-access-func+ ,class +py-class-classname-slot-index+))
 
-  (setf *make-dict-type* 'py-dict)
+(defun (setf class.raw-dict) (new-val class)
+  (setf (#.+standard-instance-access-func+ class +py-class-dict-slot-index+) new-val))
 
-  #+(or)(warn "Converting ~A dict from early to normal" (length *early-dicts*))
-  (loop for d = (pop *early-dicts*)
-      while d
-      do (change-class d 'py-dict)))
 
-;;;; Setting up the core classes is finished now.
-      
-(defun dict-map (x func)
-  (check-type x py-dict)
-  (check-type func function)
-  (dikt-map (py-dict-dikt x) func))
+(defun class.raw-attr-get (class attr)
+  ;(declare (optimize (speed 3) (safety 0) (debug 0)))
+  (let ((dict (class.raw-dict class)))
+    (funky-dict-get dict attr)))
 
-(defun py-==->lisp-val (x y)
-  (declare #.*dict-optimize-settings*
-           (notinline py-==))
-  (if (and (stringp x) (stringp y))
-      (if (and (char= (aref x 0) (aref y 0))
-               (string= x y))
-          t
-        nil)
-    (not (zerop (the fixnum (py-== x y))))))
+(defun class.raw-attr-set (class attr val)
+  ;(declare (optimize (speed 3) (safety 1) (debug 0)))
+  (clear-ca-cache)
+  (let* ((dict (class.raw-dict class))
+         (dict2 (funky-dict-set dict attr val)))
+    (unless (eq dict dict2)
+      (setf (class.raw-dict class) dict2))))
+
+(defun class.raw-attr-del (class attr)
+  "Returns whether existed."
+  ;(declare (optimize (speed 3) (safety 1) (debug 0)))
+  (clear-ca-cache)
+  (let ((dict (class.raw-dict class)))
+    (multiple-value-bind (dict2 found)
+        (funky-dict-del dict attr)
+      (unless (eq dict dict2)
+        (setf (class.raw-dict class) dict2))
+      found)))
 
 #+(or)
-(define-compiler-macro py-==->lisp-val (x y)
-  ;; A user can define a class whose instances are not equal to themselves.
-  ;; Because that leads to problems in hashtable lookup, and this function
-  ;; is used a lot for hash tables, we assume EQ => py-==.
-  `(let ((.x ,x)
-         (.y ,y))
-     (if (eq .x .y)
-         t
-       (/= (the fixnum (py-== .x .y)) 0))))
-	 
-;; The functions PY-HASH and PY-== are needed for bootstrapping; the
-;; definitions here are temporarily.
+(defun class-raw-attr-map (class func)
+  (let ((dict (class.raw-dict class)))
+    (if (hash-table-p dict)
+        (maphash func dict)
+      (loop for (k . v) in dict
+          do (funcall func k v)))))
 
-(unless (fboundp 'py-hash)
-  (defun py-hash (x)
-    (declare (ignore x))
-    0))
+;;; Class attribute cache
 
-(unless (fboundp 'py-==)
-  (defun py-== (x y)
-    "Returns Python equality value: True = 1, False = 0."
-    #+(or)(warn "old py-== ~A ~A" x y)
-    (if (equalp x y) 1 0)))
+(defstruct (class-attr (:conc-name ca.))
+  getattribute class-val-dd getattr class-val-non-dd)
 
-#+sbcl
-(sb-int:define-hash-table-test 'py-hash-table-test
-    #'py-==->lisp-val #'py-hash)
-    
-(defun make-py-hash-table ()
-  (or #+(or allegro lispworks)
-      (make-hash-table :test 'py-==->lisp-val :hash-function 'py-hash)
-      
-      #+sbcl
-      (make-hash-table :test 'py-hash-table-test)
-      
-      (error "Creating python dict not suported in this environment.")))
+(defparameter *ca-cache* (make-hash-table :test 'equal)
+  "Mapping from (class, attr) to class-attr struct.")
 
-(defun convert-dikt (x)
-  (declare #.*dict-optimize-settings*)
-  #+(or)(break "converting dikt ~A" x)
-  (do ((d (make-py-hash-table))
-       (i 0 (1+ i)))
-      ((= i +dikt-hash-vector-size+)
-       (setf (dikt-hash-table x) d
-             (dikt-vector x) nil)
-       x)
-    (let ((entries (svref (dikt-vector x) i)))
-      (do ((entry (pop entries) (pop entries)))
-          ((null entry) )
-        (setf (gethash (car entry) d) (cdr entry))))))
+(defun get-ca (class attr)
+  (declare (optimize (speed 3) (safety 0) (debug 0)) #+(or)(class class))
+  (let ((cn #+(or)(class-name class)
+            (class.raw-classname class)))
+    (let ((plist (symbol-plist cn)))
+      (loop 
+        (when (eq (pop plist) attr)
+          (return-from get-ca (car plist)))
+        (setf plist (cdr plist))
+        (unless plist
+          (return-from get-ca (setf (get cn attr) (get-ca-1 class attr))))))
+    #+(or)
+    (or (get cn attr)
+        (setf (get cn attr) (get-ca-1 class attr)))))
 
-;;; DIKT functions
+(defun get-ca-1 (class attr)
+  "Retrieve CLASS-ATTR."
+  ;(declare (optimize (speed 3) (safety 0) (debug 0)))
+  (let ((key (cons class attr)))
+    (declare (dynamic-extent key))
+    (or (gethash key *ca-cache*)
+        (setf (gethash (cons class attr) *ca-cache*)
+          (calculate-ca class attr)))))
 
-(defun dikt-del (x key)
-  ;; Returns whether found.
-  (declare #.*dict-optimize-settings*)
-  (cond ((dikt-hash-table x) ;; use hash-table
-         (remhash key (dikt-hash-table x)))
-        ((symbolp key)
-         (dikt-del-sym-with-hash x key (get-sym-attr-hash key)))
-        (t
-         (dikt-del (convert-dikt x) key))))
+(defmacro do-cpl ((c class) &body body)
+  "Loop over the superclasses relevant for attribute lookup."
+  `(block .looper
+     (dolist (,c (closer-mop:class-precedence-list ,class))
+       (when (or (eq ,c (ltv-find-class 'standard-class))
+                 #+(or)(eq ,c (ltv-find-class 'dict-mixin))
+                 (eq ,c (ltv-find-class 'standard-generic-function)))
+         (return-from .looper))
+       (when (typep ,c (ltv-find-class 'dict-mixin)) ;; check needed?
+         ,@body))))
 
-(defun dikt-del-sym-with-hash (x key-sym hash)
-  ;; Assumes: HASH == (get-sym-attr-hash KEY-SYM)
-  (declare #.*dict-optimize-settings*
-           (symbol key-sym)
-           (type attr-hash-type hash))
-  (if (dikt-hash-table x)
-      (dikt-del x key-sym)
-    (let ((entries (svref (dikt-vector x) hash)))
-      (do ((entry (pop entries) (pop entries))
-           (prev-entry nil entry))
-          ((null entry) nil)
-        (when (eq (car entry) key-sym)
-          (if prev-entry
-              (setf (cdr prev-entry) entries)
-            (setf (svref (dikt-vector x) hash) entries))
-          (return-from dikt-del-sym-with-hash t))))))
+(defun calculate-ca (class attr)
+  ;; There are two modes for retrieving an attribute, characterized by whether the
+  ;; special methods __getattr__ and __getattribute__ are taken into account.
+  ;; Here we create a struct for caching that can be used for both.
+  ;; An overview:  the rows indicate the possible situations
+  ;;               x means relevant if special methods taken into account
+  ;;               # means relevant if special methods not taken into account 
+  ;;
+  ;;     getattribute | classval-dd | getattr |  | classval-non-dd | instance-dict
+  ;; (1)      x             #                             #
+  ;; (2)      x             #            x                #
+  ;; (3)                    x                       
+  ;; (4)                                 x
+  ;; (5)                                                  x               x
+  ;; (6)                                                                  x
+  ;(declare (optimize (speed 3) (safety 1) (debug 0)))
+  (let (__getattr__ __getattribute__ attr-val attr-is-dd)
+    (do-cpl (c class)
+      (unless __getattribute__
+        (whereas ((x (class.raw-attr-get c '{__getattribute__})))
+          (setf __getattribute__ x)))
+      (unless attr-val
+        (whereas ((x (class.raw-attr-get c attr)))
+          (setf attr-val x
+                attr-is-dd (data-descriptor-p x))))
+      (unless __getattr__
+        (whereas ((x (class.raw-attr-get class '{__getattr__})))
+          (setf __getattr__ x))))
+    (make-class-attr :getattribute __getattribute__
+                     :getattr __getattr__
+                     :class-val-dd (when attr-is-dd attr-val)
+                     :class-val-non-dd (when (not attr-is-dd) attr-val))))
 
-(define-compiler-macro dikt-del (&whole whole x key)
-  ;; Try to move lookup of symbol hash code to compile time or load time.
-  (let ((key.sym (cond ((stringp key) (intern key :clpython.user))
-                       ((and (listp key) 
-                             (eq (car key) 'quote)
-                             (symbolp (second key)))
-                        (second key)))))
-    (cond ((null key.sym) 
-           whole)
-          ((member key.sym *magic-methods*)
-           `(dikt-del-sym-with-hash ,x ',key.sym ,(get-sym-attr-hash key.sym)))
-          (t
-           `(dikt-del-sym-with-hash ,x ',key.sym (load-time-value (get-sym-attr-hash ',key.sym)))))))
+(defun clear-ca-cache ()
+  ;; TODO: only remove what's outdated, e.g. a class and its sublasses.
+  (loop for (class . attr) being the hash-key in *ca-cache*
+      do (remprop (class-name class) attr))
+  (clrhash *ca-cache*))
 
-;;; DIKT-SET
+;;; Attribute lookup
 
-(defun dikt-set (x key val)
-  (declare #.*dict-optimize-settings*)
-  (cond ((dikt-hash-table x) ;; use hash-table
-         (setf (gethash key (dikt-hash-table x)) val))
-        ((symbolp key)
-         (dikt-set-sym-with-hash x key (get-sym-attr-hash key) val))
-        (t
-         (dikt-set (convert-dikt x) key val))))
+(defun class.attr-no-magic (class attr)
+  "Retrieve class.attr skipping magic hooks."
+  (let ((ca (get-ca class attr)))
+    (or (ca.class-val-dd ca)
+        (ca.class-val-non-dd ca))))
 
-(defun dikt-set-sym-with-hash (x key-sym hash val)
-  ;; Assumes: HASH == (get-sym-attr-hash KEY-SYM)
-  (declare #.*dict-optimize-settings*
-           (symbol key-sym)
-           (type attr-hash-type hash))
-  (if (dikt-hash-table x)
-      (dikt-set x key-sym val)
-    (let ((entries (svref (dikt-vector x) hash)))
-      (unless (listp entries)
-        (error "invalid args: ~A" `(dikt-set-sym-with-hash ,x ,key-sym ,hash ,val)))
-      (do ((entry (pop entries) (pop entries)))
-          ((null entry) (push (cons key-sym val) (svref (dikt-vector x) hash)))
-        (when (eq key-sym (car entry))
-          (setf (cdr entry) val)
-          (return-from dikt-set-sym-with-hash))))))
-
-(define-compiler-macro dikt-set (&whole whole x key val)
-  ;; Try to move lookup of symbol hash code to compile time or load time.
-  (let ((key.sym (cond ((stringp key) (intern key :clpython.user))
-                       ((and (listp key) 
-                             (eq (car key) 'quote)
-                             (symbolp (second key)))
-                        (second key)))))
-    (cond ((null key.sym) 
-           whole)
-          ((member key.sym *magic-methods*)
-           (assert (get-sym-attr-hash key.sym) () "Symbol ~A denotes magic method, but property missing." key.sym)
-           `(dikt-set-sym-with-hash ,x ',key.sym ,(get-sym-attr-hash key.sym) ,val))
-          (t
-           `(dikt-set-sym-with-hash ,x ',key.sym (load-time-value (get-sym-attr-hash ',key.sym)) ,val)))))
+(defun x.class-attr-no-magic.bind (x attr)
+  (let ((x.cls (py-class-of x)))
+    (whereas ((m (class.attr-no-magic x.cls attr)))
+      (bind-val m x x.cls)))) 
   
-;;; DIKT-GET
+(define-compiler-macro class.attr-no-magic (class attr)
+  `(let ((ca (get-ca ,class ,attr)))
+     (or (ca.class-val-dd ca)
+         (ca.class-val-non-dd ca))))
 
-(defun dikt-get (x key)
-  "Returns value or NIL"
-  (declare #.*dict-optimize-settings*)
-  (cond ((dikt-hash-table x) ;; use hash-table
-         (gethash key (dikt-hash-table x)))
-        ((symbolp key)
-         (dikt-get-sym-with-hash x key (get-sym-attr-hash key)))
-        (t 
-         (let ((user-sym (and (stringp key)
-                              (find-symbol key #.(find-package :clpython.user)))))
-           (when user-sym
-             (return-from dikt-get (dikt-get-sym-with-hash x user-sym (get-sym-attr-hash user-sym)))))
-         (warn "dikt-get: non-{symbol,string} lookup key ~S for symbol-only dikt?" key)
-         (dikt-get (convert-dikt x) key))))
+(defun instance.attr-no-magic (inst attr)
+  (funky-dict-get (dict inst) attr))
 
-(defun dikt-get-sym-with-hash (x key-sym hash)
-  ;; Assumes: HASH == (get-sym-attr-hash KEY-SYM)
-  (declare #.*dict-optimize-settings*
-           (symbol key-sym)
-           (type attr-hash-type hash))
-  (if (dikt-hash-table x)
-      (dikt-get x key-sym)
-    (let ((entries (svref (dikt-vector x) hash)))
-      (do ((entry (pop entries) (pop entries)))
-          ((null entry) )
-        (when (eq key-sym (car entry))
-          (return-from dikt-get-sym-with-hash (cdr entry)))))))
+(define-compiler-macro instance.attr-no-magic (inst attr)
+  `(funky-dict-get (dict ,inst) ,attr))
 
-(define-compiler-macro dikt-get (&whole whole x key)
-  ;; Try to move lookup of symbol hash code to compile time or load time.
-  (let ((key.sym (cond ((stringp key) (intern key :clpython.user))
-                       ((and (listp key) 
-                             (eq (car key) 'quote)
-                             (symbolp (second key)))
-                        (second key)))))
-    (cond ((null key.sym) 
-           whole)
-          ((member key.sym *magic-methods*)
-           `(dikt-get-sym-with-hash ,x ',key.sym ,(get-sym-attr-hash key.sym)))
-          (t
-           `(dikt-get-sym-with-hash ,x ',key.sym (load-time-value (get-sym-attr-hash ',key.sym)))))))
-
-;;; Other methods
-
-(defun dikt-equal (d1 d2)
-  (declare #.*dict-optimize-settings*
-           (notinline py-==))
-  (cond ((eq d1 d2) 
-         t)
-        
-        ((and (dikt-hash-table d1)
-              (dikt-hash-table d2))
-         (let ((ht1 (dikt-hash-table d1))
-               (ht2 (dikt-hash-table d2)))
-           (and (= (the fixnum (hash-table-count ht1)) (the fixnum (hash-table-count ht2)))
-                (loop for d1.k being each hash-key in ht1 using (hash-value d1.v)
-                    for d2.v = (gethash d1.k ht2)
-                    when (not d2.v) return nil
-                    when (py-val->lisp-bool (py-!= d1.v d2.v)) return nil
-                    finally (return t)))))
-        
-        ((not (or (dikt-hash-table d1) (dikt-hash-table d2)))
-         (do ((i 0 (1+ i)))
-             ((= i +dikt-hash-vector-size+) t)
-           (let ((entries.1 (svref (dikt-vector d1) i))
-                 (entries.2 (svref (dikt-vector d2) i)))
-             (unless (= (length entries.1) (length entries.2))
-               (return-from dikt-equal nil))
-             (do* ((entry.1 (pop entries.1) (pop entries.1))
-                   (entry.2 (and entry.1 (assoc (car entry.1) entries.2 :test 'eq))))
-                 ((null entry.1) )
-               (unless (eq (cdr entry.2) (cdr entry.1))
-                 (return-from dikt-equal nil))))))
-        
-        (t (unless (dikt-hash-table d1)
-             (rotatef d1 d2))
-           ;; Now d1 is the hash-table; d2 is the vector
-           (and (= (dikt-count d2) (dikt-count d1))
-                (loop for d1.k being each hash-key in (dikt-hash-table d1)
-                    always (or (symbolp d1.k) (stringp d1.k)))
-                (loop for d1.k being each hash-key in (dikt-hash-table d1)
-                    using (hash-value d1.v)
-                    always (py-== (dikt-get d2 d1.k) d1.v))))))
-
-(eval-when (:compile-toplevel :load-toplevel :execute)
-  (defconstant +hash-table-iterator-indefinite-extent+
-      #+allegro t
-      #+lispworks nil
-      #+sbcl t
-      #-(or allegro lispworks sbcl) nil
-    "Whether the iterator created by WITH-HASH-TABLE-ITERATOR has indefinite extent.
-This is not guaranteed due to the following in ANSI:
-  It is unspecified what happens if any of the implicit interior state of
-  an iteration is returned outside the dynamic extent of the
-  with-hash-table-iterator form such as by returning some closure over
-  the invocation form."))
-
-(defun hashtable-nth-entry (ht i)
-  "Return the I-th entry in the hashtable (I >= 0), using its internal order."
+(defun instance.attr-get (x attr)
+  "Retrieve attribute from instance dict, skipping magic hooks. Instance may be a class."
   (declare (optimize (speed 3) (safety 0) (debug 0)))
-  (loop for ix from 0 to i
-      for k being each hash-key in ht
-      when (= ix i) return (values k (gethash k ht))
-      finally (return (values nil nil))))
+  ;;(check-type attr symbol)
+  (cond ((my-classp-1 x)
+         (class.attr-no-magic x attr))
+        ((has-dict x)
+         #+(or)(funky-dict-get (closer-mop:standard-instance-access x +dicted-object-dict-index+) attr)
+         (funky-dict-get (dict x) attr))))
 
-(defmacro def-dikt-iter-func (name args doc key-var val-var action-form)
-  ;; BLOCK is named 'iter.
-  ;; Modifying the value of the most recently returned item by the iterator
-  ;; should be okay; removing it is not yet supported.
-  `(defun ,name (.d ,@args)
-     (declare (optimize (debug 3) (safety 3) (speed 0)))
-     ,doc
-     (if (dikt-hash-table .d)
-         ,(if +hash-table-iterator-indefinite-extent+
-              `(with-hash-table-iterator (.next-func (dikt-hash-table .d))
-                 (lambda ()
-                   (block iter
-                     (multiple-value-bind (.ret .k .v)
-                         (.next-func)
-                       (declare (ignorable .k .v))
-                       (let (,@(when key-var `((,key-var .k)))
-                             ,@(when val-var `((,val-var .v))))
-                         (when .ret
-                           ,action-form))))))
-            `(let ((.i 0)
-                   (.ht (dikt-hash-table .d)))
-               (lambda ()
-                 (block iter
-                   (multiple-value-bind (.k .v)
-                       (hashtable-nth-entry .ht .i)
-                     (declare (ignorable .k .v))
-                     (let (,@(when key-var `((,key-var .k)))
-                           ,@(when val-var `((,val-var .v))))
-                       (when (and .k .v)
-                         (incf .i)
-                         ,action-form)))))))
-       (let ((.hash-ix 0)
-             (.nth-item 0))
-         (lambda ()
-           (loop named iter
-               do (let* ((.entries (svref (dikt-vector .d) .hash-ix))
-                         (.entry-var (nth .nth-item .entries)))
-                    (cond (.entry-var
-                           (incf .nth-item)
-                           (let (,@(when key-var `((,key-var (car .entry-var))))
-                                 ,@(when val-var `((,val-var (cdr .entry-var)))))
-                             ,action-form))
-                          ((< (incf .hash-ix) +dikt-hash-vector-size+)
-                           (setf .nth-item 0))
-                          (t (return-from iter nil))))))))))
+(defun attr (x attr)
+  "Retrieve attribute value x.attr using all the magic hooks.
+Returns NIL if not found."
+  (declare (optimize (speed 3) (safety 0) (debug 0)))
+  ;;(check-type attr symbol)
+  (let* ((x.cls (py-class-of x))
+         (ca (get-ca x.cls attr)))
+    ;; __getattribute__ (and perhaps __getattr__)
+    (whereas ((g (ca.getattribute ca)))
+      (let ((ga (ca.getattr ca)))
+        (if ga
+            (handler-case (return-from attr (py-call (bind-val g x x.cls) (symbol-name attr)))
+              ({AttributeError} () (py-call (bind-val ga x x.cls) (symbol-name attr))))
+          (return-from attr (py-call (bind-val g x x.cls) (symbol-name attr))))))
+    ;; class value that is data descriptor
+    (whereas ((v (ca.class-val-dd ca)))
+      (return-from attr (bind-val v x x.cls)))
+    ;; __dict__
+    (when (eq attr '{__dict__})
+      (return-from attr (dict x)))
+    (when (eq attr '{__class__})
+      (return-from attr (py-class-of x)))
+    (when (and (eq attr '{__name__})
+               (functionp x))
+      (return-from attr (function-name x)))
+    ;; instance dict
+    (whereas ((v (instance.attr-get x attr)))
+      (return-from attr v))
+    ;; class non-data-descriptor
+    (whereas ((v (ca.class-val-non-dd ca)))
+      (return-from attr (bind-val v x x.cls)))
+    ;; __getattr__
+    (whereas ((v (ca.getattr ca)))
+      (py-call (bind-val v x x.cls) (symbol-name attr))))
+  (py-raise '{AttributeError}
+            "Object ~A has no attribute `~A'."
+            x attr))
 
-(def-dikt-iter-func dikt-iter-keys-func ()
-    "Returns the keys one by one, and NIL when finished."
-  key nil (return-from iter key))
+(defun bind-val (val x x.class)
+  (assert (and x x.class))
+  (whereas ((meth (class.attr-no-magic (py-class-of val) '{__get__})))
+    (return-from bind-val (py-call meth val x x.class)))
+  val)
 
-(def-dikt-iter-func dikt-iter-values-func ()
-    "Returns the keys one by one, and NIL when finished."
-  nil val (return-from iter val))
+(defun (setf attr) (val x attr)
+  "Val = NIL indicates attribute deletion. Returns NIL when failed."
+  (declare (optimize (speed 3) (safety 0) (debug 0)))
+  (declare (special *the-none*))
+  ;(check-type attr symbol)
+  (let ((x.cls (py-class-of x)))
+    (if (not val)
+        (progn
+          ;; 1. class.__delattr__
+          (whereas ((v (class.attr-no-magic x.cls '{__delattr__})))
+            (return-from attr (py-call (bind-val v x x.cls) (symbol-name attr))))
+          ;; 2. class.attr.__del__
+          (whereas ((cls-attr (class.attr-no-magic x.cls attr))
+                    (v (x.class-attr-no-magic.bind cls-attr '{__del__})))
+            (if (eq v *the-none*)
+                (py-raise '{AttributeError}
+                          "Cannot delete attribute ~A of ~A, as ~A.~A.__del__ is None."
+                          x attr x attr)
+              (return-from attr (py-call v x)))) ;; XXX check args
+          ;; XXX check del of __dict__ / __class__ ?
+          ;; 3. Instance dict
+          (if (my-classp-1 x)
+              (when (class.raw-attr-del x attr)
+                (return-from attr))
+            (whereas ((d (dict x)))
+              (multiple-value-bind (d2 found)
+                  (funky-dict-del d attr)
+                (when found
+                  (unless (eq d d2)
+                    (setf (dict x) d2))
+                  (return-from attr)))))
+          ;; 4. Failed
+          (py-raise '{AttributeError} "Cannot delete attribute ~A of ~A." attr x))
+      (progn
+        ;; 1. class.__setattr__
+        (whereas ((v (class.attr-no-magic x.cls '{__setattr__})))
+          (return-from attr (py-call (bind-val v x x.cls) (symbol-name attr) val)))
+        ;; 2. class.attr.__set__
+        (whereas ((cls-attr (class.attr-no-magic x.cls attr))
+                  (v (x.class-attr-no-magic.bind cls-attr '{__set__})))
+          (if (eq v *the-none*)
+              (py-raise '{AttributeError}
+                        "Cannot set attribute ~A of ~A, as ~A.~A.__set__ is None."
+                        x attr x attr)
+            (return-from attr (py-call v x val))))
+        ;; 3. Specials attributes: __dict__, __class__
+        (case attr
+          ({__dict__}  (setf (dict x) val)
+                       (return-from attr))
+          ({__class__} (setf (py-class-of x) val)
+                       (return-from attr))
+          ({__name__}  (when (typep x 'py-function)
+                         (clpython.user::py-function.__name__-writer x val)
+                         (return-from attr))))
+        ;; 4. Dict
+        (when (my-classp-1 x)
+          (class.raw-attr-set x attr val)
+          (return-from attr))
+        (when (has-dict x)
+          (let* ((d (dict x))
+                 (d2 (funky-dict-set (dict x) attr val)))
+            (unless (eq d d2)
+              (setf (dict x) d2))
+            (return-from attr)))
+        ;; 5. Failed
+        (py-raise '{AttributeError} "Cannot set attribute ~A of ~A." attr x)))))
 
-(def-dikt-iter-func dikt-iter-keys-values-func ()
-    "Returns the key, value as two values; and NIL when finished."
-  key val (return-from iter (values key val)))
 
-(defun dikt-map (d func)
-  (let ((mapper (dikt-map-func d func)))
-    (loop while (funcall mapper))))
-   
-(def-dikt-iter-func dikt-map-func (func)
-  "Func, a function of two args, is called for every key-value pair."
-  key val (progn (funcall func key val)
-                 t))
+;;; Descriptors
 
-(defun dikt-count (d)
-  (if (dikt-hash-table d)
-      (hash-table-count (dikt-hash-table d))
-    (do ((i 0 (1+ i))
-         (count 0))
-        ((= i +dikt-hash-vector-size+) count)
-      (incf count (length (svref (dikt-vector d) i))))))
+(defun descriptor-p (x)
+  (let ((x.class (py-class-of x)))
+    (or (class.attr-no-magic x.class '{__get__})
+	(class.attr-no-magic x.class '{__set__})
+	(class.attr-no-magic x.class '{__delete__}))))
 
-(defun dikt-clear (d)
-  (when (dikt-hash-table d)
-    (setf (dikt-hash-table d) nil))
-  (cond ((dikt-vector d)
-         (do ((i 0 (1+ i)))
-             ((= i +dikt-hash-vector-size+) )
-           (setf (svref (dikt-vector d) i) nil)))
-        (t (setf (dikt-vector d)
-             (make-array +dikt-hash-vector-size+ :initial-element nil))))
-  d)
+(defun data-descriptor-p (x)
+  "Returns DES-P, __SET__"
+  (let ((x.class (py-class-of x)))
+    (or (class.attr-no-magic x.class '{__set__})
+        (class.attr-no-magic x.class '{__delete__}))))
+

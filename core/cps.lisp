@@ -38,7 +38,8 @@ StopIteration when exhausted."
                      "Generator expected None, but got ~A, as initial input value."
                      (second .x))
                    (with-pydecl ((:context :function)
-                                 (:in-sub-generator ,sub-generator))
+                                 (:in-sub-generator ,sub-generator)
+                                 (:inside-function-p t))
                      (cps-convert ,suite #'identity)))
            (:exception
             (warn "Generator got immediate command to raise exception! ~A" val)
@@ -77,13 +78,13 @@ WITH-GENERATOR-CONTEXT. A call either:
 (defun gen.send (g value)
   (funcall (generator-k g) (list :value value)))
 
+(defun gen.throw (g &optional (value *the-none*) (traceback *the-none*))
+  (funcall (generator-k g) (list :exception value traceback))) 
+
 (defun gen.send-or-throw (g &rest items)
   (ecase (car items)
     (:value (gen.send g (second items)))
-    (:exception (apply #'gen.throw g (cdr items))))) 
-
-(defun gen.throw (g &optional (value *the-none*) (traceback *the-none*))
-  (funcall (generator-k g) (list :exception value traceback)))
+    (:exception (apply #'gen.throw g (cdr items)))))
 
 (defun g.__del__ (g)
   (gen.close g))
@@ -122,7 +123,6 @@ WITH-GENERATOR-CONTEXT. A call either:
                                        (warn "No CPS macro function defined for node `~A' ~@
                                          therefore standard macro function used." node)
                                        nil))))
-             ;; Found CPS overrule. I think it does not make sense to also call ORIG-HOOK in any way now.
              (return-from new-hook (funcall orig-hook cps-mfunc mform env)))
            
            (funcall orig-hook mfunc mform env)))
@@ -172,11 +172,11 @@ Note that CPS macros take the continuation as additional first parameter."
                            (t (error "Unexpected node name: ~A" node)))))
         (fname (intern (format nil "~A-cps-convert" node) #.*package*)))
     `(progn (defmacro ,fname (%k ,@args) ;; K is the first arg
-              (flet ((store-continuation (f) `(setf (generator-k .g) ,f)) ;; ,%k))
+              (flet ((store-continuation (f) `(setf (generator-k .g) ,f))
                      (generator-finished () `(funcall (setf (generator-k .g) 'generator-finished)))
                      (current-continuation () %k)
                      ,(ecase node-type
-                        (:stmt `(call-continuation () `(funcall ,%k nil))) ;; enfore no value
+                        (:stmt `(call-continuation () `(funcall ,%k nil))) ;; enforce no value
                         (:expr `(call-continuation (val) `(funcall ,%k ,val))))) ;; enforce value
                 (declare (ignorable #'store-continuation #'generator-finished #'call-continuation #'current-continuation))
                 ,@body))
@@ -187,7 +187,7 @@ Note that CPS macros take the continuation as additional first parameter."
      (cps-convert ,test (lambda (test-val)
                           ,(if raise-arg
                                `(cps-convert ,raise-arg (lambda (raise-arg) (assert-stmt-1 test-val ',test raise-arg)))
-                             `(assert-stmt-1 test-val ',test raise-arg))
+                             `(assert-stmt-1 test-val ',test ,raise-arg))
                           ,(call-continuation)))))
 
 (def-cps-macro [assign-stmt] (value targets &environment e)
@@ -222,7 +222,8 @@ Note that CPS macros take the continuation as additional first parameter."
                                         (let ((,place-val-now ,reader))
                                           (or (,py-@= ,place-val-now ,op-val)
                                               (let ((,(car stores) (,py-@ ,place-val-now ,op-val)))
-                                                ,writer)))))))
+                                                ,writer)))
+                                        ,(call-continuation)))))
           (loop for var in (reverse vars)
               for val in (reverse vals)
               do (setf res `(cps-convert ,val (lambda (,var) ,res))))
@@ -237,13 +238,10 @@ Note that CPS macros take the continuation as additional first parameter."
                                        ,(call-continuation `(,(get-binary-op-func-name op) x-val y-val)))))))
 
 (def-cps-macro [binary-lazy-expr] (op left right)
-  (ecase op
-    ([or] `(cps-convert ,left (lambda (x) (if (py-val->lisp-bool x)
-                                              x 
-                                            (cps-convert ,right ,(current-continuation))))))
-    ([and] `(cps-convert ,left (lambda (x) (if (py-val->lisp-bool x)
-                                               (cps-convert ,right ,(current-continuation))
-                                             x))))))
+  `(cps-convert ,left (lambda (x) (if (py-val->lisp-bool x)
+                                      ,@(when (eq op '[or]) `(x))
+                                      (cps-convert ,right ,(current-continuation))
+                                      ,@(when (eq op '[and]) `(x))))))
 
 (def-cps-macro [break-stmt] ()
   `(.break-cont)) ;; see [for-in-stmt] and [while-stmt]
@@ -272,14 +270,14 @@ Note that CPS macros take the continuation as additional first parameter."
     (setf res `(cps-convert ,primary (lambda (,primary-gensym) ,res)))
     res))
 
-;; [classdef-stmt] : keep
 (def-cps-macro [classdef-stmt] (name inheritance suite)
   (assert ([tuple-expr-p] inheritance)) 
-  (let* ((inheritance-gensyms (loop repeat (length (second inheritance)) collect (gensym "superclass")))
+  (let* ((inheritance-gensyms (loop for i from 1 repeat (length (second inheritance)) collect
+                                    (gensym (format nil "superclass-~A-" i))))
          (res `(progn (with-pydecl ((:in-generator-toplevel nil))
                         (classdef-stmt-1 ,name ([tuple-expr] ,inheritance-gensyms) ,suite))
                       ,(call-continuation))))
-    (loop for sup in (second inheritance) for gensym in inheritance-gensyms
+    (loop for sup in (reverse (second inheritance)) for gensym in (reverse inheritance-gensyms)
         do (setf res `(cps-convert ,sup (lambda (,gensym) ,res))))
     res))
 
@@ -287,9 +285,9 @@ Note that CPS macros take the continuation as additional first parameter."
 
 (def-cps-macro [comparison-expr] (cmp left right)
   (let ((py-@ (get-binary-comparison-func-name cmp)))
-    `(cps-convert ,left (lambda (left)
-                          (cps-convert ,right (lambda (right)
-                                                (,py-@ left right)))))))
+    `(cps-convert ,left (lambda (.left)
+                          (cps-convert ,right (lambda (.right)
+                                                ,(call-continuation `(,py-@ .left .right))))))))
 
 (def-cps-macro [continue-stmt] ()
   `(.continue-cont)) ;; see [for-in-stmt]
@@ -320,26 +318,32 @@ Note that CPS macros take the continuation as additional first parameter."
     res))
 
 (def-cps-macro [for-in-stmt] (target source suite else-suite)
-  `(cps-convert ,source (lambda (source)
-                          (let* ((.it-fun (get-py-iterate-fun source)))
-                            (labels ((.break-cont (val)
-                                       (declare (ignore val))
-                                       (call-continuation))
-                                     (.else-cont (val)
-                                       (declare (ignore val))
-                                       (cps-convert ,else-suite (lambda (.val) ;; may be nil
-                                                                  (declare (ignore .val))
-                                                                  (.break-cont nil))))
-                                     (.continue-cont (.val)
-                                       (declare (ignore .val))
-                                       (let ((.x (funcall .it-fun)))
-                                         (unless .x
-                                           (.else-cont nil))
-                                         ([assign-stmt] .x (,target))
-                                         (cps-convert ,suite (lambda (val)
-                                                               (declare (ignore val))
-                                                               (.continue-cont nil))))))
-                              (.continue-cont))))))
+  `(let ((stmt-k ,(current-continuation)))
+     (cps-convert ,source (lambda (source)
+                            (let* ((.it-fun (get-py-iterate-fun source)))
+                              (labels ((.break-cont ()
+                                         (funcall stmt-k nil))
+                                       (.else-cont (val)
+                                         (declare (ignore val))
+                                         ,(if else-suite
+                                              `(cps-convert ,else-suite (lambda (.val)
+                                                                          (declare (ignore .val))
+                                                                          (.break-cont)))
+                                            `(.break-cont)))
+                                       (.continue-cont ()
+                                         (let ((.x (funcall .it-fun)))
+                                           (warn "for-in: x=~A" .x)
+                                           (if .x
+                                               (cps-convert ([assign-stmt] .x (,target))
+                                                            (lambda (.v)
+                                                              (declare (ignore .v))
+                                                              (warn "before for-in suite")
+                                                              (cps-convert ,suite (lambda (val)
+                                                                                    (declare (ignore val))
+                                                                                    (warn "after for-in suite")
+                                                                                    (.continue-cont)))))
+                                             (.else-cont nil)))))
+                                (.continue-cont)))))))
 
 (def-cps-macro [funcdef-stmt] (decorators
                                fname (pos-args key-args *-arg **-arg)
@@ -350,7 +354,8 @@ Note that CPS macros take the continuation as additional first parameter."
          (kwd-val-gensyms (loop repeat (length key-args) collect (gensym "kwarg-default")))
          (new-key-args (loop for (name nil) in key-args and gensym in kwd-val-gensyms
                            collect (list name gensym)))
-         (res `(progn (funcdef-stmt-1 ,decorator-gensyms ,fname (,pos-args ,new-key-args ,*-arg ,**-arg) ,suite)
+         (res `(progn (with-pydecl ((:in-generator-toplevel nil))
+                        (funcdef-stmt-1 ,decorator-gensyms ,fname (,pos-args ,new-key-args ,*-arg ,**-arg) ,suite))
                       ,(call-continuation))))
     (loop for (nil val) in (reverse key-args) for gensym in (reverse kwd-val-gensyms)
         do (setf res `(cps-convert ,val (lambda (,gensym) ,res))))
@@ -376,7 +381,6 @@ Note that CPS macros take the continuation as additional first parameter."
                                      `(%module-get ',name)))))))
     (call-continuation res)))
 
-
 (def-cps-macro [if-expr] (condition then else)
   `(cps-convert ,condition (lambda (.c)
                              (if (py-val->lisp-bool .c)
@@ -384,13 +388,15 @@ Note that CPS macros take the continuation as additional first parameter."
                                (cps-convert ,else ,(current-continuation))))))
 
 (def-cps-macro [if-stmt] (if-clauses else-clause)
-  (let ((res (if else-clause 
-                 `(cps-convert ,else-clause ,(current-continuation))
-               (call-continuation))))
+  (let* ((stmt-k (current-continuation))
+         (res (if else-clause 
+                  `(cps-convert ,else-clause ,stmt-k)
+                (call-continuation))))
     (loop for (cond body) in (reverse if-clauses)
         do (setf res `(cps-convert ,cond (lambda (.cond)
+                                           (warn "if-cond = ~A" .cond)
                                            (if (py-val->lisp-bool .cond)
-                                               (cps-convert ,body ,(current-continuation))
+                                               (cps-convert ,body ,stmt-k)
                                              ,res)))))
     res))
 
@@ -421,13 +427,10 @@ Note that CPS macros take the continuation as additional first parameter."
                     ([identifier-expr] ,list))))) ;; list
 
 (def-cps-macro [list-expr] (items)
-  (let ((build-func 'make-py-list-unevaled-list))
-    (loop with list = (gensym "list")
-        with item-gensyms = (loop repeat (length items) collect (gensym "item"))
-        with res = (call-continuation `(,build-func ,item-gensyms))
-        for x in (reverse items) and gensym in (reverse item-gensyms)
-        do (setf res `(cps-convert ,(pop items) (lambda (,gensym) ,res)))
-        finally (return `(let (,list) ,res)))))
+  ;; Relies on tuples being Lisp lists.
+  `(cps-convert ([tuple-expr] ,items)
+                (lambda (.tuple)
+                  ,(call-continuation `(make-py-list-from-tuple .tuple)))))
 
 (def-cps-macro [module-stmt] (&rest args)
   (declare (ignore args))
@@ -476,10 +479,11 @@ Note that CPS macros take the continuation as additional first parameter."
           ((null (cadr stmts))
            `(cps-convert ,(car stmts) ,(current-continuation)))
           (t 
-           `(cps-convert ,(car stmts) (lambda (val)
-                                        (declare (ignore val))
-                                        (cps-convert ([suite-stmt] ,(cdr stmts))
-                                                     ,(current-continuation)))))))
+           `(cps-convert ,(car stmts) (named-function (suite ,(intern (format nil "\"~A; ...\"" (clpython.parser:py-pprint (cadr stmts)) #.*package*)))
+                                          (lambda (val)
+                                            (declare (ignore val))
+                                            (cps-convert ([suite-stmt] ,(cdr stmts))
+                                                         ,(current-continuation))))))))
 
 (def-cps-macro [try-except-stmt] (suite except-clauses else-suite)
   `(flet ((.attempt-handle-error (.c)
@@ -590,13 +594,12 @@ Note that CPS macros take the continuation as additional first parameter."
   #-allegro (error "Don't know how to UNSCHEDULE-FINALIZATION in this lisp."))
 
 (def-cps-macro [tuple-expr] (items)
-  (let ((build-func 'make-tuple-unevaled-list))
-    (loop with list = (gensym "list")
-        with item-gensyms = (loop repeat (length items) collect (gensym "item"))
-        with res = (call-continuation `(,build-func ,item-gensyms))
-        for x in (reverse items) and gensym in (reverse item-gensyms)
-        do (setf res `(cps-convert ,(pop items) (lambda (,gensym) ,res)))
-        finally (return `(let (,list) ,res)))))
+  (loop
+      with item-gensyms = (loop for i from 0 repeat (length items) collect (gensym (format nil "item-~A-" i)))
+      with res = (call-continuation `(make-tuple-unevaled-list ,item-gensyms))
+      for x in (reverse items) and gensym in (reverse item-gensyms)
+      do (setf res `(cps-convert ,x (lambda (,gensym) ,res)))
+      finally (return res)))
 
 (def-cps-macro [unary-expr] (op val)
   (let ((py-op-func (get-unary-op-func-name op)))
@@ -604,20 +607,27 @@ Note that CPS macros take the continuation as additional first parameter."
                          ,(call-continuation `(funcall (function ,py-op-func) .val))))))
 
 (def-cps-macro [while-stmt] (test suite else-suite)
-  `(labels ((.break-cont () ;; see [break-stmt]
-              (call-continuation))
-            (.loop-again ()
-              (cps-convert ,test (lambda (val)
-                                   (if (py-val->lisp-bool val)
-                                       (cps-convert ,suite (lambda (v) (declare (ignore v) (.loop-again))))
-                                     (cps-convert ,else-suite (lambda (v) ,(call-continuation))))))))
-     (.loop-again)))
+  (let ((stmt-k (current-continuation)))
+    `(labels ((.break-cont () ;; see [break-stmt]
+                (funcall ,stmt-k nil))
+              (.loop-again ()
+                (cps-convert ,test (lambda (val)
+                                     (if (py-val->lisp-bool val)
+                                         (cps-convert ,suite (lambda (v)
+                                                               (declare (ignore v))
+                                                               (.loop-again)))
+                                       ,(if else-suite
+                                            `(cps-convert ,else-suite ,stmt-k)
+                                          `(progn (warn "funcall while-cont nil")
+                                                  (funcall ,stmt-k nil))))))))
+       (.loop-again))))
 
 ;; [with-stmt]: keep?
 
 (def-cps-macro [yield-expr] (val)
   `(cps-convert ,val (lambda (val)
                        ,(store-continuation `(lambda (.x)
+                                               (warn "yield continues with ~A for ~A" .x ,(current-continuation))
                                                (assert (and (listp .x) (member (car .x) '(:value :exception)))
                                                    (.x) "Invalid Yield expression input value: ~S." .x)
                                                (ecase (car .x)
@@ -630,7 +640,7 @@ Note that CPS macros take the continuation as additional first parameter."
   ;; A yield statement is a yield expression whose value is not used.
   `(cps-convert ([yield-expr] ,(or value '*the-none*)) ,(current-continuation)))
 
-  
+
 (defmacro view-cps (string)
   (format t "Code: ~A~%" string)
   (let ((ast (parse string :one-expr t)))
@@ -685,14 +695,15 @@ MAX is a safey limit, in case the code erroneously goes into an endless loop."
                                                           :exhausted))
                                                       #+(or)(gen.send gener *the-none*))
                      for i from 1 below (1+ max)
-                     while val do (ecase (car val)
+                     while val do (case (car val)
                                     (:exhausted
                                      (return-from iterate))
                                     (:yield
                                      (wformat "  yield ~A: ~A~%" (1+ i) (second val))
                                      (push (second val) yielded))
                                     (:implicit-return
-                                     (return-from iterate)))
+                                     (return-from iterate))
+                                    (t (error "invalid values from gener: ~A" val)))
                      finally (when (> i max)
                                (warn "Generator manually stopped (but perhaps not exhausted).~%")))))))
           (nreverse yielded)))))
@@ -758,7 +769,61 @@ finally:
   print 'end finally'
 print 'after try/finally'
 yield 5
-print 'still after try/finally'" (1 2 40 41))))
+print 'still after try/finally'" (1 2 40 41))
+      ("
+y = (yield 3)
+yield y" ,(list 3 *the-none*))
+      ("print [1,2,3,4]
+print (1,2,3,4)" ())
+      ("
+for x in [1,2,3,4]:
+  yield x" (1 2 3 4))
+      ("
+for x in [1,2,3,4]:
+  if x != 3:
+    yield x" (1 2 4))
+      ("
+x = 1
+while x < 4:
+  yield x
+  x = x + 1
+" (1 2 3))
+      ("
+for x in [1,2,3,4,5]:
+  if x <= 3:
+     continue
+  if x == 5:
+     break
+  yielded = False
+  for y in 'abcde':
+     while not yielded:
+       yield x
+       yielded = True
+" (4))
+      ("assert ((yield 1), (yield 2) == (None, None))" (1 2))
+      ("assert [(yield 1), (yield 2)] == [(yield 3), (yield 4)], 'Never' % (yield 5)" (1 2 3 4))
+      ("
+try:
+  yield 1
+  assert 0
+  yield 3
+except AssertionError:
+  yield 2" (1 2))
+      ("
+class C: pass
+yield 1
+x = C()
+x.a = 3
+yield x.a
+x.a += 1
+yield x.a" (1 3 4))
+      ("
+x = []
+def f(i):
+  x.append(i)
+assert `(f(1), (yield f(2)), f(3), (yield f(4)))` == (None, None, None, None)
+assert x == [1, 2, 3, 4]" (2 4))
+      ))
 
 (defun cps-test (&key debug)
   (loop for (src expected) in *cps-tests*

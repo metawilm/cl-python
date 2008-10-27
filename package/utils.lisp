@@ -121,3 +121,57 @@ http://groups.google.nl/group/comp.lang.lisp/msg/2520fe9bc7749328?dmode=source"
 (deftype char-code-type ()
   "CHAR-CODE return value type"
   '(integer 0 (#.+max-char-code+)))
+
+(defmacro ltv-find-class (clsname)
+  `(load-time-value (find-class ,clsname)))
+
+(defun alist-remove-prop (alist attr)
+  "Removes first occurrence, if any. Returns NEW-LIST, FOUNDP."
+  (declare (optimize (speed 3) (safety 1) (debug 0)))
+  (if (eq (caar alist) attr)
+      (values (cdr alist) t)
+    (loop for cons on alist
+        when (eq (car (second cons)) attr)
+        do (setf (cdr cons) (cddr cons))
+           (return-from alist-remove-prop (values alist t))
+        finally (return (values alist nil)))))
+
+
+;;; Alist versus hashtable performance for symbol keys
+
+(defconstant +dict-alist-to-hashtable-threshold+ 100
+  "When #items <= threashold, represent attributes as alist, otherwise switch to eq hash table.
+Value is somewhat arbitrary, as relative performance depends on how many lookups fail.
+See function ALIST-VS-HT.")
+
+#+(or)
+(defun alist-vs-ht ()
+  (declare (optimize (speed 3) (safety 1) (debug 0)))
+  (macrolet ((with-measure-passed-time (msg &body body)
+               `(let* ((.msg ,msg)
+                       (.start (get-internal-run-time)))
+                  ,@body
+                  (let ((.stop (get-internal-run-time)))
+                    (format t "  ~3A=~4D " .msg (- .stop .start))))))
+    (loop with iter-repeat = 100000
+        with fail-factor = 10 ;; only 1 in FAIL-FACTOR lookups succeeds
+        for num-items from 0 to 30
+        do (let ((alist (loop for i from 0 below num-items collect (cons i (1+ i))))
+                 (hash-table (let ((ht (make-hash-table :test 'eq)))
+                               (loop for i from 0 below num-items do
+                                     (setf (gethash i ht) (1+ i)))
+                               ht))
+                 (keys (loop repeat (* 10 num-items) collect (random (* fail-factor num-items)))))
+             (dolist (key keys)
+               (when (< key num-items)
+                 (assert (eq (cdr (assoc key alist :test 'eq)) (1+ key)))
+                 (assert (eq (gethash key hash-table) (1+ key)))))
+             (format t "~%Num-items = ~3D: " num-items)
+             (with-measure-passed-time "alist"
+               (dotimes (i iter-repeat)
+                 (dolist (key keys)
+                   (cdr (assoc key alist :test 'eq)))))
+             (with-measure-passed-time "ht"
+               (dotimes (i iter-repeat)
+                 (dolist (key keys)
+                   (gethash key hash-table))))))))

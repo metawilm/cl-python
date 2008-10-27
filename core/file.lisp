@@ -14,12 +14,12 @@
 
 ;; File (User object)
 
-(defclass py-file (py-user-object py-dict-mixin)
+(defclass py-file (dicted-object)
   ((file-stream :initform nil   :accessor py-file-stream)
    (mode        :initform nil   :accessor py-file-mode)
    (binary-mode-p :initform nil :accessor py-file-binary-mode-p)
    (closed-p    :initform t     :accessor py-file-closed-p))
-  (:metaclass py-user-type))
+  (:metaclass py-type))
 
 (defun ensure-open-file (f)
   (when (py-file-closed-p f)

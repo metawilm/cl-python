@@ -22,7 +22,10 @@
     s))
 
 #+allegro
-(defvar |environ| (clpython::make-dict-from-symbol-alist (excl.osi:environment)))
+(defvar |environ| (loop with d = (clpython::make-py-hash-table)
+                      for (k . v) in (excl.osi:environment)
+                      do (setf (gethash k d) v)
+                      finally (return d)))
 
 (set-impl-status '(|name| |error| |urandom| #+allegro |environ|) t)
 

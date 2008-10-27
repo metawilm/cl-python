@@ -54,6 +54,7 @@
                           :components ((:file "csetup"       )
                                        (:file "pydecl"       )
                                        (:file "formatstring" )
+                                       (:file "classdefs"    )
                                        (:file "early-dict"   )
                                        (:file "classes"      )
                                        (:file "file"         )

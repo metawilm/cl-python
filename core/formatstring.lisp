@@ -40,8 +40,7 @@
 			       args))
 				 
 	  with mapping-getitem-unb = (when is-mapping-fs
-				       (recursive-class-dict-lookup (py-class-of arg)
-								    '|__getitem__|))
+				       (class.attr-no-magic (py-class-of arg) '|__getitem__|))
 	  with mapping-getitem-bound = (when mapping-getitem-unb
 					 ;; for efficiency, skip making bound method
 					 (unless (functionp mapping-getitem-unb)

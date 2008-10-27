@@ -92,6 +92,10 @@ like .join (string.join), .sort (list.sort), etc")
   `(locally (declare ,+optimize-fastest+)
      ,@body))
 
+(defmacro fixnump (x)
+  #+allegro `(excl::fixnump ,x)
+  #-allegro `(typep ,x 'fixnum))
+
 ;;; `Exex' statement handling
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
@@ -176,7 +180,229 @@ Disabled by default, to not confuse the test suite.")
          nil)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;;; 
+;;; Namespaces
+
+(defgeneric ns.read-form (namespace name))
+(defgeneric ns.write-form (namespace name val-form))
+(defgeneric ns.write-runtime-form (namespace name-form val-form))
+(defgeneric ns.del-form (namespace name))
+(defgeneric ns.locals-form (namespace))
+
+(defmacro with-namespace (ns &body body &environment e)
+  ;; XXX not always %locals needed (e.g. when no call expr in body)
+  (setf body `(flet ((%locals () ,(ns.locals-form ns)))
+                (declare (ignorable #'%locals))
+                ,@body))
+  `(with-pydecl ((:namespace ,ns))
+     ,(ns.expand-with ns body e)))
+
+(defun ns.find-form (func ns &rest args)
+  (declare (dynamic-extent args))
+  (check-type func function)
+  (loop named lookup
+      for try-ns = ns then (ns.parent try-ns)
+      for form = (and try-ns (apply func try-ns args))
+      when form
+      do (return-from lookup (values form try-ns))
+      finally (error "No namespace for handling ~A ~A, from ~A." func args ns)))
+
+(defmacro namespace-set (key val &environment e)
+  (check-type key symbol)
+  (let ((ns (get-pydecl :namespace e)))
+    (ns.write-form ns key val)))
+
+(defmacro namespace-set-runtime (key-form val &environment e)
+  (let ((ns (get-pydecl :namespace e)))
+    (ns.write-runtime-form ns key-form val)))
+
+(defmacro namespace-get (key &environment e)
+  (check-type key symbol)
+  (let ((ns (get-pydecl :namespace e)))
+    (ns.read-form ns key)))
+
+(defun get-module-namespace (e)
+  (loop for ns = (get-pydecl :namespace e) then (ns.parent ns)
+      while ns
+      when (member (ns.scope ns) '(:function :module :exec-globals))
+      return ns
+      finally (error "No global namespace found, as parent.")))
+                         
+(defmacro module-namepace-get (key &environment e)
+  (check-type key symbol)
+  (let ((ns (get-module-namespace e)))
+    (ns.read-form ns key)))
+
+(defclass namespace ()
+  ((parent :accessor ns.parent :initarg :parent :initform nil)
+   (scope :accessor ns.scope :initarg :scope :initform (error "missing arg :scope"))))
+
+(defmethod ns.expand-with ((ns namespace) body-form environment)
+  (declare (ignorable ns environment))
+  body-form)
+
+(defclass excl-ns (namespace)
+  ((excluded-names :accessor ns.excluded-names :initarg :excluded-names)))
+
+(defmethod ns.read-form :around ((ns excl-ns) (s symbol))
+  (unless (member s (ns.excluded-names ns))
+    (call-next-method)))
+
+(defmethod ns.write-form :around ((ns excl-ns) (s symbol) val-form)
+  (declare (ignore val-form))
+  (unless (member s (ns.excluded-names ns))
+    (call-next-method)))
+
+(defmethod ns.del-form :around ((ns excl-ns) (s symbol))
+  (unless (member s (ns.excluded-names ns))
+    (call-next-method)))
+
+(defclass mapping-ns (namespace)
+  ((mapping-form :accessor ns.mapping-form :initarg :mapping-form)))
+
+(defmethod ns.read-form ((ns mapping-ns) (s symbol))
+  `(or (py-subs ,(ns.mapping-form ns) ,(symbol-name s))
+       ,(when (ns.parent ns)
+          (ns.read-form (ns.parent ns) s))))
+
+(defmethod ns.write-form ((ns mapping-ns) (s symbol) val-form)
+  `(setf (py-subs ,(ns.mapping-form ns) ,(symbol-name s)) ,val-form))
+
+(defmethod ns.del-form ((ns mapping-ns) (s symbol))
+  `(prog1 (py-subs ,(ns.mapping-form ns) ,(symbol-name s))
+     (setf (py-subs ,(ns.mapping-form ns) ,(symbol-name s)) nil)))
+ 
+(defmethod ns.locals-form ((ns mapping-ns))
+  (ns.mapping-form ns))
+
+(defclass mapping-w/excl-ns (mapping-ns excl-ns)
+  ())
+
+(defclass let-ns (namespace)
+  ((names :accessor ns.names :initarg :names)))
+
+(defmethod ns.read-form ((ns let-ns) (s symbol))
+  (when (member s (ns.names ns)) s))
+
+(defmethod ns.write-form ((ns let-ns) (s symbol) val-form)
+  (when (member s (ns.names ns))
+    `(setf ,s ,val-form)))
+
+(defmethod ns.del-form ((ns let-ns) (s symbol))
+  (when (member s (ns.names ns))
+    `(prog1 ,s (setf ,s nil))))
+
+(defmethod ns.expand-with ((ns let-ns) body-form environment)
+  (declare (ignore environment))
+  `(let ,(ns.names ns)
+     ,body-form))
+
+(defmethod ns.locals-form ((ns let-ns))
+  `(make-locals-dict ',(ns.names ns) (list ,@(loop for name in (ns.names ns)
+                                                 collect (ns.read-form ns name)))))
+
+(defun make-locals-dict (name-list value-list)
+  (loop with ht = (make-eq-hash-table "locals-dict")
+      for name in name-list
+      for val in value-list
+      unless (null val) ;; unbound var
+      do (setf (gethash name ht) val)
+      finally (return ht)))
+
+(defclass let-w/locals-ns (let-ns)
+  ((locals-names :accessor ns.locals-names :initarg :locals-names)
+   (let-names :accessor ns.let-names :initarg :let-names)))
+
+(defmethod print-object ((x let-w/locals-ns) stream)
+  (print-unreadable-object (x stream :type t)
+    (format stream ":locals-names ~A  :let-names ~A"
+            (ns.locals-names x) (ns.let-names x))))
+
+(defmethod ns.expand-with ((ns let-w/locals-ns) body-form environment)
+  (declare (ignore environment))
+  `(let ,(ns.let-names ns)
+     ,body-form))
+
+(defmethod ns.locals-form ((ns let-w/locals-ns))
+  `(make-locals-dict ',(ns.locals-names ns) (list ,@(loop for name in (ns.names ns)
+                                                       collect (ns.read-form ns name)))))
+
+(defclass hash-table-ns (namespace)
+  ((dict-form :accessor ns.dict-form :initarg :dict-form :initform (error "required"))))
+
+(defmethod ns.read-form ((ns hash-table-ns) (s symbol))
+  `(or (gethash ',s ,(ns.dict-form ns))
+       ,(when (ns.parent ns)
+          (ns.read-form (ns.parent ns) s))))
+
+(defmethod ns.write-form ((ns hash-table-ns) (s symbol) val-form)
+  `(setf (gethash ',s ,(ns.dict-form ns)) ,val-form))
+
+(defmethod ns.write-runtime-form ((ns hash-table-ns) name-form val-form)
+  `(setf (gethash ,name-form ,(ns.dict-form ns)) ,val-form))
+       
+(defmethod ns.del-form ((ns hash-table-ns) (s symbol))
+  `(remhash ',s ,(ns.dict-form ns)))
+
+(defmethod ns.locals-form ((ns hash-table-ns))
+  (ns.dict-form ns))
+
+(defclass hash-table-w/excl-ns (hash-table-ns excl-ns)
+  ())
+
+#||
+(defclass package-ns (namespace)
+  ((package :accessor ns.package :initarg :package)
+   (incl-builtins :accessor ns.incl-builtins :initarg :incl-builtins :initform nil)))
+
+(defmethod package-ns-intern ((ns package-ns) (s symbol))
+  (intern (symbol-name s) (ns.package ns)))
+
+(defmethod ns.read-form ((ns package-ns) (s symbol))
+  (let ((ps (package-ns-intern ns s)))
+    `(or (and (boundp ',ps) (symbol-value ',ps))
+         ,(when (ns.incl-builtins ns)
+            `(builtin-value ',s)))))
+
+(defmethod ns.write-form ((ns package-ns) (s symbol) val-form)
+  (let ((ps (package-ns-intern ns s)))
+    `(setf (symbol-value ',ps) ,val-form)))
+
+(defmethod ns.del-form ((ns package-ns) (s symbol))
+  (let ((ps (package-ns-intern ns s)))
+    `(prog1 (boundp ',ps)
+       (makunbound ',ps))))
+
+(defmethod ns.locals-form ((ns package-ns))
+  `(loop for x being the symbols in ,(ns.package ns)
+       when (and (eq (symbol-package x)  ,(ns.package ns))
+                 (boundp x))
+       collect (progn (warn "name: ~A" x) x) into names
+       and collect (symbol-value x) into values
+       finally (return (make-locals-dict names values))))
+||#
+
+(defclass builtins-ns (namespace)
+  ())
+
+(defun make-builtins-namespace ()
+  (make-instance 'clpython::builtins-ns :scope :builtins))
+
+(defmethod ns.read-form ((ns builtins-ns) (s symbol))
+  (when (builtin-value s)
+    `(load-time-value (builtin-value ',s))))
+
+(defmethod ns.locals-form ((ns builtins-ns))
+  `(error "Namespace ~A does not have locals()." ,ns))
+
+(defmethod ns.write-form ((ns builtins-ns) (s symbol) val-form)
+  (declare (ignore val-form))
+  `(error "Namespace ~A not writable (attempt to set ~A)." ,ns ,s))
+
+(defmethod ns.del-form ((ns builtins-ns) (s symbol))
+  `(error "Namespace ~A not writable (attempt to delete ~A)." ,ns ',s))
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;  The macros corresponding to AST nodes
 
 (defun assert-stmt-1 (test test-ast raise-arg)
@@ -240,19 +466,19 @@ Disabled by default, to not confuse the test suite.")
 
 (defmacro [attributeref-expr] (item attr)
   (with-matching (attr ([identifier-expr] ?name))
-    `(py-attr ,item ',?name)))
+    `(attr ,item ',?name)))
 
 (define-setf-expander [attributeref-expr] (item attr)
   (with-matching (attr ([identifier-expr] ?name))
     (with-gensyms (prim store)
-      (values `(,prim)    ;; temps
+      (values `(,prim) ;; temps
               `(,item) ;; values
               `(,store)   ;; stores
               `(with-pydecl ((:inside-setf-py-attr t)) ;; store-form
-                 (setf (py-attr ,prim ',?name) ,store))
-              `(py-attr ,prim ',?name)                 ;; read-form
+                 (setf (attr ,prim ',?name) ,store))
+              `(attr ,prim ',?name)                 ;; read-form
               `(with-pydecl ((:inside-setf-py-attr t)) ;; del-form
-                 (setf (py-attr ,prim ',?name) nil))))))
+                 (setf (attr ,prim ',?name) nil))))))
 
 (defmacro [augassign-stmt] (&whole whole op place val &environment env)
   (unless (listp place)
@@ -275,8 +501,7 @@ Disabled by default, to not confuse the test suite.")
 
 	      ;; The @= functions are not defined on numbers and strings.
 	      ;; Check for fixnum inline.
-	      (or (unless #+allegro (excl::fixnump ,place-val-now)
-                          #-allegro (typep ,place-val-now 'fixnum)
+	      (or (unless (fixnump ,place-val-now)
 		    ;; py-@= returns t iff __i@@@__ found
 		    (,py-@= ,place-val-now ,op-val))
 		  (let ((,(car stores) (,py-@ ,place-val-now ,op-val)))
@@ -309,7 +534,7 @@ Disabled by default, to not confuse the test suite.")
 
 ;; EXEC-STMT here, because CALL-EXPR needs it
 
-(defmacro [exec-stmt] (code-string globals locals &key (allowed-stmts t) &environment e)
+(defmacro [exec-stmt] (code-string globals locals &key (allowed-stmts t))
   ;; TODO:
   ;;   - allow code object etc as CODE
   ;;
@@ -320,21 +545,16 @@ Disabled by default, to not confuse the test suite.")
   ;;                   a list: allow only those statements
   ;;                   NIL:    allow no statements
   ;;  (not evaluated)
-
   `(multiple-value-bind (glo loc)
        ,(cond ((and globals locals) `(values ,globals ,locals))
-              (globals              `(let ((.x ,globals))
-                                       (values .x .x))) ;; globals also used for locals
-              (t                    `(let ((.g (create-module-globals-dict)))
-                                       (values .g
-                                               ,(if (eq (get-pydecl :context e) :module)
-                                                    `.g
-                                                  `(.locals.))))))
-     (exec-stmt-check-namespaces glo loc)
-     ;; ensure dicts reflect current namespace
-     (dolist (x (list glo loc))
-       (when (typep x 'py-dict-moduledictproxy)
-         (funcall (mdp-updater x))))
+              (globals              `(let ((x ,globals))
+                                       (values x x))) ;; globals also used for locals
+              (t                    `(values (%globals) (%locals))))
+     (when (typep glo 'symbol-hash-table)
+       (setf glo (sht-ht glo)))
+     (when (typep loc 'symbol-hash-table)
+       (setf loc (sht-ht loc)))
+     #+(or)(exec-stmt-check-namespaces glo loc)
      (exec-stmt-string ,code-string glo loc ',allowed-stmts)))
 
 (defun exec-stmt-check-namespaces (globals locals)
@@ -343,6 +563,8 @@ Disabled by default, to not confuse the test suite.")
   (flet ((check-is-namespace-dict (d)
            ;; Ensure dict has only string keys.
            (check-type d py-dict)
+           ;; XXX todo
+           #+(or)
            (dikt-map (py-dict-dikt d)
                      (lambda (k v)
                        (declare (ignore v))
@@ -355,22 +577,24 @@ Disabled by default, to not confuse the test suite.")
     (unless (eq globals locals)
       (check-is-namespace-dict locals))))
 
-(defun exec-stmt-string (code-string globals locals allowed-stmts)
+(defun exec-stmt-string (code-string globals-handler locals-handler allowed-stmts)
   (check-type code-string string)
   (let ((ast (parse code-string)))
     (exec-stmt-check-ast code-string ast allowed-stmts)
-    (exec-stmt-ast ast globals locals)))
+    (exec-stmt-ast ast globals-handler locals-handler)))
 
-(define-compiler-macro exec-stmt-string (&whole whole code-string globals locals allowed-stmts)
+#+(or)
+(define-compiler-macro exec-stmt-string (&whole whole code-string globals-handler locals-handler allowed-stmts)
   (assert (and (listp allowed-stmts)
                (eq (car allowed-stmts) 'quote)))
   ;; Move compilation of string to compile-time. Warn if string contains errors.
+  ;; (Actually the whole string could be inlined without any runtime exec call,
+  ;; maybe should even do that.)
   (labels ((warn-static-error (error)
              (let ((nice-code (if (> (length code-string) 40)
                                   (concatenate 'string (subseq code-string 0 40) "...")
                                 code-string)))
-               (warn "Invalid argument for `exec': parsing ~S will raise [~A]."
-                     nice-code error))))
+               (warn "The statement `exec ~S' will raise [~A]." nice-code error))))
     (when (and *exec-early-parse-constant-string*
                (stringp code-string))
       (multiple-value-bind (ast error)
@@ -383,104 +607,66 @@ Disabled by default, to not confuse the test suite.")
             (if error
                 (warn-static-error error)
               (return-from exec-stmt-string
-                `(exec-stmt-ast ',ast ,globals ,locals)))))))
+                `(exec-stmt-ast ',ast ,global-handler ,locals-handler)))))))
     whole))
 
 (defun exec-stmt-check-ast (string ast allowed-stmts)
   (whereas ((s (ast-contains-stmt-p ast :allowed-stmts allowed-stmts)))
     (py-raise '{TypeError}
               "Statements are not allowed in this Python code string (found `~A' in \"~A\")." s string))
-  
   (with-py-ast (form ast :into-nested-namespaces nil)
     (case (car form)
       ([return-stmt] (py-raise '{SyntaxError}
                                "Statement `return' was found outside function (in `exec')."))
       (t form)))
-  
   t)
 
 (defun exec-stmt-ast (ast globals locals)
-  (assert ([module-stmt-p] ast))
-  (let ((f `(lambda (.initial-globals .globals-update-func)
-               (locally (declare (optimize (debug 3)))
-                 ;; When this is compiled, the environment object is NIL.
-                 (with-pydecl ((:function-must-save-locals t))
-                   ([module-stmt]
-                    ,([make-suite-stmt*]
-
-                ;; Define helper function
-                ([make-funcdef-stmt]
-                 :fname ([make-identifier-expr*] 'exec-stmt-helper-func)
-                 :args '(() () nil nil)
-                 :suite
-                 ([make-suite-stmt*]
-                  `(block helper
-                     ,([make-suite-stmt*]
-                       
-                       `(loop for (k . v) in .initial-globals
-                            do (check-type k symbol)
-                               (%module-set k v))
-                       
-                       `([suite-stmt]
-                         ;; Set local variables
-                         (,@(let (res)
-                            (dict-map locals
-                                      (lambda (k v)
-                                        (assert (not (null v)) () 
-                                          "Local var `~A' (passed as EXEC local) is NIL." k)
-                                        (push ([make-assign-stmt*]
-                                               :value `',v
-                                               :target ([make-identifier-expr*]
-                                                        (py-string->symbol k)))
-                                              res)))
-                            res)
-                            ;; Include pass stmt, because suite stmt may not be empty (walker requirement)
-                            ([pass-stmt])))
-                         
-                       `(progn ;; Execute exec suite, save result
-                          (let ((res ,(with-matching (ast ([module-stmt] ?suite))
-                                        (assert (match-p ?suite '([suite-stmt] ?stmts)))
-                                        ?suite)))
-                            (when *exec-stmt-result-handler*
-                              (funcall *exec-stmt-result-handler* res))
-                            (return-from helper res)))))))
-                
-                ;; Call helper function
-                ([make-call-expr] :primary ([make-identifier-expr*] 'exec-stmt-helper-func))
-
-                ;; Update `globals'.
-                ;; Using *exec-stmt-globals-update-func* so that we don't have to include
-                ;; GLOBALS as literal (so read-only) object in the function.
-                `(loop for (k . v) in (mgh-all-items .mgh)
-                     unless (eq k 'exec-stmt-helper-func)
-                     do (funcall .globals-update-func k v)))))))))
-    (when *exec-stmt-compile-before-run*
-      (setf f (compile nil f)))
-    (let ((globals-alist
-           (let (res)
-             (dict-map globals
-                       (lambda (k v)
-                         (push (cons (if (stringp k) (intern k :clpython.user) k) v)
-                               res)))
-             res)))
-      (handler-bind ((error (lambda (c)
-                            ;; Only print header line if condition not handled in outer scope.
-                              (signal c)
-                              (format t "[Error occured inside an `exec' statement:]"))))
-        (block run-exec-body
-          (restart-case
-              (let ((mod-func (funcall f globals-alist (lambda (k v) (setf (py-subs globals k) v)))))
-                (funcall mod-func))
-            (return-from-exec ()
-                :report "Abort evaluation of the `exec' statement, but continue execution."
-              (warn "Evaluation of `exec' body was aborted.")
-              (return-from run-exec-body))))))))
+  ;; XXX *exec-stmt-result-handler*
+  (multiple-value-bind (globals-ns globals-param)
+      (typecase globals
+        (symbol-hash-table (break "never"))
+        (eq-hash-table     (values (make-instance 'hash-table-ns
+                                     :dict-form '%exec-globals-ns
+                                     :scope :exec-globals
+                                     :parent (make-builtins-namespace))
+                                   globals))
+        (t                 (values (make-instance 'mapping-ns
+                                     :mapping-form '%exec-globals-ns
+                                     :scope :exec-globals
+                                     :parent (make-builtins-namespace))
+                                   globals)))
+    (let ((locals-excluded-names  (multiple-value-bind (locals new-locals globals)
+                                      (suite-globals-locals (second ast) nil nil)
+                                    (declare (ignore locals new-locals))
+                                    globals)))
+      (multiple-value-bind (locals-ns locals-param)
+          (typecase locals
+            (symbol-hash-table (break "never"))
+            (eq-hash-table     (values (make-instance 'hash-table-w/excl-ns
+                                         :dict-form '%exec-locals-ns
+                                         :excluded-names locals-excluded-names
+                                         :parent globals-ns
+                                         :scope :exec-locals)
+                                       locals))
+            (t                 (values (make-instance 'mapping-w/excl-ns
+                                         :mapping-form '%exec-locals-ns
+                                         :excluded-names locals-excluded-names
+                                         :parent globals-ns
+                                         :scope :exec-locals)
+                                       locals)))
+        (funcall (coerce `(lambda (%exec-globals-ns %exec-locals-ns)
+                            (with-namespace ,globals-ns
+                              (with-namespace ,locals-ns
+                                ,(second ast))))
+                         'function)
+                 globals-param locals-param)))))
 
 ;;; `Call' expression
 
 (defvar *special-calls* '({locals} {globals} {eval}))
 
-(defmacro [call-expr] (&whole whole primary pos-args kwd-args *-arg **-arg &environment e)
+(defmacro [call-expr] (&whole whole primary pos-args kwd-args *-arg **-arg)
   ;; For complete Python semantics, we should check for every call if
   ;; the function being called is one of the built-in functions EVAL,
   ;; LOCALS or GLOBALS, because they access the variable scope of the
@@ -503,10 +689,8 @@ Disabled by default, to not confuse the test suite.")
                                            (**-arg    `(py-iterate->lisp-list ,**-arg))
                                            (t         nil)))
                  (pos-args `(nconc (list ,@pos-args) ,(when *-arg `(py-iterate->lisp-list ,*-arg))))
-                 (locals-dict (if (eq (get-pydecl :context e) :module)
-				  '(create-module-globals-dict)
-				'(.locals.)))
-                 (globals-dict '(create-module-globals-dict)))
+                 (locals-dict '(%locals))
+                 (globals-dict '(%globals)))
                
              `(cond ,@(when (member '{locals} which)
                         `(((eq ,prim (function {locals}))
@@ -531,11 +715,15 @@ Disabled by default, to not confuse the test suite.")
 
 (defun call-expr-locals (locals-dict args-p)
   (when args-p (py-raise '{TypeError} "Built-in function `locals' does not take args."))
-  locals-dict)
+  (if (typep locals-dict 'hash-table)
+      (make-symbol-hash-table locals-dict)
+    locals-dict))
 
 (defun call-expr-globals (globals-dict args-p)
   (when args-p (py-raise '{TypeError} "Built-in function `globals' does not take args."))
-  globals-dict)
+  (if (typep globals-dict 'hash-table)
+      (make-symbol-hash-table globals-dict)
+    globals-dict))
 
 (defun call-expr-eval (locals-dict globals-dict pos-args key-args-p)
   "Handle call to `Eval' at runtime."
@@ -543,7 +731,7 @@ Disabled by default, to not confuse the test suite.")
   (when (or key-args-p 
 	    (not pos-args)
 	    (> (length pos-args) 3))
-    (py-raise '{TypeError} "Built-in function `eval' takes from 1 to three positional args."))
+    (py-raise '{TypeError} "Built-in function `eval' takes between 1 and 3 positional args."))
   (let* ((string (pop pos-args))
 	 (glob-d (or (pop pos-args) globals-dict))
 	 (loc-d  (or (pop pos-args) locals-dict)))
@@ -583,6 +771,7 @@ Disabled by default, to not confuse the test suite.")
 (defun call-expr-* (prim *-args)
   (apply #'py-call prim (py-iterate->lisp-list *-args)))
 
+#+(or)
 (define-compiler-macro [call-expr] (&whole whole primary pos-args kwd-args *-arg **-arg)
   (declare (ignore primary pos-args kwd-args *-arg **-arg))
 
@@ -628,54 +817,50 @@ Disabled by default, to not confuse the test suite.")
   `(classdef-stmt-1 ,@(cdr whole)))
 
 (defmacro classdef-stmt-1 (name inheritance suite &environment e)
-  ;; todo: define .locals. containing class vars
   (multiple-value-bind (all-class-locals new-locals class-cumul-declared-globals)
-      (classdef-stmt-suite-globals-locals suite (get-pydecl :lexically-declared-globals e))
+      (suite-globals-locals suite () (get-pydecl :lexically-declared-globals e))
     (assert (equal new-locals all-class-locals))
     (let* ((cname             (with-matching (name ([identifier-expr] ?name))
                                 ?name))
 	   (new-context-stack (cons cname (get-pydecl :context-stack e)))
 	   (context-cname     (ensure-user-symbol 
 			       (format nil "~{~A~^.~}" (reverse new-context-stack)))))
-
-      (with-gensyms (cls)
-	`(let ((new-cls-dict 
-		
-		;; Need a nested LET, as +cls-namespace+ may not be set when the ASSIGN-STMT
-		;; below is executed, as otherwise nested classes don't work.
-		(let ((+cls-namespace+ (make-dict)))
-                  ;; First, run the statements in the body of the class
-                  ;; definition. This will fill +cls-namespace+ with the
-                  ;; class attributes and methods.
-		  
-                  ;; Note that the local class variables are not locally visible
-                  ;; i.e. they don't extend ":lexically-visible-vars".
-		  (flet ((.locals. () +cls-namespace+))
-                    (declare (ignorable #'.locals.))
-		    (with-pydecl ((:context :class)
-				  (:context-stack ,new-context-stack)
-				  (:lexically-declared-globals
-				   ,class-cumul-declared-globals))
-                      
-                      ,(if *mangle-private-variables-in-class*
-                           (mangle-suite-private-variables cname suite)
-                         suite)))
-		  
-		  +cls-namespace+)))
-	   
-	   ;; Second, now that +cls-namespace+ is filled, make the
-	   ;; class with that as namespace.
-	   (let ((,cls (make-py-class
-                        :name ',cname
-                        :context-name ',context-cname
-                        :namespace new-cls-dict
-                        :supers ,(with-matching (inheritance ([tuple-expr] ?supers))
-                                   `(list ,@?supers))
-                        :cls-metaclass (sub/dict-get new-cls-dict "__metaclass__")
-                        :mod-metaclass (handler-case (%module-get '{__metaclass__})
-                                         ({NameError} () nil)))))
-             (record-source-file-loc ',context-cname :type)
-             ([assign-stmt] ,cls (,name))))))))
+      `(multiple-value-bind (namespace-ht cls-dict.__metaclass__)
+           ;; Need a nested LET, as +cls-namespace+ may not be set when the ASSIGN-STMT
+           ;; below is executed, as otherwise nested classes don't work.
+           (let ((%class-namespace (make-eq-hash-table "class-namespace")))
+             (with-namespace ,(make-instance 'hash-table-ns
+                                :dict-form '%class-namespace
+                                :parent (get-module-namespace e) ;; not the lexical parent ns!
+                                :scope :class)
+               ;; XXX enforce string-only keys
+               ;; First, run the statements in the body of the class
+               ;; definition. This will fill +cls-namespace+ with the
+               ;; class attributes and methods.
+               
+               ;; Note that the local class variables are not locally visible
+               ;; i.e. they don't extend ":lexically-visible-vars".
+               (with-pydecl ((:context :class)
+                             (:context-stack ,new-context-stack)
+                             (:lexically-declared-globals
+                              ,class-cumul-declared-globals))
+                 ,(if *mangle-private-variables-in-class*
+                      (mangle-suite-private-variables cname suite)
+                    suite))
+               
+               (values %class-namespace (namespace-get {__metaclass__}))))
+         
+         ;; Second, now that +cls-namespace+ is filled, make the
+         ;; class with that as namespace.
+         (let ((cls (make-py-class :name ',cname
+                                   :context-name ',context-cname
+                                   :namespace namespace-ht
+                                   :supers ,(with-matching (inheritance ([tuple-expr] ?supers))
+                                              `(list ,@?supers))
+                                   :cls-metaclass cls-dict.__metaclass__
+                                   :mod-metaclass (module-namepace-get {__metaclass__}))))
+           (record-source-file-loc ',context-cname :type)
+           ([assign-stmt] cls (,name)))))))
 
 (defun mangle-suite-private-variables (cname suite)
   "Rename all attributes `__foo' to `_CNAME__foo'."
@@ -738,9 +923,9 @@ Disabled by default, to not confuse the test suite.")
        ,del-form)))
 
 (defun init-dict (vk-list)
-  (let ((dict (make-dict)))
+  (let ((dict (make-py-hash-table)))
     (loop for (v k) on vk-list by #'cddr
-        do (sub/dict-set dict k v))
+        do (setf (gethash k dict) v))
     dict))
 
 (defmacro [dict-expr] (vk-list)
@@ -846,7 +1031,7 @@ Disabled by default, to not confuse the test suite.")
                   (nconc normal-pos-args normal-key-args)
                   (nreverse nested-vars)))))))
 
-(defun funcdef-globals-locals (suite locals globals)
+(defun suite-globals-locals (suite sure-locals sure-globals)
   "Returns three lists: LOCALS, NEW-LOCALS, GLOBALS.
 LOCALS are the variables assigned to within the function body.
 LOCALS shares share tail structure with input arg locals."
@@ -867,22 +1052,19 @@ LOCALS shares share tail structure with input arg locals."
 	       ([funcdef-stmt]
                 (with-matching (form (?decorators ([identifier-expr] ?fname) ?fargs ?fsuite))
                   (values ?fname "function"))))
-	   (when (member name globals)
+	   (when (member name sure-globals)
 	     (py-raise '{SyntaxError}
 		       "The ~A name `~A' may not be declared `global'." kind name))
-           (unless (or (member name locals)
-                       (member name new-locals))
-             (push name locals)
+           (unless (member* name sure-locals new-locals)
+             (push name sure-locals)
              (push name new-locals)))
 	 (values nil t))
 	
 	([identifier-expr]
 	 (let ((name (second form)))
-	   (when (and target 
-		      (not (member name locals))
-		      (not (member name new-locals))
-                      (not (member name globals)))
-	     (push name locals)
+	   (when (and target
+                      (not (member* name sure-locals new-locals sure-globals)))
+	     (push name sure-locals)
 	     (push name new-locals)))
 	 (values nil t))
 	
@@ -891,7 +1073,7 @@ LOCALS shares share tail structure with input arg locals."
            (dolist (x ?identifiers)
              (assert (match-p x '([identifier-expr] ?_))))
            (let* ((sym-list (mapcar #'second ?identifiers))
-                  (erroneous (intersection sym-list locals :test 'eq)))
+                  (erroneous (intersection sym-list sure-locals :test 'eq)))
              (when erroneous
                ;; CPython gives SyntaxWarning, and seems to internally move the `global'
                ;; declaration before the first use. Let us signal an error; it's easy
@@ -900,7 +1082,7 @@ LOCALS shares share tail structure with input arg locals."
                          "This `global' declaration for variable `~A' is not allowed: ~
                           declaration must be given before first use in function body."
                          (car erroneous)))
-             (setf globals (nconc sym-list globals)))
+             (setf sure-globals (nconc sym-list sure-globals)))
            (values nil t)))
 
         ([del-stmt]
@@ -910,7 +1092,7 @@ LOCALS shares share tail structure with input arg locals."
               
 	(t form)))
   
-    (values locals new-locals globals)))
+    (values sure-locals new-locals sure-globals)))
 
 
 ;; Temporary (?) hack to get things running on SBCL 1.0.16, 
@@ -955,7 +1137,7 @@ otherwise work well.")
       (when **-arg (push (second **-arg) nontuple-arg-names))
 
       (multiple-value-bind (all-nontuple-func-locals new-locals func-cumul-declared-globals)
-	  (funcdef-globals-locals suite
+	  (suite-globals-locals suite
 				  nontuple-arg-names
 				  (get-pydecl :lexically-declared-globals e))
 	
@@ -994,30 +1176,28 @@ otherwise work well.")
                         collect `(,lambda-key-arg ,key-default-arg))
 		   ,(when *-arg  (second *-arg))
 		   ,(when **-arg (second **-arg)))
-		  
-		  (let (,@destruct-nested-vars
-			,@new-locals)
-		    
-		    ,@(unless *warn-unused-function-vars*
+		
+                  (with-namespace ,(make-instance 'let-w/locals-ns
+                                     :parent (get-module-namespace e)
+                                     :names (append all-nontuple-func-locals
+                                                    destruct-nested-vars
+                                                    new-locals)
+                                     :let-names (remove-duplicates (append destruct-nested-vars nil new-locals))
+                                     :locals-names all-nontuple-func-locals
+                                     :scope :function)
+                    ;;(let (,@destruct-nested-vars
+                    ;;      ,@new-locals)
+                    ,@(unless *warn-unused-function-vars*
 			`((declare (ignorable ,@nontuple-arg-names ,@new-locals))))
 		    
 		    (block function-body
-		      (flet
-			  (,@(when (funcdef-should-save-locals-p suite e)
-			       `((.locals. () 
-                                           ;; lambdas and gen-exprs have 'locals()' too
-					   (make-locals-dict 
-					    ',all-nontuple-func-locals
-					    (list ,@all-nontuple-func-locals))))))
-			,@(when (funcdef-should-save-locals-p suite e)
-                            `((declare (ignorable #'.locals.))))
-			(with-pydecl ,body-decls
-			  ,tuples-destruct-form
-			  ,(if (generator-ast-p suite)
-			       `([return-stmt] ,(rewrite-generator-funcdef-suite
-						 context-fname suite))
-			     `(progn ,suite
-				     (load-time-value *the-none*))))))))))
+		      (with-pydecl ,body-decls
+                        ,tuples-destruct-form
+                        ,(if (generator-ast-p suite)
+                             `([return-stmt] ,(rewrite-generator-funcdef-suite
+                                               context-fname suite))
+                           `(progn ,suite
+                                   (load-time-value *the-none*)))))))))
 	  
 	  (when (keywordp fname)
 	    (return-from funcdef-stmt-1 func-lambda))
@@ -1061,60 +1241,28 @@ otherwise work well.")
              (not (get-pydecl :inside-function-p e)))
     (warn "Bogus `global' statement found at top-level.")))
 
-(defun variable-level (name e)
-  "One of :MODULE-LEVEL :FUNCTION-LEVEL :CLASS-LEVEL"
-  (check-type name symbol)
-  #+allegro (check-type e system::augmentable-environment)
-  (ecase (get-pydecl :context e)
-    (:module    :module-level)
-    (:function  (if (or (member name (get-pydecl :lexically-declared-globals e))
-                        (not (member name (get-pydecl :lexically-visible-vars e))))
-                    :module-level
-                  :function-level))
-    (:class     (if (member name (get-pydecl :lexically-declared-globals e))
-                    :module-level 
-                  :class-level))))
-
 (define-setf-expander [identifier-expr] (name &environment e)
-  ;; As looking up identifiers is side-effect free, the valuable
-  ;; functionality here is the "store form" (fourth value).
-  ;; As a bonus the "delete form" is given (sixth value).
-  (with-gensyms (val)
-    (multiple-value-bind (store-form del-form)
-        (ecase (variable-level name e)
-          (:module-level (values `(%module-set ',name ,val)
-                                 `(%module-del ',name)))
-          (:function-level (values `(setf ,name ,val)
-                                `(progn (unless ,name
-                                          (unbound-variable-error ',name :expect-value nil))
-                                        (setf ,name ,(when (builtin-value name)
-                                                       `(builtin-value ',name))))))
-          (:class-level (values `(sub/dict-set +cls-namespace+ ',name ,val)
-                                `(unless (py-del-subs +cls-namespace+ ,name)
-                                   (unbound-variable-error ',name :expect-value nil)))))
-      (values
-       () ;; temps
-       () ;; values
-       (list val) ;; stores
-       store-form
-       `([identifier-expr] ,name) ;; name is literal symbol, thus no side-effect
-       del-form)))) ;; bonus
+  ;; XXX safe-lexical-vars
+  (let ((ns (get-pydecl :namespace e)))
+    (with-gensyms (store)
+      (values () ;; temps
+              () ;; values
+              `(,store) ;; stores
+              (ns.find-form #'ns.write-form ns name store) ;; write
+              `(or ,(ns.find-form #'ns.read-form ns name)
+                   (unbound-variable-error ',name :expect-value t)) ;; read
+              `(if ,(ns.find-form #'ns.del-form ns name)
+                   nil
+                 (unbound-variable-error ',name :expect-value nil)))))) ;; delete
 
-(defmacro [identifier-expr] (name &environment e)
+(defmacro [identifier-expr] (&whole whole name &environment e)
   ;; The identifier is used for its value.
   ;; (Assignent targets are handled by the setf expander.)
   (check-type name symbol)
-  (ecase (variable-level name e)
-    (:module-level `(%module-get ',name))
-    (:function-level (if (member name (get-pydecl :safe-lex-visible-vars e))
-                         (progn (comp-msg "Safe lexical var `~A' in context `~A': skipped boundness check."
-                                          name (format nil "~{~A~^.~}" (reverse (get-pydecl :context-stack e))))
-                                name)
-                       `(or ,name (unbound-variable-error ',name :debug-info (format nil "(identifier-expr func-level; names=~A)" (funcall (mgh-names .mgh)))))))
-    (:class-level `(or (sub/dict-get +cls-namespace+ ',(symbol-name name))
-                       ,(if (member name (get-pydecl :lexically-visible-vars e))
-                            name
-                          `(%module-get ',name))))))
+  (multiple-value-bind (temps values stores store-form read-form del-form)
+      (get-setf-expansion whole e)
+    (declare (ignore temps values stores store-form del-form))
+    read-form))
 
 (defmacro [if-expr] (condition then else)
   `(if (py-val->lisp-bool ,condition) ,then ,else))
@@ -1143,19 +1291,22 @@ otherwise work well.")
 			    ,(when (equalp res mod-name-as-list)
 			       `module-obj))))))
 
-(defmacro [import-from-stmt] (mod-name-as-list items)
+(defmacro [import-from-stmt] (mod-name-as-list items &environment e)
   `(let ((m (py-import '(,(car mod-name-as-list)) :within-mod-path module-path)))
      (declare (ignorable m)) ;; Ensure topleve module is imported relative to current mod
      (whereas ((mod-obj ,(if (= (length mod-name-as-list) 1)
-                             `m
+                             'm
                            `(py-import ',mod-name-as-list))))
-       ,@(cond ((eq items '[*])
-                `((let ((src-items (mgh-all-items (module-mgh mod-obj) :import-* t)))
-                    (loop for (k . v) in src-items
-                        do (%module-set k v)))))
-               (t (loop for (item bind-name) in items
+       ,(case items
+          ([*] (assert (typep (get-pydecl :namespace e) 'hash-table-ns)
+                   () "Can't do `from .. import *' in this namespace: ~A."
+                   (get-pydecl :namespace e))
+               `(loop for (k . v) in (dir-items mod-obj)
+                    do (namespace-set-runtime (ensure-user-symbol k) v)))
+          (t `(progn
+                ,@(loop for (item bind-name) in items
                       collect `([assign-stmt] ([attributeref-expr] mod-obj ([identifier-expr] ,item))
-                                              (([identifier-expr] ,(or bind-name item))))))))))
+                                              (([identifier-expr] ,(or bind-name item)))))))))))
        
 (defmacro [lambda-expr] (args expr)
   ;; XXX Treating lambda as a funcdef-stmt results in way more
@@ -1182,131 +1333,11 @@ otherwise work well.")
 (define-setf-expander [list-expr] (items &environment e)
   (get-setf-expansion `(list/tuple-expr ,items) e))
 
-(defstruct (module-globals-handler (:conc-name mgh-) (:constructor make-mgh))
-  get    ;; Called with args NAME
-  set    ;; Called with args NAME, VAL 
-  del    ;; Called with args NAME
-  names  ;; Called without args, returns bound names as sequence
-  )
-
-(defun global-get (mgh name)
-  (funcall (mgh-get mgh) name))
-
-(defun global-set (mgh name val)
-  (funcall (mgh-set mgh) name val))
-
-(defun (setf global-get) (val mgh name)
-  (global-set mgh name val))
-
-(defun global-del (mgh name)
-  (funcall (mgh-del mgh) name))
-
-(defun global-names (mgh)
-  (funcall (mgh-names mgh)))
-
-(defstruct (dict-mgh (:include module-globals-handler) (:conc-name dmgh-) (:constructor make-dmgh))
-  (ht (make-hash-table :test 'eq)) 
-  module)
-
-(defstruct (pkg-mgh (:include module-globals-handler) (:conc-name pmgh-) (:constructor make-pmgh))
-  package)
-
-(defun make-dict-mgh (module-name module-path)
-  (let* ((mgh (make-dmgh))
-         (mod (make-py-module :mgh mgh :name (string module-name) :path module-path)))
-    (setf (dmgh-module mgh) mod)
-    (flet ((do-get (name)
-             (or (gethash name (dmgh-ht mgh))
-                 (builtin-value name)
-                 (py-raise '{NameError} "Variable `~A' is unbound (dict mgh).~_Bound names are: ~A." 
-                           name (loop for x being the hash-key in (dmgh-ht mgh) collect x))))
-           (do-set (name val)
-             (setf (gethash name (dmgh-ht mgh)) val)
-             (values))
-           (do-del (name)
-             (unless (gethash name (dmgh-ht mgh))
-               (with-simple-restart (continue "Continue as if `~A' is currently bound." name)
-                 (py-raise '{NameError} "Variable `~A' is unbound." name)))
-             (remhash name (dmgh-ht mgh))
-             (values))
-           (do-names ()
-             (loop for x being the hash-key in (dmgh-ht mgh) collect x)))
-      (setf (mgh-get mgh) #'do-get
-            (mgh-set mgh) #'do-set
-            (mgh-del mgh) #'do-del
-            (mgh-names mgh) #'do-names))
-    mgh))
-
-(defconstant +pkg-mgh-py-val-indicator+ 'python-value-p
-  "Indicator used on symbols to indicate that it has an associated Python value,
-presumably set by a pkg-mgh.")
-
-(defun make-pkg-mgh (pkg &optional module-name)
-  (check-type pkg package)
-  (flet ((do-get (name) (multiple-value-bind (sym kind)
-                            (find-symbol (string name) pkg)
-                          (or (when kind
-                                (or (and (boundp sym) (symbol-value sym))
-                                    (builtin-value name)
-                                    (and (fboundp sym)
-                                         (functionp (fdefinition sym))
-                                         (symbol-function sym))
-                                    (find-class sym nil)))
-                              (builtin-value name)
-                              (py-raise '{NameError} "Variable `~A' is unbound." name))))
-         (do-set (name val) (let ((sym (intern (string name) pkg)))
-                              (setf (symbol-value sym) val
-                                    (get sym +pkg-mgh-py-val-indicator+) t)
-                              (values)))
-         (do-del (name) (let ((sym (find-symbol (string name) pkg)))
-                          (when (or (not sym) (not (boundp sym)))
-                            (py-raise '{NameError} "Cannot delete variable `~A': it is unbound." name))
-                          (if (remprop sym +pkg-mgh-py-val-indicator+)
-                              (makunbound sym)
-                            (warn "Ignoring attempt to make variable `~A' unbound: its value `~A' was not assigned from within Python."
-                                  name (symbol-value sym)))
-                          (values)))
-         (do-names () (loop for sym being each symbol in pkg
-                          when (get sym +pkg-mgh-py-val-indicator+)
-                          collect sym)))
-    (when module-name
-      (do-set "__name__" module-name))
-    (make-pmgh :get #'do-get :set #'do-set :del #'do-del :names #'do-names)))
-         
-(defun mgh-all-items (mgh &key import-*)
-  "If IMPORT-*, then returns either (1) the variables in __all__ (if present),
-or (2) all names not starting with underscore."
-  (check-type mgh module-globals-handler)
-  (flet ((return-name-p (name)
-	   (when (symbolp name)
-	     (setf name (symbol-name name)))
-	   (check-type name string)
-	   (or (not import-*)
-	       (char/= (aref name 0) #\_))))
-    (let ((full-list (loop for k in (funcall (mgh-names mgh))
-                         when (return-name-p k)
-                         collect (cons k (funcall (mgh-get mgh) k)))))
-      (when import-*
-	;; XXX Raise error when a name in __all__ is not bound?
-	(let* ((__all__ (cdr (assoc '{__all__} full-list))))
-	  (when __all__
-	    (let ((all-names-list (py-iterate->lisp-list __all__)))
-	      (setf full-list 
-		(delete-if-not (lambda (kv) (member (car kv) all-names-list :test #'string=))
-			       full-list))))))
-      full-list)))
-
 (defvar *habitat* nil)
 (defvar *module-preload-hook*)
 
-(defmacro create-module-globals-dict ()
-  ;; Updating this dict really modifies the globals.
-  `(module-make-globals-dict .mgh))
-
-(defun unbound-variable-error (name &key (expect-value t) debug-info)
+(defun unbound-variable-error (name &key (expect-value t))
   (declare (special *py-signal-conditions*))
-  (when debug-info
-    (warn "Unbound variable debug info: ~A." debug-info))
   (if expect-value
       (restart-case
 	  (py-raise '{NameError} "Variable `~A' is unbound." name)
@@ -1322,6 +1353,8 @@ or (2) all names not starting with underscore."
 
 (defvar *module-function*)
 
+(defvar *module-namespace* nil)
+
 (defmacro [module-stmt] (suite) ;; &environment e)
   ;; A module is translated into a lambda that creates and returns a
   ;; module object. Executing the lambda will create a module object
@@ -1333,45 +1366,50 @@ or (2) all names not starting with underscore."
   ;; If we are inside an EXEC-STMT, PYDECL assumptions
   ;; :exec-mod-locals-ht and :exec-mod-globals-ht are assumed declared
   ;; (hash-tables containing local and global scope).
-  `(let ((f (lambda (&key globals-handler #+(or)initial-globals (call-preload-hook t)
-                          (module-name ',*current-module-name*) (module-path ',*current-module-path*))
-              "GLOBALS-HANDLER determines how references to globals (module-level variables) are handled.
+  `(flet ((module-function (&key (%module-globals (make-eq-hash-table "module"))
+                                 (call-preload-hook t)
+                                 (module-name ',(or *current-module-name* "__main__"))
+                                 (module-path ',*current-module-path*))
+            "GLOBALS-HANDLER determines how references to globals (module-level variables) are handled.
 INITIAL-GLOBALS is an alist containing pre-set global variables: ((sym . val) ..)
 CALL-PRELOAD-HOOK specifies whether *module-preload-hook* is called before the body is run.
 MODULE-NAME is stored in __name__.
 MODULE-PATH ...
-DETERMINE-BODY-GLOBALS
-"
-              (with-pydecl
-                  ((:context      :module)
-                   #+(or)(:mod-globals-names ,(coerce (module-stmt-suite-globals suite) 'vector))
-                   #+(or)(:mod-futures  :todo-parse-module-ast-future-imports)) ;; todo
-                
-                (let* ((*habitat* (or *habitat* (make-habitat :search-paths '("."))))
-                       (.mgh (or globals-handler (make-dict-mgh module-name module-path))))
-                  
-                  (macrolet ((%module-get (name)      `(funcall (mgh-get .mgh) ,name))
-                             (%module-set (name val)  `(funcall (mgh-set .mgh) ,name ,val))
-                             (%module-del (name)      `(funcall (mgh-del .mgh) ,name))
-                             #+(or)(%module-names ()        `(funcall (mgh-names .mgh))))
-                    ;; Is there a situation in which these globals should not be set?
-                    (%module-set '{__name__}  (or module-name "__main__"))
-                    (%module-set '{__debug__} *the-true*)
-                    
-                    (when (and call-preload-hook (boundp '*module-preload-hook*))
-                      (funcall *module-preload-hook* (dmgh-module .mgh)))
-                    
-                    (with-py-errors (:name (python-module ,*current-module-name*))
-                      ,suite)))))))
+DETERMINE-BODY-GLOBALS"
+            (with-pydecl ((:context :module)
+                          #+(or)(:mod-futures  :todo-parse-module-ast-future-imports)) ;; todo
+              (let* ((*habitat* (or *habitat* (make-habitat :search-paths '(".")))))
+                (with-namespace ,(or *module-namespace*
+                                     (make-instance 'hash-table-ns
+                                       :dict-form '%module-globals
+                                       :scope :module
+                                       :parent (make-builtins-namespace)
+                                       ))
+                  (let ((*module-namespace* nil))
+                    (flet ((%globals () (%locals))) ;; with-namespace defines %locals
+                      (declare (ignorable #'%globals))
+                      
+                      (namespace-set {__name__} module-name)
+                      (namespace-set {__debug__} *the-true*)
+                      
+                      (when (and call-preload-hook (boundp '*module-preload-hook*))
+                        (let ((%module (make-instance 'module
+                                         :name module-name
+                                         :path module-path
+                                         :namespace-ht %module-globals)))
+                          (funcall *module-preload-hook* %module)))
+                      
+                      (with-py-errors (:name (python-module ,*current-module-name*))
+                        ,suite))))))))
      (when (boundp '*module-function*)
-       (funcall *module-function* f))))
+       (funcall *module-function* #'module-function))))
 
 (defmacro [pass-stmt] ()
   nil)
 
 (defmacro [print-stmt] (dest items comma?)
   ;; XXX todo: use methods `write' of `dest' etc
-  `(py-print ,dest (list ,@items) ,comma?))
+  `(py-print ,dest (list ,@items) ,(not (null comma?))))
 
 (defmacro [return-stmt] (val &environment e)
   (if (get-pydecl :inside-function-p e)
@@ -1399,6 +1437,7 @@ DETERMINE-BODY-GLOBALS
       (car stmts)
     `(progn ,@stmts)))
 
+#+(or)
 (define-compiler-macro [suite-stmt] (&whole whole stmts &environment e)
   ;; Skip checks for bound-ness, when a lexical variable is certainly bound.
   (unless (eq (get-pydecl :context e) :function)
@@ -1615,8 +1654,8 @@ finally:
     exit(None, None, None)
 "
   `(let* ((mgr ,expr)
-          (exit (py-attr mgr '{__exit__}))
-          (value (py-call (py-attr mgr '{__enter__})))
+          (exit (attr mgr '{__exit__}))
+          (value (py-call (attr mgr '{__enter__})))
           (exc t))
      (unwind-protect
          (handler-case (progn ,@(when var `((setf ,var value)))
@@ -1740,40 +1779,16 @@ finally:
               (py-dict-p          `(eq (class-of .prim) (ltv-find-class 'py-dict)))
               (py-func-iterator-p `(eq (class-of .prim) (ltv-find-class 'py-func-iterator))))
            (,inline-func .prim ,@args)
-         (py-call (py-attr .prim ',attr) ,@args)))))
+         (py-call (attr .prim ',attr) ,@args)))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;;; 
-;;; Support for introspection: locals() and globals()
-
-(defun make-locals-dict (name-list value-list)
-  (make-dict-from-symbol-alist
-   (delete nil (mapcar #'cons name-list value-list) :key #'cdr)))
-
-(defun module-make-globals-dict (mgh)
-  (let* ((d (make-dict))
-         (updater (lambda () ;; closes over D
-                    (clear-dict d)
-                    (loop for k in (global-names mgh)
-                        for v = (global-get mgh k)
-                        do (sub/dict-set d (string k) v))
-                    d))
-         (setter (lambda (key val)
-                   (py-mgh-set-kv mgh (py-string->symbol key) val))))
-    ;; Initialize (at least to satisfy possible use in exec stmt)
-    (funcall updater) 
-    (change-class d 'py-dict-proxy
-                  :setter setter
-                  :updater updater
-                  :desc "(module globals)")
-    d))
 
 (defun py-**-mapping->lisp-arg-list (**-arg)
   ;; Return list: ( :|key1| <val1> :|key2| <val2> ... )
   ;; 
   ;; XXX CPython checks that ** args are unique (also w.r.t. k=v args supplied before it).
   ;;     We catch errors while the called function parses its args.
-  (let* ((items-meth (or (recursive-class-lookup-and-bind **-arg '{items})
+  (let* ((items-meth (or (x.class-attr-no-magic.bind **-arg '{items})
 			 (py-raise '{TypeError}
 				   "The ** arg in call must be mapping, ~
                                    supporting 'items' (got: ~S)" **-arg)))
@@ -1796,6 +1811,7 @@ finally:
 ;;;
 ;;; Detecting the globals and locals of modules, functions and classes
 
+#+(or) ;; Unused, maybe move to ast-util or something.
 (defun module-stmt-suite-globals (suite)
   "A list of the global variables of the module."
 
@@ -1857,17 +1873,8 @@ finally:
     
     globals))
 
-(defun classdef-stmt-suite-globals-locals (suite enclosing-declared-globals)
-  "Lists with the locals and globals of the class."
-  ;; The local variables of a class are those variables that are set
-  ;; inside the class' suite.
-  (funcdef-globals-locals suite () enclosing-declared-globals))
-
 (defun member* (item &rest lists)
-  (dolist (list lists)
-    (when (member item list)
-      (return-from member* t)))
-  nil)
+  (loop for x in lists thereis (member item x)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;
@@ -2015,20 +2022,22 @@ Non-negative integer denoting the number of args otherwise."
       (1 (let* ((pa (car pos-args))
                 (ka (intern (symbol-name pa) :keyword))
                 (e  (gensym "e")))
-           `(named-function ,name
-              (lambda (,pa ,e)
-                (declare ,+optimize-fastest+) ;; surpress default arg checking
-                (let ((f-body (named-function ,name
-                                (lambda (,pa)
-                                  (declare ,+optimize-fastest+) ;; surpress default arg checking
-                                  (locally (declare ,+optimize-std+) ;; but run body with safety
-                                    ,@body)))))
-                  (declare (dynamic-extent f-body))
-                  (with-nof-args-supplied-as-mi (nargs-mi)
-                    (unless (eq nargs-mi (excl::ll :fixnum-to-mi 1))
-                      (check-1-kw-call ,pa nargs-mi ,ka)
-                      (setf ,pa ,e)))
-                  (funcall f-body ,pa))))))
+           (let ((res `(named-function ,name
+                         (lambda (,pa ,e)
+                           (declare ,+optimize-fastest+) ;; surpress default arg checking
+                           (let ((f-body (named-function ,name
+                                           (lambda (,pa)
+                                             (declare ,+optimize-fastest+) ;; surpress default arg checking
+                                             (locally (declare ,+optimize-std+) ;; but run body with safety
+                                               ,@body)))))
+                             (declare (dynamic-extent f-body))
+                             (with-nof-args-supplied-as-mi (nargs-mi)
+                               (unless (eq nargs-mi (excl::ll :fixnum-to-mi 1))
+                                 (check-1-kw-call ,pa nargs-mi ,ka)
+                                 (setf ,pa ,e)))
+                             (funcall f-body ,pa))))))
+             #+(or)(format t "res: ~A~%" res)
+             res)))
       
       (2 (destructuring-bind (pa pb)
              pos-args
@@ -2142,8 +2151,10 @@ Non-negative integer denoting the number of args otherwise."
     ;; Create ** arg
     (when (fa-**-arg fa)
       (setf (svref arg-val-vec (1+ (the fixnum (fa-num-pos-key-args fa))))
-	(make-dict-from-symbol-alist for-**))))
-  
+        (loop with d = (make-py-hash-table)
+            for (k . v) in for-** 
+            do (setf (gethash (symbol-name k) d) v)
+            finally (return d)))))
   (values))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;

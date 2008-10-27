@@ -10,7 +10,7 @@
 (defpackage :clpython.module.array
   (:use :clpython :common-lisp)
   (:import-from :clpython
-		#:py-val->string #:py-core-object #:py-core-type #:def-py-method
+		#:py-val->string #:def-py-method
 		#:py-iterate->lisp-list #:py-raise )
   (:shadow #:|array|)
   (:export #:|array|))
@@ -88,8 +88,9 @@
 
 (defpackage :clpython.module.re
   (:use :clpython :common-lisp)
+  (:shadow #:|compile| #:|error| #:|search|)
   (:export #:|compile| #:|search| #:|match| #:|split| #:|findall|
-           #:|finditer| #:|sub| #:|subn| #:|escape| #:|exception|
+           #:|finditer| #:|sub| #:|subn| #:|escape| #:|error|
            #:|I| #:|IGNORECASE|
            #:|L| #:|LOCALE|
            #:|M| #:|MULTILINE|

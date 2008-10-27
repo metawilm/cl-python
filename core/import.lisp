@@ -188,6 +188,7 @@ Returns the loaded module, or NIL on error."
                      (return-from do-loading))))
                (if module-function
                    (progn (funcall module-function) ;; Execute the module toplevel forms
+                          ;; XXX call module-function with :%module-globals if updating existing mod
                           (unless new-module
                             (break "CLPython bug: module ~A did not call *module-preload-hook* upon loading"
                                    mod-name))
@@ -197,8 +198,7 @@ Returns the loaded module, or NIL on error."
                           (values new-module t))
                  (progn (warn "The FASL of module ~A was not produced by CLPython ~
                                (or CLPython bug: module did not call *module-function*)." mod-name)
-                        (values (make-py-module :name "non-Python fasl"
-                                                :path filename)
+                        (values (make-instance 'module :name "non-Python fasl" :path filename)
                                 t))))))
       (let (new-module success)
         (unwind-protect
@@ -207,8 +207,8 @@ Returns the loaded module, or NIL on error."
                    (assert success) ;; Second value is sanity check
                    new-module)
           (unless success
-            (warn "Loading of module `~A' was aborted.~@[~:@_Module source: ~A~]~@[~:@_Imported by: ~A~]"
-                  mod-name src-file within-mod-path)
+            (warn "Loading of module `~A' was aborted.~@[~:@_Source: ~A~]~@[~:@_Binary: ~A~]~@[~:@_Imported by: ~A~]"
+                  mod-name src-file filename within-mod-path)
             (remove-loaded-module mod-name habitat)))))))
 
 (defun parent-package-local-search-path (mod-name-as-list &rest import-options)
@@ -236,10 +236,12 @@ Returns the loaded module, or NIL on error."
 (defun module-dotted-name (list-name)
   (format nil "~{~A~^.~}" list-name))
 
-(defvar cl-user::*clpython-module-search-paths* ()
-  "Default search paths for imported modules. Should at least contain the location
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (unless (boundp 'cl-user::*clpython-module-search-paths*)
+    (defvar cl-user::*clpython-module-search-paths* ()
+      "Default search paths for imported modules. Should at least contain the location
 of the Python stanard libraries. (This variable is in the CL-USER package to allow
-it being set before CLPython is loaded.)")
+it being set before CLPython is loaded, e.g. in a Lisp configuration file.)")))
 
 (defun maybe-warn-set-search-paths (at-error)
   (cond ((not cl-user::*clpython-module-search-paths*)

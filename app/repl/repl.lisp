@@ -13,7 +13,7 @@
   (:documentation "Python read-eval-print loop")
   (:use :common-lisp :clpython :clpython.parser)
   (:export #:repl #:*repl-compile* #:*repl-prof*)
-  (:import-from :clpython #:with-matching #:global-get #:global-set)
+  (:import-from :clpython #:with-matching)
   (:import-from :clpython.ast #:|suite-stmt-p| #:|module-stmt-p|))
 
 (in-package :clpython.app.repl)
@@ -70,7 +70,7 @@ Possible values: :time :ptime :space :pspace nil")
   "Whether to remove initial `>>>' and `...' on the input line.
 If true, previous input can be copy-pasted as new input easily.")
                                 
-(defparameter *repl-doc* (concatenate 'string
+(defparameter *doc* (concatenate 'string
                            "CLPython - an implementation of Python in Common Lisp
 http://common-lisp.net/project/clpython
 
@@ -83,7 +83,6 @@ CLPython is referenced in the preamble as the \"LIBRARY.\"~%"
 Keyboard commands in this Python interpreter:
      :h             => print (this) help
      :q             => quit
-     :lic           => license
   <command>         => execute Python or Lisp <command>
   <space><command>  => execute Lisp <command>
 "
@@ -166,34 +165,36 @@ KIND can be :ptime, :time, :space, :pspace or NIL."
                (setf *truncation-explain* nil)))
     (write-string s))
   (values))
-  
+
+(defvar *repl-module-globals*)
+
 (defun repl-1 ()
-  (let* ((pkg (make-package (gensym "py-repl-") :use '(:common-lisp)))
-         (mgh (clpython::make-pkg-mgh pkg "__main__"))
+  (let* ((*repl-module-globals* (clpython::make-eq-hash-table "repl module"))
+         (mod-namespace (make-instance 'clpython::hash-table-ns
+                          :dict-form '*repl-module-globals*
+                          :scope :module
+                          :parent (clpython::make-builtins-namespace)))
          (clpython::*habitat* (clpython::make-habitat))
          (*truncation-explain* t)
 	 acc)
     (declare (special clpython::*habitat*))
-    (dolist (x '(_ __ ___))
-      (global-set mgh x *the-none*))
     (labels ((print-cmds ()
-	       (format t *repl-doc*))
-	     
+	       (format t *doc*))
 	     (remember-value (val)
                ;; Make last three return values available as _, __, ___
                ;; for both Python (repl module namespace) and Lisp (dynamic vars).
                (when val ;; don't save NIL (which can be return value for Lisp eval)
                  (shiftf ___ __ _ val)
-                 (shiftf (global-get mgh '___)
-                         (global-get mgh '__)
-                         (global-get mgh '_)
-                         val)))
-
+                 (eval `(progn ,(clpython::ns.write-form mod-namespace '{_} '_)
+                               ,(clpython::ns.write-form mod-namespace '{__} '__)
+                               ,(clpython::ns.write-form mod-namespace '{___} '___)))))
+             (clear-history ()
+               (loop repeat 3 do (remember-value *the-none*)))
 	     (run-ast-func (suite)
-               (lambda () (clpython::run-python-ast suite :run-args
-                                                    (list :globals-handler mgh)
-                                                    :compile *repl-compile*)))
-	     
+               (lambda () (let ((clpython::*module-namespace* mod-namespace))
+                            (clpython::run-python-ast suite :run-args
+                                                      (list :%module-globals *repl-module-globals*)
+                                                      :compile *repl-compile*))))
              (nice-one-line-input-abbrev (total)
                (check-type total string)
                (loop while (and (plusp (length total))
@@ -208,8 +209,7 @@ KIND can be :ptime, :time, :space, :pspace or NIL."
                        ((> (length total) 30)
                         (setf total (concatenate 'string (subseq total 0 30) "...")))))
                total)
-             
-	     (eval-print-ast (ast total)
+             (eval-print-ast (ast total)
                (with-matching (ast ([module-stmt] ?suite))
 		 (assert (|suite-stmt-p| ?suite))
 		 (let ((vals (multiple-value-list
@@ -236,7 +236,6 @@ KIND can be :ptime, :time, :space, :pspace or NIL."
                                       (print-string-truncated (py-val->string str-val)))) 
                                   (write-char #\Newline)))
                          (return-from repr)))))))
-	     
 	     (handle-as-python-code (total &key print-error (ast-finished :maybe))
                ;; Return T if this succeeded somehow, i.e. parsing as Lisp
                ;; should not be attempted.
@@ -289,13 +288,12 @@ KIND can be :ptime, :time, :space, :pspace or NIL."
                        (eval-print-ast ast total)
                        (setf acc nil)))
                    (return-from handle-as-python-code t))))
-	     
 	     (handle-as-lisp-code (total &key print-error)
                ;; Returns whether actually handled
 	       (multiple-value-bind (lisp-form error)
                    (ignore-errors (with-standard-io-syntax
                                     ;; Bind package, so symbols _, __, ___ are present.
-                                    (let ((*package* pkg #+(or) #.*package*))
+                                    (let ((*package* #.*package*))
                                       (read-from-string total nil nil))))
                  (cond ((and (null lisp-form)
                              (typep error 'error))
@@ -331,13 +329,12 @@ KIND can be :ptime, :time, :space, :pspace or NIL."
 				  (write-char #\Newline))
 				(setf acc nil)
                                 t)))))))
-
              #+allegro
              (input-available-p ()
                (let ((ch (read-char-no-hang *standard-input*)))
                  (when ch
                    (prog1 t (unread-char ch))))))
-      
+      (clear-history)
       (loop 
         (with-simple-restart (return-python-toplevel
                               (concatenate 'string "Return to Python top level" #+allegro " ~A.")

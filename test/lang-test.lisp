@@ -704,16 +704,6 @@ x = C()
 x.a = 3
 assert x.a == 3")
   (run-no-error "
-class mystring(str):
-  def __eq__(self, other):
-    return False
-myx = mystring('x')
-mystring.x = 3
-setattr(mystring, myx, 4)
-assert mystring.x == 3
-assert getattr(mystring, myx) == 4"
-                :known-failure t :fail-info "{g,s}etattr only support regular string args")
-  (run-no-error "
 class C:
   pass
 setattr(C, 'a', 3)

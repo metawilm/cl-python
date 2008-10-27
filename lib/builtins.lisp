@@ -21,7 +21,7 @@
           ({buffer}       ,*the-notimplemented*)
 	  ({classmethod}  py-class-method )
 	  ({complex}      py-complex      )
-	  ({dict}         py-dict         )
+	  ({dict}         dict         )
 	  ({enumerate}    py-enumerate    )
 	  ({file}         py-file         )
 	  ({float}        py-float        )
@@ -29,7 +29,7 @@
 	  ({list}         py-list         )
 	  ({long}         py-int          )
 	  ({number}       py-number       )
-	  ({object}       py-object       )
+	  ({object}       object       )
 	  ({property}     py-property     )
 	  ({slice}        py-slice        )
 	  ({staticmethod} py-static-method)
@@ -72,7 +72,7 @@ Raises AttributeError when there is no `__abs__' method."
 
 (defun {apply} (function &optional pos-args kw-dict)
   "Apply FUNCTION (a callable object) to given args.
-POS-ARGS is any iterable object; KW-DICT must be of type PY-DICT." 
+POS-ARGS is any iterable object; KW-DICT must be of type DICT." 
   
   (warn "Function 'apply' is deprecated; use extended call ~@
          syntax instead:  f(*args, **kwargs)")
@@ -95,7 +95,7 @@ POS-ARGS is any iterable object; KW-DICT must be of type PY-DICT."
 (defun {callable} (x)
   "Returns whether x can be called (function, class, or callable class instance)
    as True or False."
-  (py-bool (recursive-class-dict-lookup (py-class-of x) '{__call__})))
+  (py-bool (class.attr-no-magic (py-class-of x) '{__call__})))
 
 (defun {chr} (x)
   "Return a string of one character whose ASCII code is the integer i. ~@
@@ -120,45 +120,18 @@ POS-ARGS is any iterable object; KW-DICT must be of type PY-DICT."
   (error "todo: py-compile"))
 
 (defun {delattr} (x attr)
-  (unless (stringp attr)
-    (py-raise '{TypeError} "Attribute (for delattr) must be string (got: ~S)" attr))
-  (let ((attr.sym (ensure-user-symbol attr)))
-    (setf (py-attr x attr.sym) nil)))
+  (let ((attr.sym (ensure-user-symbol (py-val->string attr))))
+    (setf (attr x attr.sym) nil)))
 
 (defun {dir} (&optional x)
   "Without args, returns names in current scope. ~@
    With arg X, return list of valid attributes of X. ~@
    Result is sorted alphabetically, and may be incomplete."
   (let (res)
-    (flet ((add-dict (d)
-	     (when d
-	       (dolist (k (py-iterate->lisp-list (py-dict.keys d)))
-		 (pushnew k res)))))
-      ;; instance dict
-      (let ((d (dict x)))
-	(when d
-	  (add-dict (dict x))
-	  (pushnew "__dict__" res :test #'string=)))
-      
-      (let ((x.class (py-class-of x)))
-        (loop for c in (class-precedence-list x.class)
-	    until (or (eq c (ltv-find-class 'standard-class))
-		      (eq c (ltv-find-class 'py-dict-mixin))
-                      (eq c (ltv-find-class 'standard-generic-function)))
-	    do (add-dict (dict c))))
-      
-      (when (typep x 'py-module)
-	(loop for k in (mapcar #'car (mgh-all-items (module-mgh x)))
-	    do (pushnew (if (stringp k) k (py-val->string k)) res)))
-
-      (when (packagep x)
-	(do-external-symbols (s x)
-	  (pushnew (symbol-name s) res))))
-    
-    (assert (every #'stringp res))
-    (setf res (sort res #'string<))
-    res))
-
+    (when x (loop for (k . nil) in (dir-items x :use-all nil)
+                do (push k res)))
+    (make-py-list-from-list (sort res #'string<))))
+  
 (defun {divmod} (x y)
   "Return (x/y, x%y) as tuple"
   (py-divmod x y))
@@ -196,19 +169,15 @@ POS-ARGS is any iterable object; KW-DICT must be of type PY-DICT."
   ;; This interns the ATTR in the :clpython.user package - probably a
   ;; small price to pay for using symbols in attribute lookup everywhere
   ;; else.
-  (unless (stringp attr)
-    (py-raise '{TypeError} "Attribute (for getattr) must be string (got: ~S)" attr))
-  (let* ((attr.sym (ensure-user-symbol attr))
-	 (val (catch :getattr-block
-		(handler-case
-		    (py-attr x attr.sym :via-getattr t)
-		  ({AttributeError} () :py-attr-not-found)))))
-    
-    (if (eq val :py-attr-not-found)
+  (let* ((attr.sym (ensure-user-symbol (py-val->string attr)))
+	 (val (handler-case (attr x attr.sym)
+                ({AttributeError} () nil))))
+    (if (null val)
 	(or default
 	    (py-raise '{AttributeError} "Object `~A' has no attribute `~A'." x attr))
       val)))
 
+#+(or)
 (defun getattr-nobind (x attr &optional default)
   ;; Exceptions raised during py-attr are not catched.
   ;; Returns :class-attr <meth> <inst>
@@ -217,7 +186,7 @@ POS-ARGS is any iterable object; KW-DICT must be of type PY-DICT."
     (multiple-value-bind (a b c)
 	(catch :getattr-block
 	  (handler-case
-	      (py-attr x attr.sym :via-getattr t :bind-class-attr nil)
+	      (attr x attr.sym :via-getattr t :bind-class-attr nil)
 	    ({AttributeError} () nil)))
       (case a
 	(:class-attr (values a b c))
@@ -235,7 +204,7 @@ POS-ARGS is any iterable object; KW-DICT must be of type PY-DICT."
   "Returns True is X has attribute NAME, False if not. ~@
    (Uses `getattr'; catches _all_ exceptions.)"
   (check-type name string)
-  (py-bool (ignore-errors (py-attr x (ensure-user-symbol name)))))
+  (py-bool (ignore-errors (attr x (ensure-user-symbol name)))))
 
 (defun {hash} (x)
   (py-hash x))
@@ -269,7 +238,7 @@ POS-ARGS is any iterable object; KW-DICT must be of type PY-DICT."
   (let ((cls (deproxy cls)))
     (if (listp cls)
 	(some (lambda (c) ({isinstance} x c)) cls)
-      (py-bool (or (eq cls (load-time-value (find-class 'py-object)))
+      (py-bool (or (eq cls (load-time-value (find-class 'object)))
 		   (typep x cls)
 		   (subtypep (py-class-of x) cls))))))
 
@@ -295,7 +264,7 @@ POS-ARGS is any iterable object; KW-DICT must be of type PY-DICT."
 	(when (issubclass-1 x c)
 	  (return-from issubclass-1 t)))
     
-    (or (eq cls (load-time-value (find-class 'py-object)))
+    (or (eq cls (load-time-value (find-class 'object)))
 	(subtypep x cls))))
 
 (defun {iter} (x &optional y)
@@ -384,7 +353,7 @@ None, use identity function (multiple sequences -> list of tuples)."
 
 (defun maxmin (cmpfunc item items)
   (let ((res nil))
-    (map-over-py-object (lambda (k)
+    (map-over-object (lambda (k)
 			  (when (or (null res) (py-val->lisp-bool (funcall cmpfunc k res)))
 			    (setf res k)))
 			
@@ -429,10 +398,10 @@ None, use identity function (multiple sequences -> list of tuples)."
     (if initial
 	
 	(progn (setf res initial)
-	       (map-over-py-object (lambda (x) (setf res (py-call func res x)))
+	       (map-over-object (lambda (x) (setf res (py-call func res x)))
 				   seq))
       
-      (map-over-py-object (lambda (x) (cond ((null res) (setf res x))
+      (map-over-object (lambda (x) (cond ((null res) (setf res x))
 					    (t (setf res (py-call func res x)))))
 			  seq))
     (or res
@@ -447,8 +416,9 @@ None, use identity function (multiple sequences -> list of tuples)."
          (*import-compile-verbose* v)
          (*import-load-verbose*    v)
          (mod-name-as-symbol-list (list (py-string-val->symbol (slot-value m 'name)))))
-    (funcall 'py-import mod-name-as-symbol-list))
-  m)
+    (let ((new-mod (funcall 'py-import mod-name-as-symbol-list)))
+      (copy-module-contents :from new-mod :to m)
+      m)))
 
 (defun {repr} (x)
   (py-repr x))
@@ -476,10 +446,8 @@ None, use identity function (multiple sequences -> list of tuples)."
       (coerce x-rounded 'double-float))))
 
 (defun {setattr} (x attr val)
-  (unless (stringp attr)
-    (py-raise '{TypeError} "Attribute (for setattr) must be string (got: ~S)" attr))
-  (let ((attr.sym (ensure-user-symbol attr)))
-    (setf (py-attr x attr.sym) val)))
+  (let ((attr.sym (ensure-user-symbol (py-val->string attr))))
+    (setf (attr x attr.sym) val)))
 
 (defun {sorted} (x)
   ;;; over sequences, or over all iterable things?
@@ -488,7 +456,7 @@ None, use identity function (multiple sequences -> list of tuples)."
 
 (defun {sum} (seq &optional (start 0))
   (let ((total (py-val->number start)))
-    (map-over-py-object (lambda (x) (incf total (py-val->number x)))
+    (map-over-object (lambda (x) (incf total (py-val->number x)))
 			seq)
     total))
 

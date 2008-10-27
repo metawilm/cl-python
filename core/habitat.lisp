@@ -54,7 +54,7 @@
 	:test #'string-equal))
 
 (defun add-known-module (module habitat)
-  (check-type module py-module)
+  (check-type module module)
   (check-type habitat habitat)
   (remove-known-module (module-name module) habitat)
   (push module (habitat-known-mods habitat)))
@@ -80,7 +80,7 @@
 	:test #'string-equal))
 
 (defun add-loaded-module (module habitat)
-  (check-type module py-module)
+  (check-type module module)
   (check-type habitat habitat)
   (remove-loaded-module (module-name module) habitat)
   (push module (habitat-loaded-mods habitat)))
