@@ -244,15 +244,17 @@ of the Python stanard libraries. (This variable is in the CL-USER package to all
 it being set before CLPython is loaded, e.g. in a Lisp configuration file.)")))
 
 (defun maybe-warn-set-search-paths (at-error)
-  (cond ((not cl-user::*clpython-module-search-paths*)
-         (warn "Please customize variable ~A which should be a list of module ~
-search paths. At a minimum it should include the location of the Python (2.5) ~
-standard libraries (as those modules are not included in CLPython)."
+  (cond ((or (not (boundp 'cl-user::*clpython-module-search-paths*))
+             (not cl-user::*clpython-module-search-paths*))
+         (warn "Please customize variable ~S to be a list of paths that are tried ~
+\(in addition to the current directory and `sys.path') when locating a module in order to import it. ~
+Typically it should at least contain the path to the Python (2.5) standard libraries, ~
+as those are not distributed with CLPython."
                'cl-user::*clpython-module-search-paths*))
         ((not at-error)
-         (format t ";; Default module search paths are in ~A (~A).~%"
-                 'cl-user::*clpython-module-search-paths*
-                 (length cl-user::*clpython-module-search-paths*)))))
+         (format t "Using ~A default module search paths set in ~S~%"
+                 (length cl-user::*clpython-module-search-paths*)
+                 'cl-user::*clpython-module-search-paths*))))
 
 (defun py-import (mod-name-as-list 
 		  &rest options

@@ -74,23 +74,23 @@ If true, previous input can be copy-pasted as new input easily.")
                            "CLPython - an implementation of Python in Common Lisp
 http://common-lisp.net/project/clpython
 
-CLPython is licensed under the terms of the Lisp Lesser GNU
-Public License (http://opensource.franz.com/preamble.html), known as
-the LLGPL.  The LLGPL consists of a preamble (see above URL) and the
-LGPL.  Where these conflict, the preamble takes precedence. 
-CLPython is referenced in the preamble as the \"LIBRARY.\"~%"
+CLPython is licensed under the terms of the Lisp Lesser GNU Public License
+\(http://opensource.franz.com/preamble.html), known as the LLGPL. The LLGPL
+consists of a preamble (see above URL) and the LGPL.  Where these conflict,
+the preamble takes precedence. CLPython is referenced in the preamble as
+the \"LIBRARY.\"~%"
                      "
 Keyboard commands in this Python interpreter:
-     :h             => print (this) help
+     :h             => print this help
      :q             => quit
-  <command>         => execute Python or Lisp <command>
-  <space><command>  => execute Lisp <command>
+  <form>            => execute Python or Lisp form
+  <space><form>     => execute Lisp form
 "
                      #+allegro
                      (format nil "
 Restart shortcuts in the Lisp debugger:
-     :~A           => back to Python top level
-     :~A           => retry evaluation of the last Python command
+     :~A            => back to Python top level
+     :~A            => retry evaluation of the last Python command
 " 
                              (abbrev-for-restart 'return-python-toplevel)
                              (abbrev-for-restart 'retry-repl-eval))
@@ -139,8 +139,8 @@ KIND can be :ptime, :time, :space, :pspace or NIL."
 
 (defun repl ()
   (format t "Welcome to CLPython, an implementation of Python in Common Lisp.~%")
-  (format t "[~A ~A]~%" (lisp-implementation-type) (lisp-implementation-version))
-  (format t "Type `:q' to quit, `:h' for help.~%~%")
+  (format t "Running on: ~A ~A~%" (lisp-implementation-type) (lisp-implementation-version))
+  (format t "REPL shortcuts: `:q' = quit, `:h' = help.~%")
   (clpython::maybe-warn-set-search-paths nil)
   (with-repl-toplevel-aliases
       (clpython::with-python-compiler-style-warnings
