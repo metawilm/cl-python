@@ -10,14 +10,6 @@
 (in-package :clpython)
 (in-syntax *user-readtable*)
 
-#+lispworks
-(eval-when (:compile-toplevel :load-toplevel :execute)
-  (progn
-    (defun closer-mop::standard-instance-access (&rest args)
-      (apply 'clos::standard-instance-access args))
-    (export '(closer-mop::standard-instance-access) :closer-mop)))
-
-
 ;;; Funky dict: alist or hashtable
 
 (defun funky-dict-get (dict attr)
