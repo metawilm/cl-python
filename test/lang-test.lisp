@@ -24,7 +24,7 @@
                     :subscription-expr :suite-stmt :return-stmt :raise-stmt
                     :try-except-stmt :try-finally-stmt :tuple-expr :unary-expr
                     :while-stmt :with-stmt :yield-stmt
-                    :attribute-semantics))
+                    :attribute-semantics :number-method-lookups))
       (test-lang node))))
 
 (defmacro with-all-compiler-variants-tried (&body body)
@@ -739,4 +739,92 @@ except TypeError:
   None
 "))
 
-   
+(defmethod test-lang ((kind (eql :number-method-lookups)))
+  (run-no-error "
+# http://bugs.jython.org/issue1159
+class DummyNumber(object):
+    '''
+    Minimal implementation of a number that works with SymPy.
+
+    If one has a Number class (e.g. Sage Integer, or some other custom class)
+    that one wants to work well with SymPy, one has to implement at least the
+    methods of this class DummyNumber, resp. it's subclasses I5 and F1_1.
+
+    Basically, one just needs to implement either __int__() or __float__() and
+    then one needs to make sure that the class works with Python integers and
+    with itself.
+    '''
+
+    def __radd__(self, a):
+        if isinstance(a, (int, float)):
+            return a + self.number
+        return NotImplemented
+
+    def __add__(self, a):
+        if isinstance(a, (int, float, DummyNumber)):
+            return self.number + a
+        return NotImplemented
+
+    def __rsub__(self, a):
+        if isinstance(a, (int, float)):
+            return a - self.number
+        return NotImplemented
+
+    def __sub__(self, a):
+        if isinstance(a, (int, float, DummyNumber)):
+            return self.number - a
+        return NotImplemented
+
+    def __rmul__(self, a):
+        if isinstance(a, (int, float)):
+            return a * self.number
+        return NotImplemented
+
+    def __mul__(self, a):
+        if isinstance(a, (int, float, DummyNumber)):
+            return self.number * a
+        return NotImplemented
+
+    def __rdiv__(self, a):
+        if isinstance(a, (int, float)):
+            return a / self.number
+        return NotImplemented
+
+    def __div__(self, a):
+        if isinstance(a, (int, float, DummyNumber)):
+            return self.number / a
+        return NotImplemented
+
+    def __rpow__(self, a):
+        if isinstance(a, (int, float)):
+            return a ** self.number
+        return NotImplemented
+
+    def __pow__(self, a):
+        if isinstance(a, (int, float, DummyNumber)):
+            return self.number ** a
+        return NotImplemented
+
+    def __pos__(self):
+        return self.number
+
+    def __neg__(self):
+        return - self.number
+
+class I5(DummyNumber):
+    number = 5
+    def __int__(self):
+        return self.number
+
+class F1_1(DummyNumber):
+    number = 1.1
+    def __float__(self):
+        return self.number
+
+i5 = I5()
+f1_1 = F1_1()
+
+print f1_1**i5
+print f1_1**f1_1"
+                :known-failure t
+                :fail-info "__pow__ lookup goes wrong somewhere"))
