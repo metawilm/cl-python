@@ -137,7 +137,32 @@ assert `x` == 'r'"))
   (run-no-error "assert 1 ^ 3 == 2")
   (run-no-error "assert 1 | 2 == 3")
   (run-no-error "assert 4 * 'ax' == 'axaxaxax'")
-  (run-no-error "assert -4 * 'ax' == ''"))
+  (run-no-error "assert -4 * 'ax' == ''")
+  (run-no-error "
+# https://codespeak.net/issue/pypy-dev/issue412
+class Base(object):
+    '''analogous to sympy.core.basic.Basic'''
+    def __init__(self, value):
+        self.value = value
+    def __mul__(self, other):
+        return self.value * other.value
+    def __rmul__(self, other):
+        return other.value * self.value
+
+class Doubler(Base):
+    '''analogous to sympy.core.numbers.Rational'''
+    def __mul__(self, other):
+        return 2 * (self.value * other.value)
+
+class AnotherDoubler(Doubler):
+    '''analogous to sympy.core.numbers.Half'''
+
+a = Doubler(2)
+b = AnotherDoubler(3)
+assert a * b == 12"
+                :known-failure t
+                :fail-info "Wrong lookup logic for __r...__ methods"
+                ))
 
 (defmethod test-lang ((kind (eql :binary-lazy-expr)))
   (run-no-error "assert not (0 or 0)")
