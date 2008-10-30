@@ -176,7 +176,7 @@
                                                                         (error "Attribute read function ~A not defined yet"
                                                                                ',cls.meth))))
                                                         (setf (slot-value read-f 'write-func) f)
-                                                        nil ;; read function is already stored in dict
+                                                        read-f ;; read function is already stored in dict
                                                         ))))))))
 
 (defun register-method (cls-name attr val)
@@ -679,7 +679,7 @@
   #+allegro (excl:arglist f)
   #-allegro nil)
 
-(def-py-method py-function.__doc__ :attribute (func^)
+(def-py-method py-function.__doc__ :attribute-read (func^)
   (let ((fname (py-function-name func))
         (arglist (function-arglist func))
         (documentation (documentation func 'function)))
@@ -689,6 +689,9 @@
       (when (and documentation (or fname arglist))
         (terpri s))
       (when documentation (write-string documentation s)))))
+
+(def-py-method py-function.__doc__ :attribute-write (func^ doc)
+  (setf (documentation func 'function) doc))
 
 ;; Enumerate (core object)
 
@@ -1254,7 +1257,7 @@ but the latter two classes are not in CPython.")
 (defgeneric dir-items (item &rest args))
 
 (defmethod dir-items ((x module) &key (use-all t))
-  (whereas ((all (and use-all (attr x '{__all__}))))
+  (whereas ((all (and use-all (instance.attr-no-magic x '{__all__}))))
     (return-from dir-items
       (loop for k in (py-iterate->lisp-list all)
           collect (cons k (attr x (ensure-user-symbol k))))))
