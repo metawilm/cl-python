@@ -953,16 +953,18 @@ Disabled by default, to not confuse the test suite.")
                   ,@body))))))
 
 #-sbcl ;; bracketed (target source) triggers lambda list parsing error in SBCL
-(define-compiler-macro with-iterator (&whole whole (target source) &body body)
+(define-compiler-macro with-iterator (&whole whole (target source) &body body &environment e)
   "Optimize some common iteration patterns."
+  (unless (get-pydecl :may-inline-iteration e) ;; Can't declare a macro as (not)inline
+    (return-from with-iterator whole))
   (with-perhaps-matching (source ([call-expr] ([identifier-expr] {range}) ?pos-args () () ()))
     (let ((n-args (length ?pos-args)))
       (when (<= 1 n-args 2)
         (return-from with-iterator
           `(flet ((run-it (val)
-                    (declare (inline with-iterator))
-                    (let ((,target val))
-                      ,@body)))
+                    (with-pydecl ((:may-inline-iteration t))
+                      (let ((,target val))
+                        ,@body))))
              (declare (dynamic-extent #'run-it))
              (let ((.range ([identifier-expr] {range}))
                    (.p1 ,(first ?pos-args))
@@ -974,26 +976,27 @@ Disabled by default, to not confuse the test suite.")
                             `((fixnump .p2))))
                    (loop for .i fixnum from ,(if (= n-args 2) `.p1 0) below ,(if (= n-args 2) `.p2 `.p1)
                        do (run-it .i))
-                 (locally (declare (notinline with-iterator))
-                          (with-iterator (,target (py-call .range .p1 ,@(when (= n-args 2) `(.p2))))
-                            (run-it ,target))))))))))
+                 (with-pydecl ((:may-inline-iteration nil))
+                   (with-iterator (,target (py-call .range .p1 ,@(when (= n-args 2) `(.p2))))
+                     (run-it ,target))))))))))
   whole)
 
 (defmacro [for-in-stmt] (target source suite else-suite &environment e)
   (with-gensyms (x)
-    `(tagbody (with-iterator (,x ,source)
-                ([assign-stmt] ,x (,target))
-                (tagbody
-                  (with-pydecl ((:inside-loop-p t)
-                                (:safe-lex-visible-vars
-                                 ,(union (set-difference
-                                          (target-get-bound-vars target)
-                                          (nconc (ast-deleted-variables suite)
-                                                 (get-pydecl :lexically-declared-globals e)))
-                                         (get-pydecl :safe-lex-visible-vars e))))
-                    ,suite)
-                  (go .continue) ;; prevent warning about unused tag
-                 .continue))
+   `(tagbody (with-pydecl ((:may-inline-iteration t))
+               (with-iterator (,x ,source)
+                 ([assign-stmt] ,x (,target))
+                 (tagbody
+                   (with-pydecl ((:inside-loop-p t)
+                                 (:safe-lex-visible-vars
+                                  ,(union (set-difference
+                                           (target-get-bound-vars target)
+                                           (nconc (ast-deleted-variables suite)
+                                                  (get-pydecl :lexically-declared-globals e)))
+                                          (get-pydecl :safe-lex-visible-vars e))))
+                     ,suite)
+                   (go .continue) ;; prevent warning about unused tag
+                  .continue)))
        ,@(when else-suite `(,else-suite))
        (go .break) ;; prevent warning about unused tag
       .break)))
