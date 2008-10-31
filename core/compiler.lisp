@@ -565,11 +565,11 @@ Disabled by default, to not confuse the test suite.")
      (exec-stmt-string ,code-string glo loc ',allowed-stmts)))
 
 (defun exec-stmt-check-namespaces (globals locals)
-  (check-type globals py-dict) ;; todo: support any mapping for globals, locals
-  (check-type locals py-dict)
+  (check-type globals dict) ;; todo: support any mapping for globals, locals
+  (check-type locals dict)
   (flet ((check-is-namespace-dict (d)
            ;; Ensure dict has only string keys.
-           (check-type d py-dict)
+           (check-type d dict)
            ;; XXX todo
            #+(or)
            (dikt-map (py-dict-dikt d)
@@ -1744,9 +1744,9 @@ finally:
 	  ({strip}      0 stringp      py-string.strip  )
 	  ({upper}      0 stringp      py-string.upper  )
 	  	     
-	  ({keys}       0 py-dict-p    py-dict.keys     )
-	  ({items}      0 py-dict-p    py-dict.items    )
-	  ({values}     0 py-dict-p    py-dict.values   )
+	  ({keys}       0 dict-p    dict.keys     )
+	  ({items}      0 dict-p    dict.items    )
+	  ({values}     0 dict-p    dict.values   )
 	  	     
 	  ({next}       0 py-func-iterator-p py-func-iterator.next)
 	  
@@ -1786,7 +1786,7 @@ finally:
        (if ,(ecase check
               ((stringp vectorp)  `(,check .prim))
               (filep              `(eq (class-of .prim) (ltv-find-class 'py-func-iterator)))
-              (py-dict-p          `(eq (class-of .prim) (ltv-find-class 'py-dict)))
+              (dict-p             `(eq (class-of .prim) (ltv-find-class 'dict)))
               (py-func-iterator-p `(eq (class-of .prim) (ltv-find-class 'py-func-iterator))))
            (,inline-func .prim ,@args)
          (py-call (attr .prim ',attr) ,@args)))))
