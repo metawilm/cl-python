@@ -882,23 +882,23 @@ Disabled by default, to not confuse the test suite.")
     `(let ((hook *runtime-line-number-hook*))
        (when hook (funcall hook ,line-no)))))
 
-(defmacro [comparison-expr] (&whole whole cmp left right)
+(defmacro [comparison-expr] (&whole whole cmp left right brackets)
   ;; "Formally, if a, b, c, ..., y, z are expressions and
   ;; op1, op2, ..., opN are comparison operators, then
   ;; a op1 b op2 c ... y opN z is equivalent to
   ;; a op1 b and b op2 c and ... y opN z,
   ;; except that each expression is evaluated at most once."
   ;; http://python.org/doc/current/reference/expressions.html
-  (declare (ignore cmp left right))
+  (declare (ignore cmp left right brackets))
   (flet ((bracketize ()
            (let (args cmps)
              (labels ((apply-brackets (form)
                         (cond ((not ([comparison-expr-p] form))
                                (push form args))
                               ((and (not (eq form whole))
-                                    (gethash form clpython.parser::*bracketed-cmp-expr-hack*))
+                                    (clpython.parser::comparison-expr-brackets form))
                                (push form args))
-                              (t (with-matching (form ([comparison-expr] ?cmp ?left ?right))
+                              (t (with-matching (form ([comparison-expr] ?cmp ?left ?right ?brackets))
                                    (apply-brackets ?left)
                                    (push ?cmp cmps)
                                    (apply-brackets ?right))))))

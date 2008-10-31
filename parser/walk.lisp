@@ -214,7 +214,7 @@ CLASSDEF, FUNCDEF or LAMBDA."
 #+(or) ;; nested namespace
 (def-ast-node [classdef-stmt] (name +normal-target+) (inheritance +normal-value+) (suite +namespace-suite+))
 
-(def-ast-node [comparison-expr] (op (left +normal-value+) (right +normal-value+)))
+(def-ast-node [comparison-expr] (op (left +normal-value+) (right +normal-value+) brackets))
 (def-ast-node [continue-stmt] ())
 (def-ast-node [del-stmt] ((item +delete-target+)))
 (def-ast-node [dict-expr] ((&rest vk-list +normal-value+)))
