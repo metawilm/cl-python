@@ -13,6 +13,96 @@
 (in-package :clpython.parser)
 (in-syntax *ast-readtable*)
 
+
+;; Register AST node patterns. The pattern matcher in the compiler checks
+;; structural consistency with these entries.
+
+(defparameter *ast-patterns* (make-hash-table :test 'eq)
+  "The patterns of all AST nodes.")
+
+(defun register-ast-pattern (ast-node args)
+  (assert (symbolp ast-node))
+  (assert (every #'symbolp args) ()
+    "Pattern members must be symbols (not e.g. sublists)")
+  (let ((tail (loop for x in args
+                  do (assert (char/= (aref (string x) 0) #\?))
+                  collect (intern (concatenate 'string "?" (string x)) #.*package*))))
+    (setf (gethash ast-node *ast-patterns*) (cons ast-node tail))))
+
+(defun get-ast-pattern (ast-node)
+  (gethash ast-node *ast-patterns*))
+
+(defun reg-patterns ()
+  (macrolet ((rp (ast-node &rest args)
+               `(progn (register-ast-pattern ',ast-node ',args)
+                       (defstruct (,ast-node
+                                   :named
+                                   (:type list)
+                                   (:conc-name ,(symbol-name ast-node))
+                                   (:constructor ,(intern (format nil "make-~A" ast-node) :clpython.ast))
+                                   (:predicate ,(intern (format nil "~A-p" ast-node) :clpython.ast)))
+                         ,@args))))
+    
+    (rp [assert-stmt] test raise-arg)
+    (rp [assign-stmt] value targets)
+    (rp [attributeref-expr] item attr)
+    (rp [augassign-stmt] op place val)
+    (rp [backticks-expr] item)
+    (rp [binary-expr] op left right)
+    (rp [binary-lazy-expr] op left right)
+    (rp [break-stmt])
+    (rp [call-expr] primary pos key *a **a)
+    (rp [classdef-stmt] name inheritance suite)
+    (rp [comparison-expr] cmp left right brackets)
+    (rp [continue-stmt])
+    (rp [del-stmt] item)
+    (rp [dict-expr] alist)
+    (rp [exec-stmt] code globals locals)
+    (rp [for-in-stmt] target source suite else-suite)
+    (rp [funcdef-stmt] decorators fname args suite)
+    (rp [generator-expr] item for-in/if-clauses)
+    (rp [global-stmt] names)
+    (rp [identifier-expr] name)
+    (rp [if-expr] condition then else)
+    (rp [if-stmt] if-clauses else-clause)
+    (rp [import-stmt] items)
+    (rp [import-from-stmt] mod-name-as-list items)
+    (rp [lambda-expr] args expr)
+    (rp [listcompr-expr] item for-in/if-clauses)
+    (rp [list-expr] items)
+    (rp [module-stmt] suite)
+    (rp [pass-stmt] )
+    (rp [print-stmt] dest items comma?)
+    (rp [raise-stmt] exc var tb)
+    (rp [return-stmt] val)
+    (rp [slice-expr] start stop step)
+    (rp [subscription-expr] item subs)
+    (rp [suite-stmt] stmts)
+    (rp [try-except-stmt] suite except-clauses else-suite)
+    (rp [try-finally-stmt] try-suite finally-suite)
+    (rp [tuple-expr] items)
+    (rp [unary-expr] op item)
+    (rp [while-stmt] test suite else-suite)
+    (rp [with-stmt] test var suite)
+    (rp [yield-expr] val)
+    (rp [yield-stmt] val))
+    
+  ;; Some shortcuts
+  (defun [make-identifier-expr*] (name)
+    (check-type name symbol)
+    ([make-identifier-expr] :name name))
+  
+  (defun [make-suite-stmt*] (&rest args)
+    ([make-suite-stmt] :stmts args))
+  
+  (defun [make-assign-stmt*] (&key value target)
+    ([make-assign-stmt] :value value :targets (list target))))
+
+(reg-patterns)
+
+
+;;; Grammar definition
+
 (defparameter *precedence-and-associativity*
     '((left [or])
       (left [and] )
@@ -51,59 +141,50 @@
   "Hashtable containing all grammar rules")
 
 (defmacro p (name &rest rules)
-  ;; Abbreviated rule rewriting:
-  ;;  (p myrule (x y? z) (list $1 $2 $3))  =>  (x z) or (x y z)
-  ;;  (p myrule (x y* z) (list $1 $2 $3))  =>  (x y+ z) or (x z)
-  (if (eq (car rules) :or)
-      `(progn ,@(loop for rule in (cdr rules)
-                    collect `(p ,name ,@rule)))
-    
-    (labels ((token-suffix (x)
-               (when (symbolp x)
-                 (unless (eq (symbol-package x) (find-package :clpython.ast.operator)) ;; skip "**" etc
-                   (let ((sn (symbol-name x)))
-                     (aref sn (- (length sn) 1))))))
-             (remove-token-suffix (x)
-               (check-type x symbol)
-               (let ((sn (symbol-name x)))
-                 (assert (member (aref sn (- (length sn) 1)) '(#\? #\*)))
-                 (intern (subseq sn 0 (- (length sn) 1)) #.*package*)))
-             (change-token-suffix (x suffix)
-               (check-type suffix character)
-               (let ((s (remove-token-suffix x)))
-                 (intern (format nil "~A~C" s suffix) #.*package*)))
-             (make-number-token (n)
-               (check-type n (integer 1 #.most-positive-fixnum))
-               (intern (format nil "$~D" n) #.*package*)))
-      
-      (destructuring-bind (terms outcome &optional options) rules
-        (if (not (some (lambda (x) (member (token-suffix x) '(#\? #\*))) terms))
-            `(add-rule ',name ',terms ',outcome ,@options)
-
-          (labels ((find-suffix-token (suffix)
-                     (position suffix terms
-                               :test 'eql 
-                               :key (lambda (x) (token-suffix x))))
-                   (shift-outcome (removed-$)
-                     `(let ((,(make-number-token removed-$) nil)
-                            ,@(loop for i from (1+ removed-$) to (length terms)
-                                  collect (list (make-number-token i) (make-number-token (1- i)))))
-                        (declare (ignorable ,@(loop for i from removed-$ to (length terms) collect (make-number-token i))))
-                        ,outcome)))
-            (let* ((?-token (find-suffix-token #\?))
-                   (*-token (unless ?-token (find-suffix-token #\*))))
-              (cond (?-token (let ((with-?-token (nconc (subseq terms 0 ?-token)
-                                                        (list (remove-token-suffix (nth ?-token terms)))
-                                                        (subseq terms (1+ ?-token))))
-                                   (without-?-token (nconc (subseq terms 0 ?-token) (subseq terms (1+ ?-token)))))
-                               `(progn (p ,name ,with-?-token ,outcome ,@options)
-                                       (p ,name ,without-?-token ,(shift-outcome (1+ ?-token)) ,@options))))
-                    (*-token (let ((with-+-token (nconc (subseq terms 0 *-token)
-                                                        (list (change-token-suffix (nth *-token terms) #\+))
-                                                        (subseq terms (1+ *-token))))
-                                   (without-token (nconc (subseq terms 0 *-token) (subseq terms (1+ *-token)))))
-                               `(progn (p ,name ,with-+-token ,outcome ,@options)
-                                       (p ,name ,without-token ,(shift-outcome (1+ *-token)) ,@options))))))))))))
+  (when (eq (car rules) :or)
+    (return-from p `(progn ,@(loop for rule in (cdr rules) collect `(p ,name ,@rule)))))
+  (destructuring-bind (terms outcome &optional options) rules
+    (flet ((token-suffix (x)
+             (whereas ((sn (and (symbolp x)
+                                (not (eq (symbol-package x) #.(find-package :clpython.ast.operator))) ;; skip "**" etc
+                                (symbol-name x))))
+               (aref sn (1- (length sn))))))
+      (unless (some (lambda (x) (member (token-suffix x) '(#\? #\*))) terms)
+        (return-from p `(add-rule ',name ',terms ',outcome ,@options)))
+      (labels ((remove-token-suffix (x)
+                 (check-type x symbol)
+                 (let ((sn (symbol-name x)))
+                   (assert (member (aref sn (- (length sn) 1)) '(#\? #\*)))
+                   (intern (subseq sn 0 (- (length sn) 1)) #.*package*)))
+               (change-token-suffix (x suffix)
+                 (check-type suffix character)
+                 (let ((s (remove-token-suffix x)))
+                   (intern (format nil "~A~C" s suffix) #.*package*)))
+               (make-number-token (n)
+                 (check-type n (integer 1 #.most-positive-fixnum))
+                 (intern (format nil "$~D" n) #.*package*)))
+        (flet ((shift-outcome (removed-$)
+                 `(let ((,(make-number-token removed-$) nil)
+                        ,@(loop for i from (1+ removed-$) to (length terms)
+                              collect (list (make-number-token i) (make-number-token (1- i)))))
+                    (declare (ignorable ,@(loop for i from removed-$ to (length terms) collect (make-number-token i))))
+                    ,outcome)))
+          (loop for term in terms
+              for term-ix from 0
+              when (member (token-suffix term) '(#\? #\*))
+              do (let ((with (copy-list terms))
+                       (without (copy-list terms)))
+                   (if (zerop term-ix)
+                       (pop without)
+                     (setf (cdr (nthcdr (1- term-ix) without))
+                       (nthcdr (1+ term-ix) without)))
+                   (setf (nth term-ix with)
+                     (ecase (token-suffix term)
+                       (#\? (remove-token-suffix term))
+                       (#\* (change-token-suffix term #\+))))
+                   (return-from p
+                     `(progn (p ,name ,with ,outcome ,@options)
+                             (p ,name ,without ,(shift-outcome (1+ term-ix)) ,@options))))))))))
 
 (defun add-rule (name terms outcome &rest options)
   (pushnew (list terms outcome options) (gethash name *python-prods*) :test 'equal))
@@ -469,7 +550,7 @@
                                                 `([tuple-expr] (,$1 . ,$2))
                                               (progn (when ([comparison-expr-p] $1)
                                                        (setf $1 (copy-list $1)
-                                                             (comparison-expr-brackets $1) t))
+                                                             (fifth $1) t)) ;; brackets
                                                      $1)))
 
 (p lambdef ([lambda] [:] test)                    `([lambda-expr] (nil nil nil nil) ,$3))
@@ -627,88 +708,3 @@
                                     (when (not (stringp tg)) #\'))))))
     (dolist (tg targets) 
       (check tg))))
-    
-;; Register AST node patterns. The pattern matcher in the compiler checks
-;; structural consistency with these entries.
-
-(defparameter *ast-patterns* (make-hash-table :test 'eq)
-  "The patterns of all AST nodes.")
-
-(defun register-ast-pattern (ast-node args)
-  (assert (symbolp ast-node))
-  (assert (every #'symbolp args) ()
-    "Pattern members must be symbols (not e.g. sublists)")
-  (let ((tail (loop for x in args
-                  do (assert (char/= (aref (string x) 0) #\?))
-                  collect (intern (concatenate 'string "?" (string x)) #.*package*))))
-    (setf (gethash ast-node *ast-patterns*) (cons ast-node tail))))
-
-(defun get-ast-pattern (ast-node)
-  (gethash ast-node *ast-patterns*))
-
-(defun reg-patterns ()
-  (macrolet ((rp (ast-node &rest args)
-               `(progn (register-ast-pattern ',ast-node ',args)
-                       (defstruct (,ast-node
-                                   :named
-                                   (:type list)
-                                   (:constructor ,(intern (format nil "make-~A" ast-node) :clpython.ast))
-                                   (:predicate ,(intern (format nil "~A-p" ast-node) :clpython.ast)))
-                         ,@args))))
-    
-    (rp [assert-stmt] test raise-arg)
-    (rp [assign-stmt] value targets)
-    (rp [attributeref-expr] item attr)
-    (rp [augassign-stmt] op place val)
-    (rp [backticks-expr] item)
-    (rp [binary-expr] op left right)
-    (rp [binary-lazy-expr] op left right)
-    (rp [break-stmt])
-    (rp [call-expr] primary pos key *a **a)
-    (rp [classdef-stmt] name inheritance suite)
-    (rp [comparison-expr] cmp left right brackets)
-    (rp [continue-stmt])
-    (rp [del-stmt] item)
-    (rp [dict-expr] alist)
-    (rp [exec-stmt] code globals locals)
-    (rp [for-in-stmt] target source suite else-suite)
-    (rp [funcdef-stmt] decorators fname args suite)
-    (rp [generator-expr] item for-in/if-clauses)
-    (rp [global-stmt] names)
-    (rp [identifier-expr] name)
-    (rp [if-expr] condition then else)
-    (rp [if-stmt] if-clauses else-clause)
-    (rp [import-stmt] items)
-    (rp [import-from-stmt] mod-name-as-list items)
-    (rp [lambda-expr] args expr)
-    (rp [listcompr-expr] item for-in/if-clauses)
-    (rp [list-expr] items)
-    (rp [module-stmt] suite)
-    (rp [pass-stmt] )
-    (rp [print-stmt] dest items comma?)
-    (rp [raise-stmt] exc var tb)
-    (rp [return-stmt] val)
-    (rp [slice-expr] start stop step)
-    (rp [subscription-expr] item subs)
-    (rp [suite-stmt] stmts)
-    (rp [try-except-stmt] suite except-clauses else-suite)
-    (rp [try-finally-stmt] try-suite finally-suite)
-    (rp [tuple-expr] items)
-    (rp [unary-expr] op item)
-    (rp [while-stmt] test suite else-suite)
-    (rp [with-stmt] test var suite)
-    (rp [yield-expr] val)
-    (rp [yield-stmt] val))
-    
-  ;; Some shortcuts
-  (defun [make-identifier-expr*] (name)
-    (check-type name symbol)
-    ([make-identifier-expr] :name name))
-  
-  (defun [make-suite-stmt*] (&rest args)
-    ([make-suite-stmt] :stmts args))
-  
-  (defun [make-assign-stmt*] (&key value target)
-    ([make-assign-stmt] :value value :targets (list target))))
-
-(reg-patterns)

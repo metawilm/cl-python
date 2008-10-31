@@ -12,6 +12,7 @@
 (in-package :clpython.parser)
 
 (eval-when (:compile-toplevel)
+  #+sbcl (terpri)
   (format t ";;; Compiling Python grammar for CL-Yacc: this may take a while...~%"))
             
 #+(or) ;; Disabled while cl-yacc is included in the CLPython distribution
