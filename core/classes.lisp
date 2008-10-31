@@ -2575,6 +2575,9 @@ invocation form.")
 (defun make-py-list-from-tuple (tuple)
   (make-py-list-from-list (if (eq tuple *the-empty-tuple*) () tuple)))
 
+(defun make-lisp-list-from-tuple (tuple)
+  (if (eq tuple *the-empty-tuple*) () tuple))
+
 (defun make-tuple-from-list (list)
   (or list *the-empty-tuple*))
 
@@ -2650,6 +2653,12 @@ invocation form.")
 (def-py-method py-tuple.__len__ (x^)
   (length x))
 
+(def-py-method py-tuple.__mul__ (x^ n)
+  (let* ((n (py-val->integer n :min 0))
+         (x-list (make-lisp-list-from-tuple x))
+         (repeats (loop repeat n collect x-list)))
+    (make-tuple-from-list (apply #'concatenate 'list repeats))))
+                                 
 (def-py-method py-tuple.__nonzero__ (x^)
   (py-bool x))
 
