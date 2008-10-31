@@ -76,6 +76,7 @@
                                        (:file "builtins")
                                        (:file "gc")
                                        (:file "math")
+                                       (:file "operator")
                                        (:file "os")
                                        (:file "_random")
                                        (:file "re")

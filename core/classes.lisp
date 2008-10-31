@@ -3416,14 +3416,14 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
   `(defgeneric ,funcname (x)
      (:method ((x t))
 	      #+(or)(warn "~A T: ~S" ',funcname x)
-	      (let* ((,method (x.class-attr-no-magic.bind x ',method)))
-			(if ,method
-			    (py-call ,method)
-			  ,(or error
-			       `(py-raise '{TypeError}
-					  "Object ~A (a ~A) has no `~A' method."
-					  x (class-name (py-class-of x))
-					  ',method)))))))
+	      (let ((,method (x.class-attr-no-magic.bind x ',method)))
+                (if ,method
+                    (py-call ,method)
+                  ,(or error
+                       `(py-raise '{TypeError}
+                                  "Object ~A (a ~A) has no `~A' method."
+                                  x (class-name (py-class-of x))
+                                  ',method)))))))
 
 (def-py-shortcut-func py-abs  {__abs__} )
 (def-py-shortcut-func py-repr {__repr__})
@@ -3433,7 +3433,17 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
 (def-py-shortcut-func py-len  {__len__} )
 (def-py-shortcut-func py-nonzero {__nonzero__} )
 (def-py-shortcut-func py-float {__float__})
-(def-py-shortcut-func py-hash {__hash__})
+(def-py-shortcut-func py-hash  {__hash__})
+(def-py-shortcut-func py-index {__index__})
+
+(defun py-contains (x item)
+  ;; Whether ITEM is in X (note reversed args!)
+  (let ((method (x.class-attr-no-magic.bind x '{__contains__})))
+    (if method
+        (py-call method item)
+      (py-raise '{TypeError}
+                "Object ~A (a ~A) has no `~A' method."
+                x (class-name (py-class-of x)) '{__contains__}))))
 
 (defmethod py-hash ((x symbol))
   ;; Returning (py-hash (symbol-name x)) leads to infinite recursion.

@@ -33,6 +33,11 @@
            #:|fmod| #:|fabs| #:|modf| #:|frexp| #:|hypot| #:|ldexp| )
   (:shadow #:|sin| #:|cos| #:|tan| #:|asin| #:|acos| #:|atan| #:|sinh| #:|cosh| #:|tanh|))
 
+(defpackage :clpython.module.operator
+  (:use :clpython :common-lisp)
+  (:export) ;; symbols will be filled upon package loading
+  (:shadow #:|eq| #:|mod| #:|index| #:|abs| #:|not|))
+
 (defpackage :clpython.module.os
   (:use :clpython :common-lisp)
   (:export #:|name|
