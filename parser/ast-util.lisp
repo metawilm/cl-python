@@ -89,7 +89,7 @@ starts a new top-level statement. Uses an extra heuristic if *use-ast-return-stm
   ;;    return
 
   (flet ((funcdef-complete-p (ast)
-           (assert ([funcdef-stmt-p] ast))
+           (assert (and ast (eq (car ast) '[funcdef-stmt-p])))
            (with-matching (ast ([funcdef-stmt] ?decorators ([identifier-expr] ?fname) ?fargs
                                                ([suite-stmt] ?stmts)))
              (let ((last-stmt (car (last ?stmts))))

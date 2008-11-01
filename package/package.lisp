@@ -79,21 +79,21 @@
   (:intern "clpython-stmt" ;; internal state
 	   ))
 
-(defpackage :clpython.ast.makenode
+(defpackage :clpython.ast.node-p
   (:documentation "Statement and expression nodes")
   (:use )
-  (:export "make-assert-stmt" "make-assign-stmt" "make-augassign-stmt" "make-break-stmt" "make-classdef-stmt"
-	   "make-continue-stmt" "make-del-stmt" "make-exec-stmt" "make-for-in-stmt" "make-funcdef-stmt"
-	   "make-global-stmt" "make-if-stmt" "make-import-stmt" "make-import-from-stmt" "make-module-stmt"
-	   "make-pass-stmt" "make-print-stmt" "make-raise-stmt" "make-return-stmt" "make-suite-stmt"
-	   "make-try-except-stmt" "make-try-finally-stmt" "make-while-stmt" "make-yield-stmt"
+  (:export ;"make-assert-stmt" "make-assign-stmt" "make-augassign-stmt" "make-break-stmt" "make-classdef-stmt"
+	   ;"make-continue-stmt" "make-del-stmt" "make-exec-stmt" "make-for-in-stmt" "make-funcdef-stmt"
+	   ;"make-global-stmt" "make-if-stmt" "make-import-stmt" "make-import-from-stmt" "make-module-stmt"
+	   ;"make-pass-stmt" "make-print-stmt" "make-raise-stmt" "make-return-stmt" "make-suite-stmt"
+	   ;"make-try-except-stmt" "make-try-finally-stmt" "make-while-stmt" "make-yield-stmt"
 	   
-	   "make-attributeref-expr" "make-backticks-expr" "make-binary-expr" "make-binary-lazy-expr"
-	   "make-call-expr" "make-comparison-expr" "make-dict-expr" "make-generator-expr"
-	   "make-identifier-expr" "make-lambda-expr" "make-listcompr-expr" "make-list-expr" "make-slice-expr"
-	   "make-subscription-expr" "make-tuple-expr" "make-unary-expr"
+	   ;"make-attributeref-expr" "make-backticks-expr" "make-binary-expr" "make-binary-lazy-expr"
+	   ;"make-call-expr" "make-comparison-expr" "make-dict-expr" "make-generator-expr"
+	   ;"make-identifier-expr" "make-lambda-expr" "make-listcompr-expr" "make-list-expr" "make-slice-expr"
+	   ;"make-subscription-expr" "make-tuple-expr" "make-unary-expr"
            
-           "make-identifier-expr*" "make-suite-stmt*" "make-assign-stmt*" ;; shortcuts
+           ;"make-identifier-expr*" "make-suite-stmt*" "make-assign-stmt*" ;; shortcuts
            
            ;; Predicates
            "assert-stmt-p" "assign-stmt-p" "augassign-stmt-p" "break-stmt-p" "classdef-stmt-p"
@@ -111,8 +111,7 @@
 (defpackage :clpython.ast
   (:documentation "Python abstract syntax tree representation")
   (:use :clpython.ast.reserved :clpython.ast.node :clpython.ast.punctuation
-	:clpython.ast.operator :clpython.ast.token :clpython.ast.makenode)
-  
+	:clpython.ast.operator :clpython.ast.token :clpython.ast.node-p)
   (:import-from :clpython.ast.operator "/t/" "<divmod>")
   (:import-from :clpython.ast.reserved "is not" "not in")
   (:import-from :clpython.ast.node     "clpython-stmt"))
