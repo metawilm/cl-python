@@ -722,7 +722,20 @@ def f():
 g = f()
 assert g.next() == 0
 assert g.next() == 1
-"))
+")
+  (run-no-error "
+def f():
+  'asdfas'  # in the resulting tagbody, no strings may occur at toplevel
+  yield 2")
+  (run-no-error "
+def f():
+  0  # ensure loose integers don't screw up tagbody tags
+  yield 2
+  0
+  1
+  2
+  3
+  yield 3"))
 
 (defmethod test-lang ((kind (eql :attribute-semantics)))
   (run-no-error "

@@ -103,7 +103,13 @@
 	     (walk-py-ast
 	      form
 	      (lambda (form &rest context)
-		(declare (ignore context))
+                (declare (ignore context))
+                (block walker
+                  ;; In tagbody only "compound statements" may occur at toplevel, and
+                  ;; strings (e.g. docstrings) and numbers are not.
+                  (unless (listp form)
+                    (return-from walker (values `(or ,form) t)))
+                
 		(case (first form)
 		  
 		  ([break-stmt]
@@ -304,7 +310,8 @@
                                        ,tag)
 			     t)))
                   
-                  (t (values form t))))
+                  (t (values form t)))))
+              :lists-only nil
 	      :build-result t)))
 
 	(let* ((walked-as-list (multiple-value-list (apply-splits (walk suite ()))))
