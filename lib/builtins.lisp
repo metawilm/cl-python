@@ -21,7 +21,7 @@
           ({buffer}       ,*the-notimplemented*)
 	  ({classmethod}  py-class-method )
 	  ({complex}      py-complex      )
-	  ({dict}         dict         )
+	  ({dict}         dict            )
 	  ({enumerate}    py-enumerate    )
 	  ({file}         py-file         )
 	  ({float}        py-float        )
@@ -29,7 +29,7 @@
 	  ({list}         py-list         )
 	  ({long}         py-int          )
 	  ({number}       py-number       )
-	  ({object}       object       )
+	  ({object}       object          )
 	  ({property}     py-property     )
 	  ({slice}        py-slice        )
 	  ({staticmethod} py-static-method)
@@ -503,8 +503,6 @@ None, use identity function (multiple sequences -> list of tuples)."
 			      :fill-pointer t
 			      :initial-contents tuples)))
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
 ;;; 3) Built-in values
 
 (defvar {None}           *the-none*           )
@@ -512,3 +510,4 @@ None, use identity function (multiple sequences -> list of tuples)."
 (defvar {True}           +the-true+           )
 (defvar {False}          +the-false+          )
 (defvar {NotImplemented} *the-notimplemented* )
+

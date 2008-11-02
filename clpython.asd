@@ -57,7 +57,6 @@
                                        (:file "classdefs"    )
                                        (:file "early-dict"   )
                                        (:file "classes"      )
-                                       (:file "file"         )
                                        (:file "exceptions"   )
                                        (:file "compiler"     )
                                        (:file "generator"    )
@@ -70,11 +69,13 @@
     :description "Python module library"
     :depends-on (:clpython.package :clpython.parser :clpython.core)
     :components ((:module "lib"
-                          :serial t
-                          :components ((:file "lsetup")
+                          ;; :serial t
+                          :components ((:file "builtins-file")
+                                       (:file "builtins" :depends-on ("builtins-file"))
+
+                                       (:file "lsetup")
                                        (:file "array")
                                        (:file "binascii")
-                                       (:file "builtins")
                                        (:file "gc")
                                        (:file "math")
                                        (:file "operator")
