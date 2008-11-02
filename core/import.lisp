@@ -209,7 +209,7 @@ Returns the loaded module, or NIL on error."
           (unless success
             (warn "Loading of module `~A' was aborted.~@[~:@_Source: ~A~]~@[~:@_Binary: ~A~]~@[~:@_Imported by: ~A~]"
                   mod-name src-file filename within-mod-path)
-            (remove-loaded-module mod-name habitat)))))))
+            (remove-loaded-module mod-name habitat :must-exist t)))))))
 
 (defun parent-package-local-search-path (mod-name-as-list &rest import-options)
   "Path of MOD-NAME-AS-LIST's parent package."
@@ -333,25 +333,24 @@ as those are not distributed with CLPython."
         ;; but implementations have that already. :)
         (compile-py-file src-file :mod-name dotted-name :output-file bin-file))
       
-      (flet ((delete-fasl-try-again ()
-               (delete-file bin-file)
-               (return-from py-import (apply #'py-import mod-name-as-list options))))
+      (restart-case
+          (let ((new-module (load-compiled-python-file bin-file
+                                                       :mod-name dotted-name
+                                                       :within-mod-path within-mod-path
+                                                       :habitat habitat
+                                                       :src-file src-file)))
+            (when new-module ;; Maybe loading failed (which already gave a warning)
+              (add-loaded-module new-module habitat)
+              new-module))
         
-      (restart-bind ((delete-fasl-try-again #'delete-fasl-try-again
-                         :test-function (lambda (c)
-                                          (declare (ignore c))
-                                          (and (probe-file src-file) (probe-file bin-file)))
-                         :report-function (lambda (stream)
-                                            (format stream "Recompile module `~A' file ~A" dotted-name src-file))))
-        
-        (let ((new-module (load-compiled-python-file bin-file
-                                                     :mod-name dotted-name
-                                                     :within-mod-path within-mod-path
-                                                     :habitat habitat
-                                                     :src-file src-file)))
-          (when new-module ;; Maybe loading failed (which already gave a warning)
-            (add-loaded-module new-module habitat)
-            new-module)))))))
+        (delete-fasl-try-again ()
+            :test (lambda (c)
+                    (declare (ignore c))
+                    (and (probe-file src-file) (probe-file bin-file)))
+            :report (lambda (s) (format s "Recompile module `~A' file ~A" dotted-name src-file))
+          (delete-file bin-file)
+          (return-from py-import (apply #'py-import mod-name-as-list options)))))))
+
   
 (defun directory-p (pathname)
   (check-type pathname pathname)

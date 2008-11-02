@@ -2541,6 +2541,9 @@ invocation form.")
 (def-py-method py-string.replace (x^ old new &optional count^)
   (substitute (py-val->string new) (py-val->string old) x :count count))
 
+(def-py-method py-string.split (x^ &optional sep max-split)
+  (error "todo"))
+
 (def-py-method py-string.startswith (x^ prefix &optional start end)
   (when (or start end) (error "todo"))
   (py-bool (and (>= (length x) (length prefix))
