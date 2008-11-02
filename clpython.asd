@@ -54,7 +54,7 @@
                           :components ((:file "csetup"       )
                                        (:file "pydecl"       )
                                        (:file "formatstring" )
-                                       (:file "classdefs"    )
+                                       (:file "metaclass"    )
                                        (:file "dictattr"     )
                                        (:file "classes"      )
                                        (:file "exceptions"   )
