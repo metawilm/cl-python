@@ -334,7 +334,6 @@ as those are not distributed with CLPython."
         (compile-py-file src-file :mod-name dotted-name :output-file bin-file))
       
       (flet ((delete-fasl-try-again ()
-               (declare (ignore c))
                (delete-file bin-file)
                (return-from py-import (apply #'py-import mod-name-as-list options))))
         
