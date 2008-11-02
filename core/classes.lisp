@@ -13,6 +13,9 @@
 (in-package :clpython)
 (in-syntax *ast-user-readtable*)
 
+;; TODO: ensure all items listed in this table are implemented
+;; http://www.python.org/doc/current/library/inspect.html
+
 ;; Python metatype. Class `type' and subclasses thereof are instances
 ;; of py-meta-type.
 
@@ -82,7 +85,7 @@
 
 (defparameter *writable-attribute-methods* (make-hash-table :test #'eq))
 
-(eval-when (compile load eval)
+(eval-when (:compile-toplevel :load-toplevel :execute)
 
 (defun ensure-pkg-symbol (str pkg)
   (check-type str string)
@@ -594,8 +597,8 @@
   t)
 
 (defclass py-function (standard-generic-function dicted-object)
-  ;; mop:funcallable-standard-class defines :name initarg, but I don't know how to access it...
-  ((name         :initarg :fname        :initform nil :accessor py-function-name)
+  ;; mop:funcallable-standard-class defines :name initarg, but how to to access it portably...
+  ((fname        :initarg :fname        :initform nil :accessor py-function-name)
    (context-name :initarg :context-name :initform nil :accessor py-function-context-name)
    (lambda       :initarg :lambda       :initform nil :accessor py-function-lambda))
   (:metaclass funcallable-python-class))
@@ -610,7 +613,10 @@
   (:method ((f py-function)) (string (py-function-name f))))
 
 (defun make-py-function (&key name context-name lambda)
-  (let ((x (make-instance 'py-function :fname (string name) :lambda lambda :context-name context-name)))
+  (let ((x (make-instance 'py-function
+			  :fname (string name)
+			  :lambda lambda
+			  :context-name context-name)))
     (set-funcallable-instance-function x lambda)
     ;; fill dict?
     x))
@@ -968,7 +974,7 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 (finalize-inheritance (find-class 'py-xrange))
 
 (def-py-method py-xrange.__new__ :static (cls &rest args)
-  (declare (ignore args))
+  (or args) ;; XX fix warning
   (make-instance cls))
                                   
 (def-py-method py-xrange.__init__ (x &rest args)

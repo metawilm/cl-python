@@ -452,7 +452,31 @@ Disabled by default, to not confuse the test suite.")
     (declare (ignore ?value))
     (mapcan #'target-get-bound-vars ?targets)))
 
+(defun check-valid-assignment-targets (targets &key augmented)
+  (labels ((check (tg)
+             (when (listp tg)
+               (let ((node (car tg)))
+                 (when (member node '([attributeref-expr] [subscription-expr]
+                                      [identifier-expr]))
+                   (return-from check))
+                 (unless augmented
+                   (when (member node '([tuple-expr] [list-expr]))
+                     (dolist (tg (second tg))
+                       (check tg))
+                     (return-from check)))))
+             ;; Surround source code with quotes, unless it is a string itself.
+             (raise-syntax-error
+              "Invalid ~Aassignment target: ~A~A~A."
+              (if augmented "augmented " "")
+              (if (stringp tg) "" #\`)
+              (py-pprint tg)
+              (if (stringp tg) "" #\'))))
+    (dolist (tg targets)
+      (check tg)))
+  t)
+
 (defmacro [assign-stmt] (value targets)
+  (check-valid-assignment-targets targets)
   (with-gensyms (assign-val)
     `(let ((,assign-val ,value))
        ,@(loop for tg in targets collect `(setf ,tg ,assign-val)))))
@@ -460,6 +484,7 @@ Disabled by default, to not confuse the test suite.")
 (define-compiler-macro [assign-stmt] (&whole whole value targets)
   ;; Shortcut the case "a,b,.. = 1,2,.." where left and right same number of
   ;; items. This saves creation of a tuple for RHS.
+  (check-valid-assignment-targets targets)
   (if (and (or (match-p value '([tuple-expr] ?items))
                (match-p value '([list-expr] ?items)))
            (or (match-p targets '(([tuple-expr] ?items)))
@@ -488,10 +513,7 @@ Disabled by default, to not confuse the test suite.")
                  (setf (attr ,prim ',?name) nil))))))
 
 (defmacro [augassign-stmt] (&whole whole op place val &environment env)
-  (unless (listp place)
-    (py-raise '{SyntaxError}
-              "Augmented assignment to a literal is not possible (got: \"~A ~A ..\")."
-              place op)) 
+  (check-valid-assignment-targets (list place) :augmented t)
   (case (car place)
     
     (([attributeref-expr] [subscription-expr] [identifier-expr])
@@ -514,8 +536,8 @@ Disabled by default, to not confuse the test suite.")
 		  (let ((,(car stores) (,py-@ ,place-val-now ,op-val)))
 		    ,writer)))))))
 
-    (t (py-raise '{SyntaxError} "Invalid augmented assignment: ~A"
-		 (py-pprint whole nil)))))
+    (t (raise-syntax-error "Invalid augmented assignment: ~A"
+                                     (py-pprint whole nil)))))
 
 (defmacro [backticks-expr] (item)
   `(py-repr ,item))
@@ -537,7 +559,7 @@ Disabled by default, to not confuse the test suite.")
 (defmacro [break-stmt] (&environment e)
   (if (get-pydecl :inside-loop-p e)
       `(go .break)
-    (py-raise '{SyntaxError} "Statement `break' was found outside loop.")))
+    (raise-syntax-error "Statement `break' was found outside loop.")))
 
 ;; EXEC-STMT here, because CALL-EXPR needs it
 
@@ -623,8 +645,8 @@ Disabled by default, to not confuse the test suite.")
               "Statements are not allowed in this Python code string (found `~A' in \"~A\")." s string))
   (with-py-ast (form ast :into-nested-namespaces nil)
     (case (car form)
-      ([return-stmt] (py-raise '{SyntaxError}
-                               "Statement `return' was found outside function (in `exec')."))
+      ([return-stmt] (raise-syntax-error
+                      "Statement `return' was found outside function (in `exec')."))
       (t form)))
   t)
 
@@ -918,7 +940,7 @@ Disabled by default, to not confuse the test suite.")
 (defmacro [continue-stmt] (&environment e)
   (if (get-pydecl :inside-loop-p e)
       `(go .continue)
-    (py-raise '{SyntaxError} "Statement `continue' was found outside loop.")))
+    (raise-syntax-error "Statement `continue' was found outside loop.")))
 
 (defmacro [del-stmt] (item &environment e)
   (multiple-value-bind (temps values stores store-form read-form del-form)
@@ -1062,8 +1084,8 @@ LOCALS shares share tail structure with input arg locals."
                 (with-matching (form (?decorators ([identifier-expr] ?fname) ?fargs ?fsuite))
                   (values ?fname "function"))))
 	   (when (member name sure-globals)
-	     (py-raise '{SyntaxError}
-		       "The ~A name `~A' may not be declared `global'." kind name))
+             (raise-syntax-error
+              "The ~A name `~A' may not be declared `global'." kind name))
            (unless (member* name sure-locals new-locals)
              (push name sure-locals)
              (push name new-locals)))
@@ -1087,10 +1109,10 @@ LOCALS shares share tail structure with input arg locals."
                ;; CPython gives SyntaxWarning, and seems to internally move the `global'
                ;; declaration before the first use. Let us signal an error; it's easy
                ;; for the user to fix this.
-               (py-raise '{SyntaxError}
-                         "This `global' declaration for variable `~A' is not allowed: ~
-                          declaration must be given before first use in function body."
-                         (car erroneous)))
+               (raise-syntax-error
+                "This `global' declaration for variable `~A' is not allowed: ~
+                 declaration must be given before first use in function body."
+                (car erroneous)))
              (setf sure-globals (nconc sym-list sure-globals)))
            (values nil t)))
 
@@ -1421,7 +1443,7 @@ DETERMINE-BODY-GLOBALS"
 (defmacro [return-stmt] (val &environment e)
   (if (get-pydecl :inside-function-p e)
       `(return-from function-body ,(or val `(load-time-value *the-none*)))
-    (py-raise '{SyntaxError} "Statement `return' was found outside function.")))
+    (raise-syntax-error "Statement `return' was found outside function.")))
 
 (defmacro [slice-expr] (start stop step)
   `(make-slice ,start ,stop ,step))
@@ -1677,11 +1699,11 @@ finally:
 
 (defmacro [yield-expr] (val)
   (declare (ignore val))
-  (py-raise '{SyntaxError} "Expression `yield' was found outside function."))
+  (raise-syntax-error "Expression `yield' was found outside function."))
 
 (defmacro [yield-stmt] (val)
   (declare (ignore val))
-  (py-raise '{SyntaxError} "Statement `yield' was found outside function."))
+  (raise-syntax-error "Statement `yield' was found outside function."))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;

@@ -40,7 +40,7 @@
                                        (:file "lexer"    :depends-on ("grammar"))
                                        (:file "parser"   :depends-on ("grammar" "lexer"))
                                        (:file "grammar-aclyacc" :depends-on ("grammar" "lexer" "parser"))
-                                       (:file "grammar-clyacc" :depends-on ("grammar" "lexer" "parser"))
+                                       (:file "grammar-clyacc"  :depends-on ("grammar" "lexer" "parser"))
                                        (:file "ast-match")
                                        (:file "ast-util" :depends-on ("ast-match" "grammar"))
                                        (:file "walk"     :depends-on ("psetup"))
@@ -62,6 +62,7 @@
                                        (:file "compiler"     )
                                        (:file "generator"    )
                                        (:file "optimize"     )
+                                       (:file "run"          )
                                        (:file "habitat"      )
                                        (:file "import"       )))))
 

@@ -18,14 +18,20 @@
 ;; loaded, a SyntaxError is thrown, otherwise a regular ERROR.
 ;; Same for EOF error.
 
-(defun raise-syntax-error (formatstring &rest args)
+(defparameter clpython:*raise-syntax-error-hook* 'raise-syntax-error-default)
+
+(defun clpython:raise-syntax-error (&rest args)
+  (apply *raise-syntax-error-hook* args))
+
+(defun raise-syntax-error-default (formatstring &rest args)
   "Raise SyntaxError, or (if that condition is unavailable) a regular error."
   (declare (special clpython:*exceptions-loaded* clpython::*exceptions-are-python-objects*))
   (if clpython:*exceptions-loaded*
       (if clpython::*exceptions-are-python-objects*
           (apply 'clpython:py-raise '{SyntaxError} formatstring args)
         (error '{SyntaxError}))
-    (apply #'error (concatenate 'string "SyntaxError: " formatstring) args)))
+    (apply #'error (concatenate 'string "SyntaxError: " formatstring) args))
+  (break "unreachable"))
 
 (defun raise-unexpected-eof (&optional line-no)
   (declare (special clpython:*exceptions-loaded*))
@@ -33,7 +39,7 @@
     (if clpython:*exceptions-loaded*
 	(funcall 'clpython:py-raise '{UnexpectedEofError} msg)
       (raise-syntax-error msg)))
-  (assert nil () "unreachable"))
+  (break "unreachable"))
 
 ;;; Depenency on Allegro's YACC
 

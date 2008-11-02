@@ -1,4 +1,4 @@
-;; -*- package: clpython; readtable: py-ast-user-readtable -*-
+;; -*- Mode: LISP; Syntax: COMMON-LISP; Package: CLPYTHON; Readtable: PY-AST-USER-READTABLE -*-
 ;; 
 ;; This software is Copyright (c) Franz Inc. and Willem Broekema.
 ;; Franz Inc. and Willem Broekema grant you the rights to
@@ -94,73 +94,3 @@
   (setf (habitat-loaded-mods habitat)
     (remove name (habitat-loaded-mods habitat)
 	    :test #'string-equal :key #'module-name)))
-
-(defvar *compile-python-ast-before-running* t
-  "Whether to compile an AST before running it.")
-
-(defmacro without-sbcl-compiler-errors-for-syntax-errors (&body body)
-  #+sbcl
-  `(call-without-sbcl-compiler-macros-for-syntax-errors
-    (lambda ()
-      ;; In interpreted code, if a macroexpansion signals an error,
-      ;; that error is first SIGNAL-led by SBCL, and then a
-      ;; SB-INT:COMPILED-PROGRAM-ERROR is ERROR-ed. Here we
-      ;; ensure that a syntax error is aways raised using ERROR.
-      (handler-bind (({SyntaxError} #'error))
-        (progn ,@body))))
-  #-sbcl `(progn ,@body))
-
-#+sbcl
-(defun call-without-sbcl-compiler-macros-for-syntax-errors (f)
-  ;; SBCL compiler reports errors signalled during macroexpansion.
-  ;; But a few Python syntax errors are detected and signalled during macroexpansion.
-  ;; We want the SyntaxError to throw the user in the debugger, not to have
-  ;; it just reported.
-  ;; 
-  ;; This is implemented by wrapping sb-c:compiler-error, which has arglist
-  ;; (datum &rest arguments). Simply look for SyntaxError as datum or a format arg,
-  ;; and in that case call ERROR instead of the normal report functionality.
-  (flet ((wrap ()
-           (sb-int:encapsulate
-              'sb-c:compiler-error
-              'do-nothing-for-syntax-errors
-              ;; ARG-LIST and BASIC-DEFINITION are special variables, but
-              ;; not declared as globals by SBCL, and declaring them special
-              ;; here results in package lock violation. Using 
-              ;; SB-EXT:WITHOUT-PACKAGE-LOCKS leads to a whole bunch of
-              ;; error messages. Therefore simply using symbol-value.
-              `(let ((c (find-if (lambda (x) (typep x '{SyntaxError})) 
-                                 (symbol-value 'sb-int:arg-list))))
-                 (if c
-                     (error c)
-                   (apply (symbol-value 'sb-int:basic-definition)
-                          (symbol-value 'sb-int:arg-list))))))
-         (unwrap ()
-           (sb-int:unencapsulate 'sb-c:compiler-error 'do-nothing-for-syntax-errors)))
-    (unwind-protect
-        (progn (wrap)
-               (funcall f))
-      (unwrap))))
-
-
-(defun run-python-ast (ast &key (habitat *habitat*)
-                                (compile *compile-python-ast-before-running*)
-                                run-args)
-  "Run Python AST in freshly bound habitat.
-If COMPILE is true, the AST is compiled into a function before running."
-  (without-sbcl-compiler-errors-for-syntax-errors
-   (let* ((*habitat* habitat)
-          (get-module-f `(lambda () ,ast))
-          (fc (if compile
-                  (compile nil get-module-f)
-                (coerce get-module-f 'function))))
-     (let* (module-function
-            (*module-function* (lambda (f) (setf module-function f))))
-       (declare (special *module-function*))
-       (funcall fc)
-       (unless module-function
-         (break "Module ~A did not call *module-function*." fc))
-       (apply module-function run-args)))))
-
-(defun run (thing &rest args)
-  (apply #'run-python-ast (parse thing) args))

@@ -13,6 +13,8 @@
 (in-package :clpython.parser)
 (in-syntax *ast-readtable*)
 
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (import 'raise-syntax-error :clpython))
 
 ;; Register AST node patterns. The pattern matcher in the compiler checks
 ;; structural consistency with these entries.
@@ -288,10 +290,8 @@
            (setf $2 (second $2))
            (let* ((val (car (last $2)))
                   (targets (cons $1 (nbutlast $2))))
-             (apply #'check-valid-assignment-targets targets)
              `([assign-stmt] ,val ,targets)))
           ($2
-           (check-valid-assignment-targets $1)
            `([augassign-stmt] ,(car $2) ,$1 ,(cdr $2)))
           (t $1)))
    ((testlist) $1)) 
@@ -667,18 +667,4 @@
     (dolist (x dotted-name res)
       (setf res `([attributeref-expr] ,res ([identifier-expr] ,x))))))
 
-(defun check-valid-assignment-targets (&rest targets)
-  (labels ((check (tg)
-             (case (and (listp tg) (first tg))
-               (([attributeref-expr] [subscription-expr] [identifier-expr]))
-               (([tuple-expr] [list-expr])
-                (dolist (x (second tg))
-                  (check x)))
-               (t
-                ;; Surround source code with quotes, unless it is a string itself.
-                (raise-syntax-error "Invalid assignment target: ~@[~A~]~A~@[~A~]."
-                                    (when (not (stringp tg)) #\`)
-                                    (py-pprint tg)
-                                    (when (not (stringp tg)) #\'))))))
-    (dolist (tg targets) 
-      (check tg))))
+
