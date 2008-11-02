@@ -11,8 +11,9 @@
 
 ;;; Class hierarchy
 
+;; Different implementations have different requirements, so let's
+;; make everything available all the time.
 (eval-when (:compile-toplevel :load-toplevel :execute)
-  ;; Different implementations have different requirements, so let's make everything available all the time.
 
 (defclass dict-mixin ()
   ((dict :initarg :dict
