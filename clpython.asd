@@ -55,7 +55,7 @@
                                        (:file "pydecl"       )
                                        (:file "formatstring" )
                                        (:file "classdefs"    )
-                                       (:file "early-dict"   )
+                                       (:file "dictattr"     )
                                        (:file "classes"      )
                                        (:file "exceptions"   )
                                        (:file "compiler"     )
