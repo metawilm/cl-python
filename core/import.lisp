@@ -329,17 +329,31 @@ as those are not distributed with CLPython."
 
       (when src-file
         (setf bin-file (compiled-file-name kind just-mod-name src-file :include-dir nil :create-dir t))
+        ;; This would be a good place for a "try recompiling" restart,
+        ;; but implementations have that already. :)
         (compile-py-file src-file :mod-name dotted-name :output-file bin-file))
       
-      (let ((new-module (load-compiled-python-file bin-file
-                                                   :mod-name dotted-name
-                                                   :within-mod-path within-mod-path
-                                                   :habitat habitat
-                                                   :src-file src-file)))
-        (when new-module ;; Maybe loading failed (which already gave a warning)
-          (add-loaded-module new-module habitat)
-          new-module)))))
-
+      (flet ((delete-fasl-try-again ()
+               (declare (ignore c))
+               (delete-file bin-file)
+               (return-from py-import (apply #'py-import mod-name-as-list options))))
+        
+      (restart-bind ((delete-fasl-try-again #'delete-fasl-try-again
+                         :test-function (lambda (c)
+                                          (declare (ignore c))
+                                          (and (probe-file src-file) (probe-file bin-file)))
+                         :report-function (lambda (stream)
+                                            (format stream "Recompile module `~A' file ~A" dotted-name src-file))))
+        
+        (let ((new-module (load-compiled-python-file bin-file
+                                                     :mod-name dotted-name
+                                                     :within-mod-path within-mod-path
+                                                     :habitat habitat
+                                                     :src-file src-file)))
+          (when new-module ;; Maybe loading failed (which already gave a warning)
+            (add-loaded-module new-module habitat)
+            new-module)))))))
+  
 (defun directory-p (pathname)
   (check-type pathname pathname)
   #+allegro (excl:file-directory-p pathname)
