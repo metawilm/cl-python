@@ -69,10 +69,8 @@
     :description "Python module library"
     :depends-on (:clpython.package :clpython.parser :clpython.core)
     :components ((:module "lib"
-                          ;; :serial t
                           :components ((:file "builtins-file")
                                        (:file "builtins" :depends-on ("builtins-file"))
-
                                        (:file "lsetup")
                                        (:file "array")
                                        (:file "binascii")
