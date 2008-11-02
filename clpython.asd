@@ -70,7 +70,8 @@
     :depends-on (:clpython.package :clpython.parser :clpython.core)
     :components ((:module "lib"
                           :components ((:file "builtins-file")
-                                       (:file "builtins" :depends-on ("builtins-file"))
+                                       (:file "builtins-set")
+                                       (:file "builtins" :depends-on ("builtins-file" "builtins-set"))
                                        (:file "lsetup")
                                        (:file "array")
                                        (:file "binascii")

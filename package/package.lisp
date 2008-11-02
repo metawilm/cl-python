@@ -137,7 +137,7 @@
 (defpackage :clpython.user.builtin.type
   (:use :clpython.user.builtin.type.exception)
   (:export "basestring" "bool" "buffer" "classmethod" "complex" "dict" "enumerate" "file"
-	   "float" "int" "list" "long" "number" "object" "property" "slice"
+	   "float" "frozenset" "int" "list" "long" "number" "object" "property" "set" "slice"
 	   "staticmethod" "str" "super" "tuple" "type" "unicode" "xrange"))
 
 (defpackage :clpython.user.builtin.value
