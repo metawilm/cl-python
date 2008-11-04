@@ -2541,9 +2541,32 @@ invocation form.")
 (def-py-method py-string.replace (x^ old new &optional count^)
   (substitute (py-val->string new) (py-val->string old) x :count count))
 
-(def-py-method py-string.split (x^ &optional sep max-split)
-  (error "todo"))
-
+(def-py-method py-string.split (x^ &optional (sep *the-none*)
+                                             (max-splits most-positive-fixnum))
+  (let ((sep-sequence (cond ((eq sep *the-none*) (list #\Space #\Tab #\Return)) ;; definition of whitespace?
+                            ((and (stringp sep)
+                                  (= (length sep) 1)) (coerce sep 'list))
+                            (t (error "Todo: string.split() with this as seperator: ~S." sep)))))
+    (let (res
+          (ix 0)
+          (num-splits 0))
+        (block iter
+          (dotimes (i max-splits)
+            (when (>= ix (length x))
+              (return-from iter))
+            (unless (whereas ((start-collect (position-if-not (lambda (x) (member x sep-sequence)) x :start ix))
+                              (end-collect (when start-collect
+                                             (or (position-if (lambda (x) (member x sep-sequence)) x :start (1+ start-collect))
+                                                 (length x)))))
+                      (push (subseq x start-collect end-collect) res)
+                      (incf num-splits)
+                      (setf ix (1+ end-collect))
+                      t)
+              (return-from iter))))
+        (unless (>= ix (length x))
+          (push (subseq x ix) res))
+        (make-py-list-from-list (nreverse res)))))
+  
 (def-py-method py-string.startswith (x^ prefix &optional start end)
   (when (or start end) (error "todo"))
   (py-bool (and (>= (length x) (length prefix))
