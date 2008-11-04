@@ -1274,6 +1274,7 @@ otherwise work well.")
 
 (define-setf-expander [identifier-expr] (name &environment e)
   ;; XXX safe-lexical-vars
+  ;; XXX built-in non-shadowable values like True, False, None, Ellipsis, NotImplemented
   (let ((ns (get-pydecl :namespace e)))
     (with-gensyms (store)
       (values () ;; temps
