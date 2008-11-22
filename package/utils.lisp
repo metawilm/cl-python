@@ -175,3 +175,9 @@ See function ALIST-VS-HT.")
                (dotimes (i iter-repeat)
                  (dolist (key keys)
                    (gethash key hash-table))))))))
+
+;;; Weak-keys hash table
+
+(defun make-weak-key-hash-table (&rest options)
+  #+allegro (apply #'make-hash-table :weak-keys t options)
+  #-allegro (apply #'make-hash-table options))
