@@ -12,12 +12,23 @@
 (in-package :clpython)
 (in-syntax *user-readtable*)
 
-(defclass py-set (object)
+(defclass |py-set| (object)
+  ((items :accessor set-items))
+  (:metaclass py-type))
+
+(defclass |frozenset| (object)
   ()
   (:metaclass py-type))
 
-(defclass frozenset (object)
-  ()
-  (:metaclass py-type))
+(def-py-method |py-set.__init__| (x &optional iterable)
+  (setf (set-items x) (when iterable (py-iterate->lisp-list iterable))))
+
+(def-py-method |py-set.__iter__| (x)
+  (make-iterator-from-function :name "set-iterator"
+                               :func (let ((items (copy-list (set-items x))))
+                                       (lambda () (pop items)))))
+
+(def-py-method |py-set.add| (x item)
+  (push item (set-items x)))
 
 ;; much TODO...
