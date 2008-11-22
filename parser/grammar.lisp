@@ -116,6 +116,12 @@
 (defparameter *python-prods* (make-hash-table :test 'eq)
   "Hashtable containing all grammar rules")
 
+(eval-when (:compile-toplevel :load-toplevel :execute)
+(defun make-number-token (n)
+  (check-type n (integer 1 #.most-positive-fixnum))
+  (intern (format nil "$~D" n) #.*package*))
+) ;; eval-when
+
 (defmacro p (name &rest rules)
   (when (eq (car rules) :or)
     (return-from p `(progn ,@(loop for rule in (cdr rules) collect `(p ,name ,@rule)))))
@@ -135,10 +141,7 @@
                (change-token-suffix (x suffix)
                  (check-type suffix character)
                  (let ((s (remove-token-suffix x)))
-                   (intern (format nil "~A~C" s suffix) #.*package*)))
-               (make-number-token (n)
-                 (check-type n (integer 1 #.most-positive-fixnum))
-                 (intern (format nil "$~D" n) #.*package*)))
+                   (intern (format nil "~A~C" s suffix) #.*package*))))
         (flet ((shift-outcome (removed-$)
                  `(let ((,(make-number-token removed-$) nil)
                         ,@(loop for i from (1+ removed-$) to (length terms)
@@ -162,8 +165,51 @@
                      `(progn (p ,name ,with ,outcome ,@options)
                              (p ,name ,without ,(shift-outcome (1+ term-ix)) ,@options))))))))))
 
-(defun add-rule (name terms outcome &rest options)
-  (pushnew (list terms outcome options) (gethash name *python-prods*) :test 'equal))
+;;; Source location recording
+
+(defparameter *python-form-source-code-ht* nil
+  "EQ hashtable, mapping AST subforms to source position")
+
+(defun record-source-location (terms outcome)
+  "Records location in *python-form-source-code*."
+  (when (and *python-form-source-code-ht*
+             (listp outcome))
+    (flet ((retrieve-position (item)
+             (typecase item
+               (lex-value (lex-value-position item))
+               (list (gethash item *python-form-source-code-ht*))
+               ;; some other possibilities: string, number, indent, dedent, newline
+               )))
+      (let* ((first (retrieve-position (car terms)))
+             (last (retrieve-position (car (last terms))))
+             (pos (cond ((null first) last)
+                        ((null last) first)
+                        (t (list :start (getf first :start)
+                                 :end (getf last :end))))))
+        (when pos
+          (setf (gethash outcome *python-form-source-code-ht*) pos)
+          (return-from record-source-location t))))))
+
+(defun instrument-outcome (terms outcome)
+  (if (and (= 1 (length terms))
+           (equal outcome '$1))
+      (return-from instrument-outcome outcome)
+    (let* (($vars (loop for i from 1 to (length terms)
+                      collect (make-number-token i))))
+      `(progn (let* ((.terms (list ,@$vars)))
+                ;; Extract values out of the lex-value structs. The structs
+                ;; only exist to travel the source locations information here. 
+                ,@(loop for v in $vars
+                      collect `(when (typep ,v 'lex-value)
+                                 (setf ,v (lex-value-value ,v))))
+                (let* ((.outcome ,outcome))
+                  (record-source-location .terms .outcome)
+                  .outcome))))))
+  
+(defun add-rule (name terms outcome &rest options)        
+  ;; Enable reduction trackin, for source form location recording purposes
+  (let ((out (instrument-outcome terms outcome)))
+    (pushnew (list terms out options) (gethash name *python-prods*) :test 'equal)))
 
 (defmacro gp (name)
   "Generate a production rule:

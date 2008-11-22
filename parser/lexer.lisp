@@ -23,8 +23,8 @@
 ;; Internal
 
 (defgeneric make-lexer (yacc-version string &rest options)
-  (:documentation "Create lexer function that when called will return two values for every token, ~
-                   or the grammar-specific eof indication."))
+  (:documentation "Create lexer function that when called will either return three values
+\(TOKEN-CODE, TOKEN-VALUE, SOURCE-POSITION) or the grammar-specific EOF indication."))
 
 (defmethod make-lexer (yacc-version (string string) &rest options)
   "Default lexer"
@@ -53,9 +53,6 @@
 (defmethod make-lexer ((yacc-version (eql :cl-yacc)) (string string) &rest options)
   (declare (ignore options))
   (call-next-method))
-
-
-
 
 (defgeneric lexer-eof-token (yacc-version)
   (:documentation "Value returned by lexer to signal eof."))
@@ -97,30 +94,47 @@
   `(let ((.char ,ch))
      (and .char (member .char ,list :test #'char=))))
 
+(defparameter *lex-value-print* nil)
+
+(defun print-lex-value (x stream)
+  (if *lex-value-print*
+      (format stream "(~A [~A])" (lex-value-value x) (or (lex-value-position x) "src: n/a"))
+    (let ((*lex-value-print* t))
+      (print-unreadable-object (x stream)
+        (format stream "lex-value ~A [~A]" (lex-value-value x) (or (lex-value-position x) "src: n/a"))))))
+
+(defstruct (lex-value (:print-object print-lex-value))
+  value position)
+
 (defun make-lexer-1 (string &rest options)
   ;; A little hack to merge [not] + [in] into [not in], 
   ;; and [is] + [not] into [is not].
   ;; This evades precedence issues in the grammars.
-  (let ((lexer (apply #'make-lexer-2 string options))
-        (todo  nil))
-    (lambda (&optional op)
-      (block lexer
-        (when todo
-          (let ((res todo))
-            (setf todo nil)
-            (return-from lexer (apply #'values res))))
-        (multiple-value-bind (x y) (funcall lexer op)
-          (case x
-            (([not] [is])
-             (multiple-value-bind (p q)
-                 (funcall lexer op)
-               (cond ((and (eq x '[not]) (eq p '[in]))
-                      (values '[not in] '[not in]))
-                     ((and (eq x '[is]) (eq p '[not]))
-                      (values '[is not] '[is not]))
-                     (t (setf todo (list p q))
-                        (values x y)))))
-            (t (values x y))))))))
+  (flet ((wrap (value position)
+           ;; EOF should not be wrapped. Currently it comes without position, so goes right.
+           (if position
+               (make-lex-value :value value :position position)
+             value)))
+    (let ((lexer (apply #'make-lexer-2 string options))
+          (todo  nil))
+      (lambda (&optional op)
+        (block lexer
+          (when todo
+            (let ((res todo))
+              (setf todo nil)
+              (return-from lexer (apply #'values res))))
+          (multiple-value-bind (x y z) (funcall lexer op)
+            (case x
+              (([not] [is])
+               (multiple-value-bind (p q r)
+                   (funcall lexer op)
+                 (cond ((and (eq x '[not]) (eq p '[in]))
+                        (values '[not in] '[not in] nil))
+                       ((and (eq x '[is]) (eq p '[not]))
+                        (values '[is not] '[is not] nil))
+                       (t (setf todo (list p (make-lex-value :value q :position r)))
+                          (values x (wrap y z))))))
+              (t (values x (wrap y z))))))))))
 
 (defun make-lexer-2 (string &rest options)
   "Return a lexer for the given string of Python code.
@@ -139,22 +153,22 @@ On EOF returns: eof-token, eof-token."
                                      (:eof-seen ,(not (null (member (lexer-eof-token yacc-version) tokens-todo :key #'second)))))))
               (when (= last-read-char-ix -1)
                 ;; Check leading whitespace. This will go unnoticed by the lexer otherwise.
-                (multiple-value-bind (newline-p new-indent eof-p)
-                    (read-whitespace)
+                (destructuring-bind (newline-p new-indent eof-p)
+                    (read-kind :whitespace (lex-read-char))
                   (declare (ignore newline-p))
                   (when (and (not eof-p) (plusp new-indent))
                     (restart-case
                         (raise-syntax-error "Leading whitespace on first non-blank line.")
                       (cl-user::continue () :report "Continue parsing, ignoring the leading whitespace.")))))
-              (flet ((lex-return (token value &optional msg)
-                       (when debug (format t "Lexer returns: ~S ~S~@[ ~A~]~%" token value msg))
-                       (return-from lexer (values token value)))
+              (flet ((lex-return (token value source-loc &optional msg)
+                       (when debug (format t "Lexer returns: ~S ~S ~S~@[ ~A~]~%" token value source-loc msg))
+                       (return-from lexer (values token value source-loc)))
                      (lex-todo (token value)
                        (when debug (format t "Lexer todo: ~S ~S~%" token value))
                        (push (list token value) tokens-todo)))
                 (when tokens-todo
                   (destructuring-bind (token value) (pop tokens-todo)
-                    (lex-return token value "(from todo)")))
+                    (lex-return token value nil "(from todo)"))) ;; loc not important
                 (loop 
                   (let ((c (lex-read-char :eof-error nil)))
                     (cond ((not c)
@@ -165,13 +179,16 @@ On EOF returns: eof-token, eof-token."
                            (lex-todo (lexer-eof-token yacc-version) (lexer-eof-token yacc-version))
                            (loop while (plusp (pop indent-stack))
                                do (lex-todo '[dedent] '[dedent]))
-                           (lex-return '[newline] `(:newline t :curr-line-no ,curr-line-no :indent 0)))
+                           (lex-return '[newline] `(:newline t :curr-line-no ,curr-line-no :indent 0) nil))
                             
                           ((digit-char-p c 10)
-                           (lex-return '[number] (read-number c)))
+                           (multiple-value-bind (val source-loc)
+                               (read-kind :number c)
+                             (lex-return '[number] val source-loc)))
                             
                           ((identifier-char1-p c)
-                           (let ((token (read-identifier c)))
+                           (multiple-value-bind (token token-pos)
+                               (read-kind :identifier c)
                              ;; u"abc"    : `u' stands for `Unicode string'
                              ;; u + b     : `u' is an identifier
                              ;; r"s/f\af" : `r' stands for `raw string'
@@ -186,7 +203,9 @@ On EOF returns: eof-token, eof-token."
                                      (let* ((sn      (symbol-name token))
                                             (unicode (position #\u sn :test 'char-equal))
                                             (raw     (position #\r sn :test 'char-equal)))
-                                       (lex-return '[string] (read-string ch :raw raw :unicode unicode)))
+                                       (multiple-value-bind (val source-loc)
+                                           (read-kind :string ch :raw raw :unicode unicode)
+                                         (lex-return '[string] val source-loc)))
                                    (when ch (lex-unread-char ch)))))
                              (when (and open-deco (eq token '[def]))
                                ;; All outstanding decorators are associated with this function
@@ -195,14 +214,18 @@ On EOF returns: eof-token, eof-token."
                                                  (load-time-value (find-package :clpython.ast.reserved)))
                                              token
                                            '[identifier])
-                                         token)))
+                                         token
+                                         token-pos)))
 
                           ((char-member c '(#\' #\"))
-                           (lex-return '[string] (read-string c)))
+                           (multiple-value-bind (val source-loc)
+                               (read-kind :string c)
+                             (lex-return '[string] val source-loc)))
 
                           ((or (punct-char1-p c)
                                (punct-char-not-punct-char1-p c))
-                           (let ((token (read-punctuation c)))
+                           (multiple-value-bind (token token-pos)
+                               (read-kind :punctuation c)
                              ;; Keep track of whether we are in a bracketed expression
                              ;; (list, tuple or dict), because in that case newlines are ignored.
                              ;; (Check on matching brackets is in grammar.)
@@ -210,11 +233,11 @@ On EOF returns: eof-token, eof-token."
                                (( [[]  [{] [\(] ) (incf bracket-level))
                                (( [\]] [}] [\)] ) (decf bracket-level))
                                ([@]               (setf open-deco t)))
-                             (lex-return token token)))
+                             (lex-return token token token-pos)))
 
                           ((char-member c +whitespace+)
                            (lex-unread-char c)
-                           (multiple-value-bind (newline-p new-indent eof-p) (read-whitespace)
+                           (destructuring-bind (newline-p new-indent eof-p) (read-kind :whitespace c)
                              (declare (ignore eof-p))
                              (when (and newline-p (zerop bracket-level))
 
@@ -242,10 +265,10 @@ On EOF returns: eof-token, eof-token."
                                         (raise-syntax-error 
                                          "Dedent did not arrive at a previous indentation level (line ~A)."
                                          curr-line-no))))
-                               (lex-return '[newline] `(:newline t :curr-line-no ,curr-line-no :indent ,new-indent)))))
+                               (lex-return '[newline] `(:newline t :curr-line-no ,curr-line-no :indent ,new-indent) nil))))
                           
                           ((char= c #\#)
-                           (read-comment-line c))
+                           (read-kind :comment-line c))
                             
                           ((char= c #\\) ;; next line is continuation of this one
                            (let ((c2 (lex-read-char)))
@@ -263,6 +286,15 @@ On EOF returns: eof-token, eof-token."
                                  (:continue "Discard the character `~A' and continue parsing." c)
                                (raise-syntax-error "Nobody expected this character: `~A' (line ~A)."
                                                    c curr-line-no))))))))))))))
+
+(defgeneric read-kind (kind c1 &rest args)
+  (:method :around (kind c1 &rest args)
+           "Return source code location as second value."
+           (declare (ignore kind c1 args))
+           (let* ((start %lex-last-read-char-ix%)
+                  (result (call-next-method))
+                  (end %lex-last-read-char-ix%))
+             (values result (list :start start :end end)))))
 
 ;; Identifier
 
@@ -348,22 +380,23 @@ C must be either a character or NIL."
               (mapc #'lex-unread-char chs-seen)
               (return ch-correct)))
 
-(defun read-identifier (first-char)
+(defmethod read-kind ((kind (eql :identifier)) c1 &rest args)
   "Returns the identifier (which might be a reserved word) as symbol."
   (declare (optimize speed))
-  (assert (identifier-char1-p first-char))
-    (let* ((start %lex-last-read-char-ix%)
-           (end   (loop for c = (lex-read-char :eof-error nil)
-                      while (identifier-char2-p c)
-                      finally (when c (lex-unread-char))
-                              (return %lex-last-read-char-ix%)))
-           (str   (lex-substring start end)))
-      (or (find-symbol str (load-time-value (find-package :clpython.ast.reserved)))
-          (intern str (load-time-value (find-package :clpython.user))))))
+  (assert (identifier-char1-p c1))
+  (assert (null args))
+  (let* ((start %lex-last-read-char-ix%)
+         (end   (loop for c = (lex-read-char :eof-error nil)
+                    while (identifier-char2-p c)
+                    finally (when c (lex-unread-char))
+                            (return %lex-last-read-char-ix%)))
+         (str   (lex-substring start end)))
+    (or (find-symbol str (load-time-value (find-package :clpython.ast.reserved)))
+        (intern str (load-time-value (find-package :clpython.user))))))
 
 ;; String
 
-(defun read-string (ch1 &key raw unicode)
+(defmethod read-kind ((kind (eql :string)) ch1 &key raw unicode)
   (assert (char-member ch1 '( #\' #\" )))
   
   (labels ((read-unicode-char (uch s s.ix num-hex-digits)
@@ -506,11 +539,11 @@ C must be either a character or NIL."
                          
                          ((char= ch1 ch2) ;; "" or '' but not """ or '''
                           (when ch3 (lex-unread-char ch3))
-                          (return-from read-string ""))
+                          (return-from read-kind ""))
                          
                          ((and (char= ch1 ch3) ;; "x"
                                (char/= ch2 #\\))
-                          (return-from read-string (lex-substring (1- %lex-last-read-char-ix%) 
+                          (return-from read-kind (lex-substring (1- %lex-last-read-char-ix%) 
                                                                   (1- %lex-last-read-char-ix%))))
                          
                          (t (let* ((start (- %lex-last-read-char-ix% 1))
@@ -581,8 +614,9 @@ Values outside this range are represented by +ENORMOUS-FLOAT-REPRESENTATION-TYPE
 (defconstant +enormous-float-representation-type+ 'integer
   "The Lisp type used for representing Python float values outside +NORMAL-FLOAT-RANGE+.")
 
-(defun read-number (&optional (first-char (lex-read-char)))
-  (assert (digit-char-p first-char 10))
+(defmethod read-kind ((kind (eql :number)) c1 &rest args)
+  (assert (digit-char-p c1 10))
+  (assert (null args))
   (flet ((read-int (base)
            (multiple-value-bind (integer pos)
                (parse-integer %lex-string% :radix base
@@ -591,8 +625,8 @@ Values outside this range are represented by +ENORMOUS-FLOAT-REPRESENTATION-TYPE
                (setf %lex-last-read-char-ix% (1- pos))))))
     (declare (dynamic-extent #'read-int))
     (let* ((can-have-frac-exp t)
-           (res (if (char/= first-char #\0)
-                    (progn (lex-unread-char first-char)
+           (res (if (char/= c1 #\0)
+                    (progn (lex-unread-char c1)
                            (read-int 10))
                   (let ((second (lex-read-char :eof-error nil)))
                     (cond ((null second)                   0)
@@ -645,8 +679,9 @@ Values outside this range are represented by +ENORMOUS-FLOAT-REPRESENTATION-TYPE
                                                            (Beware obscure bugs!)"
                                                           (string-upcase +enormous-float-representation-type+))
                              (raise-syntax-error "Literal Python float value `~Ae~A' falls outside the ~A ~
-                                                  range of this Lisp implementation (line ~A)."
+                                                  range of this Lisp implementation, which is [~A - ~A] (line ~A)."
                                                  primary expo-value (string-upcase +normal-float-representation-type+)
+                                                 (first +normal-float-range+) (second +normal-float-range+)
                                                  %lex-curr-line-no%)))))
             (t (lex-unread-char))))
           
@@ -670,10 +705,11 @@ Values outside this range are represented by +ENORMOUS-FLOAT-REPRESENTATION-TYPE
 ;;; Punctuation
 
 
-(defun read-punctuation (c1)
+(defmethod read-kind ((kind (eql :punctuation)) c1 &rest args)
   "Returns puncutation as symbol."
   (assert (or (punct-char1-p c1)
 	      (punct-char-not-punct-char1-p c1)))
+  (assert (null args))
   (flet ((lookup-3char (c1) (ecase c1
 			      (#\* '[**=])
 			      (#\< '[<<=])
@@ -771,20 +807,21 @@ Values outside this range are represented by +ENORMOUS-FLOAT-REPRESENTATION-TYPE
        (char= c1 c2)
        (char-member c1 '( #\* #\< #\> #\/ ))))
 
-(defun read-whitespace ()
+(defmethod read-kind ((kind (eql :whitespace)) c1 &rest args)
   "Reads all whitespace and comments, until first non-whitespace character.
 Returns NEWLINE-P, NEW-INDENT, EOF-P."
+  (assert (null args))
   (loop with newline-p = nil and n-spaces = 0 and n-tabs = 0
-      for c = (lex-read-char :eof-error nil)
+      for c = c1 then (lex-read-char :eof-error nil)
       do (case c
-	   ((nil)                (return-from read-whitespace
-                                   (values nil nil t)))
+	   ((nil)                (return-from read-kind
+                                   (list nil nil t)))
            ((#\Newline #\Return) (setf newline-p t
                                        n-spaces 0
                                        n-tabs 0))
            ((#\Space #\Page)     (incf n-spaces))
            (#\Tab                (incf n-tabs))
-           (#\#                  (progn (read-comment-line c)
+           (#\#                  (progn (read-kind :comment-line c)
                                         (setf newline-p t
                                               n-spaces 0
                                               n-tabs 0)))
@@ -793,12 +830,14 @@ Returns NEWLINE-P, NEW-INDENT, EOF-P."
                                             %lex-warn-indent%)
                                    (warn "Irregular indentation: both spaces and tabs (line ~A)."
                                          %lex-curr-line-no%))
-				 (return-from read-whitespace
-                                   (values newline-p 
-                                           (+ n-spaces (* %lex-tab-width% n-tabs))))))))
+				 (return-from read-kind
+                                   (list newline-p 
+                                         (+ n-spaces (* %lex-tab-width% n-tabs))
+                                         nil))))))
 
-(defun read-comment-line (c)
+(defmethod read-kind ((kind (eql :comment-line)) c &rest args)
   "Read until the end of the line, leaving the last #\Newline in the source."
+  (declare (null args))
   (assert (char= c #\#))
   (loop for c = (lex-read-char :eof-error nil)
       while (and c (char/= c #\Newline))

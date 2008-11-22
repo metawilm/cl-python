@@ -28,19 +28,19 @@ Most important options:
   :ONE-EXPR     -- only return first form read (implies :INCL-MODULE NIL)
   :TAB-WIDTH    -- width of one tab character in spaces")
   
-  (:method :around (x &rest options &key (one-expr nil) (incl-module (not one-expr)))
+  (:method :around (x &rest options &key (one-expr nil) (incl-module (not one-expr)) &allow-other-keys)
            (assert (not (and incl-module one-expr)) ()
              "PARSE options :ONE-EXPR and :INCL-MODULE are mutually exclusive.")
-           (let ((res (apply #'call-next-method x :incl-module incl-module (sans options :one-expr))))
+           (let ((res-list (multiple-value-list (apply #'call-next-method x :incl-module incl-module (sans options :one-expr)))))
              (when one-expr
-               (assert (= (length res) 1) ()
+               (assert (= (length (car res-list)) 1) ()
                  "PARSE got ~A forms, while only one expected (due to :ONE-EXPR), in AST for ~S."
-                 (length res) x)
-               (setf res (car res)))
-             res))
+                 (length (car res-list)) x)
+               (setf (car res-list) (caar res-list)))
+             (values-list res-list)))
   
   (:method ((x string) &rest options &key (yacc-version *default-yacc-version*))
-           (let ((lexer (apply #'make-lexer yacc-version x (sans options :incl-module))))
+           (let ((lexer (apply #'make-lexer yacc-version x (sans options :incl-module :record-source-location))))
              (apply #'parse-module-with-yacc yacc-version lexer options)))
   
   (:method ((x pathname) &rest options)
@@ -52,18 +52,25 @@ Most important options:
              (setf seq (adjust-array seq n))
              (apply #'parse seq options))))
 
-(defun parse-module-with-yacc (yacc-version lexer &key incl-module #+(or) &allow-other-keys)
-  "Collect all parsed top-level forms."
-  (let (forms)
-    (loop (multiple-value-bind (form eof-p)
-              (parse-form-with-yacc yacc-version lexer)
-            (push form forms)
-            (when eof-p
-              (setf forms (nreverse forms))
-              (return))))
-    (when incl-module
-      (setf forms `([module-stmt] ([suite-stmt] ,forms))))
-    forms))
+(defun parse-module-with-yacc (yacc-version lexer &key incl-module record-source-location)
+  "Collect all parsed top-level forms. If RECORD-SOURCE-LOCATION, the (new or existing)
+source location hash-table is returned as second value."
+  (let ((*python-form-source-code-ht* (case record-source-location
+                                        ((nil))
+                                        ((t) (clpython.package::make-weak-key-hash-table :test 'eq))
+                                        (t record-source-location))))
+    (let (forms)
+      (loop (multiple-value-bind (form eof-p)
+                (parse-form-with-yacc yacc-version lexer)
+              (push form forms)
+              (when eof-p
+                (setf forms (nreverse forms))
+                (return))))
+      (when incl-module
+        (setf forms `([module-stmt] ([suite-stmt] ,forms))))
+      (if *python-form-source-code-ht*
+          (values forms *python-form-source-code-ht*)
+        forms))))
 
 (defmacro with-parser-eof-detection ((at-real-eof-var) &body body)
   (check-type at-real-eof-var symbol)
