@@ -114,7 +114,7 @@ Returns NIL if nothing found."
 
 (defparameter *import-force-recompile* nil)
 (defparameter *import-force-reload*    nil)
-(defparameter *import-compile-verbose* t)
+(defparameter *import-compile-verbose* nil)
 (defparameter *import-load-verbose*    t)
 
 (defmacro with-python-code-reader (() &body body)
@@ -140,10 +140,11 @@ Returns NIL if nothing found."
     (declare (special *current-module-path*))
     (with-auto-mode-recompile (:verbose *import-compile-verbose*)
       (with-python-code-reader ()
-        (compile-file filename
-                      :output-file output-file
-                      #+allegro #+allegro :if-newer (not *import-force-recompile*)
-                      :verbose *import-compile-verbose*)))))
+        (handler-bind (#+sbcl(sb-int:simple-compiler-note #'muffle-warning))
+          (compile-file filename
+                        :output-file output-file
+                        #+allegro #+allegro :if-newer (not *import-force-recompile*)
+                        :verbose *import-compile-verbose*))))))
 
 (defun load-compiled-python-file (filename
 				  &key (mod-name (error ":mod-name required"))
