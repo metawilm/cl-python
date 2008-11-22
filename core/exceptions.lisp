@@ -14,38 +14,65 @@
 
 (defvar *exceptions-loaded* nil)
 
-(defun py-raise (exc-type string &rest format-args)
-  "Raise a Python exception with given format string"
-  (declare (ignorable string format-args))
-  #+clpython-exceptions-are-python-objects
-  (error exc-type :args (cons string format-args))
-  #-clpython-exceptions-are-python-objects
-  (error exc-type))
+;; Depending on the Lisp implementation, the exceptions are either Python objects with
+;; the appropriate metaclass, or fairly normal Lisp conditions.
 
 #+clpython-exceptions-are-python-objects
-(defclass {Exception} (object error)
-  ((args :initarg :args :initform nil :documentation "Arguments as Lisp list"
-	 :accessor exception-args))
-  (:metaclass py-type))
+(progn
+
+  (defun py-raise (exc-type string &rest format-args)
+    "Raise a Python exception with given format string"
+    (error exc-type :args (cons string format-args)))
+
+  (defclass {Exception} (object error)
+    ((args :initarg :args :initform nil :documentation "Arguments as Lisp list"
+           :accessor exception-args))
+    (:metaclass py-type))
+  
+  (def-py-method {Exception.__new__} :static (cls &rest args)
+    (make-instance cls))
+  
+  (def-py-method {Exception.__init__} (x &rest args)
+    ;; raise AttributeError("a %s b", 24)  =>  AttributeError: "a 24 b"
+    (when (and (>= (length args) 2)
+               (stringp (car args)))
+      (setf args (py-string.__mod__ (car args) (cdr args))))
+    (setf (exception-args x) args))
+    
+  (def-py-method {Exception.__repr__} (x)
+    (with-output-to-string (s)
+      (print-object x s)))
+  
+  (defun define-exception-subclass (exc-name &rest supers)
+  (ensure-class exc-name
+                :direct-superclasses supers
+                :metaclass 'py-type)))
 
 #-clpython-exceptions-are-python-objects
-(define-condition {Exception} (error)
-  ((args :initarg :args :initform nil :documentation "Arguments as Lisp list"
-	 :accessor exception-args)))
+(progn 
 
-#+clpython-exceptions-are-python-objects
-(def-py-method {Exception.__new__} :static (cls &rest args)
-  #+(or)(assert (subtypep cls (load-time-value (find-class '{Exception} ))))
-  (make-instance cls))
+  (defun py-raise (exc-type string &rest format-args)
+    "Raise a Python exception with given format string"
+    (error exc-type :args (cons string format-args)))
 
-#+clpython-exceptions-are-python-objects
-(def-py-method {Exception.__init__} (x &rest args)
-  ;; raise AttributeError("a %s b", 24)  =>  AttributeError: "a 24 b"
-  (when (and (>= (length args) 2)
-	     (stringp (car args)))
-    (setf args (py-string.__mod__ (car args) (cdr args))))
-  (setf (slot-value x 'args) args))
-    
+  (define-condition {Exception} (error)
+    ((args :initarg :args :initform nil :documentation "Arguments as Lisp list"
+           :accessor exception-args)))
+
+  (defun define-exception-subclass (exc-name &rest supers)
+    (eval `(define-condition ,exc-name ,supers nil))))
+
+
+;; Works in #+/#- either case
+
+(defmethod print-object ((x {Exception}) stream)
+  (format stream "~A" (class-name (class-of x)))
+  (whereas ((args (exception-args x)))
+    (destructuring-bind (string . format-args)
+        args
+      (format stream ": ~@<~@;~A~:>" (if format-args (apply #'format nil string format-args) string)))))
+
+
 (defparameter *exception-tree* ;; XXX CPython has explanation string for every exception
     `({SystemExit}
       {StopIteration}
@@ -90,13 +117,7 @@
   (declare (optimize (debug 3))
 	   (notinline def-python-exceptions))
   (flet ((def-sub-exc (super exc-name)
-	     (let ((c #+clpython-exceptions-are-python-objects
-                      (ensure-class exc-name
-                                    :direct-superclasses (list super)
-                                    :metaclass 'py-type)
-                      #-clpython-exceptions-are-python-objects
-                      (eval `(define-condition ,exc-name ,(list super) nil))))
-	       (push c *exception-classes*))))
+	     (push (define-exception-subclass exc-name super) *exception-classes*)))
     (if (symbolp child-tree)
 	(def-sub-exc parent child-tree)
       (progn
@@ -110,21 +131,6 @@
       do (def-python-exceptions-1 '{Exception} branch)))
 
 (def-python-exceptions)
-
-#+clpython-exceptions-are-python-objects
-(defmethod print-object ((x {Exception}) stream)
-  (format stream "~A" (class-name (class-of x)))
-  (when (and (slot-boundp x 'args)
-	     (slot-value x 'args))
-    (destructuring-bind (string . format-args)
-        (slot-value x 'args)
-      (format stream ": ~@<~@;~A~:>" (if format-args (apply #'format nil string format-args) string)))))
-
-#+clpython-exceptions-are-python-objects
-(def-py-method {Exception.__repr__} (x)
-  (with-output-to-string (s)
-    (print-object x s)))
-
 
 (defparameter *cached-StopIteration*
     #+clpython-exceptions-are-python-objects

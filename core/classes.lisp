@@ -196,7 +196,7 @@
   (declare (dynamic-extent args))
   (multiple-value-bind (cls kind)
       (apply #'make-py-class-1 args)
-    (assert (member kind '(:metaclass :class)))
+    (assert (member kind '(:metaclass :class :condition)))
     cls))
 
 (defun apply-namespace-to-cls (namespace cls)
@@ -208,107 +208,120 @@
 
 (defun make-py-class-1 (&key name context-name namespace supers cls-metaclass mod-metaclass)
   (declare (ignore context-name)) ;; XXX for now
+  (flet ((make-condition-exception ()
+           (assert (not *exceptions-are-python-objects*))
+           (values (apply #'define-exception-subclass name (mapcar 'class-name supers))
+                   :condition)))
+    
+    #+(or)(assert (symbolp name))
+    #+(or)(assert (listp supers))
+    #+(or)(assert (typep namespace 'dict))
+  
+    ;; XXX is this a true restriction?  Custom metaclasses may allow
+    ;; more kinds of `bases' in their __new__(...) ?
+  
+    ;; either:
+    ;;  1) all supers are subtype of 'py-type   (to create a new metaclass)
+    ;;  2) all supers are subtype of 'object (to create new "regular user-level" class)
+  
+    (flet ((of-type-class (s) (typep s 'class))
+           (subclass-of-py-dl-object-p (s) (subtypep s (ltv-find-class 'object)))
+           (subclass-of-py-type-p (s)      (subtypep s (ltv-find-class 'py-type))))
+    
+      (unless (every #'of-type-class supers)
+        (py-raise '{TypeError} "Not all superclasses are classes (got: ~A)." supers))
 
-  #+(or)(assert (symbolp name))
-  #+(or)(assert (listp supers))
-  #+(or)(assert (typep namespace 'dict))
-  
-  ;; XXX is this a true restriction?  Custom metaclasses may allow
-  ;; more kinds of `bases' in their __new__(...) ?
-  
-  ;; either:
-  ;;  1) all supers are subtype of 'py-type   (to create a new metaclass)
-  ;;  2) all supers are subtype of 'object (to create new "regular user-level" class)
-  
-  (flet ((of-type-class (s) (typep s 'class))
-	 (subclass-of-py-dl-object-p (s) (subtypep s (ltv-find-class 'object)))
-	 (subclass-of-py-type-p (s)      (subtypep s (ltv-find-class 'py-type))))
+      ;; Handle the case where exceptions are not Python object instances.
+      (when (and (not *exceptions-are-python-objects*)
+                 (loop for s in supers thereis (subtypep s 'condition)))
+        (unless (loop for s in supers always (subtypep s 'condition))
+          (py-raise '{TypeError}
+                    "Heregoneous superclasses: some 'condition, some not: ~A" supers))
+        (return-from make-py-class-1 (make-condition-exception)))
+      
+      (loop for s in supers
+          unless (or (subclass-of-py-type-p s)
+                     (subclass-of-py-dl-object-p s))
+          do   (error "BUG? Superclass ~A is neither sub of 'type nor sub of 'object~@[~A~]!"
+                      s (unless *exceptions-are-python-objects* " not a subtype of 'condition")))
     
-    (unless (every #'of-type-class supers)
-      (py-raise '{TypeError} "Not all superclasses are classes (got: ~A)." supers))
-
-    (loop for s in supers
-	unless (or (subclass-of-py-type-p s)
-		   (subclass-of-py-dl-object-p s))
-	do (error "BUG? Superclass ~A is neither sub of 'type nor sub of 'object!" s))
+      #+(or)
+      (let ((core-supers (remove-if-not (lambda (s) (typep s 'py-type)) supers)))
+        (when core-supers
+          (py-raise '{TypeError} "Cannot subclass from these classes: ~A" core-supers)))
     
-    #+(or)
-    (let ((core-supers (remove-if-not (lambda (s) (typep s 'py-type)) supers)))
-      (when core-supers
-	(py-raise '{TypeError} "Cannot subclass from these classes: ~A" core-supers)))
-    
-    (when (and (some #'subclass-of-py-type-p supers)
-	       (some #'subclass-of-py-dl-object-p supers))
-      (py-raise 'TypeError "Superclasses are at different levels (some metaclass, ~
+      (when (and (some #'subclass-of-py-type-p supers)
+                 (some #'subclass-of-py-dl-object-p supers))
+        (py-raise 'TypeError "Superclasses are at different levels (some metaclass, ~
                             some regular class) (got: ~A)." supers))
     
-    (let ((metaclass (or cls-metaclass
-			 (when supers (class-of (car supers)))
-			 mod-metaclass
-			 (ltv-find-class 'py-type))))
-      #+(or)(warn "metaclass: ~A" metaclass)
-      (unless (typep metaclass 'class)
-	(py-raise '{TypeError} "Metaclass must be a class (got: ~A)" metaclass))
-      (unless (or (eq metaclass (ltv-find-class 'py-meta-type))
-		  (subtypep metaclass (ltv-find-class 'py-type)))
-	(py-raise '{TypeError} 
-		  "Metaclass must be subclass of `type' (got class: ~A)" metaclass))
-      ;; When inheriting from py-lisp-type (like `int'), use
-      ;; py-meta-type as metaclass.
-      (when (or (eq metaclass (ltv-find-class 'py-lisp-type))
-		#+(or)(eq metaclass (ltv-find-class 'py-type)))
-	(setf metaclass (ltv-find-class 'py-type)))
-      #+(or)(warn "metaclass 2: ~A" metaclass)
-      ;; Subclass of `type' has metaclass 'py-meta-type
-      (when (eq metaclass (ltv-find-class 'py-meta-type))
-	(let ((cls (ensure-class
-		    (make-symbol (symbol-name name))
-		    :direct-superclasses supers
-		    :metaclass (ltv-find-class 'py-meta-type)
-		    #+(or):dict #+(or)namespace)))
-          (apply-namespace-to-cls namespace cls)
-	  (return-from make-py-class-1 (values cls :metaclass))))
+      (let ((metaclass (or cls-metaclass
+                           (when supers (class-of (car supers)))
+                           mod-metaclass
+                           (ltv-find-class 'py-type))))
+        #+(or)(warn "metaclass: ~A" metaclass)
+        (unless (typep metaclass 'class)
+          (py-raise '{TypeError} "Metaclass must be a class (got: ~A)" metaclass))
+        (unless (or (eq metaclass (ltv-find-class 'py-meta-type))
+                    (subtypep metaclass (ltv-find-class 'py-type)))
+          (py-raise '{TypeError} 
+                    "Metaclass must be subclass of `type' (got class: ~A)" metaclass))
+        ;; When inheriting from py-lisp-type (like `int'), use
+        ;; py-meta-type as metaclass.
+        (when (or (eq metaclass (ltv-find-class 'py-lisp-type))
+                  #+(or)(eq metaclass (ltv-find-class 'py-type)))
+          (setf metaclass (ltv-find-class 'py-type)))
+        #+(or)(warn "metaclass 2: ~A" metaclass)
+        ;; Subclass of `type' has metaclass 'py-meta-type
+        (when (eq metaclass (ltv-find-class 'py-meta-type))
+          (let ((cls (ensure-class
+                      (make-symbol (symbol-name name))
+                      :direct-superclasses supers
+                      :metaclass (ltv-find-class 'py-meta-type)
+                      #+(or):dict #+(or)namespace)))
+            (apply-namespace-to-cls namespace cls)
+            (return-from make-py-class-1 (values cls :metaclass))))
             
-      ;; Not a subclass of `type', so at the `object' level
-      (let ((__new__ (class.attr-no-magic metaclass '{__new__})))
-	(assert __new__ ()
-	  "recur: no __new__ found for class ~A, yet it is a subclass of PY-TYPE ?!" metaclass)
+        ;; Not a subclass of `type', so at the `object' level
+        (let ((__new__ (class.attr-no-magic metaclass '{__new__})))
+          (assert __new__ ()
+            "recur: no __new__ found for class ~A, yet it is a subclass of PY-TYPE ?!" metaclass)
 
-	#+(or)(warn "binding __new__: ~A ~A" __new__ metaclass)
-	(let ((cls (if (and (eq (class-of __new__) (ltv-find-class 'py-static-method))
-			    (eq (py-method-func __new__) (symbol-function 'py-type.__new__)))
+          #+(or)(warn "binding __new__: ~A ~A" __new__ metaclass)
+          (let ((cls (if (and (eq (class-of __new__) (ltv-find-class 'py-static-method))
+                              (eq (py-method-func __new__) (symbol-function 'py-type.__new__)))
 		       
-		       ;; Optimize common case:  py-type.__new__
-		       (progn 
-			 #+(or)(warn "Inlining make-py-class")
-			 (py-type.__new__ metaclass
-					  (string name)
-					  supers ;; MAKE-TUPLE-FROM-LIST not needed
-					  namespace))
+                         ;; Optimize common case:  py-type.__new__
+                         (progn 
+                           #+(or)(warn "Inlining make-py-class")
+                           (py-type.__new__ metaclass
+                                            (string name)
+                                            supers ;; MAKE-TUPLE-FROM-LIST not needed
+                                            namespace))
 		     
-		     (let ((bound-_new_ (bind-val __new__ metaclass (py-class-of metaclass))))
-		       ;; If __new__ is a static method, then bound-_new_ will
-		       ;; be the underlying function.
+                       (let ((bound-_new_ (bind-val __new__ metaclass (py-class-of metaclass))))
+                         ;; If __new__ is a static method, then bound-_new_ will
+                         ;; be the underlying function.
 		       
-		       (or (py-call bound-_new_ metaclass
-				    (string name) 
-				    (make-tuple-from-list supers) ;; ensure not NIL
-				    namespace)
-			   (break "Class' bound __new__ returned NIL: ~A" bound-_new_))))))
+                         (or (py-call bound-_new_ metaclass
+                                      (string name) 
+                                      (make-tuple-from-list supers) ;; ensure not NIL
+                                      namespace)
+                             (break "Class' bound __new__ returned NIL: ~A" bound-_new_))))))
 
-	  ;; Call __init__ when the "thing" returned by
-	  ;; <metaclass>.__new__ is of type <metaclass>.
-	  (if (typep cls metaclass)
+            ;; Call __init__ when the "thing" returned by
+            ;; <metaclass>.__new__ is of type <metaclass>.
+            (if (typep cls metaclass)
 		
-	      (let ((__init__ (class.attr-no-magic metaclass '{__init__})))
-		#+(or)(warn "  __init__ method ~A is: ~A" metaclass __init__)
-		(when __init__
-		  (py-call __init__ cls)))
+                (let ((__init__ (class.attr-no-magic metaclass '{__init__})))
+                  #+(or)(warn "  __init__ method ~A is: ~A" metaclass __init__)
+                  (when __init__
+                    (py-call __init__ cls)))
 	    
-	    #+(or)(warn "Not calling __init__ method, as class ~A is not instance of metaclass ~A"
-			cls metaclass))
+              #+(or)(warn "Not calling __init__ method, as class ~A is not instance of metaclass ~A"
+                          cls metaclass))
 	  
-	  (values cls :class))))))
+            (values cls :class)))))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -418,7 +431,10 @@
 (def-py-method py-class-method.__init__ (x^ func)
   (setf (slot-value x 'func) func))
 
-(def-py-method py-class-method.__call__ (x^ obj &rest args)
+(def-py-method py-class-method.__call__ (x^ &rest args)
+  (break "todo")
+  #+(or)(apply #'py-call (py-method-func x) (slot-value x 'instance) args)
+  #+(or)
   (let ((arg (if (classp obj) obj (py-class-of obj))))
     (apply #'py-call (py-method-func x) arg args)))
 
@@ -2239,7 +2255,7 @@ invocation form.")
 	  (prog1 (aref x ix)
 	    (replace x x :start1 ix :start2 (1+ ix))
 	    (decf (fill-pointer x)))
-	(py-raise '{ValueError}
+	(py-raise '{IndexError}
 		  "list.pop(x, i): ix wrong (got: ~A; x.len: ~A)"
 		  ix x.len)))))
 
@@ -2874,9 +2890,12 @@ finished; F will then not be called again."
            (declare (ignore args) (dynamic-extent args))
 	   (error "PY-CALL of NIL"))
   
-  (:method ((f t) &rest args)
+  (:method ((f class) &rest args)
            (declare (dynamic-extent args)
                     (optimize (speed 3) (safety 0) (debug 0)))
+           #-clpython-exceptions-are-python-objects
+           (when (subtypep f '{Exception})
+             (return-from py-call (make-condition f :args (copy-list args))))
            (let ((__call__ (class.attr-no-magic (py-class-of f) '{__call__})))
              (cond ((functionp __call__)
                     (apply __call__ f args))
@@ -2921,7 +2940,6 @@ finished; F will then not be called again."
              "Should not come in (py-call <condition-type> ..) if ~A = T."
              '*exceptions-are-python-objects*)
            (make-condition x)))
-
 
 (defun py-classlookup-bind-call (x attr &rest args)
   "Returns RESULT, METH-FOND-P"

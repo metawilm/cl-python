@@ -1531,7 +1531,7 @@ DETERMINE-BODY-GLOBALS"
 	    
 	  ((and exc var)
 	   (etypecase exc
-	     (class  (do-error (make-instance exc :args var)))
+	     (class  (do-error (make-instance exc :args (list var))))
 	     (error  (progn (warn "RAISE: ignored arg, as exc was already an instance, not a class")
 			    (do-error exc)))))
 	  (exc
