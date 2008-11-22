@@ -61,9 +61,15 @@ If COMPILE is true, the AST is compiled into a function before running."
                    (compile nil get-module-f)
                  (coerce get-module-f 'function))))
       (let* (module-function
-             (*module-function* (lambda (f) (setf module-function f))))
-        (declare (special *module-function*))
+             (*module-function-hook* (lambda (f) (setf module-function f))))
         (funcall fc)
         (unless module-function
           (break "Module ~A did not call *module-function*." fc))
         (apply module-function run-args)))))
+
+(defun compile-py-file (fname)
+  (let* ((module (pathname-name fname))
+         (fasl-file (compiled-file-name :module module fname))
+         (*import-force-recompile* t)
+         (*import-compile-verbose* t))
+    (%compile-py-file fname :mod-name module :output-file fasl-file)))

@@ -129,8 +129,8 @@ Returns NIL if nothing found."
                          (setup-omnivore-readmacro #'clpython.parser:parse (copy-readtable nil)))))
        ,@body)))
 
-(defun compile-py-file (filename &key (mod-name (error ":mod-name required"))
-                                      (output-file (error ":output-file required")))
+(defun %compile-py-file (filename &key (mod-name (error ":mod-name required"))
+                                       (output-file (error ":output-file required")))
   "Compile Python source file into FASL. Source file must exist."
   (check-type filename pathname)
   (assert (probe-file filename) (filename)
@@ -146,15 +146,15 @@ Returns NIL if nothing found."
                         #+allegro #+allegro :if-newer (not *import-force-recompile*)
                         :verbose *import-compile-verbose*))))))
 
-(defun load-compiled-python-file (filename
-				  &key (mod-name (error ":mod-name required"))
-                                       #+(or)(dotted-name (error ":dotted-name required")) 
-				       (context-mod-name mod-name)
-                                       within-mod-path
-				       (habitat (error "habitat required"))
-				       (update-existing-mod t)
-                                       src-file
-				  &allow-other-keys)
+(defun %load-compiled-python-file (filename
+                                   &key (mod-name (error ":mod-name required"))
+                                        #+(or)(dotted-name (error ":dotted-name required")) 
+                                        (context-mod-name mod-name)
+                                        within-mod-path
+                                        (habitat (error "habitat required"))
+                                        (update-existing-mod t)
+                                        src-file
+                                   &allow-other-keys)
   
   "Loads and registers given compiled Python file.
 Returns the loaded module, or NIL on error."
@@ -166,12 +166,12 @@ Returns the loaded module, or NIL on error."
   
   #+(or)(when (get-loaded-module mod-name habitat)
           (break "Module ~A already known, but imported again (file ~A)" mod-name filename))
-         
+  
   (let* ((old-module (when habitat (get-known-module mod-name habitat))))
     (flet ((do-loading ()
 	     (let* (new-module
                     module-function
-                    (*module-function* (lambda (f) (setf module-function f)))
+                    (*module-function-hook* (lambda (f) (setf module-function f)))
 		    (*module-preload-hook* (lambda (mod)
                                              (setf new-module mod)
                                              ;; Need to register module before it is fully loaded,
@@ -180,7 +180,6 @@ Returns the loaded module, or NIL on error."
                                              #+(or)(warn "Register module ~A as ~A in habitat ~A"
                                                          mod (module-name mod) habitat)
                                              (add-loaded-module mod habitat))))
-	       (declare (special *module-preload-hook* *module-function*))
                (with-auto-mode-recompile (:verbose *import-load-verbose*)
 		 (let ((*current-module-name* mod-name))
 		   (declare (special *current-module-name*))
@@ -198,7 +197,7 @@ Returns the loaded module, or NIL on error."
                             (setf new-module old-module))
                           (values new-module t))
                  (progn (warn "The FASL of module ~A was not produced by CLPython ~
-                               (or CLPython bug: module did not call *module-function*)." mod-name)
+                               (or CLPython bug: module did not call *module-function-hook*)." mod-name)
                         (values (make-instance 'module :name "non-Python fasl" :path filename)
                                 t))))))
       (let (new-module success)
@@ -332,14 +331,14 @@ as those are not distributed with CLPython."
         (setf bin-file (compiled-file-name kind just-mod-name src-file :include-dir nil :create-dir t))
         ;; This would be a good place for a "try recompiling" restart,
         ;; but implementations have that already. :)
-        (compile-py-file src-file :mod-name dotted-name :output-file bin-file))
+        (%compile-py-file src-file :mod-name dotted-name :output-file bin-file))
       
       (restart-case
-          (let ((new-module (load-compiled-python-file bin-file
-                                                       :mod-name dotted-name
-                                                       :within-mod-path within-mod-path
-                                                       :habitat habitat
-                                                       :src-file src-file)))
+          (let ((new-module (%load-compiled-python-file bin-file
+                                                        :mod-name dotted-name
+                                                        :within-mod-path within-mod-path
+                                                        :habitat habitat
+                                                        :src-file src-file)))
             (when new-module ;; Maybe loading failed (which already gave a warning)
               (add-loaded-module new-module habitat)
               new-module))

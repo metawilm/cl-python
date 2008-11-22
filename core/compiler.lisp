@@ -1381,7 +1381,7 @@ otherwise work well.")
     (with-simple-restart (continue "Continue as if `~A' is currently bound." name)
       (py-raise '{NameError} "Variable `~A' is unbound." name))))
 
-(defvar *module-function*)
+(defvar *module-function-hook*)
 
 (defvar *module-namespace* nil)
 
@@ -1392,10 +1392,6 @@ otherwise work well.")
   ;; 
   ;; Functions, classes and variables inside the module are available
   ;; as attributes of the module object.
-  ;; 
-  ;; If we are inside an EXEC-STMT, PYDECL assumptions
-  ;; :exec-mod-locals-ht and :exec-mod-globals-ht are assumed declared
-  ;; (hash-tables containing local and global scope).
   `(flet ((module-function (&key (%module-globals (make-eq-hash-table "module"))
                                  (call-preload-hook t)
                                  (module-name ',(or *current-module-name* "__main__"))
@@ -1431,8 +1427,11 @@ DETERMINE-BODY-GLOBALS"
                       
                       (with-py-errors (:name (python-module ,*current-module-name*))
                         ,suite))))))))
-     (when (boundp '*module-function*)
-       (funcall *module-function* #'module-function))))
+
+     (if (boundp '*module-function-hook*)
+         (funcall *module-function-hook* #'module-function)
+       (progn (format t ";; Original Python source file: ~S~%" ',*current-module-path*)
+              (funcall #'module-function)))))
 
 (defmacro [pass-stmt] ()
   nil)
