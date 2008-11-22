@@ -1,0 +1,87 @@
+--- /Users/willem/dev/lisp/cl-yacc-0.2/yacc.lisp	2005-12-08 18:09:20.000000000 +0100
++++ yacc.lisp	2008-11-22 21:59:35.000000000 +0100
+@@ -18,7 +18,11 @@
+ ; OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ ; THE SOFTWARE.
+ 
+-(defpackage #:yacc
++;; This file is a modified version of CL-Yacc: it is extended with the possibility
++;; to assign a precedence on grammar rule level. If and when this change is included
++;; in CL-Yacc, this file will be removed from the CLPython distribution. -WB
++
++(defpackage #:yacc-clpython
+   (:use #:common-lisp)
+   (:export #:make-production #:make-grammar #:make-parser #:parse-with-lexer
+            #:define-grammar #:define-parser #:yacc-eof-symbol
+@@ -28,7 +32,7 @@
+   (:import-from #:extensions #:required-argument #:memq)
+   )
+ 
+-(in-package #:yacc)
++(in-package #:yacc-clpython)
+ 
+ #-CMU
+ (defun required-argument () (error "A required argument was not supplied"))
+@@ -48,18 +52,21 @@
+ 
+ (defstruct (production
+              (:constructor make-production (symbol derives
+-                                            &key action action-form))
++                                            &key action action-form precedence))
+              (:print-function print-production))
+   (id nil :type (or null index))
+   (symbol (required-argument) :type symbol)
+   (derives (required-argument) :type list)
+   (action #'list :type function)
+-  (action-form nil))
++  (action-form nil)
++  (precedence nil))
+ 
+ (defun print-production (p s d)
+   (declare (type production p) (stream s) (ignore d))
+   (print-unreadable-object (p s :type t)
+-    (format s "~S -> ~{~S~^ ~}" (production-symbol p) (production-derives p))))
++    (format s "~S -> ~{~S~^ ~}" (production-symbol p) (production-derives p))
++    (when (production-precedence p)
++      (format s " :precedence ~A" (production-precedence p)))))
+ 
+ (declaim (inline production-equal-p))
+ (defun production-equal-p (p1 p2)
+@@ -866,8 +873,10 @@
+     (when (and (shift-action-p a1) (reduce-action-p a2))
+       (let* ((op1 (find-single-terminal (production-derives p1) grammar))
+              (op2 (find-single-terminal (production-derives p2) grammar))
+-             (op1-tail (find-precedence op1 (grammar-precedence grammar)))
+-             (op2-tail (find-precedence op2 (grammar-precedence grammar))))
++             (op1-tail (find-precedence (or (production-precedence p1) op1)
++                                        (grammar-precedence grammar)))
++             (op2-tail (find-precedence (or (production-precedence p2) op2)
++                                        (grammar-precedence grammar))))
+         (when (and (eq s op1) op1-tail op2-tail)
+           (cond
+             ((eq op1-tail op2-tail)
+@@ -1095,12 +1104,19 @@
+                                 :action #'identity :action-form '#'identity)
+                productions))
+         ((listp stuff)
+-         (let ((l (car (last stuff))))
+-           (let ((rhs (if (symbolp l) stuff (butlast stuff)))
+-                 (action (if (symbolp l) '#'list l)))
++         (let* ((l (car (last stuff)))
++                (rhs (if (symbolp l) stuff (butlast stuff))))
++           (multiple-value-bind (action precedence)
++               (typecase l
++                 (symbol (values '#'list nil))
++                 (list (if (eq (second l) :precedence) ;; (#'func :precedence pr)
++                           (values (car l) (third l))
++                         (values l nil)))
++                 (t      (values l nil)))
+              (push (make-production symbol rhs
+-                     :action (eval action)
+-                     :action-form action)
++                                    :action (eval action)
++                                    :action-form action
++                                    :precedence precedence)
+                    productions))))
+         (t (error "Unexpected production ~S" stuff))))
+     productions))

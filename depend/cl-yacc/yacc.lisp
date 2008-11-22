@@ -1,4 +1,5 @@
 ; Copyright (c) 2005 by Juliusz Chroboczek
+
 ; Permission is hereby granted, free of charge, to any person obtaining a copy
 ; of this software and associated documentation files (the "Software"), to deal
 ; in the Software without restriction, including without limitation the rights
@@ -17,15 +18,11 @@
 ; OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 ; THE SOFTWARE.
 
+;; This file is a modified version of CL-Yacc: it is extended with the possibility
+;; to assign a precedence on grammar rule level. If and when this change is included
+;; in CL-Yacc, this file will be removed from the CLPython distribution. -WB
 
-;; This file is part of CL-Yacc, by Juliusz Chroboczek <jch@pps.jussieu.fr>,
-;; released under a "MIT/X11" license.
-;; In order to parse Python code with CL-Yacc, I made an extension that allows
-;; precedence at production level (see file "clyacc_production_precedence.patch").
-;; When/if that extension is integrated, this file will be removed from
-;; the CLPython distribution.    -- Willem Broekema 2008.04.01
-
-(defpackage #:yacc
+(defpackage #:yacc-clpython
   (:use #:common-lisp)
   (:export #:make-production #:make-grammar #:make-parser #:parse-with-lexer
            #:define-grammar #:define-parser #:yacc-eof-symbol
@@ -35,7 +32,7 @@
   (:import-from #:extensions #:required-argument #:memq)
   )
 
-(in-package #:yacc)
+(in-package #:yacc-clpython)
 
 #-CMU
 (defun required-argument () (error "A required argument was not supplied"))
@@ -116,7 +113,6 @@
 
 (defun terminal-p (symbol grammar)
   (declare (symbol symbol) (type grammar grammar))
-  (declare (optimize (speed 3)))
   (or (eq symbol 'propagate)
       (and (member symbol (grammar-terminals grammar)) t)))
 
@@ -140,7 +136,6 @@
 
 (defun derives-epsilon (symbol grammar &optional seen)
   "True if symbol derives epsilon."
-  (declare (optimize (speed 3)))
   (declare (symbol symbol) (type grammar grammar) (list seen))
   (let ((e (assoc symbol (grammar-derives-epsilon grammar))))
     (cond
@@ -597,7 +592,6 @@
 (defun compute-goto (kernel symbol grammar)
   "Compute the kernel of goto(KERNEL, SYMBOL)"
   (declare (type kernel kernel) (symbol symbol) (type grammar grammar))
-  (declare (optimize (speed 3)))
   (let ((result '()))
     (dolist (item (kernel-items kernel))
       (when (not (item-dot-right-p item))
@@ -1115,8 +1109,9 @@ Handle YACC-PARSE-ERROR to provide custom error reporting."
            (multiple-value-bind (action precedence)
                (typecase l
                  (symbol (values '#'list nil))
-                 (list ;; (#'func :precedence pr)
-                  (values (car l) (getf (cdr l) :precedence)))
+                 (list (if (eq (second l) :precedence) ;; (#'func :precedence pr)
+                           (values (car l) (third l))
+                         (values l nil)))
                  (t      (values l nil)))
              (push (make-production symbol rhs
                                     :action (eval action)
