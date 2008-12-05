@@ -14,7 +14,6 @@
 
 (defvar *warn-indent* t "Warn if suspicious indentation")
 (defvar *lex-debug* nil "Print the tokens returned by the lexer")
-(defvar *include-line-numbers* nil "Include line number tokens in AST?")
 (defvar *tab-width-spaces* 8
   "One tab is equivalent to this many spaces, when it comes to indentation levels.")
 
@@ -69,7 +68,6 @@
 (defclass lexer-state ()
   ((string        :initarg :string        :accessor ls-string                                     :type string)
    (tab-width     :initarg :tab-width     :accessor ls-tab-width     :initform *tab-width-spaces* :type fixnum) 
-   #+(or)(incl-line-nos :initarg :incl-line-nos :accessor ls-incl-line-nos :initform *include-line-numbers*)
    (yacc-version  :initarg :yacc-version  :accessor ls-yacc-version  :initform nil)
    (last-read-char-ix :accessor ls-last-read-char-ix :initform -1  :type fixnum)
    (curr-line-no  :accessor ls-curr-line-no  :initform 1  :type fixnum)
@@ -94,49 +92,44 @@
   `(let ((.char ,ch))
      (and .char (member .char ,list :test #'char=))))
 
-(defparameter *lex-value-print* nil)
-
-(defun print-lex-value (x stream)
-  (if *lex-value-print*
-      (format stream "(~A [~A])" (lex-value-value x) (or (lex-value-position x) "src: n/a"))
-    (let ((*lex-value-print* t))
-      (print-unreadable-object (x stream)
-        (format stream "lex-value ~A [~A]" (lex-value-value x) (or (lex-value-position x) "src: n/a"))))))
-
-(defstruct (lex-value (:print-object print-lex-value))
-  value position)
-
 (defun make-lexer-1 (string &rest options)
+  "Source form recording lexer"
+  (let ((lexer (apply #'make-lexer-2 string options)))
+    (lambda (&optional op)
+      (multiple-value-bind (token value source-loc)
+          (funcall lexer op)
+        ;; Assuming eof-token is a symbol, which is true for acl/cl yacc:
+        (check-type value (or list literal symbol))
+        (when (and source-loc *python-form->source-location*)
+          (setf (gethash value *python-form->source-location*) source-loc))
+        (values token value)))))
+    
+(defun make-lexer-2 (string &rest options)
   ;; A little hack to merge [not] + [in] into [not in], 
   ;; and [is] + [not] into [is not].
   ;; This evades precedence issues in the grammars.
-  (flet ((wrap (value position)
-           ;; EOF should not be wrapped. Currently it comes without position, so goes right.
-           (if position
-               (make-lex-value :value value :position position)
-             value)))
-    (let ((lexer (apply #'make-lexer-2 string options))
-          (todo  nil))
-      (lambda (&optional op)
-        (block lexer
-          (when todo
-            (let ((res todo))
-              (setf todo nil)
-              (return-from lexer (apply #'values res))))
-          (multiple-value-bind (x y z) (funcall lexer op)
-            (case x
-              (([not] [is])
-               (multiple-value-bind (p q r)
-                   (funcall lexer op)
-                 (cond ((and (eq x '[not]) (eq p '[in]))
-                        (values '[not in] '[not in] nil))
-                       ((and (eq x '[is]) (eq p '[not]))
-                        (values '[is not] '[is not] nil))
-                       (t (setf todo (list p (make-lex-value :value q :position r)))
-                          (values x (wrap y z))))))
-              (t (values x (wrap y z))))))))))
+  (let ((lexer (apply #'make-lexer-3 string options))
+        (todo  nil))
+    (lambda (&optional op)
+      (block lexer
+        (when todo
+          (let ((res todo))
+            (setf todo nil)
+            (return-from lexer (values-list res))))
+        (multiple-value-bind (x y z) (funcall lexer op)
+          (case x
+            (([not] [is])
+             (multiple-value-bind (p q r)
+                 (funcall lexer op)
+               (cond ((and (eq x '[not]) (eq p '[in]))
+                      (values '[not in] '[not in] nil))
+                     ((and (eq x '[is]) (eq p '[not]))
+                      (values '[is not] '[is not] nil))
+                     (t (setf todo (list p q r))
+                        (values x y z)))))
+            (t (values x y z))))))))
 
-(defun make-lexer-2 (string &rest options)
+(defun make-lexer-3 (string &rest options)
   "Return a lexer for the given string of Python code.
 Will return two value each time: TYPE, VALUE.
 On EOF returns: eof-token, eof-token."
@@ -149,8 +142,9 @@ On EOF returns: eof-token, eof-token."
             (with-slots (last-read-char-ix curr-line-no yacc-version
                          tokens-todo indent-stack bracket-level open-deco debug) lex-state
               (when (eq op :report-location) ;; used when GRAMMAR-PARSE-ERROR occurs (Allegro CL Yacc)
-                (return-from lexer `((:line-no ,curr-line-no)
-                                     (:eof-seen ,(not (null (member (lexer-eof-token yacc-version) tokens-todo :key #'second)))))))
+                (return-from lexer
+                  `((:line-no ,curr-line-no)
+                    (:eof-seen ,(not (null (member (lexer-eof-token yacc-version) tokens-todo :key #'second)))))))
               (when (= last-read-char-ix -1)
                 ;; Check leading whitespace. This will go unnoticed by the lexer otherwise.
                 (destructuring-bind (newline-p new-indent eof-p)
@@ -179,15 +173,15 @@ On EOF returns: eof-token, eof-token."
                            (lex-todo (lexer-eof-token yacc-version) (lexer-eof-token yacc-version))
                            (loop while (plusp (pop indent-stack))
                                do (lex-todo '[dedent] '[dedent]))
-                           (lex-return '[newline] `(:newline t :curr-line-no ,curr-line-no :indent 0) nil))
+                           (lex-return '[newline] '[newline] nil))
                             
                           ((digit-char-p c 10)
                            (multiple-value-bind (val source-loc)
                                (read-kind :number c)
-                             (lex-return '[number] val source-loc)))
+                             (lex-return '[number] (make-literal val) source-loc)))
                             
                           ((identifier-char1-p c)
-                           (multiple-value-bind (token token-pos)
+                           (multiple-value-bind (token source-loc)
                                (read-kind :identifier c)
                              ;; u"abc"    : `u' stands for `Unicode string'
                              ;; u + b     : `u' is an identifier
@@ -205,26 +199,24 @@ On EOF returns: eof-token, eof-token."
                                             (raw     (position #\r sn :test 'char-equal)))
                                        (multiple-value-bind (val source-loc)
                                            (read-kind :string ch :raw raw :unicode unicode)
-                                         (lex-return '[string] val source-loc)))
+                                         (lex-return '[string] (make-literal val) source-loc)))
                                    (when ch (lex-unread-char ch)))))
                              (when (and open-deco (eq token '[def]))
                                ;; All outstanding decorators are associated with this function
                                (setf open-deco nil))
-                             (lex-return (if (eq (symbol-package token)
-                                                 (load-time-value (find-package :clpython.ast.reserved)))
+                             (let ((type (if (eq (symbol-package token) #.(find-package :clpython.ast.reserved))
                                              token
-                                           '[identifier])
-                                         token
-                                         token-pos)))
+                                           '[identifier])))
+                               (lex-return type token source-loc))))
 
                           ((char-member c '(#\' #\"))
                            (multiple-value-bind (val source-loc)
                                (read-kind :string c)
-                             (lex-return '[string] val source-loc)))
+                             (lex-return '[string] (make-literal val) source-loc)))
 
                           ((or (punct-char1-p c)
                                (punct-char-not-punct-char1-p c))
-                           (multiple-value-bind (token token-pos)
+                           (multiple-value-bind (token source-loc)
                                (read-kind :punctuation c)
                              ;; Keep track of whether we are in a bracketed expression
                              ;; (list, tuple or dict), because in that case newlines are ignored.
@@ -233,14 +225,14 @@ On EOF returns: eof-token, eof-token."
                                (( [[]  [{] [\(] ) (incf bracket-level))
                                (( [\]] [}] [\)] ) (decf bracket-level))
                                ([@]               (setf open-deco t)))
-                             (lex-return token token token-pos)))
+                             (lex-return token token source-loc)))
 
                           ((char-member c +whitespace+)
                            (lex-unread-char c)
-                           (destructuring-bind (newline-p new-indent eof-p) (read-kind :whitespace c)
+                           (destructuring-bind (newline-p new-indent eof-p)
+                               (read-kind :whitespace c)
                              (declare (ignore eof-p))
                              (when (and newline-p (zerop bracket-level))
-
                                ;; Queue eof before dedents as todo.
                                (when (and (zerop new-indent)
                                           *lex-fake-eof-after-toplevel-form*
@@ -253,7 +245,6 @@ On EOF returns: eof-token, eof-token."
                                    (when debug (format t "Lexer signals: next-eof-fake-after-toplevel-form~%"))
                                    (signal 'next-eof-fake-after-toplevel-form))
                                  (lex-todo (lexer-eof-token yacc-version) (lexer-eof-token yacc-version)))
-                               
                                (cond ((< (car indent-stack) new-indent) ; one indent
                                       (push new-indent indent-stack)
                                       (lex-todo '[indent] '[indent]))
@@ -265,11 +256,11 @@ On EOF returns: eof-token, eof-token."
                                         (raise-syntax-error 
                                          "Dedent did not arrive at a previous indentation level (line ~A)."
                                          curr-line-no))))
-                               (lex-return '[newline] `(:newline t :curr-line-no ,curr-line-no :indent ,new-indent) nil))))
+                               (lex-return '[newline] '[newline] nil))))
                           
                           ((char= c #\#)
                            (read-kind :comment-line c))
-                            
+                          
                           ((char= c #\\) ;; next line is continuation of this one
                            (let ((c2 (lex-read-char)))
                              (case c2
@@ -604,15 +595,27 @@ C must be either a character or NIL."
 ;; convert the result to a long). We ignore any difference between
 ;; regular and long integers.
 
-(defconstant +normal-float-representation-type+ 'double-float
-  "The Lisp type normally used for representing Python floats.")
+(defparameter *normal-float-representation-type* 'double-float
+  "The Lisp type normally used for representing \"normal\" Python floats. Values outside the
+range of this type are represented by *enormous-float-representation-type*.")
 
-(defconstant-once +normal-float-range+ (list most-negative-double-float most-positive-double-float)
-  "Python float values in this range are represented by +NORMAL-FLOAT-REPRESENTATION-TYPE+.
-Values outside this range are represented by +ENORMOUS-FLOAT-REPRESENTATION-TYPE+.")
+(defparameter *enormous-float-representation-type* 'integer
+  "The Lisp type used for representing Python float values outside +NORMAL-FLOAT-RANGE+.
+Coercion from float to int must be confirmed by the user.")
 
-(defconstant +enormous-float-representation-type+ 'integer
-  "The Lisp type used for representing Python float values outside +NORMAL-FLOAT-RANGE+.")
+(defun number-range (number-type)
+  (check-type number-type symbol)
+  (loop for prefix in (load-time-value (mapcar 'string '(#:most-negative- #:most-positive-)))
+      for sym-name = (read-from-string (concatenate 'string prefix (symbol-name number-type)))
+      collect (symbol-value sym-name)))
+
+(defun float-suffix (type)
+  (ecase type
+    (float        "e")
+    (short-float  "s")
+    (single-float "f")
+    (double-float "d")
+    (long-float   "l")))
 
 (defmethod read-kind ((kind (eql :number)) c1 &rest args)
   (assert (digit-char-p c1 10))
@@ -660,30 +663,42 @@ Values outside this range are represented by +ENORMOUS-FLOAT-REPRESENTATION-TYPE
                                (frac-value (if (<= start end)
                                                (with-standard-io-syntax
                                                  (read-from-string
-                                                  ;; Read as `long-float'; CPython uses 32-bit C `long'.
-                                                  (format nil "0.~A0L0" (lex-substring start end))))
-                                             0.0L0)))
+                                                  (format nil "0.~A0~A0"
+                                                          (lex-substring start end)
+                                                          (float-suffix *normal-float-representation-type*))))
+                                             (with-standard-io-syntax
+                                               (read-from-string
+                                                (format nil "0.0~A0"
+                                                        (float-suffix *normal-float-representation-type*)))))))
                           (incf res frac-value))))
             (t (lex-unread-char)))
           ;; Exponent marker
-          (case (lex-read-char :eof-error nil)
-            ((nil) )
-            ((#\e #\E) (let ((expo-value (read-int 10))
-                             (primary res))
-                         (setf has-exp t)
-                         (setf res (* res (expt 10 expo-value)))
-                         ;; CPython: 1e10 -> float, even though it's an int
-                         (if (<= (first +normal-float-range+) res (second +normal-float-range+))
-                             (setf res (coerce res +normal-float-representation-type+))
-                           (with-simple-restart (continue "Represent the value by an ~A instead. ~
-                                                           (Beware obscure bugs!)"
-                                                          (string-upcase +enormous-float-representation-type+))
-                             (raise-syntax-error "Literal Python float value `~Ae~A' falls outside the ~A ~
-                                                  range of this Lisp implementation, which is [~A - ~A] (line ~A)."
-                                                 primary expo-value (string-upcase +normal-float-representation-type+)
-                                                 (first +normal-float-range+) (second +normal-float-range+)
-                                                 %lex-curr-line-no%)))))
-            (t (lex-unread-char))))
+          (let ((e-ch (lex-read-char :eof-error nil)))
+            (case e-ch
+              ((nil) )
+              ((#\e #\E) (let ((expo-value (read-int 10))
+                               (primary res))
+                           (setf has-exp t)
+                           (setf res (* res (expt 10 expo-value)))
+                           ;; CPython: 1e10 -> float, even though it's an int
+                           (let* ((normal-flt-tp *normal-float-representation-type*)
+                                  (range (number-range normal-flt-tp)))
+                             (if (<= (first range) res (second range))
+                                 (setf res (coerce res normal-flt-tp))
+                               (with-simple-restart
+                                   (continue "Represent the value by an ~A instead. (Beware obscure bugs!) ~
+                                              ~@:_[~S = ~S]"
+                                             (string-upcase *enormous-float-representation-type*)
+                                             '*enormous-float-representation-type*
+                                             *enormous-float-representation-type*)
+                                 (raise-syntax-error
+                                  "Literal Python float value `~A~A~A' (line ~A) falls outside the range of ~@:_~
+                                   the Lisp type ~A, which is [~A, ~A]. ~:@_[~S = ~S]"
+                                  primary e-ch expo-value %lex-curr-line-no%
+                                  (string-upcase normal-flt-tp)
+                                  (first range) (second range) 
+                                  '*normal-float-representation-type* *normal-float-representation-type*))))))
+              (t (lex-unread-char)))))
           
         ;; CPython allows `j' (imaginary) for decimal, not for hex (SyntaxError) or octal
         ;; (becomes decimal!!?)

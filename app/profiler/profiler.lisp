@@ -28,6 +28,8 @@
     ;; Because not every line has a line-no token, we first initialize all
     ;; available line-nos to zero. In the final print-out, we show 0 for
     ;; lines not visited, and blank when no stats available.
+    (break "Line number hack is removed; this does not work anymore")
+    #+(or)
     (with-line-numbers (:compile-hook (lambda (n) 
                                         (setf (gethash n count-ht) 0))
                                       :runtime-hook (lambda (n)

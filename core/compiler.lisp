@@ -117,16 +117,20 @@ then (optionally) compiled and called. Should it be compiled before running?")
 
 ;;; Line number handling
 
+#+(or)
 (defvar *include-line-number-hook-calls* nil
   "Include calls to *runtime-line-number-hook* in generated code?")
 
+#+(or)
 (defvar *runtime-line-number-hook* nil
   "Function to call at run time, when arrived on new line number")
 
+#+(or)
 (defvar *compile-line-number-hook* nil
   "Function to call at compile time, when a line number token is encountered.
 Only has effect when *include-line-number-hook-calls* is true.")
 
+#+(or)
 (defmacro with-line-numbers ((&key compile-hook runtime-hook) &body body)
   ;; You have to set *runtime-line-number-hook* yourself.
   `(let ((*include-line-number-hook-calls* t)
@@ -896,6 +900,7 @@ Disabled by default, to not confuse the test suite.")
   (declare (ignore cname suite))
   (error "todo"))
 
+#+(or) ;; now unused
 (defmacro [clpython-stmt] (&key line-no)
   ;; XXX The module name should also be a param.
   (when *include-line-number-hook-calls*
@@ -1207,17 +1212,15 @@ otherwise work well.")
                         collect `(,lambda-key-arg ,key-default-arg))
 		   ,(when *-arg  (second *-arg))
 		   ,(when **-arg (second **-arg)))
-		
                   (with-namespace ,(make-instance 'let-w/locals-ns
                                      :parent (get-module-namespace e)
                                      :names (append all-nontuple-func-locals
                                                     destruct-nested-vars
                                                     new-locals)
-                                     :let-names (remove-duplicates (append destruct-nested-vars nil new-locals))
+                                     :let-names (remove-duplicates (append destruct-nested-vars new-locals))
                                      :locals-names all-nontuple-func-locals
                                      :scope :function)
-                    ;;(let (,@destruct-nested-vars
-                    ;;      ,@new-locals)
+                    ;; XXX this IGNORABLE declaration ends up at the wrong place, w.r.t. function args.
                     ,@(unless *warn-unused-function-vars*
 			`((declare (ignorable ,@nontuple-arg-names ,@new-locals))))
 		    
@@ -1385,13 +1388,12 @@ otherwise work well.")
 
 (defvar *module-namespace* nil)
 
+(defstruct (module-source-information
+            (:conc-name msi-)
+            (:constructor make-msi (original-filename original-source subform-positions)))
+  original-filename original-source subform-positions)
+
 (defmacro [module-stmt] (suite) ;; &environment e)
-  ;; A module is translated into a lambda that creates and returns a
-  ;; module object. Executing the lambda will create a module object
-  ;; and register it, after which other modules can access it.
-  ;; 
-  ;; Functions, classes and variables inside the module are available
-  ;; as attributes of the module object.
   `(flet ((module-function (&key (%module-globals (make-eq-hash-table "module"))
                                  (call-preload-hook t)
                                  (module-name ',(or *current-module-name* "__main__"))
@@ -1427,11 +1429,29 @@ DETERMINE-BODY-GLOBALS"
                       
                       (with-py-errors (:name (python-module ,*current-module-name*))
                         ,suite))))))))
-
+     ;; (Optionally) Source form recording
+     ,@(when (and *python-form->source-location* *current-module-path*) ;; *c-m-path* is nil in REPL
+         (let (positions)
+           (with-py-ast ((subform &key value target) suite :into-nested-namespaces t)
+             (declare (ignore value))
+             (unless target
+	       (whereas ((source-position (gethash subform *python-form->source-location*)))
+                 (push (list* :form subform source-position) positions)))
+             subform)
+           `((when *module->source-positions*
+               (setf (gethash ,(truename *current-module-path*) *module->source-positions*)
+                 (make-msi ,(truename *current-module-path*) ,(slurp-file *current-module-path*) ',positions))
+               #+(or)(format t ";;; Source code added to file ~A:~% ~S"
+                             ',(truename *current-module-path*)
+                             (gethash ,(truename *current-module-path*) *module->source-positions*))))))
+     ;; Module registration
      (if (boundp '*module-function-hook*)
-         (funcall *module-function-hook* #'module-function)
-       (progn (format t ";; Original Python source file: ~S~%" ',*current-module-path*)
-              (funcall #'module-function)))))
+         (funcall *module-function-hook* #'module-function) ;; imported by Python code
+       (progn ;; importing of fasl using (load ..)
+         ,(when *current-module-path*
+            `(format t ";;; Executing Python top-level forms (source: ~A)~%" ',(truename *current-module-path*)))
+         (funcall #'module-function)))
+     (values)))
 
 (defmacro [pass-stmt] ()
   nil)
@@ -1923,11 +1943,11 @@ Non-negative integer denoting the number of args otherwise."
 
 (defun raise-invalid-keyarg-error (kw)
   (py-raise '{TypeError}
-	    "Function got unsupported keyword argument `~A'." kw))
+	    "Function got unexpected keyword argument `~A'." kw))
 
 (defun raise-double-keyarg-error (kw)
   (py-raise '{TypeError}
-	    "Function got multiple values for keyword argument `~A'." kw))
+	    "Function got multiple values for argument `~A'." kw))
 
 (defmacro py-arg-function (name (pos-args key-args *-arg **-arg) &body body)
   ;; Non-consing argument parsing! (except when *-arg or **-arg
@@ -2158,6 +2178,11 @@ Non-negative integer denoting the number of args otherwise."
                 (push (cons key val) for-**)
 		t)
 
+              ;; Error.. either an unknown keyword, or we already got a pos arg for it
+              (loop for i fixnum from 0 below num-filled-by-pos-args
+                  when (eq (svref (fa-arg-kwname-vec fa) i) key)
+                  do (raise-double-keyarg-error (svref (fa-pos-key-arg-names fa) i)))
+              
 	      (raise-invalid-keyarg-error key)))
     
     ;; Ensure all positional arguments covered

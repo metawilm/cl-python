@@ -54,14 +54,9 @@
            (assert (listp pos) () "Got invalid grammar position (not a list): ~S" pos)
            (let* ((line (second (assoc :line-no pos)))
                   (eof-seen (second (assoc :eof-seen pos)))
-                  (token (excl.yacc:grammar-parse-error-token c))
+                  (token (maybe-unwrap-literal-value (excl.yacc:grammar-parse-error-token c)))
                   (encl-error (excl.yacc::grammar-parse-error-enclosed-error c)))
              
-             ;; Hide line number mechanism hack
-             (when (and (listp token)
-                        (eq (car token) :newline))
-               (setf token '[newline]))
-	   
              (cond (encl-error ;; Error in one of our grammar rules
                     (when clpython:*exceptions-loaded*
                       (assert (not (typep encl-error '{SyntaxError}))

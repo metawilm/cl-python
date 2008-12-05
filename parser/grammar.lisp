@@ -167,28 +167,40 @@
 
 ;;; Source location recording
 
-(defparameter *python-form-source-code-ht* nil
-  "EQ hashtable, mapping AST subforms to source position")
+(defparameter *python-form->source-location* nil #+(or)(make-weak-key-hash-table :test 'eq)
+  "EQ hashtable, mapping AST subforms to source position. Used during file compilation.")
 
-(defun record-source-location (terms outcome)
-  "Records location in *python-form-source-code*."
-  (when (and *python-form-source-code-ht*
-             (listp outcome))
-    (flet ((retrieve-position (item)
-             (typecase item
-               (lex-value (lex-value-position item))
-               (list (gethash item *python-form-source-code-ht*))
-               ;; some other possibilities: string, number, indent, dedent, newline
-               )))
-      (let* ((first (retrieve-position (car terms)))
-             (last (retrieve-position (car (last terms))))
-             (pos (cond ((null first) last)
-                        ((null last) first)
-                        (t (list :start (getf first :start)
-                                 :end (getf last :end))))))
-        (when pos
-          (setf (gethash outcome *python-form-source-code-ht*) pos)
-          (return-from record-source-location t))))))
+(defparameter *module->source-positions* (make-hash-table :test 'equal)
+  "EQ hashtable, mapping from pathname to source data. Filled during loading.")
+
+(defstruct (literal (:constructor make-literal (value)))
+  value)
+
+(defun maybe-unwrap-literal-value (x)
+  (if (literal-p x)
+      (literal-value x)
+    x))
+    
+(defun record-source-location (outcome start end)
+  "Records location in *python-form->source-location*"
+  (check-type outcome (or list literal))
+  (when *python-form->source-location*
+    (let ((existing (gethash outcome *python-form->source-location*))
+          (loc (list :start start :end end)))
+      (cond ((not existing)
+             (setf (gethash outcome *python-form->source-location*) loc))
+            (existing
+             (assert (equal existing loc) ()
+               "Duplicate but diferent locations for ~A: old=~A but new=~A." outcome existing loc))))))
+
+(defun contour-source-location (terms)
+  (when *python-form->source-location*
+    (loop for term in terms
+        for pos = (gethash term *python-form->source-location*)
+        for some-pos = (or some-pos pos)
+        when (progn #+(or)(warn "pos of ~A is ~A" term pos) pos)
+        minimize (getf pos :start) into min and maximize (getf pos :end) into max
+        finally (return (when some-pos (values min max))))))
 
 (defun instrument-outcome (terms outcome)
   (if (and (= 1 (length terms))
@@ -196,16 +208,13 @@
       (return-from instrument-outcome outcome)
     (let* (($vars (loop for i from 1 to (length terms)
                       collect (make-number-token i))))
-      `(progn (let* ((.terms (list ,@$vars)))
-                ;; Extract values out of the lex-value structs. The structs
-                ;; only exist to travel the source locations information here. 
-                ,@(loop for v in $vars
-                      collect `(when (typep ,v 'lex-value)
-                                 (setf ,v (lex-value-value ,v))))
-                (let* ((.outcome ,outcome))
-                  (record-source-location .terms .outcome)
-                  .outcome))))))
-  
+      `(progn (with-stack-list (.terms ,@$vars)
+                (multiple-value-bind (.min .max)
+                    (contour-source-location .terms)
+                  (let ((.outcome ,outcome))
+                    (when .min (record-source-location .outcome .min .max))
+                    .outcome)))))))
+
 (defun add-rule (name terms outcome &rest options)        
   ;; Enable reduction trackin, for source form location recording purposes
   (let ((out (instrument-outcome terms outcome)))
@@ -225,14 +234,15 @@
                    (intern item-name #.*package*))))
     (ecase (aref str (1- len))
       (#\+ `(progn (add-rule ',name '(,item) '(list $1))
-                   (add-rule ',name '(,name ,item) '(nconc $1 (list $2))))))))
+                   ;; using APPEND instead of NCONC, as latter screws up source form positions
+                   (add-rule ',name '(,name ,item) '(append $1 (list $2))))))))
   
 ;; These rules, including most names, are taken from the CPython
 ;; grammar file from CPython CVS, file Python/Grammar/Grammar,
 ;; 20040827.
 ;; Try/except/finally-stmt and with-stmt added later.
 
-(p python-grammar (one-stmt-input) $1)
+(p python-grammar (one-stmt-input) (unwrap-literals $1))
 
 (p one-stmt-input (stmt)      $1)
 (p one-stmt-input (stmt [newline])      $1)
@@ -306,12 +316,7 @@
    ((compound-stmt) $1))
 
 (p simple-stmt (small-stmt semi--small-stmt* semi? [newline])
-   (let ((ss (if $2 `([suite-stmt] ,(cons $1 $2)) $1)))
-     (declare (special *include-line-numbers*))
-     (if *include-line-numbers*
-         `([suite-stmt] (([clpython-stmt] :line-no ,(1- $4))
-                         ,ss))
-       ss)))
+   (if $2 `([suite-stmt] ,(cons $1 $2)) $1))
 
 (p semi--small-stmt ([\;] small-stmt) $2)
 
@@ -545,20 +550,24 @@
    (( [`] testlist1     [`]  )  `([backticks-expr] ,$2)  )
    (( [identifier]           )  `([identifier-expr] ,$1) )
    (( [number]               )  $1                       )
-   (( [.] [number]           ) (cond ;; little hack for floats starting with dot, like ".5"
-                                ((integerp $2)
-                                 (let ((str (format nil "0.~Ad0" $2)))
-                                   (with-standard-io-syntax (read-from-string str))))
-                                ((and (complexp $2)
-                                      (zerop (realpart $2))
-                                      (integerp (imagpart $2)))
-                                 (let ((str (format nil "0.~Ad0" (imagpart $2))))
-                                   (complex 0 (with-standard-io-syntax (read-from-string str)))))
-                                (t (raise-syntax-error
-                                    "Invalid format for number starting with dot: .~G" $2))))
+   (( [.] [number]           ) (let (($2val (literal-value $2))
+                                     (suffix (float-suffix *normal-float-representation-type*)))
+                                 ;; A float value starting with a dot, like ".5"
+                                 ;; As NUMBER is a fraction between 0 and 1, it always falls in the range
+                                 ;; of the float representation type.
+                                 (make-literal
+                                  (typecase $2val
+                                    (integer (let ((str (format nil "0.~A~A0" $2val suffix)))
+                                               (with-standard-io-syntax (read-from-string str))))
+                                    (complex (assert (zerop (realpart $2val)))
+                                             (assert (typep (imagpart $2val) 'integer))
+                                             (let ((str (format nil "0.~A~A0" (imagpart $2val) suffix)))
+                                               (complex 0 (with-standard-io-syntax (read-from-string str)))))
+                                    (t (raise-syntax-error
+                                        "Invalid format for number starting with dot: .~G" $2val))))))
    (( string+ )
-    ;; consecutive string literals are joined: "s" "b" => "sb"
-    (apply #'concatenate 'string $1)))
+    ;; consecutive string literals are joined: "ab" "c" => "abc"
+    (make-literal (apply #'concatenate 'string (mapcar #'literal-value $1)))))
 
 (gp string+)
 
@@ -713,4 +722,8 @@
     (dolist (x dotted-name res)
       (setf res `([attributeref-expr] ,res ([identifier-expr] ,x))))))
 
-
+(defun unwrap-literals (x)
+  (etypecase x
+    ((or symbol number) x)
+    (literal (literal-value x))
+    (list (mapcar #'unwrap-literals x))))

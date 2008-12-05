@@ -44,7 +44,7 @@ Most important options:
              (apply #'parse-module-with-yacc yacc-version lexer options)))
   
   (:method ((x pathname) &rest options)
-           (apply #'parse (clpython.package::slurp-file x) options))
+           (apply #'parse (slurp-file x) options))
 
   (:method ((x stream) &rest options)
            (let* ((seq (make-string (file-length x)))
@@ -52,13 +52,14 @@ Most important options:
              (setf seq (adjust-array seq n))
              (apply #'parse seq options))))
 
-(defun parse-module-with-yacc (yacc-version lexer &key incl-module record-source-location)
+(defun parse-module-with-yacc (yacc-version lexer &key incl-module (record-source-location *python-form->source-location*))
   "Collect all parsed top-level forms. If RECORD-SOURCE-LOCATION, the (new or existing)
 source location hash-table is returned as second value."
-  (let ((*python-form-source-code-ht* (case record-source-location
-                                        ((nil))
-                                        ((t) (clpython.package::make-weak-key-hash-table :test 'eq))
-                                        (t record-source-location))))
+  (let ((*python-form->source-location*
+         (case record-source-location
+           ((nil))
+           ((t) (clpython.package::make-weak-key-hash-table :test 'eq))
+           (t record-source-location))))
     (let (forms)
       (loop (multiple-value-bind (form eof-p)
                 (parse-form-with-yacc yacc-version lexer)
@@ -68,8 +69,8 @@ source location hash-table is returned as second value."
                 (return))))
       (when incl-module
         (setf forms `([module-stmt] ([suite-stmt] ,forms))))
-      (if *python-form-source-code-ht*
-          (values forms *python-form-source-code-ht*)
+      (if *python-form->source-location*
+          (values forms *python-form->source-location*)
         forms))))
 
 (defmacro with-parser-eof-detection ((at-real-eof-var) &body body)

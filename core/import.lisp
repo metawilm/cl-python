@@ -135,9 +135,8 @@ Returns NIL if nothing found."
   (check-type filename pathname)
   (assert (probe-file filename) (filename)
     "Python source file ~A does not exist" filename)
-  (let* ((*current-module-path* filename) ;; used by compiler
-         (*current-module-name* mod-name))
-    (declare (special *current-module-path*))
+  (let ((*current-module-path* filename) ;; used by compiler
+        (*current-module-name* mod-name))
     (with-auto-mode-recompile (:verbose *import-compile-verbose*)
       (with-python-code-reader ()
         (handler-bind (#+sbcl(sb-int:simple-compiler-note #'muffle-warning))

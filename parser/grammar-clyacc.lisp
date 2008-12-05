@@ -55,10 +55,6 @@
                 (token (yacc-clpython:yacc-parse-error-terminal c))
                 (value (yacc-clpython:yacc-parse-error-value c))
                 (expected-tokens (yacc-clpython:yacc-parse-error-expected-terminals c)))
-           ;; Hide line number mechanism hack
-           (when (and (listp value)
-                      (eq (car value) :newline))
-             (setf value '[newline]))
            
            (cond ((or eof-seen (eq token 'yacc-clpython:yacc-eof-symbol))
                   (raise-unexpected-eof))

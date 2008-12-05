@@ -192,18 +192,18 @@
   (:export #:in-syntax #:*ast-readtable* #:*user-readtable* #:*ast-user-readtable*
            #:with-ast-user-readtable #:with-ast-user-pprinter
            #:setup-omnivore-readmacro
-           #:with-auto-mode-recompile #:whereas #:sans #:named-function
+           #:with-auto-mode-recompile #:whereas #:sans #:named-function #:slurp-file
            #:with-stack-list #:without-redefinition-warnings #:defconstant-once
-           #:+max-char-code+ #:char-code-type #:ltv-find-class))
+           #:+max-char-code+ #:char-code-type #:ltv-find-class #:make-weak-key-hash-table))
 
 ;;; CLPYTHON.PARSER - Parser and Lexer
 
 (defpackage :clpython.parser
   (:documentation "Parser and lexer for Python code")
   (:use :common-lisp :clpython.package)
-  (:export #:parse ;; Parser
-           #:ast-complete-p
-           
+  (:export #:parse #:ast-complete-p ;; parser
+           #:*python-form->source-location* #:*module->source-positions*
+                      
            #:match-p #:with-matching #:with-perhaps-matching ;; AST pattern matcher
            
            #:walk-py-ast #:with-py-ast ;; code walker

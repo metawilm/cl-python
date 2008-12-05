@@ -61,11 +61,11 @@
     (test-equal #C(0.0 0.5d0) (ps "0.5j" nil))
     (test-equal #C(0.0 0.5d0) (ps ".5j" nil))
 
-    (assert (not (eq clpython.parser::+normal-float-representation-type+
-                     clpython.parser::+enormous-float-representation-type+))
+    (assert (not (eq clpython.parser::*normal-float-representation-type*
+                     clpython.parser::*enormous-float-representation-type*))
         () "Invalid float representation types: outside a FLOAT range an INTEGER should take over.")
     (destructuring-bind (min-f max-f)
-        clpython.parser::+normal-float-range+
+        (clpython.parser::number-range clpython.parser::*normal-float-representation-type*)
       (assert (< min-f 0))
       (assert (< (expt 10 3) max-f) () "Really small float range in this Lisp implementation?!")
       (test-equal 1D3 (ps "1e3" nil)) ;; 1e3 is small enough to be a regular ..-FLOAT
@@ -180,7 +180,16 @@ def f(): pass" nil))
       (test-equal (ignore-errors (parse s :one-expr t)) "\\"))
     ;; trailing comma
     (test-no-error (parse "def f(a=3,): pass") :known-failure t)
-    ))
+    ;; backslash at end of whitespace line
+    (test-equal (ps "
+if a:
+  foo
+\
+else:
+  b" nil)
+                '([if-stmt] ((([identifier-expr] {a})
+                              ([suite-stmt] (([identifier-expr] {foo})))))
+                  ([suite-stmt] (([identifier-expr] {b})))))))
 
 (defun run-code-walker-test ()
   (with-subtest (:name "CLPython-Codewalker")

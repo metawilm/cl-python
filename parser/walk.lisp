@@ -370,7 +370,7 @@ CLASSDEF, FUNCDEF or LAMBDA."
       
       (flet ((walk-arg (ast awna subtargetable)
                #+(or)(warn "walk-arg: ~A  rest=~A key=~A" ast (awna-rest-p awna) (awna-key awna))
-               (setf ast (copy-tree ast))
+               #+(or)(setf ast (copy-tree ast))
                (unless (awna-walk awna)
                  (return-from walk-arg ast))
                (when (null ast)
