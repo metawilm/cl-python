@@ -18,6 +18,8 @@
 ;; loaded, a SyntaxError is thrown, otherwise a regular ERROR.
 ;; Same for EOF error.
 
+(defvar clpython:*exceptions-loaded* nil)
+
 (defparameter clpython:*raise-syntax-error-hook* 'raise-syntax-error-default)
 
 (defun clpython:raise-syntax-error (&rest args)

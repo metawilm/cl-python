@@ -852,7 +852,7 @@ Returns NEWLINE-P, NEW-INDENT, EOF-P."
 
 (defmethod read-kind ((kind (eql :comment-line)) c &rest args)
   "Read until the end of the line, leaving the last #\Newline in the source."
-  (declare (null args))
+  (assert (null args))
   (assert (char= c #\#))
   (loop for c = (lex-read-char :eof-error nil)
       while (and c (char/= c #\Newline))

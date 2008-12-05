@@ -12,8 +12,6 @@
 (in-package :clpython)
 (in-syntax *ast-user-readtable*)
 
-(defvar *exceptions-loaded* nil)
-
 ;; Depending on the Lisp implementation, the exceptions are either Python objects with
 ;; the appropriate metaclass, or fairly normal Lisp conditions.
 

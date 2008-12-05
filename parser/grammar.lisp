@@ -746,6 +746,7 @@ Value should be a (weak) EQ hash table: (make-weak-key-hash-table :test 'eq).")
             res))))
 
 (defun clean-source-locations ()
+  (declare (special *expr-stmt-nodes*))
   (when *python-form->source-location*
     (maphash (lambda (k v)
                (declare (ignore v))
