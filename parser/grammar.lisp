@@ -167,8 +167,9 @@
 
 ;;; Source location recording
 
-(defparameter *python-form->source-location* nil #+(or)(make-weak-key-hash-table :test 'eq)
-  "EQ hashtable, mapping AST subforms to source position. Used during file compilation.")
+(defparameter *python-form->source-location* nil
+  "EQ hashtable, mapping AST subforms to source position. Used during file compilation.
+Value should be a (weak) EQ hash table: (make-weak-key-hash-table :test 'eq).")
 
 (defparameter *module->source-positions* (make-hash-table :test 'equal)
   "EQ hashtable, mapping from pathname to source data. Filled during loading.")
@@ -190,8 +191,9 @@
       (cond ((not existing)
              (setf (gethash outcome *python-form->source-location*) loc))
             (existing
-             (assert (equal existing loc) ()
-               "Duplicate but diferent locations for ~A: old=~A but new=~A." outcome existing loc))))))
+             (unless (<= start (getf existing :start) (getf existing :end) end)
+               "Duplicate location for ~A, and new [~A, ~A] does not overlap old [~A, ~A]"
+               outcome start end (getf existing :start) (getf existing :end)))))))
 
 (defun contour-source-location (terms)
   (when *python-form->source-location*
@@ -242,7 +244,7 @@
 ;; 20040827.
 ;; Try/except/finally-stmt and with-stmt added later.
 
-(p python-grammar (one-stmt-input) (unwrap-literals $1))
+(p python-grammar (one-stmt-input) (finish-ast $1))
 
 (p one-stmt-input (stmt)      $1)
 (p one-stmt-input (stmt [newline])      $1)
@@ -588,10 +590,10 @@
 (p old-lambdef ([lambda] parameters [:] old-test) `([lambda-expr] ,$2 ,$4))
 
 (p trailer :or
-   (( [(] [)]                ) `([call-expr] nil nil nil nil))
-   (( [(] arglist [)]        ) `([call-expr] ,@$2))
-   (( [[] subscriptlist [\]] ) `([subscription-expr] ,$2))
-   (( [.] [identifier]       ) `([attributeref-expr] ([identifier-expr] ,$2))))
+   (( [(] [)]                ) `(call-trailer nil nil nil nil))
+   (( [(] arglist [)]        ) `(call-trailer ,@$2))
+   (( [[] subscriptlist [\]] ) `(subs-trailer ,$2))
+   (( [.] [identifier]       ) `(attr-trailer ([identifier-expr] ,$2))))
 
 (gp trailer+)
 
@@ -714,7 +716,12 @@
   ;; foo[x].a => (id foo) + ((subscription (id x)) (attributeref (id a)))
   ;;          => (attributeref (subscription (id foo) (id x)) (id a))
   (dolist (tr trailers item)
-    (setf item `(,(car tr) ,item ,@(cdr tr))))) ;; dont change first cons of tr: might be constant 
+    (let ((head (or (second (assoc (car tr) '((call-trailer [call-expr])
+                                              (subs-trailer [subscription-expr])
+                                              (attr-trailer [attributeref-expr]))))
+                    (error "Unknown trailer: ~S" tr))))
+      ;; Don't modify first cons: might be a constant.
+      (setf item `(,head ,item ,@(cdr tr))))))
 
 (defun dotted-name-to-attribute-ref (dotted-name)
   (assert dotted-name)
@@ -722,8 +729,33 @@
     (dolist (x dotted-name res)
       (setf res `([attributeref-expr] ,res ([identifier-expr] ,x))))))
 
+(defun finish-ast (ast)
+  (prog1 (unwrap-literals ast)
+    (clean-source-locations)))
+
 (defun unwrap-literals (x)
   (etypecase x
     ((or symbol number) x)
     (literal (literal-value x))
-    (list (mapcar #'unwrap-literals x))))
+    (list (let ((res (mapcar #'unwrap-literals x)))
+            (when *python-form->source-location*
+              (let ((loc (gethash x *python-form->source-location*)))
+                (when loc
+                  (setf (gethash res *python-form->source-location*) loc)
+                  (remhash x *python-form->source-location*))))
+            res))))
+
+(defun clean-source-locations ()
+  (when *python-form->source-location*
+    (maphash (lambda (k v)
+               (declare (ignore v))
+               (unless (and (listp k)
+                            (member (car k) *expr-stmt-nodes*))
+                 (remhash k *python-form->source-location*)))
+             *python-form->source-location*)))
+
+(defun debug-print-locs (&optional (ht *python-form->source-location*))
+  (when ht
+    (maphash (lambda (k v) (format t "~30A: ~2@A .. ~2@A ~A~%"
+                                   (clpython.parser::py-pprint k) (getf v :start) (getf v :end) (if (listp k) (car k) k)))
+             ht)))
