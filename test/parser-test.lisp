@@ -15,8 +15,8 @@
 	   
 (defun ps (s &optional (incl-module t))
   (if incl-module
-      (parse s :incl-module t)
-    (parse s :one-expr t :incl-module nil)))
+      (values (parse s :incl-module t))
+    (values (parse s :one-expr t :incl-module nil))))
 
 (defun run-parser-test ()
   (with-subtest (:name "CLPython-Parser")
@@ -142,23 +142,23 @@ def f(): pass" nil))
     
     ;; Empty string is parsed as module without body
     #+(or)(test-equal '([module-stmt] ([suite-stmt] () ))
-                      (parse ""))
+                      (values (parse "")))
 
     ;; yield expressions are implemented
-    (test-no-error (parse "y = yield x"))
+    (test-no-error (values (parse "y = yield x")))
     
     ;; parsing a file
     #+(and allegro unix) ;; no WITH-OPEN-TEMP-FILE on windows
     (let ((fname (excl.osi:with-open-temp-file (s (format nil "_clpython-ast-test-~A" (gensym)))
 		   (format s "print 42"))))
       (test-equal '([print-stmt] nil (42) nil)
-		  (..parser:parse (pathname fname) :one-expr t))
+		  (values (clpython.parser:parse (pathname fname) :one-expr t)))
       (test t (excl.osi:unlink fname)))
     
     ;; handling eof
     (test-true (subtypep '{UnexpectedEofError} '{SyntaxError}))
     (flet ((try-parse (s)
-	     (handler-case (parse s)
+	     (handler-case (values (parse s))
 	       ({UnexpectedEofError} () :unexp-eof-error)
 	       ({SyntaxError}        () :syntax-error)
 	       (condition            () :condition))))
@@ -170,14 +170,14 @@ def f(): pass" nil))
       (test :syntax-error    (try-parse " 42") :fail-info "(Leading whitespace)"))
     (test-equal 42 (handler-bind (({SyntaxError} (lambda (c) (declare (ignore c))
                                                          (continue))))
-                     (parse " 42" :one-expr t)))
+                     (values (parse " 42" :one-expr t))))
     ;; strings with quotes
     (let ((s (apply #'concatenate 'string (mapcar 'string '(#\' #\" #\\ #\' #\')))))
-      (test-equal (parse s :one-expr t) "\"'"))
+      (test-equal (values (parse s :one-expr t)) "\"'"))
     (let ((s (apply #'concatenate 'string (mapcar 'string '(#\' #\\ #\\ #\')))))
-      (test-equal (ignore-errors (parse s :one-expr t)) "\\"))
+      (test-equal (ignore-errors (values (parse s :one-expr t))) "\\"))
     (let ((s (apply #'concatenate 'string (mapcar 'string '(#\' #\\ #\\ #\' #\Space)))))
-      (test-equal (ignore-errors (parse s :one-expr t)) "\\"))
+      (test-equal (ignore-errors (values (parse s :one-expr t))) "\\"))
     ;; trailing comma
     (test-no-error (parse "def f(a=3,): pass") :known-failure t)
     ;; backslash at end of whitespace line
@@ -207,16 +207,16 @@ else:
 		    (test ,str (py-pprint (parse ,str))
 			  :test 'string-strip-= ,@options)
 		    (when (string-strip-= ,str (py-pprint (parse ,str)))
-		      (test-equal (parse ,str)
-				  (parse (py-pprint (parse ,str)))
+		      (test-equal (values (parse ,str))
+				  (values (parse (py-pprint (parse ,str))))
 				  ,@options))))
 	       (pe (str &rest options)
 		 `(progn 
 		    (test ,str (py-pprint (parse ,str :one-expr t))
 			  :test 'string-strip-= ,@options)
 		    (when (string-strip-= ,str (py-pprint (parse ,str :one-expr t)))
-		      (test-equal (parse ,str)
-				  (parse (py-pprint (parse ,str :one-expr t)))
+		      (test-equal (values (parse ,str))
+				  (values (parse (py-pprint (parse ,str :one-expr t))))
 				  ,@options)))))
       #+(or)(parse "")
       ;; number

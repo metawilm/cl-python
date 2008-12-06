@@ -184,7 +184,7 @@ Value should be a (weak) EQ hash table: (make-weak-key-hash-table :test 'eq).")
     
 (defun record-source-location (outcome start end)
   "Records location in *python-form->source-location*"
-  (check-type outcome (or list literal))
+  (check-type outcome (or list literal number string symbol)) ;; XXX reduce number of possibilities
   (when *python-form->source-location*
     (let ((existing (gethash outcome *python-form->source-location*))
           (loc (list :start start :end end)))

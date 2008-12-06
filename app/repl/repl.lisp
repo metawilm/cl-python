@@ -266,7 +266,7 @@ KIND can be :ptime, :time, :space, :pspace or NIL."
                                       (multiple-value-bind (new-str changed)
                                           (remove-interpreter-prompts total *prompts*)
                                         (when changed
-                                          (handler-case (parse new-str)
+                                          (handler-case (values (parse new-str))
                                             ({UnexpectedEofError} ()
                                               (return-from handle-as-python-code t))
                                             (error (err2)

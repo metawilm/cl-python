@@ -19,7 +19,7 @@
          (suffix.len (length suffix)))
     (and (>= name.len suffix.len)
          (string= (subseq name (- name.len suffix.len)) suffix))))
-           
+
 (defun stmt-node-p (symbol)
   (symbol-ends-with-p symbol "-stmt"))
 
@@ -32,6 +32,10 @@
               collect x)
           'string<)
   "List of all ..-STMT and ..-EXPR symbols that can occur in ASTs.")
+
+(defun stmt-or-expr-node-p (symbol)
+  (check-type symbol symbol)
+  (member symbol *expr-stmt-nodes*))
 
 (defvar *multi-line-statements* '(([classdef-stmt] "class")
                                   ([for-in-stmt]   "for")

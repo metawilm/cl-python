@@ -72,4 +72,5 @@ If COMPILE is true, the AST is compiled into a function before running."
          (fasl-file (compiled-file-name :module module fname))
          (*import-force-recompile* t)
          (*import-compile-verbose* t))
+    (declare (special *import-force-recompile* *import-compile-verbose*))
     (%compile-py-file fname :mod-name module :output-file fasl-file)))
