@@ -1287,6 +1287,15 @@ but the latter two classes are not in CPython.")
       using (hash-value val)
       collect (cons (string key) val)))
 
+(defmethod dir-items ((x class) &rest args)
+  (let (res)
+    (do-cpl (c x)
+      (class.raw-attr-map c (lambda (k v)
+                              (pushnew (cons (symbol-name k) v) res 
+                                       ;; take the first entry: subclass overrides superclass
+                                       :test 'eq :key 'car))))
+    res))
+
 (defun copy-module-contents (&key from to)
   (check-type from module)
   (check-type to module)
@@ -2896,18 +2905,16 @@ finished; F will then not be called again."
            #-clpython-exceptions-are-python-objects
            (when (subtypep f '{Exception})
              (return-from py-call (make-condition f :args (copy-list args))))
-           (let ((__call__ (class.attr-no-magic (py-class-of f) '{__call__})))
+           (call-next-method))
+
+  (:method ((x t) &rest args) ;; objects
+           (let ((__call__ (class.attr-no-magic (py-class-of x) '{__call__})))
              (cond ((functionp __call__)
-                    (apply __call__ f args))
+                    (apply __call__ x args))
                    (__call__
-                    (apply #'py-call (bind-val __call__ f (py-class-of f)) args))
+                    (apply #'py-call (bind-val __call__ x (py-class-of x)) args))
                    (t 
-                    (error "Don't know how to call: ~S (args: ~A)" f args))))
-           #+(or)
-	   (let ((__call__ (x.class-attr-no-magic.bind f '{__call__})))
-	     (if __call__
-		 (apply 'py-call __call__ args)
-	       (error "Don't know how to call: ~S (args: ~A)" f args))))
+                    (error "Don't know how to call: ~S (args: ~A)" x args)))))
 
   ;; XXX For bound/unbound/static method: need to check if object is
   ;; not instance of (user-defined) subclass?
