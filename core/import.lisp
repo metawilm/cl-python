@@ -114,7 +114,7 @@ Returns NIL if nothing found."
 
 (defparameter *import-force-recompile* nil)
 (defparameter *import-force-reload*    nil)
-(defparameter *import-compile-verbose* nil)
+(defparameter *import-compile-verbose* #+sbcl nil #-sbcl t)
 (defparameter *import-load-verbose*    t)
 
 (defmacro with-python-code-reader (() &body body)
