@@ -115,30 +115,6 @@ then (optionally) compiled and called. Should it be compiled before running?")
 
 (defvar *exec-stmt-result-handler* nil)
 
-;;; Line number handling
-
-#+(or)
-(defvar *include-line-number-hook-calls* nil
-  "Include calls to *runtime-line-number-hook* in generated code?")
-
-#+(or)
-(defvar *runtime-line-number-hook* nil
-  "Function to call at run time, when arrived on new line number")
-
-#+(or)
-(defvar *compile-line-number-hook* nil
-  "Function to call at compile time, when a line number token is encountered.
-Only has effect when *include-line-number-hook-calls* is true.")
-
-#+(or)
-(defmacro with-line-numbers ((&key compile-hook runtime-hook) &body body)
-  ;; You have to set *runtime-line-number-hook* yourself.
-  `(let ((*include-line-number-hook-calls* t)
-	 (clpython.parser::*include-line-numbers* t)
-	 ,@(when runtime-hook `((*runtime-line-number-hook* ,runtime-hook)))
-	 ,@(when compile-hook `((*compile-line-number-hook* ,compile-hook))))
-     ,@body))
-
 ;;; Compiler Progress Messages
 
 (defvar *signal-compiler-messages* nil
