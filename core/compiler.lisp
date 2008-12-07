@@ -154,17 +154,6 @@ Disabled by default, to not confuse the test suite.")
 	     collect `(,x (gensym ,(symbol-name x))))
      ,@body))
 
-(defun multi-eval-safe (form)
-  ;; Can FORM be evaluated multiple times safely?
-  ;; (Always yielding the same result, without side effects)
-  (cond ((match-p form '([identifier-expr] ?_))
-         ;; variable lookup
-         t)
-        ((atom form)
-         t)
-        (t
-         nil)))
-
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; Namespaces
 
@@ -811,7 +800,6 @@ Disabled by default, to not confuse the test suite.")
                                    ([call-expr] ?id-getattr (?obj ?attr) () nil nil)
                                    ?pos-args () nil nil))
       (with-perhaps-matching (?id-getattr ([identifier-expr] {getattr}))
-        (assert (multi-eval-safe ?id-getattr))
         (comp-msg "Optimizing \"getattr(x,y)(...)\" call, skipping bound method.")
         (return-from [call-expr]
           `(if (eq ,?id-getattr (symbol-function '{getattr}))
