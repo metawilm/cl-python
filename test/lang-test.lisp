@@ -188,7 +188,13 @@ assert i == 1"))
 
 (defmethod test-lang ((kind (eql :call-expr)))
   (run-no-error "def f(x,y,z=3,*arg,**kw): return x,y,z,arg,kw
-assert (1,2,3,(),{}) == f(1,2)"))
+assert (1,2,3,(),{}) == f(1,2)")
+  (run-no-error "
+class C:
+  def __call__(self, *args):
+    return args
+x = C()
+x(1,2,3) == (1,2,3)"))
 
 (defmethod test-lang ((kind (eql :classdef-stmt)))
   (run-no-error "
