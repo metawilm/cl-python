@@ -40,6 +40,11 @@
       (values dict (remhash attr dict))
     (clpython.package::alist-remove-prop dict attr)))
 
+(defun funky-dict-map (dict func)
+  (if (hash-table-p dict)
+      (maphash func dict)
+    (loop for (k . v) in dict do (funcall func k v))))
+
 ;;; Class dict handling
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
@@ -121,13 +126,9 @@
         (setf (class.raw-dict class) dict2))
       found)))
 
-#+(or)
-(defun class-raw-attr-map (class func)
+(defun class.raw-attr-map (class func)
   (let ((dict (class.raw-dict class)))
-    (if (hash-table-p dict)
-        (maphash func dict)
-      (loop for (k . v) in dict
-          do (funcall func k v)))))
+    (funky-dict-map dict func)))
 
 ;;; Class attribute cache
 
@@ -370,4 +371,3 @@ Returns NIL if not found."
   (let ((x.class (py-class-of x)))
     (or (class.attr-no-magic x.class '{__set__})
         (class.attr-no-magic x.class '{__delete__}))))
-
