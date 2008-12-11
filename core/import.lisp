@@ -140,7 +140,7 @@ Returns NIL if nothing found."
     (with-auto-mode-recompile (:verbose *import-compile-verbose*)
       (with-python-code-reader ()
         (handler-bind (#+sbcl(sb-int:simple-compiler-note #'muffle-warning))
-          (compile-file filename
+          (compile-file (truename filename)
                         :output-file output-file
                         #+allegro #+allegro :if-newer (not *import-force-recompile*)
                         :verbose *import-compile-verbose*))))))
