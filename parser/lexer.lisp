@@ -281,7 +281,8 @@ On EOF returns: eof-token, eof-token."
 (defgeneric read-kind (kind c1 &rest args)
   (:method :around (kind c1 &rest args)
            "Return source code location as second value."
-           (declare (ignore kind c1 args))
+           (declare (ignore kind c1 args)
+                    (dynamic-extent args))
            (let* ((start %lex-last-read-char-ix%)
                   (result (call-next-method))
                   (end %lex-last-read-char-ix%))
@@ -618,6 +619,7 @@ Coercion from float to int must be confirmed by the user.")
     (long-float   "l")))
 
 (defmethod read-kind ((kind (eql :number)) c1 &rest args)
+  (declare (dynamic-extent args))
   (assert (digit-char-p c1 10))
   (assert (null args))
   (flet ((read-int (base)
@@ -722,6 +724,7 @@ Coercion from float to int must be confirmed by the user.")
 
 (defmethod read-kind ((kind (eql :punctuation)) c1 &rest args)
   "Returns puncutation as symbol."
+  (declare (dynamic-extent args))
   (assert (or (punct-char1-p c1)
 	      (punct-char-not-punct-char1-p c1)))
   (assert (null args))
@@ -825,6 +828,7 @@ Coercion from float to int must be confirmed by the user.")
 (defmethod read-kind ((kind (eql :whitespace)) c1 &rest args)
   "Reads all whitespace and comments, until first non-whitespace character.
 Returns NEWLINE-P, NEW-INDENT, EOF-P."
+  (declare (dynamic-extent args))
   (assert (null args))
   (loop with newline-p = nil and n-spaces = 0 and n-tabs = 0
       for c = c1 then (lex-read-char :eof-error nil)
@@ -852,6 +856,7 @@ Returns NEWLINE-P, NEW-INDENT, EOF-P."
 
 (defmethod read-kind ((kind (eql :comment-line)) c &rest args)
   "Read until the end of the line, leaving the last #\Newline in the source."
+  (declare (dynamic-extent args))
   (assert (null args))
   (assert (char= c #\#))
   (loop for c = (lex-read-char :eof-error nil)
