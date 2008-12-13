@@ -210,28 +210,6 @@ Returns the loaded module, or NIL on error."
                   mod-name src-file filename within-mod-path)
             (remove-loaded-module mod-name habitat :must-exist t)))))))
 
-(defun parent-package-local-search-path (mod-name-as-list &rest import-options)
-  "Path of MOD-NAME-AS-LIST's parent package."
-  (assert (> (length mod-name-as-list) 1))
-  (let* ((parent-name-list (butlast mod-name-as-list))
-	 (parent-mod (apply #'py-import parent-name-list import-options)))
-    (unless (module-package-p parent-mod)
-      (py-raise '{ImportError}
-		"Cannot import '~A', as parent '~A' is not a package (it is: ~S)."
-		(module-dotted-name mod-name-as-list)
-		(module-dotted-name parent-name-list)
-		parent-mod))
-    (let ((parent-path (slot-value parent-mod 'filepath)))
-      (assert (typep parent-path 'pathname) (parent-path)
-	"Python package ~S should have a pathname as :filepath, but it is: ~S"
-	parent-mod parent-path)
-      (assert (string= (pathname-name parent-path :case :common)
-		       *package-indicator-filename*) ()
-	"Package ~A should have filepath pointing to the ~A file, but ~
-         it is pointing somewhere else: ~A."
-	parent-mod *package-indicator-filename* parent-path)
-      (make-pathname :name nil :defaults parent-path :case :common))))
-
 (defun module-dotted-name (list-name)
   (format nil "~{~A~^.~}" list-name))
 
@@ -292,21 +270,34 @@ as those are not distributed with CLPython."
       (push "." search-paths)
       (setf search-paths (nconc search-paths cl-user::*clpython-module-search-paths*)))
     
-    ;; In case of a dotted import ("import a.b"), search only in parent ("a") directory.
+    ;; In case of a dotted import ("import a.b.c"), recursively import the parent "a.b"
+    ;; and set the search path to only the location of that package.
     (when (> (length mod-name-as-list) 1)
-      (let (success)
+      (let (parent)
         (unwind-protect
-            (setf success (apply #'py-import (butlast mod-name-as-list)
+            (setf parent (apply #'py-import (butlast mod-name-as-list)
                                  :must-be-package t
                                  :outer-mod-name-as-list outer-mod-name-as-list
                                  options))
-          (unless success
+          (unless parent
             ;; PY-IMPORT did not import successfully, and we are unwinding.
             ;; No need for an additional ImportError.
             (warn "Could not import module `~A' as importing package `~A' failed.~@[~:@_Import attempted by: ~A~]"
                   dotted-name (module-dotted-name (butlast mod-name-as-list))
-                  within-mod-path))))
-      (setf search-paths (list (parent-package-local-search-path mod-name-as-list))))
+                  within-mod-path)))
+        (unless (module-package-p parent)
+          (py-raise '{ImportError}
+                    "Cannot import '~A', as parent '~A' is not a package (it is: ~S)."
+                    (module-dotted-name mod-name-as-list)
+                    (module-dotted-name (butlast mod-name-as-list))
+                    parent))
+        (let ((parent-path (slot-value parent 'filepath)))
+          (check-type parent-path pathname)
+          (assert (string= (pathname-name parent-path :case :common)
+                           *package-indicator-filename*) ()
+            "Package ~A should have filepath pointing to the ~A file, but ~
+             it is pointing somewhere else: ~A." parent *package-indicator-filename* parent-path)
+          (setf search-paths (list (make-pathname :name nil :defaults parent-path :case :common))))))
     
     ;; 3. Find a source or binary file somewhere in the collection of search paths
     (multiple-value-bind (kind src-file bin-file)
