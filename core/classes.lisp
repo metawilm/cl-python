@@ -1262,19 +1262,25 @@ but the latter two classes are not in CPython.")
 		   :initform "__main__" 
 		   :accessor module-name
 		   :documentation "The (dotted) module name")
-   (filepath       :initarg :path           :initform nil :accessor module-filepath :type pathname)
-   (builtinp       :initarg :builtin        :initform nil)
-   (packagep       :initarg :package        :initform :maybe :accessor module-package-p))
+   (builtinp       :initarg :builtin   :initform nil :accessor module-builtin-p)
+   (packagep       :initarg :package   :initform :maybe :accessor module-package-p)
+   ;; Keep track of original files
+   (src-pathname   :initarg :src-pathname :initform nil :accessor module-src-pathname
+                   :type (or pathname null))
+   (bin-pathname   :initarg :bin-pathname :initform nil :accessor module-bin-pathname
+                   :type (or pathname null))
+   (src-file-write-date :initarg :src-file-write-date :accessor module-src-file-write-date)
+   (bin-file-write-date :initarg :bin-file-write-date :accessor module-bin-file-write-date))
   (:metaclass py-type))
 
 (def-py-method module.__repr__ (x^)
   (with-output-to-string (s)
     (print-unreadable-object (x s :identity t)
-      (with-slots (name filepath builtinp) x
-	(format s "~@[~A ~]module `~A'~@[ from file ~S~]"
-		(when builtinp "builtin")
-		name
-		(unless builtinp filepath))))))
+      (with-slots (name builtinp src-pathname bin-pathname) x
+        (if builtinp
+            (format s "builtin module `~A'" name)
+          (format s "module `~A'~_ Src: ~A~_ Binary: ~A"
+                  name src-pathname bin-pathname))))))
 
 (defgeneric dir-items (item &rest args))
 

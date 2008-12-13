@@ -148,6 +148,7 @@ Disabled by default, to not confuse the test suite.")
   "The name of the module now being compiled; module.__name__ is set to it.")
 
 (defparameter *current-module-path* nil
+  ;; XXX remove, use *load-truename*
   "The path of the Python file being compiled; saved in module's `filepath' slot.")
 
 
@@ -1294,19 +1295,19 @@ otherwise work well.")
   ;; Returns the imported (sub)modules as multiple values: <module x.y.z>, <module a.b>.
   `(values ,@(loop for (mod-name-as-list bind-name) in items
                  for top-name = (car mod-name-as-list)
-                 collect `(let ((top-module (py-import '(,top-name)
-                                                       :within-mod-path module-path
-                                                       :within-mod-name module-name
-                                                       :must-be-package ,(not (null (cdr mod-name-as-list)))))
-                                (deep-module (py-import ',mod-name-as-list
-                                                        :within-mod-path module-path
-                                                        :within-mod-name module-name)))
+                 collect `(let* ((args (list :within-mod-path (when src-module-path
+                                                                (derive-pathname src-module-path))
+                                             :within-mod-name module-name))
+                                 (top-module (apply #'py-import '(,top-name)
+                                                    :must-be-package ,(not (null (cdr mod-name-as-list)))
+                                                    args))
+                                 (deep-module (apply #'py-import ',mod-name-as-list args)))
                             ([assign-stmt] top-module
                                            (([identifier-expr] ,(or bind-name top-name))))
                             deep-module))))
 
 (defmacro [import-from-stmt] (mod-name-as-list items &environment e)
-  `(let ((m (py-import '(,(car mod-name-as-list)) :within-mod-path module-path)))
+  `(let ((m (py-import '(,(car mod-name-as-list)) :within-mod-path src-module-path)))
      (declare (ignorable m)) ;; Ensure topleve module is imported relative to current mod
      (whereas ((mod-obj ,(if (= (length mod-name-as-list) 1)
                              'm
@@ -1373,25 +1374,37 @@ otherwise work well.")
   original-filename original-source subform-positions)
 
 (defmacro [module-stmt] (suite) ;; &environment e)
-  `(flet ((module-function (&key (%module-globals (make-eq-hash-table "module"))
-                                 (call-preload-hook t)
-                                 (module-name (or *current-module-name* ;; supplied at import time
-                                                  ',*current-module-name*)) ;; compile time value, if manually loading .fasl
-                                 (module-path ',*current-module-path*))
+  "If *MODULE-NAMESPACE* is bound, it is used."
+  (assert *current-module-name* (*current-module-name*)
+    "~S is unbound - should be the module currently being compiled." *current-module-name*)
+  `(flet ((module-function
+              (&key (%module-globals (make-eq-hash-table "module"))
+                    (call-preload-hook t)
+                    ;; The dotted name, used as module.__name__ and its __repr__
+                    (module-name (or *current-module-name* ;; load time
+                                     ',*current-module-name*)) ;; compile time
+                    ;; Determine source location at compile time
+                    (src-module-path ,(when *compile-file-truename*
+                                        (derive-pathname *compile-file-truename*)))
+                    (src-file-write-date ,(when *compile-file-truename*
+                                            (file-write-date *compile-file-truename*)))
+                    ;; Determine fasl location at load time 
+                    (bin-module-path (load-time-value *load-truename*))
+                    (bin-file-write-date (load-time-value (when *load-truename*
+                                                            (file-write-date *load-truename*)))))
             ;; GLOBALS-HANDLER determines how references to globals (module-level variables) are handled.
             ;; INITIAL-GLOBALS is an alist containing pre-set global variables: ((sym . val) ..)
             ;; CALL-PRELOAD-HOOK specifies whether *module-preload-hook* is called before the body is run.
             ;; MODULE-NAME is stored in __name__.
-            ;; MODULE-PATH ...
+            (declare (optimize (debug 3)))
             (with-pydecl ((:context :module)
                           #+(or)(:mod-futures  :todo-parse-module-ast-future-imports)) ;; todo
-              (let* ((*habitat* (or *habitat* (make-habitat :search-paths '(".")))))
+              (let* ((*habitat* (or *habitat* (make-habitat))))
                 (with-namespace ,(or *module-namespace*
                                      (make-instance 'hash-table-ns
                                        :dict-form '%module-globals
                                        :scope :module
-                                       :parent (make-builtins-namespace)
-                                       ))
+                                       :parent (make-builtins-namespace)))
                   (let ((*module-namespace* nil))
                     (flet ((%globals () (%locals))) ;; with-namespace defines %locals
                       (declare (ignorable #'%globals))
@@ -1402,7 +1415,10 @@ otherwise work well.")
                       (when (and call-preload-hook (boundp '*module-preload-hook*))
                         (let ((%module (make-instance 'module
                                          :name module-name
-                                         :path module-path
+                                         :src-pathname src-module-path
+                                         :bin-pathname bin-module-path
+                                         :src-file-write-date src-file-write-date
+                                         :bin-file-write-date bin-file-write-date
                                          :namespace-ht %module-globals)))
                           (funcall *module-preload-hook* %module)))
                       

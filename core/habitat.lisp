@@ -22,17 +22,14 @@
    (stderr          :initform *error-output* 
 		    :initarg :stderr
 		    :accessor habitat-stderr)
+   #+(or) ;; unused
    (search-paths    :initarg :search-paths
 		    :initform ()
 		    :accessor habitat-search-paths)
-   (known-mods      :initform ()
-		    :initarg :known-mods   
-		    :accessor habitat-known-mods
-		    :documentation "List of modules")
    (loaded-mods     :initform ()
 		    :initarg :loaded-mods   
 		    :accessor habitat-loaded-mods
-		    :documentation "List of modules; subset of KNOWN-MODS")
+		    :documentation "List of modules")
    (autoload-p      :initform :builtin
 		    :initarg :autoload-p
 		    :accessor habitat-autoload-p
@@ -46,51 +43,32 @@
 (defun make-habitat (&rest options)
   (apply #'make-instance 'habitat options))
 
-(defun get-known-module (name habitat)
-  (check-type name string)
+(defun get-loaded-module (&key src-pathname bin-pathname
+                               src-file-write-date bin-file-write-date
+                               habitat)
   (check-type habitat habitat)
-  (find name (habitat-known-mods habitat)
-	:key #'module-name
-	:test #'string-equal))
-
-(defun add-known-module (module habitat)
-  (check-type module module)
-  (check-type habitat habitat)
-  (remove-known-module (module-name module) habitat)
-  (push module (habitat-known-mods habitat)))
-
-(defun remove-known-module (name habitat &key must-exist (also-remove-from-loaded t))
-  (check-type name string)
-  (check-type habitat habitat)
-  (when must-exist
-    (assert (member name (habitat-known-mods habitat)
-		    :key #'module-name :test #'string-equal)))
-  (setf (habitat-known-mods habitat)
-    (remove name (habitat-known-mods habitat)
-	    :test #'string-equal :key #'module-name))
-  (when also-remove-from-loaded
-    (remove-loaded-module name habitat)))
-
-
-(defun get-loaded-module (name habitat)
-  (check-type name string)
-  (check-type habitat habitat)
-  (find name (habitat-loaded-mods habitat)
-	:key #'module-name
-	:test #'string-equal))
+  (loop for m in (habitat-loaded-mods habitat)
+      when (and (or (null src-pathname)
+                    (progn (check-type src-pathname pathname)
+                           (equal (module-src-pathname m) src-pathname)))
+                (or (null bin-pathname)
+                    (progn (check-type bin-pathname pathname)
+                           (equal (module-bin-pathname m) bin-pathname)))
+                (or (null src-file-write-date)
+                    (= (module-src-file-write-date m) src-file-write-date))
+                (or (null bin-file-write-date)
+                    (= (module-bin-file-write-date m) bin-file-write-date)))
+      return m))
 
 (defun add-loaded-module (module habitat)
   (check-type module module)
   (check-type habitat habitat)
-  (remove-loaded-module (module-name module) habitat)
+  ;; In general, don't remove the old module with same pathnames:
+  ;; when re-import goes wrong, the new failed module is popped,
+  ;; so the old one is available again.
   (push module (habitat-loaded-mods habitat)))
-  
-(defun remove-loaded-module (name habitat &key must-exist)
-  (check-type name string)
-  (check-type habitat habitat)
-  (when must-exist
-    (assert (member name (habitat-loaded-mods habitat)
-		    :key #'module-name :test #'string-equal)))
-  (setf (habitat-loaded-mods habitat)
-    (remove name (habitat-loaded-mods habitat)
-	    :test #'string-equal :key #'module-name)))
+
+(defun remove-loaded-module (&rest args &key habitat)
+  (whereas ((m (apply #'get-loaded-module args)))
+    (setf (habitat-loaded-mods habitat)
+      (remove m (habitat-loaded-mods habitat)))))
