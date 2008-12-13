@@ -560,6 +560,12 @@ assert b(-2) == -1")
 (defmethod test-lang ((kind (eql :import-stmt)))
   (run-no-error "import sys
 assert sys" :fail-info "Should work in both ANSI and Modern mode.")
+  ;; run compilation outside run-no-error, to prevent allegro style warning from failing the test
+  (clpython:run "
+import sys
+sys.path.append('./test/data/')
+import bar
+reload(bar)")
   (run-no-error "
 import sys
 sys.path.append('./test/data/')
@@ -567,6 +573,11 @@ for i in xrange(3):
   import bar
   assert bar.i == 1
 ")
+  ;; run outside run-no-error
+  (clpython:run "
+import sys
+sys.path.append('./test/data/')
+import zut.bla")
   (run-no-error "
 import sys
 sys.path.append('./test/data/')
