@@ -560,7 +560,19 @@ assert b(-2) == -1")
 (defmethod test-lang ((kind (eql :import-stmt)))
   (run-no-error "import sys
 assert sys" :fail-info "Should work in both ANSI and Modern mode.")
-  )
+  (run-no-error "
+import sys
+sys.path.append('./test/data/')
+for i in xrange(3):
+  import bar
+  assert bar.i == 1
+")
+  (run-no-error "
+import sys
+sys.path.append('./test/data/')
+for i in xrange(3):
+  import zut.bla
+  assert zut.bla.x"))
 
 (defmethod test-lang ((kind (eql :import-from-stmt)))
   (run-no-error "from sys import path; path.append('/foo'); del path[-1]"))
