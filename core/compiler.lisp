@@ -138,12 +138,16 @@ Disabled by default, to not confuse the test suite.")
 
 ;;; Compiler State
 
-(defconstant-once +__main__-module-name+ "__main__")
+(defparameter *__main__-module-name* "__main__")
 
-(defvar *current-module-name* +__main__-module-name+
+(defun default-module-name-p (x)
+  (and (stringp x)
+       (string= x *__main__-module-name*)))
+
+(defparameter *current-module-name* *__main__-module-name*
   "The name of the module now being compiled; module.__name__ is set to it.")
 
-(defvar *current-module-path* nil
+(defparameter *current-module-path* nil
   "The path of the Python file being compiled; saved in module's `filepath' slot.")
 
 
@@ -1283,22 +1287,23 @@ otherwise work well.")
 	     `((t ,else-clause)))))
 
 (defmacro [import-stmt] (items)
-  `(values ,@(loop for (mod-name-as-list bind-name) in items nconc
-		   (loop for m in mod-name-as-list
-                       for toplevel = t then nil ;; Ensure topleve module is imported relative to current mod
-		       for res = (list m) then (nconc res (list m)) collect
-			 `(let ((module-obj (py-import ',res ,@(when toplevel `(:within-mod-path module-path)))))
-			    (declare (ignorable module-obj))
-			    ,(cond ((= (length res) 1)
-				    (if (= 1 (length mod-name-as-list))
-					`([assign-stmt] module-obj
-							(([identifier-expr] ,(or bind-name
-										 (car mod-name-as-list)))))
-				      `([assign-stmt] module-obj (([identifier-expr] ,(car mod-name-as-list))))))
-				   ((and bind-name (= (length res) (length mod-name-as-list)))
-				    `([assign-stmt] module-obj (([identifier-expr] ,bind-name)))))
-			    ,(when (equalp res mod-name-as-list)
-			       `module-obj))))))
+  ;; The effects of "import x.y.z" are:
+  ;;   1. modules "x", "x.y" and "x.y.z" are loaded (if they were not already)
+  ;;   2. name "x" is bound to the first module object, <module x>
+  ;; One import statement can contain multiple submodules to import (the items).
+  ;; Returns the imported (sub)modules as multiple values: <module x.y.z>, <module a.b>.
+  `(values ,@(loop for (mod-name-as-list bind-name) in items
+                 for top-name = (car mod-name-as-list)
+                 collect `(let ((top-module (py-import '(,top-name)
+                                                       :within-mod-path module-path
+                                                       :within-mod-name module-name
+                                                       :must-be-package ,(not (null (cdr mod-name-as-list)))))
+                                (deep-module (py-import ',mod-name-as-list
+                                                        :within-mod-path module-path
+                                                        :within-mod-name module-name)))
+                            ([assign-stmt] top-module
+                                           (([identifier-expr] ,(or bind-name top-name))))
+                            deep-module))))
 
 (defmacro [import-from-stmt] (mod-name-as-list items &environment e)
   `(let ((m (py-import '(,(car mod-name-as-list)) :within-mod-path module-path)))
@@ -1370,14 +1375,14 @@ otherwise work well.")
 (defmacro [module-stmt] (suite) ;; &environment e)
   `(flet ((module-function (&key (%module-globals (make-eq-hash-table "module"))
                                  (call-preload-hook t)
-                                 (module-name ',(or *current-module-name* "__main__"))
+                                 (module-name (or *current-module-name* ;; supplied at import time
+                                                  ',*current-module-name*)) ;; compile time value, if manually loading .fasl
                                  (module-path ',*current-module-path*))
-            "GLOBALS-HANDLER determines how references to globals (module-level variables) are handled.
-INITIAL-GLOBALS is an alist containing pre-set global variables: ((sym . val) ..)
-CALL-PRELOAD-HOOK specifies whether *module-preload-hook* is called before the body is run.
-MODULE-NAME is stored in __name__.
-MODULE-PATH ...
-DETERMINE-BODY-GLOBALS"
+            ;; GLOBALS-HANDLER determines how references to globals (module-level variables) are handled.
+            ;; INITIAL-GLOBALS is an alist containing pre-set global variables: ((sym . val) ..)
+            ;; CALL-PRELOAD-HOOK specifies whether *module-preload-hook* is called before the body is run.
+            ;; MODULE-NAME is stored in __name__.
+            ;; MODULE-PATH ...
             (with-pydecl ((:context :module)
                           #+(or)(:mod-futures  :todo-parse-module-ast-future-imports)) ;; todo
               (let* ((*habitat* (or *habitat* (make-habitat :search-paths '(".")))))
@@ -2360,7 +2365,7 @@ be bound."
   #+allegro
   (:method (stream (c excl:compiler-inconsistent-name-usage-warning))
            (write-string ";;; Warning: " stream)
-           (let ((mod (if (string= *current-module-name* +__main__-module-name+)
+           (let ((mod (if (default-module-name-p *current-module-name*)
                           nil
                         *current-module-name*)))
              (format stream "~Aunction `~A': unused variable `~A'."
