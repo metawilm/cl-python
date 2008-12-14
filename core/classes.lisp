@@ -2907,6 +2907,7 @@ finished; F will then not be called again."
   
   (:method ((f class) &rest args)
            (declare (dynamic-extent args)
+                    (ignorable args)
                     (optimize (speed 3) (safety 0) (debug 0)))
            #-clpython-exceptions-are-python-objects
            (when (subtypep f '{Exception})
