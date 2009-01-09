@@ -259,7 +259,6 @@ Used to avoid infinite recompilation/reloading loops.")
            (optimize (debug 3)))
   (check-type mod-name-as-list list)
   (check-type habitat habitat)
-  (warn "*import-recompiled-files* = ~A" *import-recompiled-files*)
   ;; Builtin modules are represented by Lisp module child packages of clpython.module
   ;; (e.g. clpython.module.sys).
   (when (= (length mod-name-as-list) 1)
@@ -329,7 +328,6 @@ Used to avoid infinite recompilation/reloading loops.")
           (setf bin-file (compiled-file-name kind just-mod-name src-file
                                              :include-dir nil :create-dir t))
           (unless (gethash bin-file *import-recompiled-files*)
-            (warn "~A not in ~A" bin-file *import-recompiled-files*)
             (when (or force-recompile
                       (not (probe-file bin-file))
                       (< (file-write-date bin-file)
@@ -337,7 +335,6 @@ Used to avoid infinite recompilation/reloading loops.")
               ;; This would be a good place for a "try recompiling" restart,
               ;; but implementations tend to provide that already.
               (%compile-py-file src-file :mod-name dotted-name :output-file bin-file)
-              (warn "adding ~A to ~A" bin-file *import-recompiled-files*)
               (setf (gethash bin-file *import-recompiled-files*) t))))
         
         ;; Now we have an up-to-date fasl file.
