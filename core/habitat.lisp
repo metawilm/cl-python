@@ -68,7 +68,7 @@
   ;; so the old one is available again.
   (push module (habitat-loaded-mods habitat)))
 
-(defun remove-loaded-module (&rest args &key habitat)
+(defun remove-loaded-module (&rest args &key habitat &allow-other-keys)
   (whereas ((m (apply #'get-loaded-module args)))
     (setf (habitat-loaded-mods habitat)
       (remove m (habitat-loaded-mods habitat)))))
