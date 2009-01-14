@@ -377,8 +377,7 @@ Used to avoid infinite recompilation/reloading loops.")
                          (apply #'warn args)))))
               (cond ((eq new-module 'uninitialized)
                      ;; An unwinding restart was invoked from within the LOAD.
-                     (log-abort nil)
-                     (return-from py-import))
+                     (log-abort nil))
                     ((null new-module)
                      ;; LOAD returned nil, probably due to the user invoking "skip loading" restart.
                      ;; The contract of this function requires raising an error.
