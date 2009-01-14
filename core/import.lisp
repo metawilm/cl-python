@@ -363,7 +363,7 @@ Used to avoid infinite recompilation/reloading loops.")
                             (declare (ignore c))
                             (and (probe-file src-file) (probe-file bin-file)))
                     :report (lambda (s) (format s "Recompile and re-import module `~A' ~
-                                                   in file ~A" dotted-name src-file))
+                                                   from file ~A" dotted-name src-file))
                   (delete-file bin-file)
                   (return-from py-import ;; Restart the py-import call
                     (apply #'py-import mod-name-as-list options))))
