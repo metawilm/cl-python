@@ -154,7 +154,7 @@ and several hundred test successes. Unintended test errors will have the note \"
      (:h2 "Completeness")
      (:p "Almost all Python language features are implemented, like generators, classes, metaclasses, modules, 
 list comprehensions, and of course " (:i "lambda") ". A few fairly new Python features introduced
-with " ((:a href "http://docs.python.org/whatsnew/whatsnew25.html" class "externab") "Python 2.5")
+with " ((:a href "http://docs.python.org/whatsnew/whatsnew25.html" class "external") "Python 2.5")
 " are missing:")
      (:ul (:li "Absolute and relative imports: &nbsp;" (:i "from .. import x"))
           (:li "Generators that use " (:i "yield") " as expression: &nbsp;" (:i "y = (yield x)")))
@@ -422,7 +422,7 @@ If small integers are common for the <i>+</i> operator, the compiler macro for <
 
     (h2-anchor #1#)
     (:p "Almost all language features are implemented, including the <i>yield</i> statement (to create generators). Some new features, introduced with "
-        ((:a href "http://docs.python.org/whatsnew/whatsnew25.html")
+        ((:a href "http://docs.python.org/whatsnew/whatsnew25.html" class "external")
          "Python 2.5")
         ", have not been implemented yet. This is due to lack of time, not for technical reasons. 
 The missing language features are:")
