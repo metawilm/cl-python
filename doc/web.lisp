@@ -131,7 +131,7 @@ are available to Python code, and Python libraries can be accessed by Lisp code.
      (:p "To get the source code from CVS:")
      (:ul (:li (:i "cvs -d :pserver:cvspublic@cvspublic.franz.com:/cvs-public login"))
           (:li "Password:" (:i "cvspublic"))
-          (:li (:i "cvs -d :pserver:cvspublic@cvspublic.franz.com:/cvs-public checkout clpython")))
+          (:li (:i "cvs -d :pserver:cvspublic@cvspublic.franz.com:/cvs-public checkout -P clpython")))
      
      (:h2 "Install")
      (:p "To compile and load CLPython you need " ((:a href "http://www.cliki.net/asdf" class "external") "asdf") ": "
