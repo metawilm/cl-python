@@ -51,14 +51,17 @@
 
 (defun run-python-ast (ast &key (habitat *habitat*)
                                 (compile *compile-python-ast-before-running*)
-                                run-args)
+                                run-args
+                                compile-quiet)
   "Run Python AST in freshly bound habitat.
 If COMPILE is true, the AST is compiled into a function before running."
   (with-compiler-generated-syntax-errors ()
     (let* ((*habitat* habitat)
            (get-module-f `(lambda () ,ast))
            (fc (if compile
-                   (compile nil get-module-f)
+                   (let ((*compile-print* (if compile-quiet nil *compile-print*))
+                         (*compile-verbose* (if compile-quiet nil *compile-verbose*)))
+                     (compile nil get-module-f))
                  (coerce get-module-f 'function))))
       (let* (module-function
              (*module-function-hook* (lambda (f) (setf module-function f))))

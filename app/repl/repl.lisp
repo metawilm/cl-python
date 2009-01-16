@@ -193,7 +193,8 @@ KIND can be :ptime, :time, :space, :pspace or NIL."
                (lambda () (let ((clpython::*module-namespace* mod-namespace))
                             (clpython::run-python-ast suite :run-args
                                                       (list :%module-globals *repl-module-globals*)
-                                                      :compile *repl-compile*))))
+                                                      :compile *repl-compile*
+                                                      :compile-quiet t))))
              (nice-one-line-input-abbrev (total)
                (check-type total string)
                (loop while (and (plusp (length total))
