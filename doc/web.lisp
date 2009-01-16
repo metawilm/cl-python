@@ -49,6 +49,7 @@
 (defmacro with-page-template (options &body body)
   (let ((title (second (find :title options :key #'first)))
         (page (second (find :page options :key #'first))))
+    (declare (ignorable page))
     (check-type title string)
     `(html
       (:html
@@ -90,6 +91,22 @@
     ,string))
 )
 
+(defmacro with-package-details ((rel-name is-first perc details) &body body)
+  `(let ((.pkgs (sort (excl:package-children :clpython.module) #'string<
+                      :key #'package-name)))
+     (loop for .p in .pkgs
+         for ,is-first = t then nil
+         do (multiple-value-bind (.summary .ratio ,details)
+                (clpython::package-impl-status .p)
+              (declare (ignore .summary))
+              (let ((,perc (round (* 100 (or .ratio 0))))
+                    (,rel-name (clpython::relative-package-name .p :clpython.module)))
+                (declare (ignorable ,is-first ,details ,perc))
+                ,@body)))))
+
+(defmacro h2-anchor (string)
+  `((:h2 id ,(make-anchor-text string)) ,string))
+
 (defmethod fill-page ((page (eql :main)))
   (with-page-template ((:page :main)
                        (:title "CLPython - an implementation of Python in Common Lisp"))
@@ -104,9 +121,8 @@ are available to Python code, and Python libraries can be accessed by Lisp code.
      (:p "CLPython runs successfully on the following platforms:")
      (:ul (:li ((:a href "http://franz.com/products/allegrocl/" class "external") "Allegro CL 8.1"))
           (:li ((:a href "http://www.lispworks.com/" class "external") "LispWorks 5.0"))
-          (:li ((:a href "http://sbcl.sourceforge.net/" class "external") "SBCL 1.0.16")))
-     (:p "CLPython does not run yet on the following platforms::")
-     (:ul (:li ((:a href "http://www.cons.org/cmucl/" class "external") "CMUCL")))
+          (:li ((:a href "http://sbcl.sourceforge.net/" class "external") "SBCL 1.0.16"))
+          (:li ((:a href "http://www.cons.org/cmucl/" class "external") "CMUCL 19E (Snapshot 2009-01)")))
      (:p "There are dependencies on "
          ((:a href "http://common-lisp.net/project/closer/closer-mop.html" class "external") "Closer to MOP")
          " and " ((:a href "http://www.cliki.net/ptester" class "external") "ptester") ".")
@@ -390,18 +406,7 @@ If small integers are common for the <i>+</i> operator, the compiler macro for <
       (:p)))))
 
 
-(defmacro with-package-details ((rel-name is-first perc details) &body body)
-  `(let ((.pkgs (sort (excl:package-children :clpython.module) #'string<
-                      :key #'package-name)))
-     (loop for .p in .pkgs
-         for ,is-first = t then nil
-         do (multiple-value-bind (.summary .ratio ,details)
-                (clpython::package-impl-status .p)
-              (declare (ignore .summary))
-              (let ((,perc (round (* 100 (or .ratio 0))))
-                    (,rel-name (clpython::relative-package-name .p :clpython.module)))
-                (declare (ignorable ,is-first ,details ,perc))
-                ,@body)))))
+
 (defmacro make-anchor-links (&rest strings)
    (assert strings)
    `((:p style "font-size: small")
@@ -410,9 +415,6 @@ If small integers are common for the <i>+</i> operator, the compiler macro for <
               collect " | "
               collect (anchor-link s))
         " ]"))
-
-(defmacro h2-anchor (string)
-  `((:h2 id ,(make-anchor-text string)) ,string))
 
 (defmethod fill-page ((page (eql :status)))
   (with-page-template ((:page :status)
