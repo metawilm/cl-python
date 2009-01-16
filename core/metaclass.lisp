@@ -105,12 +105,16 @@
 
 (defgeneric py-hash (x))
 
+;;; Python dicts are hash tables with custom equality (py-==) and hash functions (py-hash).
+
 #+sbcl
 (sb-int:define-hash-table-test 'py-hash-table-test #'py-==->lisp-val #'py-hash)
+#+cmu
+(extensions:define-hash-table-test 'py-hash-table-test #'py-==->lisp-val #'py-hash)
 
 (defun make-py-hash-table ()
   (or #+(or allegro lispworks) (make-hash-table :test 'py-==->lisp-val :hash-function 'py-hash)
-      #+sbcl (make-hash-table :test 'py-hash-table-test)
+      #+(or cmu sbcl) (make-hash-table :test 'py-hash-table-test)
       (error "Creating python dict not suported in this environment.")))
 
 ) ;; eval-when

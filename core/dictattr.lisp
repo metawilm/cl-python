@@ -60,12 +60,27 @@
 (defconstant-once +py-class-dict-slot-index+
     (class-slot-ix 'dict 'py-type 'py-meta-type))
 
+(defconstant-once +py-class-classname-slot-name+
+  #+allegro 'excl::name
+  #+cmu 'pcl::name
+  #+lispworks 'clos::name
+  #+sbcl 'sb-pcl::name
+  #-(or allegro cmu lispworks sbcl) 
+  (break "Define slot name containing class name, for this implementation."))
+
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (defconstant +use-standard-instance-access-setf+
+    #+allegro t
+    #+cmu nil ;; CMUCL lacks (SETF PCL:STANDARD-INSTANCE-ACCESS)
+    #+lispworks t
+    #+sbcl t)
+
+  (if +use-standard-instance-access-setf+
+      (pushnew :clpython-use-standard-instance-access-setf *features*)
+    (setf *features* (remove :clpython-use-standard-instance-access-setf *features*))))
+
 (defconstant-once +py-class-classname-slot-index+
-    (class-slot-ix #+allegro 'excl::name
-                   #+lispworks 'clos::name
-		   #+sbcl 'sb-pcl::name
-                   #-(or allegro lispworks sbcl) (break "Define slot name containing class name, for this implementation.")
-                   'py-type 'py-meta-type))
+  (class-slot-ix +py-class-classname-slot-name+ 'py-type 'py-meta-type))
 
 (defconstant-once +dicted-object-dict-index+
     (class-slot-ix 'dict 'dicted-object))
@@ -99,7 +114,10 @@
   `(#.+standard-instance-access-func+ ,class +py-class-classname-slot-index+))
 
 (defun (setf class.raw-dict) (new-val class)
-  (setf (#.+standard-instance-access-func+ class +py-class-dict-slot-index+) new-val))
+  #+clpython-use-standard-instance-access-setf
+  (setf (#.+standard-instance-access-func+ class +py-class-dict-slot-index+) new-val)
+  #-clpython-use-standard-instance-access-setf
+  (setf (slot-value class 'dict) new-val))
 
 
 (defun class.raw-attr-get (class attr)

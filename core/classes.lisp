@@ -1794,7 +1794,7 @@ But if RELATIVE-TO package name is given, result may contains dots."
 
 (def-py-method py-bool.__new__ :static (cls &optional (val 0))
   (let ((bool-val (if (py-val->lisp-bool val) +the-true+ +the-false+)))
-    (if (eq cls (ltv-find-class 'py-bool))
+    (if (eq cls (find-class 'py-bool))
 	bool-val
       (make-instance cls :lisp-object bool-val))))
 
@@ -2911,6 +2911,10 @@ finished; F will then not be called again."
                     (optimize (speed 3) (safety 0) (debug 0)))
            #-clpython-exceptions-are-python-objects
            (when (subtypep f '{Exception})
+             #+cmu (when (typep f 'class)
+                     ;; CMUCL Snapshot 2009-01 bug: 
+                     ;;  make-condition does not work with class arguments.
+                     (setf f (class-name f)))
              (return-from py-call (make-condition f :args (copy-list args))))
            (call-next-method))
 

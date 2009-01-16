@@ -123,7 +123,12 @@ http://groups.google.nl/group/comp.lang.lisp/msg/2520fe9bc7749328?dmode=source"
   '(integer 0 (#.+max-char-code+)))
 
 (defmacro ltv-find-class (clsname)
-  `(load-time-value (find-class ,clsname)))
+  ;; As the order of executing load-time-value forms relative to the order
+  ;; of loading toplevel forms is explicitly undefined, need to be careful.
+  `(or (load-time-value (find-class ,clsname nil))
+       (let ((.cache (load-time-value (cons nil nil))))
+         (or (car .cache)
+             (setf (car .cache) (find-class ,clsname))))))
 
 (defun alist-remove-prop (alist attr)
   "Removes first occurrence, if any. Returns NEW-LIST, FOUNDP."

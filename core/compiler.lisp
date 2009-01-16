@@ -389,6 +389,19 @@ Disabled by default, to not confuse the test suite.")
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;; Setf expansion
+
+;; In addition to the standard 5 values, there is also a "delete" form
+;; relevant in Python. This form used to be returned as the sixth form
+;; by the setf expanders defined in this file. However, that is not a
+;; portable mechanism; it turns out CMUCL does not communicate the
+;; sixth value to the caller of "get-setf-expansion". Thus this hack.
+
+(defparameter *want-DEL-setf-expansion* nil
+  "Whether the requested setf expansion is for a 'delete' stmt, not for
+an assigment statement. This changes at least the returned 'store' form.")
+    
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;  The macros corresponding to AST nodes
 
 (defun assert-stmt-1 (test test-ast raise-arg)
@@ -482,14 +495,15 @@ Disabled by default, to not confuse the test suite.")
 (define-setf-expander [attributeref-expr] (item attr)
   (with-matching (attr ([identifier-expr] ?name))
     (with-gensyms (prim store)
-      (values `(,prim) ;; temps
-              `(,item) ;; values
-              `(,store)   ;; stores
-              `(with-pydecl ((:inside-setf-py-attr t)) ;; store-form
-                 (setf (attr ,prim ',?name) ,store))
-              `(attr ,prim ',?name)                 ;; read-form
-              `(with-pydecl ((:inside-setf-py-attr t)) ;; del-form
-                 (setf (attr ,prim ',?name) nil))))))
+      (let ((store-form `(with-pydecl ((:inside-setf-py-attr t))
+                           (setf (attr ,prim ',?name) ,store)))
+            (del-form `(with-pydecl ((:inside-setf-py-attr t))
+                         (setf (attr ,prim ',?name) nil))))
+        (values `(,prim) ;; temps
+                `(,item) ;; values
+                `(,store)   ;; stores
+                (if *want-DEL-setf-expansion* del-form store-form) ;; store/delete form
+                `(attr ,prim ',?name)))))) ;; read-form
 
 (defmacro [augassign-stmt] (&whole whole op place val &environment env)
   (check-valid-assignment-targets (list place) :augmented t)
@@ -922,9 +936,10 @@ Disabled by default, to not confuse the test suite.")
     (raise-syntax-error "Statement `continue' was found outside loop.")))
 
 (defmacro [del-stmt] (item &environment e)
-  (multiple-value-bind (temps values stores store-form read-form del-form)
-      (get-setf-expansion item e)
-    (declare (ignore stores store-form read-form))
+  (multiple-value-bind (temps values stores del-form read-form)
+      (let ((*want-DEL-setf-expansion* t))
+        (get-setf-expansion item e))
+    (declare (ignore stores read-form))
     (assert del-form () "No DEL form for: ~A" item)
     `(let ,(mapcar #'list temps values)
        ,del-form)))
@@ -1257,25 +1272,26 @@ otherwise work well.")
   ;; XXX built-in non-shadowable values like True, False, None, Ellipsis, NotImplemented
   (let ((ns (get-pydecl :namespace e)))
     (with-gensyms (store)
-      (values () ;; temps
-              () ;; values
-              `(,store) ;; stores
-              (ns.find-form #'ns.write-form ns name store) ;; write
-              `(or ,(ns.find-form #'ns.read-form ns name)
-                   ,(unless *debug-assume-variables-bound*
-                      `(unbound-variable-error ',name :expect-value t))) ;; read
-              `(if ,(ns.find-form #'ns.del-form ns name)
-                   nil
-                 ,(unless *debug-assume-variables-bound*
-                    `(unbound-variable-error ',name :expect-value nil))))))) ;; delete
+      (let ((store-form (ns.find-form #'ns.write-form ns name store))
+            (del-form `(if ,(ns.find-form #'ns.del-form ns name)
+                           nil
+                         ,(unless *debug-assume-variables-bound*
+                            `(unbound-variable-error ',name :expect-value nil)))))
+        (values () ;; temps
+                () ;; values
+                `(,store) ;; stores
+                (if *want-DEL-setf-expansion* del-form store-form) ;; write/delete form
+                `(or ,(ns.find-form #'ns.read-form ns name)
+                     ,(unless *debug-assume-variables-bound*
+                        `(unbound-variable-error ',name :expect-value t)))))))) ;; read form
 
 (defmacro [identifier-expr] (&whole whole name &environment e)
   ;; The identifier is used for its value.
   ;; (Assignent targets are handled by the setf expander.)
   (check-type name symbol)
-  (multiple-value-bind (temps values stores store-form read-form del-form)
+  (multiple-value-bind (temps values stores store-form read-form)
       (get-setf-expansion whole e)
-    (declare (ignore temps values stores store-form del-form))
+    (declare (ignore temps values stores store-form))
     read-form))
 
 (defmacro [if-expr] (condition then else)
@@ -1469,12 +1485,13 @@ otherwise work well.")
 (define-setf-expander [subscription-expr] (item subs &environment e)
   (declare (ignore e))
   (with-gensyms (it su store)
-    (values `(,it ,su) ;; temps
-	    `(,item ,subs) ;; values
-	    `(,store) ;; stores
-	    `(setf (py-subs ,it ,su) ,store) ;; store-form
-	    `(py-subs ,it ,su) ;; read-form
-	    `(setf (py-subs ,it ,su) nil)))) ;; del-form
+    (let ((store-form `(setf (py-subs ,it ,su) ,store))
+          (del-form `(setf (py-subs ,it ,su) nil)))
+      (values `(,it ,su) ;; temps
+              `(,item ,subs) ;; values
+              `(,store) ;; stores
+              (if *want-DEL-setf-expansion* del-form store-form) ;; delete/store-form
+              `(py-subs ,it ,su))))) ;; read-form
 
 (defmacro [suite-stmt] (stmts)
   (if (null (cdr stmts))
@@ -1634,23 +1651,23 @@ inside an `except' clause.")
 
 (define-setf-expander list/tuple-expr (items &environment e)
   (with-gensyms (store val-list)
-    (values () ;; temps
-	    () ;; values
-	    (list store)
-	    
-	    `(let ((,val-list (assign-stmt-list-vals ,store ,(length items))))
-	       ,@(mapcar (lambda (it)
-			   (multiple-value-bind (temps values stores store-form)
-			       (get-setf-expansion it e)
-			     (assert (null (cdr stores)))
-			     `(let* (,@(mapcar #'list temps values)
-				     (,(car stores) (pop ,val-list)))
-				,store-form)))
-			 items)
-	       ,store)
-	    
-	    'setf-tuple-read-form-unused
-	    `(progn ,@(loop for it in items collect `([del-stmt] ,it))))))
+    (let ((store-form `(let ((,val-list (assign-stmt-list-vals ,store ,(length items))))
+                         ,@(mapcar (lambda (it)
+                                     (multiple-value-bind (temps values stores store-form read-form)
+                                         (get-setf-expansion it e)
+                                       (declare (ignore read-form))
+                                       (assert (null (cdr stores)))
+                                       `(let* (,@(mapcar #'list temps values)
+                                               (,(car stores) (pop ,val-list)))
+                                          ,store-form)))
+                                   items)
+                         ,store))
+          (del-form `(progn ,@(loop for it in items collect `([del-stmt] ,it)))))
+      (values () ;; temps
+              () ;; values
+              (list store)
+              (if *want-DEL-setf-expansion* del-form store-form)
+              'setf-tuple-read-form-unused))))
   
 (defmacro [unary-expr] (op item)
   (let ((py-op-func (get-unary-op-func-name op)))
