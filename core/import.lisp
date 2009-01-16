@@ -220,10 +220,12 @@ it being set before CLPython is loaded, e.g. in a Lisp configuration file.)")))
 (defun maybe-warn-set-search-paths (at-error)
   (cond ((or (not (boundp 'cl-user::*clpython-module-search-paths*))
              (not cl-user::*clpython-module-search-paths*))
-         (warn "Please customize variable ~S to be a list of paths that are tried ~
-\(in addition to the current directory and `sys.path') when locating a module in order to import it. ~
-Typically it should at least contain the path to the Python (2.5) standard libraries, ~
-as those are not distributed with CLPython."
+         (format t "~%;; Consider customizing variable ~S
+;; to be a list of paths that are tried when locating a module in order to import it
+;; (in addition to the current directory and `sys.path'). Typically it should at least
+;; contain the path to the Python (2.5) standard libraries, as those are not
+;; distributed with CLPython.
+"
                'cl-user::*clpython-module-search-paths*))
         ((not at-error)
          (format t "Using ~A default module search paths set in ~S~%"
