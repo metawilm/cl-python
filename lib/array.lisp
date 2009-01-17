@@ -1,4 +1,4 @@
-;; -*- Mode: LISP; Syntax: COMMON-LISP; Package: CLPYTHON.MODULE.ARRAY -*-
+;; -*- Mode: LISP; Syntax: COMMON-LISP; Package: CLPYTHON.MODULE.ARRAY; Readtable: PY-USER-READTABLE -*-
 ;;
 ;; This software is Copyright (c) Franz Inc. and Willem Broekema.
 ;; Franz Inc. and Willem Broekema grant you the rights to
@@ -8,6 +8,7 @@
 ;; known as the LLGPL.
 
 (in-package :clpython.module.array)
+(in-syntax clpython::*user-readtable*)
 
 (defclass |array| (clpython::object)
   ((kind    :type character :initarg :kind    :accessor py-array-kind)
@@ -58,7 +59,7 @@
 					     :element-type '(unsigned-byte 8)
 					     :if-does-not-exist :error)
 			      (file-length f)))))))
-    (warn "code ~A = type ~A = ~A bytes per item" type-code lisp-type item-size)
+    #+(or)(warn "code ~A = type ~A = ~A bytes per item" type-code lisp-type item-size)
     (flet ((create-array (&optional (size 0))
 	     (make-instance '|array|
 	       :kind type-code
@@ -80,7 +81,12 @@
 	(create-array)))))
 
 (def-py-method |array.__getitem__| (x item)
-  (aref (py-array-array x) item))
+  (check-type item (integer 0 #.most-positive-fixnum))
+  (let ((arr (py-array-array x)))
+    (if (< item (length arr))
+        (aref arr item)
+      (py-raise '{IndexError} "Index ~A outside the range of array ~A (num elements = ~A)."
+                item arr (length arr)))))
 
 (def-py-method |array.__setitem__| (x item value)
   (setf (aref (py-array-array x) item) value))
