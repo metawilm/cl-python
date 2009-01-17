@@ -50,7 +50,7 @@
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (defun class-slot-ix (name &rest classes)
     (flet ((slot-ix-in (cls-name)
-             (let* ((cls (find-class cls-name))
+             (let* ((cls (if (typep cls-name 'class) cls-name (find-class cls-name)))
                     (slot (or (find name (closer-mop:class-slots cls) :key #'closer-mop:slot-definition-name)
                              (error "Class ~A has no slot named ~A." cls name))))
                (closer-mop:slot-definition-location slot))))
