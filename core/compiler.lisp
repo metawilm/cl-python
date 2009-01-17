@@ -421,11 +421,15 @@ an assigment statement. This changes at least the returned 'store' form.")
     `(assert-stmt-1 ,test ',test ,raise-arg)))
 
 (defun assign-stmt-list-vals (iterable num-targets)
-  (let ((val-list (py-iterate->lisp-list iterable)))
+  ;; This function is called to parse tuple args, like (x,y) in "def f((x,y)): ..
+  ;; therefore optimize.
+  (declare #.+optimize-fastest+ (fixnum num-targets))
+  (let ((val-list (if (listp iterable) iterable (py-iterate->lisp-list iterable))))
+    (declare (list val-list))
     (unless (= (length val-list) num-targets)
       (py-raise '{ValueError}
-		"Assignment to multiple targets: wanted ~A values, but iteration gave ~A, from object ~A."
-		num-targets (length val-list) (py-repr-string iterable)))
+                "Assignment to multiple targets: wanted ~A values, but iteration gave ~A, from object ~A."
+                num-targets (length val-list) (py-repr-string iterable)))
     val-list))
 
 (defun target-get-bound-vars (tg)
