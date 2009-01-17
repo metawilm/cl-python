@@ -336,7 +336,20 @@ except NameError:
   (run-no-error "
 def f():
   global x,y,z
-  del x,y,z" :fail-info "Should not warn about unused local vars."))
+  del x,y,z" :fail-info "Should not warn about unused local vars.")
+  (run-no-error "
+x = [1,2,3,4,5]
+del x[-2:]
+assert x == [1,2,3]
+")
+  (run-no-error "
+x = range(10)
+del x[1:8:2]
+assert x == [0, 2, 4, 6, 8, 9]")
+  (run-no-error "
+x = range(10)
+del x[-1:-6:-2]
+assert x == [0, 1, 2, 3, 4, 6, 8]"))
 
 (defmethod test-lang ((kind (eql :dict-expr)))
   (run-no-error "{}")
