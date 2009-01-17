@@ -1831,6 +1831,7 @@ But if RELATIVE-TO package name is given, result may contains dots."
 (def-py-method py-int.__xor__ (x^ y^) (logxor x y))
 (def-py-method py-int.__and__ (x^ y^) (logand x y))
 (def-py-method py-int.__or__  (x^ y^) (logior x y))
+(def-py-method py-int.__ror__  (x y) (py-int.__or__ y x))
 
 (def-py-method py-int.__hex__ (x^) (format nil "0x~x" x))
 (def-py-method py-int.__oct__ (x^) (format nil "0~o" x))
@@ -1844,7 +1845,9 @@ But if RELATIVE-TO package name is given, result may contains dots."
     (string (cond ((<= x 0) "")
                   (t (apply #'concatenate 'string (loop repeat x collect y)))))
     (t (py-number.__mul__ x y))))
-  
+
+(def-py-method py-int.__rmul__ (x y) (py-int.__mul__ y x))
+
 ;; Bool
 
 (def-proxy-class py-bool (py-int))
@@ -2530,6 +2533,8 @@ invocation form.")
   (let ((fs-struct (funcall 'ensure-parsed-format-string x)))
     (funcall 'make-formatted-string fs-struct args)))
 
+(def-py-method py-string.__rmul__ (string n) (py-string.__mul__ n string))
+
 (def-py-method py-string.__mul__ (x^ n^)
   (unless (typep n '(integer 0 *))
     (py-raise '{TypeError} "str.__mul__: arg must be nonzero integer (got: ~S)" n))
@@ -2778,6 +2783,8 @@ invocation form.")
          (x-list (make-lisp-list-from-tuple x))
          (repeats (loop repeat n collect x-list)))
     (make-tuple-from-list (apply #'concatenate 'list repeats))))
+
+(def-py-method py-tuple.__rmul__ (tuple n) (py-tuple.__mul__ n tuple))
                                  
 (def-py-method py-tuple.__nonzero__ (x^)
   (py-bool x))
