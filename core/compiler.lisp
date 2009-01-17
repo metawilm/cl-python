@@ -1481,10 +1481,20 @@ LOCALS shares share tail structure with input arg locals."
               (if *want-DEL-setf-expansion* del-form store-form) ;; delete/store-form
               `(py-subs ,it ,su))))) ;; read-form
 
+(defun maybe-with-source-info (form)
+  (whereas ((loc (and *python-form->source-location*
+                      (gethash form *python-form->source-location*))))
+    (return-from maybe-with-source-info
+      `(with-debug-frame (:form ,(py-pprint form)
+                                :file ,(or *compile-file-truename* *current-module-path*)
+                                :char ,loc)
+         ,form)))
+  form)
+
 (defmacro [suite-stmt] (stmts)
   (if (null (cdr stmts))
-      (car stmts)
-    `(progn ,@stmts)))
+      (maybe-with-source-info (car stmts))
+    `(progn ,@(mapcar #'maybe-with-source-info stmts))))
 
 #+(or)
 (define-compiler-macro [suite-stmt] (&whole whole stmts &environment e)
