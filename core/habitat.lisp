@@ -66,9 +66,14 @@
   ;; In general, don't remove the old module with same pathnames:
   ;; when re-import goes wrong, the new failed module is popped,
   ;; so the old one is available again.
-  (push module (habitat-loaded-mods habitat)))
+  (remove-loaded-module :src-pathname (module-src-pathname module)
+                        :bin-pathname (module-bin-pathname module)
+                        :habitat habitat)
+  (push module (habitat-loaded-mods habitat))
+  (setf (gethash (module-name module) (builtin-module-attribute 'sys "modules")) module))
 
 (defun remove-loaded-module (&rest args &key habitat &allow-other-keys)
   (whereas ((m (apply #'get-loaded-module args)))
     (setf (habitat-loaded-mods habitat)
-      (remove m (habitat-loaded-mods habitat)))))
+      (remove m (habitat-loaded-mods habitat)))
+    (remhash (module-name m) (builtin-module-attribute 'sys "modules"))))

@@ -390,6 +390,11 @@ Used to avoid infinite recompilation/reloading loops.")
                     (t
                      ;; Imported successfully
                      (return-from py-import new-module))))))))))
+
+(defun builtin-module-attribute (module attr)
+  (check-type module symbol)
+  (check-type attr string)
+  (symbol-value (find-symbol attr (find-package (concatenate 'string (package-name :clpython.module) "." (symbol-name module))))))
   
 (defun directory-p (pathname)
   (check-type pathname pathname)
