@@ -12,5 +12,5 @@
 (in-package :clpython.module.gc)
 
 (defun |disable| ()
-  (warn "Disabling GC not implemented.")
+  (warn "Disabling GC not implemented: gc.disable() has no effect.")
   *the-none*)
