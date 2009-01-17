@@ -3130,7 +3130,6 @@ finished; F will then not be called again."
          (stop (slice-stop slice))
          (step (slice-step slice))
          (try-@etslice (or (eq step *the-none*) (equal step 1))))
-    (warn "start: ~A stop: ~A step: ~A try: ~A" start stop step try-@etslice)
     (when try-@etslice
       (whereas ((m (x.class-attr-no-magic.bind x methname)))
         (when (or (eq start *the-none*)
@@ -3170,10 +3169,7 @@ finished; F will then not be called again."
   (multiple-value-bind (meth start stop)
       (normalize-slice-for-get/set x item '{__setslice__})
     (when meth
-      (warn "meth=~A, calling ~A" meth `(py-call ,meth ,start ,stop ,new-val))
-      (warn "return-from")
       (return-from py-subs (py-call meth start stop new-val))))
-  (warn "call-next-method")
   (call-next-method))
 
 (defmethod (setf py-subs) (new-val x item)
