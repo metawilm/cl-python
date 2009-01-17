@@ -13,11 +13,15 @@
 (in-package :clpython.module.re)
 
 (clpython::def-proxy-class |reg-exp| ()
-  ())
+  ((pattern :initarg :pattern)
+   (flags :initarg :flags)))
 
-(defun |compile| (&rest args)
-  (declare (ignore args))
-  (cl:error "todo"))
+(defconstant |I| 2)
+
+(defun |compile| (pattern &optional flags)
+  (make-instance '|reg-exp|
+    :pattern pattern
+    :flags flags))
 
 (defun |match| (&rest args)
   (declare (ignore args))
