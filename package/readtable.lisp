@@ -99,9 +99,10 @@ it will be interned if INTERN, otherwise an error is raised."
 
 (defun setup-omnivore-readmacro (&key function package (readtable *readtable*))
   "Create a readtable that dispatches all characters to FUNCTION.
-The reader will return two forms: first (in-package PACKAGE), then the result of calling FUNCTION.
-\(The package is needed to ensure that when this readmacro is used by compile-file, the file is loaded
-in the right package, satisfying CLHS 3.2.4.4 \"Additional Constraints on Externalizable Objects\".\)"
+The reader will initially return (in-package PACKAGE), and then the result(s) of calling FUNCTION on the stream.
+The in-package form ensures that compilation and loading of the fasl file satisfies CLHS 3.2.4.4
+\"Additional Constraints on Externalizable Objects\". As a side effect, the function call of FUNCTION
+is executed with *PACKAGE* bound to PACKAGE."
   (check-type function function)
   (check-type package package)
   (check-type readtable readtable)
