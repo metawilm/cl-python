@@ -604,9 +604,8 @@
   (function-name func))
 
 (defclass funcallable-python-class (closer-mop:funcallable-standard-class py-type)
-  ;; When subclassable python classes also get such a metatype,
-  ;; s/py-type/py-type/
-  ())
+  ()
+  (:metaclass py-meta-type))
 
 (defmethod closer-mop:validate-superclass ((class funcallable-python-class) superclass)
   (declare (ignorable class superclass))
