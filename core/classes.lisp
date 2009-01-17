@@ -2352,6 +2352,11 @@ invocation form.")
     (setf (aref list i) (aref list (1- i))))
   (setf (aref list index) object)
   *the-none*)
+
+(def-py-method py-list.extend (x^ iterable)
+  (loop for item in (py-iterate->lisp-list iterable)
+      do (py-list.append x item))
+  *the-none*)
        
 (def-py-method py-list.pop (x^ &optional index)
   "Remove and return item at index (default: last item)"
