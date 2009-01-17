@@ -804,9 +804,9 @@ otherwise work well.")
 
 
 (defclass py-slice (object)
-  ((start :initarg :start)
-   (stop  :initarg :stop)
-   (step  :initarg :step))
+  ((start :initarg :start :accessor slice-start)
+   (stop  :initarg :stop  :accessor slice-stop)
+   (step  :initarg :step  :accessor slice-step))
   (:metaclass py-type))
 
 (defun make-slice (start stop step)
@@ -881,9 +881,9 @@ In case of empty range, returns (0,0,1)."
 START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
   (check-type x py-slice)
   (check-type length integer)
-  (let* ((start      (or (slot-value x 'start) *the-none*))
-	 (stop       (or (slot-value x 'stop)  *the-none*))
-	 (step       (or (slot-value x 'step)  *the-none*))
+  (let* ((start      (or (slice-start x) *the-none*))
+	 (stop       (or (slice-stop x)  *the-none*))
+	 (step       (or (slice-step x)  *the-none*))
 	 reversed-p)
     (setf step  (if (eq step *the-none*) 1 (py-val->integer step))
 	  reversed-p (minusp step)
@@ -3112,14 +3112,58 @@ finished; F will then not be called again."
 
 ;;; Subscription of items (sequences, mappings)
 
-(defgeneric py-subs (x item)
-  (:method ((x t) (item t))
-	   (let ((gi (class.attr-no-magic (py-class-of x) '{__getitem__})))
-	     (if gi
-		 (py-call gi x item)
-	       (py-raise '{TypeError} "Object ~S does not support item extraction" x)))))
+(defun normalize-slice-for-get/set (x slice methname)
+  (check-type slice py-slice)
+  (check-type methname symbol)
+  (let* ((start (slice-start slice))
+         (stop (slice-stop slice))
+         (step (slice-step slice))
+         (try-@etslice (or (eq step *the-none*) (equal step 1))))
+    (warn "start: ~A stop: ~A step: ~A try: ~A" start stop step try-@etslice)
+    (when try-@etslice
+      (whereas ((m (x.class-attr-no-magic.bind x methname)))
+        (when (or (eq start *the-none*)
+                  (and (numberp start) (minusp start))
+                  (eq stop *the-none*)
+                  (and (numberp stop) (minusp stop)))
+          (let ((len (py-len x)))
+            (cond ((eq start *the-none*)
+                   (setf start 0))
+                  ((and (numberp start) (minusp start))
+                   (incf start len)))
+            (cond ((eq stop *the-none*)
+                   (setf stop (1- len)))
+                  ((and (numberp stop) (minusp stop))
+                   (incf stop len)))))
+        (return-from normalize-slice-for-get/set (values m start stop))))))
+
+(defgeneric py-subs (x item))
+
+(defmethod py-subs :around (x (item py-slice))
+  ;; First try __getslice__ (with normalized indices)
+  (multiple-value-bind (meth start stop)
+      (normalize-slice-for-get/set x item '{__getslice__})
+    (when meth
+      (return-from py-subs (py-call meth start stop))))
+  (call-next-method))
+  
+(defmethod py-subs (x item)
+  (whereas ((gi (x.class-attr-no-magic.bind x '{__getitem__})))
+    (return-from py-subs (py-call gi item)))
+  (py-raise '{TypeError} "Object ~S does not support item extraction." x))
 
 (defgeneric (setf py-subs) (new-val x item))
+
+(defmethod (setf py-subs) :around (new-val x (item py-slice))
+  ;; First try __getslice__ (with normalized indices)
+  (multiple-value-bind (meth start stop)
+      (normalize-slice-for-get/set x item '{__setslice__})
+    (when meth
+      (warn "meth=~A, calling ~A" meth `(py-call ,meth ,start ,stop ,new-val))
+      (warn "return-from")
+      (return-from py-subs (py-call meth start stop new-val))))
+  (warn "call-next-method")
+  (call-next-method))
 
 (defmethod (setf py-subs) (new-val x item)
   "New-val = NIL means deletion."
@@ -3131,9 +3175,9 @@ finished; F will then not be called again."
           (py-raise '{TypeError}
                     "Object ~A (a ~A) has no `__delitem__' method."
                     x (class-name (py-class-of x)))))
-    (let ((si (class.attr-no-magic (py-class-of x) '{__setitem__})))
+    (let ((si (x.class-attr-no-magic.bind x '{__setitem__})))
       (if si
-          (py-call si x item new-val)
+          (py-call si item new-val)
         (py-raise '{TypeError} "Object ~S does not support item assignment" x)))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
