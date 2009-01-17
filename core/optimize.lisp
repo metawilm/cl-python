@@ -136,6 +136,14 @@
 	(aref x i2)
       (call-next-method))))
 
+(defmethod py-subs ((x vector) (item py-slice))
+  ;; inline x[:]
+  (with-slots (start stop step) item
+    (when (and (none-p start) (none-p stop) (none-p step))
+      (return-from py-subs
+        (make-array (length x) :adjustable t :fill-pointer (length x) :initial-contents x))))
+  (py-list.__getitem__ x item))
+      
 (defmethod py-subs ((x string) (item fixnum))
   (let* ((x.len (length x))
 	 (i2 (if (< item 0) (+ item x.len) item)))
@@ -150,6 +158,20 @@
   (or (nth item x)
       (call-next-method)))
 
+(defmethod (setf py-subs) ((val vector) (x vector) (item py-slice))
+  ;; Inline cases like "x[:4] = [1,2,3,4]"
+  (with-slots (start stop step) item
+    (destructuring-bind (kind &rest args)
+        (multiple-value-list (slice-indices item (length x)))
+      (when (eq kind :nonempty-slice)
+        (destructuring-bind (start-incl stop-incl num) args
+          (when (= num (length val))
+            (loop for x-i from start-incl to stop-incl
+                for val-i from 0
+                do (setf (aref x x-i) (aref val val-i)))
+            (return-from py-subs *the-none*))))))
+  (call-next-method))
+               
 (defmethod (setf py-subs) (val (x vector) (item fixnum))
   (let* ((x.len (length x))
 	 (i2 (if (< item 0) (+ item x.len) item)))
@@ -359,6 +381,12 @@
   (declare (ignore y))
   nil)
 
+
+;; Unary
+
+(defmethod py-unary-- ((x number))
+  (- x))
+
 (defun py-print-cmhelper (x stream)
   ;; Quickly prints obj to stdout
   ;; If X is a string, returns last char of it; otherwise returns NIL
@@ -439,7 +467,7 @@
 
 (defmethod py-not ((x py-tuple)) (py-bool (eq x *the-empty-tuple*)))
 (defmethod py-not ((x list)) ;; a tuple
-  (py-bool x))
+  (py-bool (null x)))
 
 ;;; String representation
 
