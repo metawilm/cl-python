@@ -191,7 +191,7 @@ KIND can be :ptime, :time, :space, :pspace or NIL."
                (loop repeat 3 do (remember-value *the-none*)))
 	     (run-ast-func (suite)
                (lambda () (let ((clpython::*module-namespace* mod-namespace))
-                            (clpython::run-python-ast suite :run-args
+                            (clpython::run-python-ast suite :module-run-args
                                                       (list :%module-globals *repl-module-globals*)
                                                       :compile *repl-compile*
                                                       :compile-quiet t))))
