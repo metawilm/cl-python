@@ -1040,28 +1040,28 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
                                   
 (def-py-method py-xrange.__init__ (x &rest args)
   (with-slots (start stop step) x
-    (setf start nil
-	  stop nil
-	  step nil)
-    (ecase (length args)
-      (0 (py-raise '{TypeError} "xrange: >= 1 arg needed"))
-      (1 (unless (>= (car args) 0)
-	   (break "xrange: invalid 1-arg: ~A" (car args)))
-	 (setf start 0 
-	       stop (car args)
-	       step 1))
-      (2 (break "xrange 2 todo"))
-      (3 (break "xrange 3 todo")))))
-
-(def-py-method py-xrange.__iter__ (x^)
-  (with-slots (start stop step) x
-    (let ((i start))
-      (make-iterator-from-function :name :xrange-iterator
-				   :func (lambda ()
-					   (unless (or (and (<= start stop) (>= i stop))
-						       (and (<= stop start) (<= i stop)))
-					     (prog1 i
-					       (incf i step))))))))
+    (multiple-value-setq (start stop step)
+      (ecase (length args)
+        (0 (py-raise '{TypeError} "xrange: >= 1 arg needed"))
+        (1 (unless (>= (car args) 0)
+             (break "xrange: invalid 1-arg: ~A" (car args)))
+           (values 0 (car args) 1))
+        (2 (destructuring-bind (start end) args
+             (if (< start end)
+                 (values start end 1)
+               (values 0 0 1))))
+        (3 (destructuring-bind (start end step) args
+             (if (or (and (< start end) (plusp step))
+                     (and (> start end) (minusp step)))
+                 (values start end step)
+               (values 0 0 1)))))
+      (let ((i start))
+        (make-iterator-from-function :name :xrange-iterator
+                                     :func (lambda ()
+                                             (unless (or (and (< start stop) (>= i stop))
+                                                         (and (< stop start) (<= i stop)))
+                                               (prog1 i
+                                                 (incf i step)))))))))
 
 (def-py-method py-xrange.__str__ (x^)
   (with-output-to-string (s)
