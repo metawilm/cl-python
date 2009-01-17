@@ -426,6 +426,15 @@
 (defmethod py-hash ((x string)) (py-string.__hash__ x))
 (defmethod py-hash ((x number)) (py-number.__hash__ x))
 
+;; Not
+
+(defmethod py-not ((x fixnum)) (py-bool (zerop x)))
+
+(defmethod py-not ((x py-none)) +the-true+)
+
+(defmethod py-not ((x py-tuple)) (py-bool (eq x *the-empty-tuple*)))
+(defmethod py-not ((x list)) ;; a tuple
+  (py-bool x))
 
 ;;; String representation
 
