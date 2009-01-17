@@ -9,11 +9,16 @@
 
 (in-package :clpython.module.sys)
 
-(defparameter |argv| (clpython::make-writable-attribute
-                      (lambda () (clpython::habitat-cmd-line-args clpython::*habitat*))
-                      (lambda (val) (setf (clpython::habitat-cmd-line-args clpython::*habitat*) val)))
+(defmacro def-habitat-attribute (name accessor-func doc)
+  `(progn (defparameter ,name
+              (clpython::make-writable-attribute
+               (lambda () (,accessor-func clpython::*habitat*))
+               (lambda (val) (setf (,accessor-func clpython::*habitat*) val)))
+            ,doc)
+          (set-impl-status ',name t)))
+
+(def-habitat-attribute |argv| clpython::habitat-cmd-line-args
   "Comand line args passed to script; argv[0] is script name (rel or abs)")
-(set-impl-status '|argv| t)
 
 (defvar |byteorder| :n/a "Byte order of implementation: 'big' or 'little'")
 (set-impl-status '|byteorder| :n/a "Byte order is hidden in Lisp implementation.")
@@ -70,7 +75,6 @@
   "Function to be called upon exit")
 (set-impl-status '|exitfunc| :todo "Currently never called.")
 
-
 (defun |setcheckinterval| (arg)
   "How often to check for thread switches and signal handlers"
   (declare (ignore arg))
@@ -116,13 +120,11 @@
 (defparameter |modules| (clpython::make-py-hash-table)
   "Mapping from module names (strings) to modules")
 (set-impl-status '|modules| :incomplete)
-  
+
 ;; List of search paths
-(defparameter |path| (clpython::make-writable-attribute
-                      (lambda () (clpython::habitat-search-paths clpython::*habitat*))
-                      (lambda (val) (setf (clpython::habitat-search-paths clpython::*habitat*) val)))
-  "List of directories to search for module to import")
-(set-impl-status '|path| t "only directories supported (not zip files etc).")
+(def-habitat-attribute |path| clpython::habitat-search-paths
+  "List of directories to search for module to import. (Only directories ~
+supported (not zip files etc).")
 
 (defvar |platform| "Common Lisp")
 (set-impl-status '|platform| t "Set to `Common Lisp'.")
@@ -138,17 +140,14 @@
 
 (set-impl-status '(|ps1| |ps2|) :todo "Not consulted by REPL yet.")
 
-(defvar |stdin|  :todo "Standard input")
-(defvar |stdout| :todo "Standard output")
-(defvar |stderr| :todo "Standard error output")
+(def-habitat-attribute |stdin| clpython::habitat-stdin "Standard input")
+(def-habitat-attribute |stdout| clpython::habitat-stdout "Standard output")
+(def-habitat-attribute |stderr| clpython::habitat-stderr "Error output")
 
-(set-impl-status '(|stdin| |stdout| |stderr|) :todo "Not consulted yet.")
-
-(defvar |__stdin__|  :todo "Initial stdin")
-(defvar |__stdout__| :todo "Initial stdout")
-(defvar |__stderr__| :todo "Initial stderr")
-
-(set-impl-status '(|__stdin__| |__stdout__| |__stderr__|) :todo "Not set yet.")
+(defvar |__stdin__|  (load-time-value *standard-input*) "Initial stdin")
+(defvar |__stdout__| (load-time-value *standard-output*) "Initial stdout")
+(defvar |__stderr__| (load-time-value *error-output*) "Initial stderr")
+(set-impl-status '(|__stdin__| |__stdout__| |__stderr__|) t)
 
 (defvar |api_version| :todo "The (Lisp) API version")
 (set-impl-status '|api_version| :todo "The CLPython Lisp API has no version number yet.")
