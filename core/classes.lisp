@@ -673,6 +673,9 @@ otherwise work well.")
 (def-py-method py-function.__get__ (func inst cls)
   (py-lisp-function.__get__ func inst cls))
 
+(def-py-method py-function.__hash__ (func)
+  (sxhash func))
+  
 (def-py-method py-function.__repr__ (func)
   (with-output-to-string (s)
     (print-object func s)))
@@ -1193,6 +1196,9 @@ Basically the Python equivalent of ENSURE-CLASS."
     (ensure-class-using-class cls (class-name cls) 
                               :direct-superclasses bases)
     cls))
+
+(def-py-method py-type.__hash__ (x)
+  (sxhash x))
 
 (defvar *mro-filter-implementation-classes* t
   "Whether to filter reasonable intermediate classes from the returned MRO.
