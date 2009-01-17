@@ -111,7 +111,7 @@ is executed with *PACKAGE* bound to PACKAGE."
                       (unread-char char stream)
                       (if initial-p
                           (progn (setf initial-p nil)
-                                 `(in-package ,package))
+                                 `(in-package ,(package-name package)))
                         (funcall function stream)))))
     (dotimes (i 256) ;; use file encoding or char-code-limit?
       (set-macro-character (code-char i) read-func t readtable)))
