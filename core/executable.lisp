@@ -28,9 +28,7 @@
       (if function
           (setf filename
             (concatenate 'string clpython-date-impl "-"
-                         (format nil "~A" (etypecase function
-                                            (py-func-iterator (slot-value function 'name))
-                                            (function (py-function.__name__ function))))))
+                         (format nil "~A" (py-function.__name__ function))))
         (setf filename clpython-date-impl))))
   (flet ((toplevel ()
            ;; closes over FUNCTION, HABITAT
