@@ -29,11 +29,9 @@
   "Raise SyntaxError, or (if that condition is unavailable) a regular error."
   (declare (special clpython:*exceptions-loaded* clpython::*exceptions-are-python-objects*))
   (if clpython:*exceptions-loaded*
-      (if clpython::*exceptions-are-python-objects*
-          (apply 'clpython:py-raise '{SyntaxError} formatstring args)
-        (error '{SyntaxError}))
+      (apply 'clpython:py-raise '{SyntaxError} formatstring args)
     (apply #'error (concatenate 'string "SyntaxError: " formatstring) args))
-  (break "unreachable"))
+  (break "never"))
 
 (defun raise-unexpected-eof (&optional line-no)
   (declare (special clpython:*exceptions-loaded*))
