@@ -1489,8 +1489,8 @@ But if RELATIVE-TO package name is given, result may contains dots."
 	     
 	     (no-attr-error ()
 	       (py-raise '{AttributeError}
-			  "Module `~A' has no attribute named `~A'."
-			  (relative-package-name pkg) name))
+			  "Module `~A' (Lisp package ~A) has no attribute named `~A'."
+			  (relative-package-name pkg) pkg name))
 
 	     (incomplete-warning ()
 	       (warn "Attribute `~A' of module `~A' was accessed. ~
