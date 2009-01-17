@@ -412,6 +412,8 @@
 (defclass py-none (object) () (:metaclass py-type))
 (defvar *the-none* (make-instance 'py-none))
 
+(defun none-p (x) (eq x (load-time-value *the-none*)))
+(define-compiler-macro none-p (x) `(eq ,x (load-time-value *the-none*)))
 
 ;; py-class-method
 
@@ -445,7 +447,7 @@
 ;; py-attribute-method
 
 (def-py-method py-attribute-method.__get__ (x inst class)
-  (if (and inst (not (eq inst *the-none*)))
+  (if (and inst (not (none-p inst)))
       (py-call (slot-value x 'func) inst)
     nil))
 
@@ -474,7 +476,7 @@
     (error "No writer defined for writable attribute: ~A" x)))
 
 (def-py-method py-writable-attribute-method.__get__ (x inst class)
-  (if (and inst (not (eq inst *the-none*)))
+  (if (and inst (not (none-p inst)))
       (py-call (slot-value x 'func) inst)
     nil))
 
@@ -589,12 +591,12 @@
 
 (def-py-method py-lisp-function.__get__ (func inst cls)
   (assert inst)
-  (let ((to-make (cond ((eq inst *the-none*)
+  (let ((to-make (cond ((none-p inst)
 			(if (and (typep cls 'class)
 				 (eq (class-name cls) 'py-none))
 			    :bound-method
 			  :unbound-method))
-		       ((eq cls *the-none*)
+		       ((none-p cls)
 			(py-raise '{ValueError}
 				  "function.__get__(None, None) : invalid args"))
 		       (t
@@ -894,12 +896,12 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 	 (stop       (or (slice-stop x)  *the-none*))
 	 (step       (or (slice-step x)  *the-none*))
 	 reversed-p)
-    (setf step  (if (eq step *the-none*) 1 (py-val->integer step))
+    (setf step  (if (none-p step) 1 (py-val->integer step))
 	  reversed-p (minusp step)
-	  start (if (eq start *the-none*)
+	  start (if (none-p start)
 		    (if reversed-p (1- length) 0)
 		  (py-val->integer start))
-	  stop  (if (eq stop *the-none*)
+	  stop  (if (none-p stop)
 		    (if reversed-p -1 length)
 		  (py-val->integer stop)))
     (assert (every #'integerp (list start stop step)))
@@ -1083,8 +1085,6 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 
 ;; None
 
-(defun none-p (x) (eq x *the-none*))
-
 (def-py-method py-none.__hash__ (x)
   12345)
 
@@ -1117,7 +1117,7 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
      (let ((.val ,val)
 	   (.x ,x))
        (if (and (functionp .val)
-		(not (eq .x *the-none*)))
+		(not (none-p .x)))
 	   (progn 
 	     #+(or)(warn "bind-val ~S ~S -> bound method" val x)
 	     (make-instance 'py-bound-method :instance .x :func .val))
@@ -1627,19 +1627,19 @@ But if RELATIVE-TO package name is given, result may contains dots."
 
 (def-py-method py-property.__get__ (x obj class)
   (with-slots (fget) x
-    (if (eq fget *the-none*)
+    (if (none-p fget)
 	(py-raise '{AttributeError} "Cannot get attribute")
       (py-call fget obj))))
 
 (def-py-method py-property.__set__ (x obj val)
   (with-slots (fset) x
-    (if (eq fset *the-none*)
+    (if (none-p fset)
 	(py-raise '{AttributeError} "Cannot set attribute")
       (py-call (slot-value x 'fset) obj val)))) ;; bind?
 
 (def-py-method py-property.__del__ (x obj)
   (with-slots (fdel) x
-    (if (eq fdel *the-none*)
+    (if (none-p fdel)
 	(py-raise '{AttributeError} "Cannot delete attribute")
       (py-call (slot-value x 'fdel) obj))))
 
@@ -2224,7 +2224,7 @@ invocation form.")
 	     (replace x x :start1 item :start2 (1+ item))
 	     (decf (fill-pointer x)))
     (py-slice (with-slots (start stop step) item
-		(cond ((and (eq start *the-none*) (eq stop *the-none*) (eq step *the-none*)) ;; del x[:]
+		(cond ((and (none-p start) (none-p stop) (none-p step)) ;; del x[:]
 		       (fill x nil)
 		       (setf (fill-pointer x) 0))
 		      (t (destructuring-bind (kind &rest args)
@@ -2728,7 +2728,7 @@ invocation form.")
 
 (def-py-method py-string.split (x^ &optional (sep *the-none*)
                                              (max-splits most-positive-fixnum))
-  (let ((sep-sequence (cond ((eq sep *the-none*) (list #\Space #\Tab #\Return)) ;; definition of whitespace?
+  (let ((sep-sequence (cond ((none-p sep) (list #\Space #\Tab #\Return)) ;; definition of whitespace?
                             ((and (stringp sep)
                                   (= (length sep) 1)) (coerce sep 'list))
                             (t (error "Todo: string.split() with this as seperator: ~S." sep)))))
@@ -3199,19 +3199,19 @@ finished; F will then not be called again."
   (let* ((start (slice-start slice))
          (stop (slice-stop slice))
          (step (slice-step slice))
-         (try-@etslice (or (eq step *the-none*) (equal step 1))))
+         (try-@etslice (or (none-p step) (equal step 1))))
     (when try-@etslice
       (whereas ((m (x.class-attr-no-magic.bind x methname)))
-        (when (or (eq start *the-none*)
+        (when (or (none-p start)
                   (and (numberp start) (minusp start))
-                  (eq stop *the-none*)
+                  (none-p stop)
                   (and (numberp stop) (minusp stop)))
           (let ((len (py-len x)))
-            (cond ((eq start *the-none*)
+            (cond ((none-p start)
                    (setf start 0))
                   ((and (numberp start) (minusp start))
                    (incf start len)))
-            (cond ((eq stop *the-none*)
+            (cond ((none-p stop)
                    (setf stop (1- len)))
                   ((and (numberp stop) (minusp stop))
                    (incf stop len)))))
@@ -3244,6 +3244,7 @@ finished; F will then not be called again."
 
 (defmethod (setf py-subs) (new-val x item)
   "New-val = NIL means deletion."
+  (break "(setf (py-subs ~A ~A) ~A)" x item new-val)
   (if (null new-val)
       (let* ((x.cls (py-class-of x))
              (__delitem__ (class.attr-no-magic x.cls '{__delitem__})))
@@ -3631,8 +3632,8 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
 	       ;; is catched above already, when testing for same class;
 	       ;; NoneType is not subclassable).
       
-	       (cond ((eq x *the-none*) (return-from py-cmp -1))
-		     ((eq y *the-none*) (return-from py-cmp  1)))
+	       (cond ((none-p x) (return-from py-cmp -1))
+		     ((none-p y) (return-from py-cmp  1)))
       
 	       ;; Instances of different class are compared by class name, but
 	       ;; numbers are always smaller.
