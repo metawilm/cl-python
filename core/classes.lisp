@@ -627,8 +627,17 @@
 Note that in the latter case, functions miss their name and attribute dict, but should
 otherwise work well.")
 
-(defparameter *simple-function-attributes* (make-hash-table :test 'eq)
-  "Mapping from function to hash-table (when *create-simple-lambdas-for-python-functions* is false")
+(defstruct (simple-function-data (:conc-name sfd-))
+  func name attributes)
+
+(defparameter *simple-function-data* (make-hash-table :test 'eq)
+  "Mapping from function to SIMPLE-FUNCTION-DATA")
+
+(defun register-simple-function (func name)
+  (setf (gethash func *simple-function-data*)
+    (make-simple-function-data :func func
+                               :name name
+                               :attributes (make-hash-table :test 'eq))))
 
 (defclass py-function (standard-generic-function dicted-object)
   ;; mop:funcallable-standard-class defines :name initarg, but how to to access it portably...
@@ -641,9 +650,12 @@ otherwise work well.")
   (closer-mop:set-funcallable-instance-function inst func))
 
 (defgeneric function-name (f)
-  (:method ((f function))    
-           #+allegro (string (excl::func_name f))
-           #-allegro "[a function]")
+  (:method ((f function))
+           (let ((data (gethash f *simple-function-data*)))
+             (if data
+                 (string (sfd-name f))
+               #+allegro (string (excl::func_name f))
+               #-allegro "[a function]")))
   (:method ((f py-function)) (string (py-function-name f))))
 
 (defun make-py-function (&key name context-name lambda)
@@ -675,11 +687,22 @@ otherwise work well.")
       (format stream " (~A)" (py-function-context-name x)))))
 
 (def-py-method py-function.__name__ :attribute-read (func)
-  (py-function-name func))
+  (or (and (typep func 'py-function)
+           (py-function-name func))
+      (whereas ((data (gethash func *simple-function-data*)))
+        (or (whereas ((ht (sfd-attributes data))
+                      (name (gethash '{__name__} ht)))
+              (string name))
+            (string (sfd-name data))))
+      (py-raise '{AttributeError} "Function ~A has no attribute `__name__'." func)))
 
 (def-py-method py-function.__name__ :attribute-write (func name)
-  (setf (py-function-name func) name))
-
+  (if (typep func 'py-function)
+      (setf (py-function-name func) name)
+    (or (whereas ((data (gethash func *simple-function-data*)))
+          (setf (sfd-name data) name))
+        (py-raise '{AttributeError} "Cannot set attribute `__name__' of ~A." func))))
+      
 (def-py-method py-function._fif :attribute (x)
   "The funcallable instance function of X."
   ;; CLPython-specific.
@@ -699,9 +722,11 @@ otherwise work well.")
                               (py-writable-attribute-method.__set__ meth func val))))
                         (let ((d (or (dict func) (setf (dict func) (make-eq-hash-table "func dict")))))
                           (setf (gethash attr d) val))))
-    (function (let ((ht (or (gethash func *simple-function-attributes*)
-                            (setf (gethash func *simple-function-attributes*)
-                              (make-eq-hash-table "func dict")))))
+    (function (let ((ht (whereas ((data (gethash func *simple-function-data*)))
+                          (or (sfd-attributes data)
+                              (setf (sfd-attributes data) (make-eq-hash-table "func dict"))))))
+                (unless ht
+                  (py-raise '{AttributeError} "Cannot set attribute on function ~A." func))
                 (setf (gethash attr ht) val)))))
 
 (def-py-method py-function.__getattribute__ (func attr)
@@ -714,7 +739,8 @@ otherwise work well.")
   (or (etypecase func
         (py-function (whereas ((d (dict func)))
                        (gethash attr d)))
-        (function (whereas ((ht (gethash func *simple-function-attributes*)))
+        (function (whereas ((data (gethash func *simple-function-data*))
+                            (ht (sfd-attributes data)))
                     (values (gethash attr ht)))))
       (py-raise '{AttributeError} "Function ~A has no attribute `~A'." func attr)))
 
@@ -725,8 +751,9 @@ otherwise work well.")
   (let ((ok (etypecase func
               (py-function (whereas ((d (dict func)))
                              (setf (py-subs d attr) nil)))
-              (function (whereas ((func-attrs (gethash func *simple-function-attributes*)))
-                          (remhash attr func-attrs))))))
+              (function (whereas ((data (gethash func *simple-function-data*))
+                                  (ht (sfd-attributes data)))
+                          (remhash attr ht))))))
     (unless ok
       (py-raise '{AttributeError} "Function ~A has no attribute `~A' to delete." func attr))))
 
@@ -3977,6 +4004,7 @@ the lisp list will be returned).")
   "should a space be printed in front of next arg?")
 
 (defun py-print (dest items comma?)
+  (declare (special *habitat*))
   (unless dest
     (setf dest (clpython::habitat-stdout *habitat*)))
   (assert dest)

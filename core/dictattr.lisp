@@ -362,7 +362,8 @@ Returns NIL if not found."
                        (return-from attr))
           ({__class__} (setf (py-class-of x) val)
                        (return-from attr))
-          ({__name__}  (when (typep x 'py-function)
+          ({__name__}  (when (and (find-class 'py-function)
+                                  (typep x 'py-function))
                          (clpython.user::py-function.__name__-writer x val)
                          (return-from attr))))
         ;; 4. Dict

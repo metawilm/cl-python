@@ -1227,7 +1227,9 @@ LOCALS shares share tail structure with input arg locals."
             
             `(let* ((.undecorated-func 
                      ,(if *create-simple-lambdas-for-python-functions*
-                          func-lambda
+                          `(let ((.f ,func-lambda))
+                             (register-simple-function .f ',fname)
+                             .f)
                         `(make-py-function :name ',fname
                                            :context-name ',context-fname
                                            :lambda ,func-lambda)))
