@@ -232,8 +232,10 @@ KIND can be :ptime, :time, :space, :pspace or NIL."
                            (loop for val in vals
                                do (if (stringp val)
                                       (print-string-truncated (py-repr val))
-                                    (let ((str-val (py-str-string val :circle t)))
-                                      (print-string-truncated (py-val->string str-val)))) 
+                                    (let ((str-val (ignore-errors (py-str-string val :circle t))))
+                                      (if str-val
+                                          (print-string-truncated (py-val->string str-val))
+                                        (format t "~A" val))))
                                   (write-char #\Newline)))
                          (return-from repr)))))))
 	     (handle-as-python-code (total &key print-error (ast-finished :maybe))
