@@ -68,5 +68,5 @@ assert len(hashes) > 1000"
 (defmethod test-builtin ((x (eql :type)))
   (run-no-error "
 def f(): pass
-g = lambda() 42
+g = lambda: 42
 assert type(f) == type(g)"))
