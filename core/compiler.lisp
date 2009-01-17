@@ -59,7 +59,7 @@ or not to include the assertion code.")
 
 ;;; Compiler optimizations
 
-(defvar *inline-fixnum-arithmetic* t
+(defvar *inline-number-arithmetic* t
   "For common arithmetic operations (+,-,*,/) the (often common) two-fixnum case is inlined")
 
 (defvar *inline-builtin-methods* t
@@ -76,7 +76,7 @@ like .join (string.join), .sort (list.sort), etc")
   "Whether to optimize the check on function receiving correct number of arguments.")
 
 (defmacro without-inlining (&body body)
-  `(let ((*inline-fixnum-arithmetic* nil)
+  `(let ((*inline-number-arithmetic* nil)
          (*inline-builtin-methods* nil)
          (*inline-getattr-call* nil)
          (*inline-print* nil)

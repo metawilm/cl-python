@@ -1067,15 +1067,18 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
           (slot-value x 'step) step))
   *the-none*)
 
-(def-py-method py-xrange.__iter__ (x)
+(defun xrange-iter-func (x)
   (with-slots (start stop step) x
     (let ((i start))
-      (make-iterator-from-function :name :xrange-iterator
-                                   :func (lambda ()
-                                           (unless (or (and (<= start stop) (>= i stop))
-                                                       (and (<= stop start) (<= i stop)))
-                                             (prog1 i
-                                               (incf i step))))))))
+      (lambda ()
+        (unless (or (and (<= start stop) (>= i stop))
+                    (and (<= stop start) (<= i stop)))
+          (prog1 i
+            (incf i step)))))))
+
+(def-py-method py-xrange.__iter__ (x)
+  (make-iterator-from-function :name :xrange-iterator
+                               :func (xrange-iter-func x)))
 
 (def-py-method py-xrange.__str__ (x^)
   (with-output-to-string (s)
@@ -3378,7 +3381,9 @@ finished; F will then not be called again."
 ;;   the a**b syntax, but may have a third argument when called for
 ;;   the built-in function POW.
 
-(defun py-** (x y &optional z)
+(defgeneric py-** (x y &optional z))
+
+(defmethod py-** (x y &optional z)
   (let* ((op-meth (x.class-attr-no-magic.bind x '{__pow__}))
 	 (res (and op-meth (if z
 			       (py-call op-meth y z)
@@ -3878,7 +3883,7 @@ the ~/.../ directive: ~/clpython:repr-fmt/"
    "Return a function that when called repeatedly returns VAL, T, where VAL is the
 next value gotten by iterating over X. Returns NIL, NIL upon exhaustion.")
   (:method ((x t))
-	   (let* ((x.cls       (py-class-of x))
+           (let* ((x.cls       (py-class-of x))
 		  (__iter__    (class.attr-no-magic x.cls '{__iter__}))
 		  (__getitem__-unb (unless __iter__
 				     (class.attr-no-magic x.cls '{__getitem__})))

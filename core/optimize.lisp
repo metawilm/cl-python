@@ -74,7 +74,12 @@
 	   (loop for i from stop downto start by (- step) do (funcall f i)))
 	  (t (call-next-method)))))
 
+(defmethod get-py-iterate-fun ((x py-xrange))
+  (xrange-iter-func x))
 
+(defmethod get-py-iterate-fun ((x list)) ;; tuple
+  (lambda () (pop x)))
+  
 (defmethod get-py-iterate-fun ((x py-func-iterator))
   (lambda ()
     (handler-case (funcall (slot-value x 'func))
@@ -130,26 +135,34 @@
 ;; getitem
 
 (defmethod py-subs ((x vector) (item fixnum))
+  (declare (optimize (speed 3) (safety 0) (debug 0)))
   (let* ((x.len (length x))
-	 (i2 (if (< item 0) (+ item x.len) item)))
-    (if (<= 0 i2 (1- x.len))
-	(aref x i2)
-      (call-next-method))))
+         (item2 (if (minusp item)
+                    (+ item x.len)
+                  item)))
+    (if (<= 0 item2 (1- x.len))
+	(aref x item2)
+      (py-list.__getitem__ x item))))
 
 (defmethod py-subs ((x vector) (item py-slice))
   ;; inline x[:]
   (with-slots (start stop step) item
     (when (and (none-p start) (none-p stop) (none-p step))
       (return-from py-subs
-        (make-array (length x) :adjustable t :fill-pointer (length x) :initial-contents x))))
-  (py-list.__getitem__ x item))
+        (if (stringp x)
+            x ;; using property that strings are immutable
+          (make-array (length x) :adjustable t :fill-pointer (length x) :initial-contents x)))))
+  (if (stringp x)
+      (py-string.__getitem__ x item)
+    (py-list.__getitem__ x item)))
       
 (defmethod py-subs ((x string) (item fixnum))
+  (declare (optimize (speed 3) (safety 0) (debug 0)))
   (let* ((x.len (length x))
 	 (i2 (if (< item 0) (+ item x.len) item)))
     (if (<= 0 i2 (1- x.len))
 	(py-string-from-char (char x i2))
-      (call-next-method))))
+      (py-string.__getitem__ x item))))
 
 (defmethod py-subs ((x list) (item fixnum)) ;; tuple
   (when (< item 0)
@@ -173,18 +186,20 @@
   (call-next-method))
                
 (defmethod (setf py-subs) (val (x vector) (item fixnum))
+  (declare (optimize (speed 3) (safety 0) (debug 0)))
+  (when (stringp x)
+    (py-raise '{TypeError} "Cannot assign to string items."))
   (let* ((x.len (length x))
-	 (i2 (if (< item 0) (+ item x.len) item)))
+	 (i2 (if (minusp item) (+ item x.len) item)))
     (if (<= 0 i2 (1- x.len))
-	(progn
-	  (when (stringp x)
-	    (call-next-method)) ;; error
-	  (if (null val)
-	      (progn (loop for i from (1+ i2) below x.len
-			 do (setf (aref x (1- i)) (aref x i)))
-		     (decf (fill-pointer x)))
-	    (setf (aref x i2) val)))
-      (call-next-method)))) ;; error
+        (if (null val)
+            (progn (loop for i from (1+ i2) below x.len
+                       do (setf (aref x (1- i)) (aref x i)))
+                   (decf (fill-pointer x)))
+          (setf (aref x i2) val))
+      (if val
+          (py-list.__setitem__ x item val) ;; error
+        (py-list.__delitem__ x item))))) ;; error
 
 (defmethod py-subs ((x dict) item)
   (if (eq (class-of x) (ltv-find-class 'dict))
@@ -214,30 +229,28 @@
     (symbol t)))
 
 (define-compiler-macro py-== (&whole whole x y)
-  (if (and *inline-fixnum-arithmetic*
+  (if (and *inline-number-arithmetic*
            (maybe-number-p x)
            (maybe-number-p y))
       `(let ((.x ,x)
              (.y ,y))
-         (if (and (integerp .x) (integerp .y))
+         (if (and (numberp .x) (numberp .y))
              (py-bool (= (the integer .x) (the integer .y)))
            (locally (declare (notinline py-==))
              (py-== .x .y))))
     whole))
 
 (define-compiler-macro py-!= (&whole whole x y)
-  (if (and *inline-fixnum-arithmetic*
+  (if (and *inline-number-arithmetic*
            (maybe-number-p x)
            (maybe-number-p y))
       `(let ((.x ,x)
 	     (.y ,y))
-	 (if (and (integerp .x) (integerp .y))
+	 (if (and (numberp .x) (numberp .y))
 	     (py-bool (/= .x .y))
 	   (locally (declare (notinline py-!=))
 	     (py-!= .x .y))))
     whole))
-
-
 
 (defmethod py-== ((x fixnum) (y fixnum)) (py-bool (= x y)))
 (defmethod py-== ((x string) (y string)) (py-bool (string= x y)))
@@ -251,9 +264,18 @@
 
 (defmethod py-<  ((x fixnum) (y fixnum)) (py-bool (<  x y)))
 (defmethod py-<= ((x fixnum) (y fixnum)) (py-bool (<= x y)))
-
 (defmethod py->  ((x fixnum) (y fixnum)) (py-bool (>  x y)))
 (defmethod py->= ((x fixnum) (y fixnum)) (py-bool (>= x y)))
+
+(defmethod py-<  ((x float) (y float)) (py-bool (<  x y)))
+(defmethod py-<= ((x float) (y float)) (py-bool (<= x y)))
+(defmethod py->  ((x float) (y float)) (py-bool (>  x y)))
+(defmethod py->= ((x float) (y float)) (py-bool (>= x y)))
+
+(defmethod py-<  ((x number) (y number)) (py-bool (<  x y)))
+(defmethod py-<= ((x number) (y number)) (py-bool (<= x y)))
+(defmethod py->  ((x number) (y number)) (py-bool (>  x y)))
+(defmethod py->= ((x number) (y number)) (py-bool (>= x y)))
 
 (defmethod py->  ((x string) (y string)) (py-bool (string>  x y)))
 (defmethod py->= ((x string) (y string)) (py-bool (string>= x y)))
@@ -280,49 +302,49 @@
 ;;; Arithmetic: + * // etc
 
 (define-compiler-macro py-+ (&whole whole x y)
-  (if (and *inline-fixnum-arithmetic*
+  (if (and *inline-number-arithmetic*
            (maybe-number-p x)
            (maybe-number-p y))
       `(let ((.x ,x)
 	     (.y ,y))
-	 (cond ((and (fixnump .x) (fixnump .y))
-		(+ (the fixnum .x) (the fixnum .y)))
-	       (t (locally (declare (notinline py-+))
-		    (py-+ .x .y)))))
+	 (if (and (numberp .x) (numberp .y))
+             (+ .x .y)
+           (locally (declare (notinline py-+))
+             (py-+ .x .y))))
     whole))
 
 (define-compiler-macro py-* (&whole whole x y)
-  (if (and *inline-fixnum-arithmetic*
+  (if (and *inline-number-arithmetic*
            (maybe-number-p x)
            (maybe-number-p y))
       `(let ((.x ,x)
 	     (.y ,y))
-	 (if (and (fixnump .x) (fixnump .y))
-	     (* (the fixnum .x) (the fixnum .y))
+	 (if (and (numberp .x) (numberp .y))
+	     (* .x .y)
 	   (locally (declare (notinline py-*))
 	     (py-* .x .y))))
     whole))
 
 (define-compiler-macro py-- (&whole whole x y)
-  (if (and *inline-fixnum-arithmetic*
+  (if (and *inline-number-arithmetic*
            (maybe-number-p x)
            (maybe-number-p y))
       `(let ((.x ,x)
 	     (.y ,y))
-	 (if (and (fixnump .x) (fixnump .y))
-	     (- (the fixnum .x) (the fixnum .y))
+	 (if (and (numberp .x) (numberp .y))
+	     (- .x .y)
 	   (locally (declare (notinline py--))
 	     (py-- .x .y))))
     whole))
 
 (define-compiler-macro py-// (&whole whole x y)
-  (if (and *inline-fixnum-arithmetic*
+  (if (and *inline-number-arithmetic*
            (maybe-number-p x)
            (maybe-number-p y))
       `(let ((.x ,x)
 	     (.y ,y))
-	 (if (and (fixnump .x) (fixnump .y))
-	     (floor (the fixnum .x) (the fixnum .y))
+	 (if (and (integerp .x) (integerp .y)) ;; integer, not number
+	     (floor .x .y)
 	   (locally (declare (notinline py-//))
 	     (py-// .x .y))))
     whole))
@@ -330,13 +352,13 @@
 (define-compiler-macro py-% (&whole whole x y)
   (cond ((stringp x)
          `(py-string.__mod__ ,x ,y))
-        ((and  *inline-fixnum-arithmetic*
+        ((and  *inline-number-arithmetic*
                (maybe-number-p x)
                (maybe-number-p y))
          `(let ((.x ,x)
                 (.y ,y))
-            (if (and (fixnump .x) (fixnump .y))
-                (mod (the fixnum .x) (the fixnum .y))
+            (if (and (integerp .x) (integerp .y)) ;; integer, not number
+                (mod .x .y)
               (locally (declare (notinline py-%))
                 (py-% .x .y)))))
         (t whole)))
@@ -351,9 +373,14 @@
 
 (defmethod py-+  ((x number) (y number))   (+ x y))
 (defmethod py--  ((x integer) (y integer)) (- x y))
+
+(defmethod py--  ((x float) (y float)) (- x y))
+(defmethod py-+  ((x float) (y float)) (+ x y))
+
 (defmethod py-// ((x integer) (y integer)) (floor x y))
 
 (defmethod py-/ ((x integer) (y integer)) (floor x y))
+(defmethod py-/ ((x float) (y float)) (/ x y))
                                            
 ;; Augmented assignment
 
@@ -381,6 +408,34 @@
   (declare (ignore y))
   nil)
 
+(defmethod py-** ((x float) (y float) &optional z)
+  (declare (optimize (speed 3) (safety 0) (debug 0)))
+  (if (null z)
+      (coerce (expt x y) '#.clpython.parser::*normal-float-representation-type*)
+    (py-raise '{TypeError} "Not implemented: x**y % z with x,y float and z provided.")))
+
+(defmethod py-** ((x number) (y number) &optional z)
+  (declare (optimize (speed 3) (safety 0) (debug 0)))
+  (if z
+      (progn (check-type x 'integer)
+             (check-type y 'integer)
+             (check-type z 'integer)
+             (mod (expt x y) z))
+    (let ((res (expt x y)))
+      (if (rationalp res)
+          (coerce res '#.clpython.parser::*normal-float-representation-type*)
+        res))))
+
+(define-compiler-macro py-** (x y &optional z)
+  `(let ((.x ,x)
+         (.y ,y)
+         (.z ,z))
+     (if (and (null .z)
+              (numberp .x)
+              (numberp .y))
+         (expt .x .y)
+       (locally (declare (notinline py-**))
+         (py-** .x .y .z)))))
 
 ;; Unary
 
