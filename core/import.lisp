@@ -181,7 +181,11 @@ Returns the loaded module, or NIL on error."
                (if module-function
                    (progn (let ((*current-module-name* mod-name))
                             (declare (special *current-module-name*))
-                            (funcall module-function)) ;; Execute the module toplevel forms
+                            (loop named execute-toplevel
+                                do (with-simple-restart
+                                       (continue "Retry evaluating top-level forms in module `~A'" mod-name)
+                                     (funcall module-function)
+                                     (return-from execute-toplevel))))
                           ;; XXX call module-function with :%module-globals if updating existing mod
                           (unless new-module
                             (break "CLPython bug: module ~A did not call *module-preload-hook* upon loading"
@@ -284,8 +288,7 @@ Used to avoid infinite recompilation/reloading loops.")
             ;; No need for an additional ImportError.
             (warn "Could not import module `~A' as importing package `~A' failed.~@[~:@_Import attempted by: ~A~]"
                   dotted-name (module-dotted-name (butlast mod-name-as-list))
-                  within-mod-path)
-            (return-from py-import)))
+                  within-mod-path)))
         (unless (module-package-p parent)
           (py-raise '{ImportError}
                     "Cannot import '~A', as parent '~A' is not a package (it is: ~S)."
