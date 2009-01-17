@@ -108,9 +108,9 @@
 
 (defpackage :clpython.module.string
   (:use :clpython :common-lisp)
-  (:export "ascii_letters" "ascii_lowercase" "ascii_uppercase" "digits"
-           "hexdigits" "octdigits" "lowercase" "uppercase" "letters"
-           "punctuation" "whitespace" "printable")
+  (:export #:|ascii_letters| #:|ascii_lowercase| #:|ascii_uppercase| #:|digits|
+           #:|hexdigits| #:|octdigits| #:|lowercase| #:|uppercase| #:|letters|
+           #:|punctuation| #:|whitespace| #:|printable| #:|translate| #:|maketrans|)
   (:import-from :clpython.package +max-char-code+))
 
 (defpackage :clpython.module.symbol

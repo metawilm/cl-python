@@ -120,4 +120,5 @@ seems to give implementations some freedom here. (In practice: Allegro=NIL, LisW
     (run-code-walker-test)
     (run-pretty-printer-test)
     (run-lang-test)
-    (run-builtin-test)))
+    (run-builtin-test)
+    (run-mod-string-test)))

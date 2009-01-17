@@ -77,3 +77,55 @@
 
 (set-impl-status '|punctuation| t "Value copied from CPython.")
 (set-impl-status '(|printable| |whitespace|) t)
+
+(defun |maketrans| (from to)
+  (check-type from string)
+  (check-type to string)
+  (unless (= (length from) (length to))
+    (py-raise '{ValueError} "Lengths not the same: ~A vs ~A." (length from) (length to)))
+  
+  (loop with conv = (copy-seq #.(coerce (loop for i from 0 to 255 collect (code-char i)) 'string))
+      for from-char across from
+      for from-code = (char-code from-char)
+      for to-char across to
+      for to-code = (char-code to-char)
+      do (if (or (> from-code 255)
+                 (> to-code 255))
+             (py-raise '{ValueError}
+                       "Translation character with code > 255: ~S ~S." from-char to-char)
+           (setf (aref conv from-code) to-char))
+      finally (return conv)))
+
+(defun |translate| (string table &optional delete-chars)
+  "Delete chars in DELETE-CHARS; TABLE is trans of 256 -> 256. If TABLE is None, then only delete chars."
+  (check-type string string)
+  (check-type table (or string py-none))
+  (flet ((calc-filter ()
+           (when delete-chars
+             (let ((filter (make-array 256 :initial-element t)))
+               (prog1 filter
+                 (flet ((mapper (ch)
+                          (let ((code (char-code ch)))
+                            (if (<= code 255)
+                                (setf (svref filter code) nil)
+                              (py-raise '{ValueError} "Character ~S in delete-chars has code > 255." ch)))))
+                   (declare (dynamic-extent #'mapper))
+                   (unless (typep delete-chars '(or vector list))
+                     (setf delete-chars (py-iterate->lisp-list delete-chars)))
+                   (map nil #'mapper delete-chars)))))))
+    (loop with filter = (calc-filter)
+        with res = (make-array (length string)
+                               :element-type 'character
+                               :fill-pointer (when delete-chars 0))
+        with dest-i = 0
+        for ch across string
+        for ch.code = (char-code ch)
+        do (cond ((> ch.code 255) (py-raise '{ValueError} "Char ~S has code > 255." ch))
+                 ((and filter (null (svref filter ch.code)))) ;; skip
+                 (t (let ((repl (if (clpython::none-p table)
+                                    ch
+                                  (aref table ch.code))))
+                      (setf (aref res dest-i) repl)
+                      (incf dest-i))))
+          finally (when delete-chars (setf (fill-pointer res) dest-i))
+                  (return res))))

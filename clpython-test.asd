@@ -22,5 +22,6 @@
                                        (:file "parser-test")
                                        (:file "compiler-test")
                                        (:file "lang-test")
-                                       (:file "mod-builtins-test")))))
+                                       (:file "mod-builtins-test")
+                                       (:file "mod-string-test")))))
 
