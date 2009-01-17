@@ -61,7 +61,8 @@ caught outside the COMPILE form. ANSI 3.2.5 \"Exceptional Situations in the Comp
 seems to give implementations some freedom here. (In practice: Allegro=NIL, LisWorks=T")
 
 (defmacro test-some-warning (&rest args)
-  `(test-warning ,@args 
+  `(test-warning ,@args
+                 :known-failure +compilation-warnings-muffled-by-compiler+
                  :fail-info (format nil "~S = ~S"
                                     '+compilation-warnings-muffled-by-compiler+
                                     +compilation-warnings-muffled-by-compiler+)))
