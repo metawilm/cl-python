@@ -39,6 +39,7 @@
 (defun |allocate_lock| ()
   (let* ((id (incf *lock-counter*))
          (wait-msg (format nil "waiting for lock ~A" id)))
+    (declare (ignorable wait-msg))
     #+allegro 
     (multiple-value-bind (type args)
         (ecase *lock-implementation*
@@ -115,16 +116,23 @@
   
 (defun |start_new_thread| (func args &optional kwargs)
   "Return identifier of new thread. Thread exits silently, or prints stack trace upon exception."
-  (let* ((pa (py-iterate->lisp-list args))
-         (ka (when kwargs (loop for (k v) in (clpython::dict.items kwargs)
-                              collect (intern k :keyword)
-                              collect v)))
-         (thread #+allegro (make-instance '|thread|
-                             :internal-thread (mp:process-run-function (clpython::function-name func)
-                                                (lambda () (apply #'py-call func (append pa ka)))))
-                 #-allegro (break "todo")))
-    (push thread *threads*)
-    thread))
+  (flet ((start-thread (func args)
+           (declare (ignorable func args))
+           #+allegro (mp:process-run-function (clpython::function-name func)
+                       (lambda () (apply #'py-call func args)))
+           #-allegro (break "todo")))
+    (let* ((pa (py-iterate->lisp-list args))
+           (ka (when kwargs (loop for (k v) in (clpython::dict.items kwargs)
+                                collect (intern k :keyword)
+                                collect v)))
+           (args (append pa ka))
+           (thread (make-instance '|thread| :internal-thread (start-thread func args))))
+      (push thread *threads*)
+      thread)))
 
 (defun kill_new_threads ()
-  (loop for x in *threads* do (mp:process-kill (internal-thread x))))
+  (flet ((kill (x)
+           (declare (ignorable x))
+           #+allegro (mp:process-kill (internal-thread x))
+           #-allegro (break "todo")))
+    (map nil #'kill *threads*)))
