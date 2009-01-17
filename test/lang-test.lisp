@@ -556,30 +556,30 @@ assert b(-2) == -1")
 (defmethod test-lang ((kind (eql :import-stmt)))
   (run-no-error "import sys
 assert sys" :fail-info "Should work in both ANSI and Modern mode.")
-  ;; run compilation outside run-no-error, to prevent allegro style warning from failing the test
-  (clpython:run "
+  #.(progn (unless (string= (pathname-name *compile-file-truename*) "lang-test")
+             (error "Compile file lang-test.lisp using compile-file (or asdf), not using temp file, ~
+                     otherwise import paths are incorrect: ~A." *compile-file-truename*))
+           nil)
+  (let ((prefix (concatenate 'string "
 import sys
-sys.path.append('./test/data/')
+sys.path.append('" #.(namestring (clpython::derive-pathname *compile-file-truename* :type nil :name nil)) "/data/')
+")))
+    ;; run compilation outside run-no-error, to prevent allegro style warning from failing the test
+    (clpython:run (concatenate 'string prefix "
 import bar
-reload(bar)")
-  (run-no-error "
-import sys
-sys.path.append('./test/data/')
+reload(bar)"))
+    (run-no-error (concatenate 'string prefix "
 for i in xrange(3):
   import bar
   assert bar.i == 1
-")
-  ;; run outside run-no-error
-  (clpython:run "
-import sys
-sys.path.append('./test/data/')
-import zut.bla")
-  (run-no-error "
-import sys
-sys.path.append('./test/data/')
+"))
+    ;; run outside run-no-error
+    (clpython:run (concatenate 'string prefix "
+import zut.bla"))
+    (run-no-error (concatenate 'string prefix "
 for i in xrange(3):
   import zut.bla
-  assert zut.bla.x"))
+  assert zut.bla.x"))))
 
 (defmethod test-lang ((kind (eql :import-from-stmt)))
   (run-no-error "from sys import path; path.append('/foo'); del path[-1]"))
