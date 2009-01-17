@@ -1323,7 +1323,6 @@ but the latter two classes are not in CPython.")
          ;; Inline common case: creating new classes with TYPE as requested metaclass
 	 (apply #'py-type.__new__ cls args))
         
-        ;; Inline common case: creating new classes with TYPE as requested metaclass
         (t (let ((__new__ (class.attr-no-magic cls '{__new__})))
              (unless __new__
                (break "Class ~A lacks __new__ method." cls))
