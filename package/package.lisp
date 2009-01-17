@@ -236,7 +236,7 @@
 	   #:py-repr-string #:py-attr #:py-attr*
 	   #:run #:exception-args #:*exceptions-loaded*
            #:def-py-method #:py-iterate->lisp-list #:py-raise
-           #:+the-true+ #:+the-false+
+           #:+the-true+ #:+the-false+ #:object #:py-type
 
 	   ;; compiler
 	   #:+standard-module-globals+

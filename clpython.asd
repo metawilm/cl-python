@@ -85,6 +85,7 @@ are accepted in those libraries."
                                        (:file "sys" :depends-on ("lsetup"))
                                        (:file "string" :depends-on ("lsetup"))
 				       (:file "symbol" :depends-on ("lsetup"))
+                                       (:file "thread" :depends-on ("lsetup"))
                                        (:file "time" :depends-on ("lsetup"))))))
 
 ;;; Application systems

@@ -11,29 +11,86 @@
 
 (defparameter *lock-counter* 0)
 
-(defclass |lock| (clpython::object)
-  ((internal-lock :initarg :internal-lock :accessor internal-lock))
-  (:metaclass clpython::py-type))
+#+allegro
+(defparameter *lock-implementation* :gate
+  "Implementation of locks: either :gate or :process-lock")
+ 
+(defclass lock (object)
+  ((id       :initarg :id       :accessor lock-id)
+   (wait-msg :initarg :wait-msg :accessor lock-wait-msg))
+  (:metaclass py-type))
+
+#+allegro
+(defclass allegro-gate-lock (lock)
+  ((gate :initarg :gate :accessor lock-gate))
+  (:metaclass py-type))
+
+#+allegro
+(defclass allegro-process-lock (lock)
+   ((process-lock :initarg :process-lock :accessor lock-process-lock))
+   (:metaclass py-type))
+
+(defmethod print-object ((l |lock|) stream)
+  (print-unreadable-object (l stream :type t :identity t)
+    (format stream "lock ~A" (lock-id l))))
 
 (defun |allocate_lock| ()
-  (let ((lock #+allegro (mp:make-process-lock :name (format nil "lock-~A" (incf *lock-counter*)))
-              #-allegro (break "todo")))
-    (make-instance 'lock :internal-lock lock)))
-
-(def-py-method |lock.acquire| (x &optional (waitflag 1))
-  (check-type waitflag (member 0 1))
-  (let ((timeout-sec (ecase waitflag
-                       (0 0)
-                       (1 most-positive-fixnum))))
-    #+allegro (py-bool (mp:process-lock (internal-lock x) system:*current-process* "waiting for lock" timeout-sec))
+  (let* ((id (incf *lock-counter*))
+         (wait-msg (format nil "waiting for lock ~A" id)))
+    #+allegro 
+    (multiple-value-bind (type args)
+        (ecase *lock-implementation*
+          (:gate (values 'allegro-gate-lock
+                         (list :gate (mp:make-gate t))))
+          (:process-lock (values 'allegro-process-lock
+                                 (list :process-lock (mp:make-process-lock :name (format nil "lock ~A" id))))))
+      (apply #'make-instance type :id id :wait-msg wait-msg args))
     #-allegro (break "todo")))
 
+(def-py-method |lock.acquire| (x &optional (waitflag 1))
+  (let ((wait (ecase waitflag
+                (0 nil)
+                (1 t))))
+    (py-bool (lock-acquire x wait))))
+
+(defgeneric lock-acquire (lock wait-p))
+
+#+allegro
+(defmethod lock-acquire ((lock allegro-gate-lock) wait-p)
+  (let ((g (lock-gate lock)))
+    (loop
+      (system:without-scheduling
+        (when (mp:gate-open-p g)
+          (mp:close-gate g)
+          (return-from lock-acquire t)))
+      (if wait-p
+          (mp:process-wait (lock-wait-msg lock) 'mp:gate-open-p g)
+        (return-from lock-acquire nil)))))
+
+#+allegro 
+(defmethod lock-acquire ((lock allegro-process-lock) wait-p)
+  (let* ((pl (lock-process-lock lock))
+         (wait-msg (lock-wait-msg lock))
+         (timeout-sec (if wait-p most-positive-fixnum 0)))
+    ;; MP:PROCESS-LOCK returns success
+    (mp:process-lock pl t wait-msg timeout-sec)))
+
 (def-py-method |lock.release| (x)
-  #+allegro (mp:process-unlock (internal-lock x))
-  #-allegro (break "todo"))
+  "Releases the lock, which had been acquired by this or another thread."
+  (lock-release x))
+
+(defgeneric lock-release (lock))
+
+#+allegro
+(defmethod lock-release ((lock allegro-gate-lock))
+  (mp:open-gate (lock-gate lock)))
+
+#+allegro
+(defmethod lock-release ((lock allegro-process-lock))
+  (mp:process-unlock (lock-process-lock lock) t))
 
 (def-py-method |lock.locked| (x)
-  #+allegro (py-bool (eq (mp:process-lock-locker (internal-lock x)) system:*current-process*))
+  #+allegro (py-bool (not (mp:gate-open-p (lock-gate x))))
   #-allegro (break "todo"))
 
 (def-py-method |lock.__enter__| (x)
@@ -44,4 +101,28 @@
   (|lock.release| x)
   clpython::+the-false+)
 
-;(defun |start_new_thread| 
+
+;;; Threads
+
+(defvar *threads* ()
+  "All spawned threads.")
+
+(defclass |thread| (object)
+  ((internal-thread :initarg :internal-thread :accessor internal-thread))
+  (:metaclass py-type))
+  
+(defun |start_new_thread| (func args &optional kwargs)
+  "Return identifier of new thread. Thread exits silently, or prints stack trace upon exception."
+  (let* ((pa (py-iterate->lisp-list args))
+         (ka (when kwargs (loop for (k v) in (clpython::dict.items kwargs)
+                              collect (intern k :keyword)
+                              collect v)))
+         (thread #+allegro (make-instance '|thread|
+                             :internal-thread (mp:process-run-function (clpython::function-name func)
+                                                (lambda () (apply #'py-call func (append pa ka)))))
+                 #-allegro (break "todo")))
+    (push thread *threads*)
+    thread))
+
+(defun kill_new_threads ()
+  (loop for x in *threads* do (mp:process-kill (internal-thread x))))

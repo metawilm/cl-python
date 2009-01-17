@@ -137,7 +137,7 @@
 (defpackage :clpython.module.thread
   (:use :clpython :common-lisp)
   (:import-from :clpython #:def-py-method)
-  (:export #:|allocate_lock|))
+  (:export #:|allocate_lock| |start_new_thread|))
 
 (defpackage :clpython.module.time
   (:use :clpython :common-lisp)
