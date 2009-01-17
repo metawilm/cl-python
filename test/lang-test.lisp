@@ -619,7 +619,16 @@ assert f(1, lambda: 2) == 1 + 2")
   (run-no-error "assert [(x,y) for x in [1,2] for y in [x]] == [(1,1), (2,2)]"))
 
 (defmethod test-lang ((kind (eql :list-expr)))
-  )
+  (run-no-error "
+x = []
+y = x
+x += [2,3]
+assert x == [2,3]
+assert y == [2,3]")
+  (run-no-error "
+x = []
+x += '12'
+assert x == ['1', '2']"))
 
 (defmethod test-lang ((kind (eql :module-stmt)))
   )
