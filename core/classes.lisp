@@ -2175,9 +2175,9 @@ invocation form.")
   (with-output-to-string (s)
     (let ((*print-escape* t))
       (print-unreadable-object (d s :type t)
-        (format s "[~{~S~^ ~}]" (loop for k being the hash-key in (sht-ht d)
+        (format s "{~{~A: ~S~^, ~}}" (loop for k being the hash-key in (sht-ht d)
                                     using (hash-value v)
-                                    collect (cons k v)))))))
+                                    nconc (list (string k) v)))))))
 
 ;; TODO: add the other dict methods
 
