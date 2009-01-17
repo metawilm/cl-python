@@ -614,7 +614,7 @@
 ;; Temporary (?) hack to get things running on SBCL 1.0.16, 
 ;; where instantiating a py-function leads to strange errors.
 ;; See <http://common-lisp.net/pipermail/clpython-devel/2008-May/000048.html>
-(defvar *create-simple-lambdas-for-python-functions*
+(defparameter *create-simple-lambdas-for-python-functions*
     #+(or allegro lispworks) nil
     #+sbcl t
     #-(or allegro lispworks sbcl) t
@@ -622,11 +622,9 @@
 Note that in the latter case, functions miss their name and attribute dict, but should
 otherwise work well.")
 
-(defparameter *simple-function-attributes*
-    (when *create-simple-lambdas-for-python-functions*
-      (make-hash-table :test 'eq))
-  "Mapping from function to hash-table")
-    
+(defparameter *simple-function-attributes* (make-hash-table :test 'eq)
+  "Mapping from function to hash-table (when *create-simple-lambdas-for-python-functions* is false")
+
 (defclass py-function (standard-generic-function dicted-object)
   ;; mop:funcallable-standard-class defines :name initarg, but how to to access it portably...
   ((fname        :initarg :fname        :initform nil :accessor py-function-name)
@@ -651,24 +649,6 @@ otherwise work well.")
     (set-funcallable-instance-function x lambda)
     ;; fill dict?
     x))
-
-(defun set-function-attribute (func attr val)
-  (check-type attr symbol)
-  (etypecase func
-    (py-function (let ((d (or (dict func) (setf (dict func) (make-eq-hash-table "func dict")))))
-                   (setf (py-subs d attr) val)))
-    (function (let ((ht (or (gethash func *simple-function-attributes*)
-                            (setf (gethash func *simple-function-attributes*)
-                              (make-eq-hash-table "func dict")))))
-                (setf (gethash attr ht) val)))))
-
-(defun get-function-attribute (func attr)
-  (check-type attr symbol)
-  (etypecase func
-    (py-function (whereas ((d (dict func)))
-                   (py-subs d attr)))
-    (function (whereas ((ht (gethash func *simple-function-attributes*)))
-                (gethash attr ht)))))
 
 (def-py-method py-function.__get__ (func inst cls)
   (py-lisp-function.__get__ func inst cls))
@@ -702,6 +682,41 @@ otherwise work well.")
     (setf x (py-function-lambda x)))
   (assert (functionp x))
   x)
+
+(def-py-method py-function.__setattr__ (func attr val)
+  (when (stringp attr)
+    (setf attr (ensure-user-symbol attr)))
+  (check-type attr symbol)
+  (etypecase func
+    (py-function (let ((d (or (dict func) (setf (dict func) (make-eq-hash-table "func dict")))))
+                   (setf (gethash attr d) val)))
+    (function (let ((ht (or (gethash func *simple-function-attributes*)
+                            (setf (gethash func *simple-function-attributes*)
+                              (make-eq-hash-table "func dict")))))
+                (setf (gethash attr ht) val)))))
+
+(def-py-method py-function.__getattribute__ (func attr)
+  (when (stringp attr)
+    (setf attr (ensure-user-symbol attr)))
+  (check-type attr symbol)
+  (or (etypecase func
+        (py-function (whereas ((d (dict func)))
+                       (gethash attr d)))
+        (function (whereas ((ht (gethash func *simple-function-attributes*)))
+                    (values (gethash attr ht)))))
+      (py-raise '{AttributeError} "Function ~A has no attribute `~A'." func attr)))
+
+(def-py-method py-function.__delattr__ (func attr)
+  (when (stringp attr)
+    (setf attr (ensure-user-symbol attr)))
+  (check-type attr symbol)
+  (let ((ok (etypecase func
+              (py-function (whereas ((d (dict func)))
+                             (setf (py-subs d attr) nil)))
+              (function (whereas ((func-attrs (gethash func *simple-function-attributes*)))
+                          (remhash attr func-attrs))))))
+    (unless ok
+      (py-raise '{AttributeError} "Function ~A has no attribute `~A' to delete." func attr))))
 
 (def-py-method py-function.func_code :attribute (x)
   "Read-only attribute: the underlying lambda. (In CPython the bytecode vector.)"
