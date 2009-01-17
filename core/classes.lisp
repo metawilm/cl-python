@@ -3244,7 +3244,6 @@ finished; F will then not be called again."
 
 (defmethod (setf py-subs) (new-val x item)
   "New-val = NIL means deletion."
-  (break "(setf (py-subs ~A ~A) ~A)" x item new-val)
   (if (null new-val)
       (let* ((x.cls (py-class-of x))
              (__delitem__ (class.attr-no-magic x.cls '{__delitem__})))
