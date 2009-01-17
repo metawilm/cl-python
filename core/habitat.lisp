@@ -21,18 +21,24 @@
    (search-paths   :initform (make-py-list-from-list (list ".")) :accessor habitat-search-paths))
   (:documentation "Python execution context"))
 
+(defgeneric habitat-stdin (habitat))
 (defmethod habitat-stdin ((x habitat))
   (or (%habitat-stdin x) *standard-input*))
 
+(defgeneric (setf habitat-stdin) (val habitat))
 (defmethod (setf habitat-stdin) (val (x habitat))
   (setf (%habitat-stdin x) val))
 
+(defgeneric habitat-stdout (habitat))
 (defmethod habitat-stdout ((x habitat))
   (or (%habitat-stdout x) *standard-output*))
 
+(defgeneric (setf habitat-stdout) (val habitat))
 (defmethod (setf habitat-stdout) (val (x habitat))
   (setf (%habitat-stdout x) val))
 
+(defgeneric (setf habitat-stderr) (val habitat))
+(defgeneric habitat-stderr (habitat))
 (defmethod habitat-stderr ((x habitat))
   (or (%habitat-stderr x) *error-output*))
 
