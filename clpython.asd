@@ -108,30 +108,12 @@ are accepted in those libraries."
     :description "CLPython applications"
     :depends-on (:clpython.app.repl :clpython.app.profiler))
 
-
 ;;; The main system
 
 (asdf:defsystem :clpython
     :description "CLPython - an implementation of Python in Common Lisp"
     :depends-on (:clpython.package :clpython.parser :clpython.core :clpython.lib clpython.app)
     :in-order-to ((asdf:test-op (asdf:load-op :clpython-test))))
-
-(defmethod asdf:perform :after ((op asdf:test-op) (c (eql (asdf:find-system :clpython))))
-  (funcall (find-symbol (string '#:run-tests) :clpython.test)))
-
-
-(defvar *shown-clpython-usage* nil)
-
-(defmethod asdf:perform :after ((op asdf:load-op) (c (eql (asdf:find-system :clpython))))
-  (unless *shown-clpython-usage*
-    (terpri)
-    (format t "CLPython quick start guide:~%")
-    (format t "  Run a string of Python code:           (~S \"for i in range(4): print i\")~%" (find-symbol (string '#:run) :clpython))
-    (format t "  Run a Python file:                     (~S #p\"~~/example/foo.py\")~%" (find-symbol (string '#:run) :clpython))
-    (format t "  Start the Python \"interpreter\" (REPL): (~S)~%" (find-symbol (string '#:repl) :clpython.app.repl))
-    (format t "  Run the test suite:                    ~S~%~%" '(asdf:operate 'asdf:test-op :clpython))
-    (setf *shown-clpython-usage* t)))
-
 
 ;; Check for presence of CL-Yacc and Allegro CL Yacc.
 
@@ -158,7 +140,85 @@ are accepted in those libraries."
     (defmethod asdf:perform :around ((op asdf:compile-op) (c (eql allegro-yacc-grammar)))
       #+allegro (call-next-method))))
 
-;; Testing is never finished.
+
+;;; Create concatenated fasl file
+
+(defun system-fasl-files (system system-prefix)
+  (let ((operation (make-instance 'asdf:compile-op :force t))
+        (done (make-hash-table :test 'eq)))
+    (labels ((dig (x)
+               (unless (gethash x done)
+                 (setf (gethash x done) t)
+                 (when (include-system-p (component-system x))
+                   (cond ((typep x 'asdf:cl-source-file)
+                          (list x))
+                         (t (loop for (op . thing) in (asdf::traverse operation x)
+                                when (typep op 'asdf:load-op)
+                                nconc (dig thing)))))))
+             (component-system (f)
+               (etypecase f
+                 (asdf:system f)
+                 (asdf:component
+                  (loop for parent = (asdf:component-parent f) then (asdf:component-parent parent)
+                      until (or (null parent)
+                                (typep parent 'asdf:system))
+                      finally (return parent)))))
+             (include-system-p (s)
+               (check-type s asdf:system)
+               (let ((name (asdf:component-name s)))
+                 (string-equal (subseq name 0 (min (length system-prefix) (length name)))
+                               system-prefix))))
+      (let* ((files (dig (asdf:find-system system)))
+             (fasl-files (mapcan (lambda (f) (asdf:output-files operation f)) files)))
+        fasl-files))))
+
+#+allegro ;; Concatenating fasl files might not be supported in other implementations.
+(defun write-clpython-fasl (&optional (output-fasl "clpython.fasl"))
+  (let ((fasls (system-fasl-files :clpython "clpython")))
+    (when (probe-file output-fasl)
+      (let ((newest-time (apply #'max (mapcar #'file-write-date fasls)))
+            (output-time (file-write-date output-fasl)))
+        (when (< newest-time output-time)
+          (format t "~%;; Concatenated fasl file ~A still up to date.~%" (probe-file output-fasl))
+          (return-from write-clpython-fasl (probe-file output-fasl)))))
+    (format t "~%;; Concatenating ~A CLPython fasl files to ~A...~%" (length fasls) output-fasl)
+    (with-open-file (out output-fasl :element-type '(unsigned-byte 8)
+                     :direction :output
+                     :if-exists :supersede)
+      ;;:if-does-not-exist :create
+      (dolist (fasl fasls)
+        (with-open-file (in fasl :element-type '(unsigned-byte 8) :direction :input)
+          (let* ((len (file-length in))
+                 (vector (make-array len :element-type '(unsigned-byte 8))))
+            (assert (= (read-sequence vector in) len))
+            (write-sequence vector out))))))
+  (format t ";; Writing to ~A done.~%" (truename output-fasl))
+  (truename output-fasl))
+
+
+;;; Show usage
+
+(defmethod asdf:perform :after ((op asdf:load-op) (c (eql (asdf:find-system :clpython))))
+  #+allegro
+   (let ((concatenated-fasl (write-clpython-fasl)))
+     (format t "~%To load CLPython next time, you can use either: ~%")
+     (format t "  ~S~%" `(load ,concatenated-fasl))
+     (format t "  ~S~%" '(asdf:operate 'asdf:load-op :clpython)))
+  
+   (progn
+     (format t "~%CLPython quick start guide:~%")
+     (format t "  Run a string of Python code:           (~S \"for i in range(4): print i\")~%" (find-symbol (string '#:run) :clpython))
+     (format t "  Run a Python file:                     (~S #p\"~~/example/foo.py\")~%" (find-symbol (string '#:run) :clpython))
+     (format t "  Start the Python \"interpreter\" (REPL): (~S)~%" (find-symbol (string '#:repl) :clpython.app.repl))
+     (format t "  Run the test suite:                    ~S~%~%" '(asdf:operate 'asdf:test-op :clpython))))
+
+
+;;; Link asdf operation "test-op" to asdf system "clpython.test"
+
+(defmethod asdf:perform :after ((op asdf:test-op) (c (eql (asdf:find-system :clpython))))
+  (funcall (find-symbol (string '#:run-tests) :clpython.test)))
+
 (defmethod asdf:operation-done-p ((o asdf:test-op)
 				  (c (eql (asdf:find-system :clpython))))
+  "Testing is never finished."
   (values nil))
