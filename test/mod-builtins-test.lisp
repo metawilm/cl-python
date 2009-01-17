@@ -50,10 +50,10 @@ assert len(hashes) > 1000"
                 :fail-info "Ensure tuple hashes nicely distributed."))
 
 (defmethod test-builtin ((x (eql :range)))
-  (run-no-error "assert range(3) == [0,1,2]")
-  (run-no-error "assert range(1,3) == [1,2]")
-  (run-no-error "assert range(1,10,2) == [1,3,5,7,9]")
-  (run-no-error "assert range(10,1,-2) == [10,8,6,4,2]"))
+  (run-no-error "assert range(3) == list(xrange(3)) == [0,1,2]")
+  (run-no-error "assert range(1,3) == list(xrange(1,3)) == [1,2]")
+  (run-no-error "assert range(1,10,2) == list(xrange(1,10,2)) == [1,3,5,7,9]")
+  (run-no-error "assert range(10,1,-2) == list(xrange(10,1,-2)) == [10,8,6,4,2]"))
 
 (defmethod test-builtin ((x (eql :int)))
   (run-no-error "assert int(3) == 3")
