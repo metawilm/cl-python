@@ -13,13 +13,22 @@
 (in-syntax *user-readtable*)
 
 (defclass habitat ()
-  ((stdin          :initform *standard-input*  :initarg :stdin  :accessor habitat-stdin)
-   (stdout         :initform *standard-output* :initarg :stdout :accessor habitat-stdout)
-   (stderr         :initform *error-output*    :initarg :stderr :accessor habitat-stderr)
+  ((stdin          :initform nil :initarg :stdin  :accessor %habitat-stdin)
+   (stdout         :initform nil :initarg :stdout :accessor %habitat-stdout)
+   (stderr         :initform nil :initarg :stderr :accessor %habitat-stderr)
    (loaded-mods    :initform () :initarg :loaded-mods   :accessor habitat-loaded-mods)
    (cmd-line-args  :initform () :initarg :cmd-line-args :accessor habitat-cmd-line-args)
    (search-paths   :initform (make-py-list-from-list (list ".")) :accessor habitat-search-paths))
   (:documentation "Python execution context"))
+
+(defmethod habitat-stdin ((x habitat))
+  (or (%habitat-stdin x) *standard-input*))
+
+(defmethod habitat-stdout ((x habitat))
+  (or (%habitat-stdout x) *standard-output*))
+
+(defmethod habitat-stderr ((x habitat))
+  (or (%habitat-stderr x) *error-output*))
 
 (defun make-habitat (&rest options)
   (apply #'make-instance 'habitat options))
