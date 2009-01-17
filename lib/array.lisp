@@ -74,8 +74,16 @@
 			arr initializer)
 	       arr))
 	    (t
-	     (|array.extend| (create-array) initializer))) ;; XXX could take __len__
+	     (let ((arr (create-array)))
+               (|array.extend| arr initializer)
+               arr))) ;; XXX could take __len__
 	(create-array)))))
+
+(def-py-method |array.__getitem__| (x item)
+  (aref (py-array-array x) item))
+
+(def-py-method |array.__setitem__| (x item value)
+  (setf (aref (py-array-array x) item) value))
 
 (def-py-method |array.__repr__| (x)
   (with-output-to-string (s)
