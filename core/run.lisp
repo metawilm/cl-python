@@ -67,10 +67,14 @@ ARGS are the command-line args, available as `sys.argv'; can be a string or a li
                          (*compile-verbose* (if compile-quiet nil *compile-verbose*)))
                      (compile nil get-module-f))
                  (coerce get-module-f 'function))))
+      (unless *habitat* (setf *habitat* (make-habitat)))
+      ;; set args:
+      (setf (habitat-cmd-line-args *habitat*) (make-py-list-from-list '("???.py")))
       (when args
-        (unless *habitat* (setf *habitat* (make-habitat)))
-        (setf (habitat-cmd-line-args *habitat*)
-          (if (stringp args) (py-string.split args " ") args)))
+        (typecase args
+          (string (setf args (py-string.split args " ")))
+          (list (setf args (make-py-list-from-list args))))
+        (py-list.extend (habitat-cmd-line-args *habitat*) args))
       (let* (module-function
              (*module-function-hook* (lambda (f) (setf module-function f))))
         (funcall fc)
