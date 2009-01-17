@@ -70,10 +70,10 @@ If COMPILE is true, the AST is compiled into a function before running."
           (break "Module ~A did not call *module-function*." fc))
         (apply module-function run-args)))))
 
-(defun compile-py-file (fname)
+(defun compile-py-file (fname &key (verbose t))
   (let* ((module (pathname-name fname))
          (fasl-file (compiled-file-name :module module fname))
          (*import-force-recompile* t)
-         (*import-compile-verbose* t))
+         (*import-compile-verbose* verbose))
     (declare (special *import-force-recompile* *import-compile-verbose*))
     (%compile-py-file fname :mod-name module :output-file fasl-file)))
