@@ -353,8 +353,11 @@ KIND can be :ptime, :time, :space, :pspace or NIL."
                     (format t (nth (if acc 1 0) *prompts*))
                     (force-output *standard-output*)) ;; stream T would mean *terminal-io*
 
-            (let ((x (read-line)))
+            (let ((x (read-line *standard-input* nil 'eof)))
               (cond
+               ((eq x 'eof)
+                (terpri *standard-output*)
+                (return-from repl-1))
                ((and (> (length x) 0)
                      (char= (aref x 0) #\:))
                 (multiple-value-bind (cmd ix)
