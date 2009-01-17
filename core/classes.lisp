@@ -1755,51 +1755,52 @@ But if RELATIVE-TO package name is given, result may contains dots."
 
 (def-py-method py-int.__new__ :static (cls &optional (arg 0) (base 0 base-provided))
   ;; If base = 0, then derive base from literal ARG, or use base = 10.
-  (flet ((invalid-arg-error (a)
-	   (py-raise '{TypeError} "Invalid arg for int.__new__: ~S ~@[with base ~S~]."
-                     a (when base-provided base))))
-    
-    (let ((val (typecase arg
-		 (integer arg)
-		 (float  (truncate arg))
-		 (t      (setf arg (py-val->string arg)
-			       base (py-val->integer base :min 0))
-			 
-			 (flet ((read-arg (arg &optional (base 10))
-				  ;; Can't use (parse-integer arg :radix base)
-				  ;; because that does not accept "1.2".
-				  ;; Can't use (parse-integer arg :radix base :junk-allowed t)
-				  ;; because that accepts "1.2asdjfkalsjdf".
-				  (let ((v (with-standard-io-syntax
-					     (let ((*read-base* base))
-					       (read-from-string arg)))))
-				    (if (numberp v)
-					(truncate v)
-				      (invalid-arg-error arg)))))
-			   
-			   (cond ((and (>= (length arg) 2)
-				       (char= (aref arg 0) #\0)
-				       (member (aref arg 1) '(#\x #\X) :test #'char=))
-                                  (when (and base-provided (/= base 16))
-                                    (invalid-arg-error arg))
-                                  (read-arg (subseq arg 2) 16))
-			  
-				 ((and (= (length arg) 1))
-				  (or (digit-char-p (aref arg 0) 10)
-                                      (invalid-arg-error arg)))
-			  
-				 ((and (>= (length arg) 1)
-				       (char= (aref arg 0) #\0)
-                                       (zerop base))
-				  (read-arg (subseq arg 1) 8))
-				 
-				 ((= base 0)
-				  (read-arg arg 10))
-				 
-				 ((/= base 0)
-				  (check-type base (integer 2 36))
-				  (read-arg arg base))))))))
-		  
+  (labels ((invalid-arg-error (a)
+             (py-raise '{TypeError} "Invalid arg for int.__new__: ~S ~@[with base ~S~]."
+                       a (when base-provided base)))
+           (coerce-arg ()
+             (typecase arg
+               (integer (return-from coerce-arg arg))
+               (float   (return-from coerce-arg (truncate arg))))
+             (let ((coerce-meth (x.class-attr-no-magic.bind arg '{__int__})))
+               (when coerce-meth
+                 (return-from coerce-arg (py-call coerce-meth))))
+             (setf arg (py-val->string arg)
+                   base (py-val->integer base :min 0))
+             (flet ((read-arg (arg &optional (base 10))
+                      ;; Can't use (parse-integer arg :radix base)
+                      ;; because that does not accept "1.2".
+                      ;; Can't use (parse-integer arg :radix base :junk-allowed t)
+                      ;; because that accepts "1.2asdjfkalsjdf".
+                      (let ((v (with-standard-io-syntax
+                                 (let ((*read-base* base))
+                                   (read-from-string arg)))))
+                        (if (numberp v)
+                            (truncate v)
+                          (invalid-arg-error arg)))))
+               (cond ((and (>= (length arg) 2)
+                           (char= (aref arg 0) #\0)
+                           (member (aref arg 1) '(#\x #\X) :test #'char=))
+                      (when (and base-provided (/= base 16))
+                        (invalid-arg-error arg))
+                      (read-arg (subseq arg 2) 16))
+                     
+                     ((and (= (length arg) 1))
+                      (or (digit-char-p (aref arg 0) 10)
+                          (invalid-arg-error arg)))
+                     
+                     ((and (>= (length arg) 1)
+                           (char= (aref arg 0) #\0)
+                           (zerop base))
+                      (read-arg (subseq arg 1) 8))
+                     
+                     ((= base 0)
+                      (read-arg arg 10))
+                     
+                     ((/= base 0)
+                      (check-type base (integer 2 36))
+                      (read-arg arg base))))))
+    (let ((val (coerce-arg)))
       (if (eq cls (ltv-find-class 'py-int))
 	  val
 	(make-instance cls :lisp-object val)))))
