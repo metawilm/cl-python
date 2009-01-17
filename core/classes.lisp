@@ -3184,9 +3184,8 @@ finished; F will then not be called again."
                                      (when (eq res ni)
                                        (setf res (py-call y-result y x)))))
                             res))
-                         ((or x-result y-result)
-                          (error "Operation ~A not asymmetrically defined for ~A, ~A: ~A, ~A."
-                                 op-syntax (py-class-of x) (py-class-of y) x-result y-result)))))
+                         (x-result (py-call x-result x y))
+                         (y-result (py-call y-result y x)))))
           (if (or (null res)
                   (eq res (load-time-value *the-notimplemented*)))
               (raise-invalid-operands op-syntax x y)
