@@ -9,9 +9,7 @@
 
 (defpackage :clpython.module.array
   (:use :clpython :common-lisp)
-  (:import-from :clpython
-		#:py-val->string #:def-py-method
-		#:py-iterate->lisp-list #:py-raise )
+  (:import-from :clpython #:py-val->string)
   (:shadow #:|array|)
   (:export #:|array|))
 
@@ -92,8 +90,7 @@
 
 (defpackage :clpython.module._random
   (:use :clpython :common-lisp)
-  (:export #:|Random|)
-  (:import-from :clpython #:def-py-method))
+  (:export #:|Random|))
 
 (defpackage :clpython.module.re
   (:use :clpython :common-lisp)
@@ -107,14 +104,14 @@
            #:|U| #:|UNICODE|
            #:|X| #:|VERBOSE|
            )
-  (:import-from :clpython #:def-proxy-class #:def-py-method))
+  (:import-from :clpython #:def-proxy-class))
 
 (defpackage :clpython.module.string
   (:use :clpython :common-lisp)
   (:export "ascii_letters" "ascii_lowercase" "ascii_uppercase" "digits"
            "hexdigits" "octdigits" "lowercase" "uppercase" "letters"
            "punctuation" "whitespace" "printable")
-  (:import-from :clpython.package #:defconstant-once +max-char-code+))
+  (:import-from :clpython.package +max-char-code+))
 
 (defpackage :clpython.module.symbol
   (:use :clpython :common-lisp)
@@ -136,6 +133,11 @@
 	   #:|api_version| #:|version_info| #:|version|
            #:|warnoptions|)
   (:import-from :clpython #:*try-except-currently-handled-exception*))
+
+(defpackage :clpython.module.thread
+  (:use :clpython :common-lisp)
+  (:import-from :clpython #:def-py-method)
+  (:export #:|allocate_lock|))
 
 (defpackage :clpython.module.time
   (:use :clpython :common-lisp)

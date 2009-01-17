@@ -234,9 +234,9 @@
 	   #:*the-empty-tuple* #:make-tuple-from-list #:create-python-module
 	   #:*py-modules* #:dyn-globals #:py-call #:py-class-of #:py-raise #:bind-val
 	   #:py-repr-string #:py-attr #:py-attr*
-	   #:run #:exception-args
-	   ;; more to come...
-	   #:*exceptions-loaded*
+	   #:run #:exception-args #:*exceptions-loaded*
+           #:def-py-method #:py-iterate->lisp-list #:py-raise
+           #:+the-true+ #:+the-false+
 
 	   ;; compiler
 	   #:+standard-module-globals+
