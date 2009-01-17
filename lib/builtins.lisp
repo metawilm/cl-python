@@ -31,6 +31,7 @@
 	  ({long}         py-int          )
 	  ({number}       py-number       )
 	  ({object}       object          )
+          ({open}         py-file         )
 	  ({property}     py-property     )
 	  ({slice}        py-slice        )
           ({set}          |py-set|        )
