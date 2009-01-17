@@ -1332,6 +1332,10 @@ but the latter two classes are not in CPython.")
 
 (defgeneric dir-items (item &rest args))
 
+(defmethod dir-items ((x package) &key use-all)
+  (declare (ignore use-all))
+  (loop for s being each external-symbol in x collect (cons (symbol-name s) (lisp-symbol-value s))))
+
 (defmethod dir-items ((x module) &key (use-all t))
   (whereas ((all (and use-all (instance.attr-no-magic x '{__all__}))))
     (return-from dir-items
@@ -1349,6 +1353,13 @@ but the latter two classes are not in CPython.")
                                        ;; take the first entry: subclass overrides superclass
                                        :test 'eq :key 'car))))
     res))
+
+(defmethod dir-items (x &rest args)
+  (nconc (when (dict x)
+           (let (res)
+             (funky-dict-map (dict x) (lambda (k v) (push (cons (symbol-name k) v) res)))
+             res))
+         (dir-items (py-class-of x) args)))
 
 (defun copy-module-contents (&key from to)
   (check-type from module)
