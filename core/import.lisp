@@ -133,7 +133,9 @@ with KIND one of :module, :package
                  ;; debugging becomes impossible.
                  (with-standard-io-syntax (error c)))))
      (let ((*readtable* (load-time-value 
-                         (setup-omnivore-readmacro #'clpython.parser:parse (copy-readtable nil)))))
+                         (setup-omnivore-readmacro :function #'clpython.parser:parse
+                                                   :package (find-package :clpython)
+                                                   :readtable (copy-readtable nil)))))
        ,@body)))
 
 (defun %compile-py-file (filename &key (mod-name (error ":mod-name required"))

@@ -97,12 +97,21 @@ it will be interned if INTERN, otherwise an error is raised."
 
 ;;; Readtable that takes in everything available
 
-(defun setup-omnivore-readmacro (function &optional (readtable *readtable*))
-  "Let readtable dispatch all characters to FUNCTION"
+(defun setup-omnivore-readmacro (&key function package (readtable *readtable*))
+  "Create a readtable that dispatches all characters to FUNCTION.
+The reader will return two forms: first (in-package PACKAGE), then the result of calling FUNCTION.
+\(The package is needed to ensure that when this readmacro is used by compile-file, the file is loaded
+in the right package, satisfying CLHS 3.2.4.4 \"Additional Constraints on Externalizable Objects\".\)"
   (check-type function function)
-  (let ((read-func (lambda (stream char)
-		     (unread-char char stream)
-		     (funcall function stream))))
+  (check-type package package)
+  (check-type readtable readtable)
+  (let* ((initial-p t)
+         (read-func (lambda (stream char)
+                      (unread-char char stream)
+                      (if initial-p
+                          (progn (setf initial-p nil)
+                                 `(in-package ,package))
+                        (funcall function stream)))))
     (dotimes (i 256) ;; use file encoding or char-code-limit?
       (set-macro-character (code-char i) read-func t readtable)))
   readtable)
