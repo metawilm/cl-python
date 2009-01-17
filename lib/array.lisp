@@ -88,8 +88,8 @@
       (py-raise '{IndexError} "Index ~A outside the range of array ~A (num elements = ~A)."
                 item arr (length arr)))))
 
-(def-py-method |array.__setitem__| (x item value)
-  (setf (aref (py-array-array x) item) value))
+(def-py-method |array.__len__| (x)
+  (length (py-array-array x)))
 
 (def-py-method |array.__repr__| (x)
   (with-output-to-string (s)
@@ -101,6 +101,9 @@
 	      (length (py-array-array x))
 	      (when (< (length (py-array-array x)) 10)
 		(format nil " [~{~A~^ ~}]" (loop for i across (py-array-array x) collect i)))))))
+
+(def-py-method |array.__setitem__| (x item value)
+  (setf (aref (py-array-array x) item) value))
 
 (def-py-method |array.fromstring| (py-arr string)
   (loop with vec = (py-array-array py-arr)
