@@ -24,11 +24,20 @@
 (defmethod habitat-stdin ((x habitat))
   (or (%habitat-stdin x) *standard-input*))
 
+(defmethod (setf habitat-stdin) (val (x habitat))
+  (setf (%habitat-stdin x) val))
+
 (defmethod habitat-stdout ((x habitat))
   (or (%habitat-stdout x) *standard-output*))
 
+(defmethod (setf habitat-stdout) (val (x habitat))
+  (setf (%habitat-stdout x) val))
+
 (defmethod habitat-stderr ((x habitat))
   (or (%habitat-stderr x) *error-output*))
+
+(defmethod (setf habitat-stderr) (val (x habitat))
+  (setf (%habitat-stderr x) val))
 
 (defun make-habitat (&rest options)
   (apply #'make-instance 'habitat options))
