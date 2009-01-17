@@ -15,7 +15,10 @@
 (eval-when (:compile-toplevel :execute)
 
   (defun magicify (meth)
-    (intern (format nil "__~A__" (string-downcase meth))))
+    (let ((name (symbol-name meth)))
+      (intern (format nil "__~A~A_"
+                      (if (equal (aref name (1- (length name))) #\_) "" #\_)
+                      (string-downcase meth)))))
 
   (defun sym->op (op)
     (let ((name (format nil "~A-~A" '#:py op)))
