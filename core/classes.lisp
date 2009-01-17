@@ -869,43 +869,37 @@ In case of empty range, returns (0,0,1)."
 ;; empty-slice-bogus, this means only the empty list (or another
 ;; iterable containing 0 items) can be assigned to it.
 
-(defgeneric slice-indices (x length))
-
-(defmethod slice-indices ((x py-slice) (length integer))
+(defun slice-indices (x length)
   "Return three integers: START, STOP, STEP.
 START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
-  (let* ((start      (or (slot-value x 'start) *the-none*)) ;; not with-slots: assigned to
+  (check-type x py-slice)
+  (check-type length integer)
+  (let* ((start      (or (slot-value x 'start) *the-none*))
 	 (stop       (or (slot-value x 'stop)  *the-none*))
 	 (step       (or (slot-value x 'step)  *the-none*))
 	 reversed-p)
-    
     (setf step  (if (eq step *the-none*) 1 (py-val->integer step))
-	  reversed-p (< step 0)
-	  start (if (eq start *the-none*) 
+	  reversed-p (minusp step)
+	  start (if (eq start *the-none*)
 		    (if reversed-p (1- length) 0)
 		  (py-val->integer start))
 	  stop  (if (eq stop *the-none*)
 		    (if reversed-p -1 length)
 		  (py-val->integer stop)))
-    
     (assert (every #'integerp (list start stop step)))
-    #+(or)(warn "a: start,stop = ~A,~A" start stop)
-    (when (< start 0) (incf start length))
-    (when (< stop  0) (unless (and reversed-p (= stop -1)) ;; XXX right?
-			(incf stop length)))
-    #+(or)(warn "b: start,stop = ~A,~A" start stop)
+    (when (minusp start) (incf start length))
+    (when (minusp stop) (unless (and reversed-p (= stop -1)) ;; XXX right?
+                          (incf stop length)))
     (cond ((= step 0)
-	   (py-raise '{ValueError} "Slice step cannot be zero (got: ~S)" x))
-	  
-	  ((or (and (> step 0) (or (> start length)
-				   (< stop 0)
-				   (> start stop)))
-	       (and (< step 0) (or (< start 0)
-				   (>= stop length)
-				   (< start stop))))
+	   (py-raise '{ValueError} "Slice step cannot be zero (got: ~S)." x))
+          ((or (and (plusp step) (or (> start length)
+                                     (minusp stop)
+                                     (> start stop)))
+	       (and (minusp step) (or (minusp start)
+                                      (>= stop length)
+                                      (< start stop))))
 	   (values :empty-slice-bogus))
-	    
-	  ((= step 1)
+          ((= step 1)
 	   (setf start (max 0 start)
 		 stop (min length stop))
 	   (assert (<= 0 start stop length))
@@ -913,42 +907,32 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 		  (cond ((= start 0)      (values :empty-slice-before))
 			((= start length) (values :empty-slice-after))
 			(t                (values :empty-slice-between (1- start) start))))
-		 
-		 ((< start stop)
+                 ((< start stop)
 		  (values :nonempty-slice start (1- stop) (- stop start)))))
-	  
-	  ((/= step 1)
-	   (cond ((= start stop) (values :empty-slice-bogus))
-		   
-		 ((and (> step 0) (< start stop))
+          ((/= step 1)
+	   (cond ((= start stop) 
+                  (values :empty-slice-bogus))
+                 ((and (plusp step) (< start stop))
 		  (let* ((start (max start 0))
 			 (stop  (min (1- stop) (1- length)))
 			 (num-increments (floor (- stop start) step))
 			 (real-stop (+ start (* step num-increments))))
-		    
-		    (assert (<= 0 start real-stop stop (1- length)) ()
+                    (assert (<= 0 start real-stop stop (1- length)) ()
 		      "not (<= 0 start real-stop stop (1- length)): ~A"
 		      `(<= 0 ,start ,real-stop ,stop (1- ,length)))
-		    
-		    (values :nonempty-stepped-slice
+                    (values :nonempty-stepped-slice
 			    start real-stop step (1+ num-increments))))
-		 
-		 ((and (< step 0) (> start stop))
+                 ((and (minusp step) (> start stop))
 		  (let* ((start (min start (1- length)))
 			 (stop  (max (incf stop) 0))
 			 (num-increments (floor (- stop start) step))
 			 (real-stop (- start (* (- step) num-increments))))
-		    
-		    (assert (<= 0 stop real-stop start (1- length)) ()
+                    (assert (<= 0 stop real-stop start (1- length)) ()
 		      "not (<= 0 stop real-stop start (1- length)): ~A"
 		      `(<= 0 ,stop ,real-stop ,start (1- ,length)))
-		    
-		    (values :nonempty-stepped-slice
+                    (values :nonempty-stepped-slice
 			    start real-stop step (1+ num-increments))))
-		 
-		 (t (break "unexpected"))))
-	  
-	  (t (break "unexpected")))))
+                 (t (break "unexpected")))))))
 
 ;; super( <B class>, <C instance> ) where C derives from B:
 ;;   :object = <C instance>
@@ -2187,7 +2171,7 @@ invocation form.")
 
 (def-py-method py-list.__delitem__ (x^ item)
   (typecase item
-    (integer (when (< item 0)
+    (integer (when (minusp item)
 	       (incf item (length x)))
 	     (unless (<= 0 item (1- (length x)))
 	       (py-raise '{ValueError}
@@ -2199,7 +2183,25 @@ invocation form.")
 		(cond ((and (eq start *the-none*) (eq stop *the-none*) (eq step *the-none*)) ;; del x[:]
 		       (fill x nil)
 		       (setf (fill-pointer x) 0))
-		      (t (break "Todo: del x[-2:] etc")))))))
+		      (t (destructuring-bind (kind &rest args)
+                             (multiple-value-list (slice-indices item (length x)))
+                           (ecase kind
+                             ((:empty-slice-bogus :empty-slice-before :empty-slice-after :empty-slice-between))
+                             ;; nothing to do
+                             (:nonempty-slice
+                              (destructuring-bind (start-incl stop-incl num) args
+                                (replace x x :start1 start-incl :start2 (1+ stop-incl))
+                                (decf (fill-pointer x) num)))
+                             (:nonempty-stepped-slice
+                              (destructuring-bind (start-incl stop-incl step times) args
+                                stop-incl
+                                (when (minusp step)
+                                  (setf step (- step))
+                                  (rotatef start-incl stop-incl))
+                                (dotimes (i times)
+                                 (let ((start-ix (- (+ start-incl (* step i)) i)))
+                                   (replace x x :start1 start-ix :start2 (1+ start-ix))))
+                                (decf (fill-pointer x) times)))))))))))
 
 (def-py-method py-list.__eq__ (x^ y^)
   (py-bool (and (vectorp x)
@@ -2216,7 +2218,6 @@ invocation form.")
 
 (defun vector-getitem (x item make-seq-func)
   (typecase item
-    
     (integer (when (< item 0)
 	       (incf item (length x)))
 	     (unless (<= 0 item (1- (length x)))
@@ -2227,33 +2228,25 @@ invocation form.")
     
     (py-slice (destructuring-bind (kind &rest args)
 		  (multiple-value-list (slice-indices item (length x)))
-		
-		(ecase kind
-	  
-		  ((:empty-slice-bogus
-		    :empty-slice-before :empty-slice-after :empty-slice-between)
+                (ecase kind
+                  ((:empty-slice-bogus :empty-slice-before :empty-slice-after :empty-slice-between)
 		   (funcall make-seq-func () nil))
-		  
-		  ((:nonempty-slice :nonempty-stepped-slice)
+                  ((:nonempty-slice :nonempty-stepped-slice)
 		   (multiple-value-bind (items exp-num)
 		       (ecase kind
-			 
-			 (:nonempty-slice
+                         (:nonempty-slice
 			  (destructuring-bind (start stop num) args
 			    (values (loop for i from start upto stop
 					collect (aref x i))
 				    num)))
-			 
-			 (:nonempty-stepped-slice
+                         (:nonempty-stepped-slice
 			  (destructuring-bind (start stop step num) args
 			    (values (loop for i from start upto stop by step
 					collect (char x i))
 				    num))))
 		     (assert (= exp-num (length items)) ()
 		       "Expected ~A items, got ~A" exp-num (length items))
-		     
-		     (funcall make-seq-func items nil))))))
-    
+                     (funcall make-seq-func items nil))))))
     (t (py-raise '{TypeError} "Expected integer or slice as subscript; got: ~S."
 		 item))))
 
