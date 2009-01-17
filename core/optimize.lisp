@@ -176,6 +176,11 @@
         (dict.__delitem__ x item))
     (call-next-method)))
 
+(defmethod py-subs ((x hash-table) item)
+  (let ((res (gethash item x)))
+    (or res
+        (call-next-method)))) ;; deal with key error
+
 ;;; Comparison: ==
 
 (defun maybe-number-p (expr)
