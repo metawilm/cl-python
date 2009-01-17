@@ -644,7 +644,7 @@ otherwise work well.")
   (:method ((f function))
            (let ((data (gethash f *simple-function-data*)))
              (if data
-                 (string (sfd-name f))
+                 (string (sfd-name data))
                #+allegro (string (excl::func_name f))
                #-allegro "[a function]")))
   (:method ((f py-function)) (string (py-function-name f))))
