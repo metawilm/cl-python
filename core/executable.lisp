@@ -81,5 +81,5 @@
                                               :executable t
                                               :toplevel #'toplevel)))
       
-      #-sbcl (error "Building executables not supported in this Lisp implementation yet.")
+      #-sbcl (error "Building Python executables is not yet supported in this Lisp implementation.")
       #+sbcl (build-sbcl))))
