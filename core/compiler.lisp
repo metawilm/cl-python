@@ -1395,6 +1395,8 @@ LOCALS shares share tail structure with input arg locals."
             (:constructor make-msi (original-filename original-source subform-positions)))
   original-filename original-source subform-positions)
 
+(defparameter *muffle-sbcl-compiler-notes* nil)
+
 (defmacro [module-stmt] (suite) ;; &environment e)
   "If *MODULE-NAMESPACE* is bound, it is used."
   (assert *current-module-name* (*current-module-name*)
@@ -1445,7 +1447,9 @@ LOCALS shares share tail structure with input arg locals."
                           (funcall *module-preload-hook* %module)))
                       
                       (with-py-errors (:name (python-module ,*current-module-name*))
-                        ,suite))))))))
+                        (locally (declare #+sbcl ,@(when *muffle-sbcl-compiler-notes*
+                                                     `((sb-ext:muffle-conditions sb-ext:compiler-note))))
+                          ,suite)))))))))
      ;; (Optionally) Source form recording
      ,@(when (and *python-form->source-location* *current-module-path*) ;; *c-m-path* is nil in REPL
          (let (positions)
