@@ -24,7 +24,7 @@
                     :subscription-expr :suite-stmt :return-stmt :raise-stmt
                     :try-except-stmt :try-finally-stmt :tuple-expr :unary-expr
                     :while-stmt :with-stmt :yield-stmt
-                    :attribute-semantics :number-method-lookups))
+                    :attribute-semantics :number-method-lookups :getitem-methods))
       (test-lang node))))
 
 (defmacro with-all-compiler-variants-tried (&body body)
@@ -890,3 +890,41 @@ print f1_1**i5
 print f1_1**f1_1"
                 :known-failure t
                 :fail-info "__pow__ lookup goes wrong somewhere"))
+
+(defmethod test-lang ((kind (eql :getitem-methods)))
+  (run "
+class C:
+  def __getslice__(x, frm, to):
+    return 's', frm, to
+  def __getitem__(x, item):
+    return 'i', item
+  def __len__(x):
+    return 10
+
+val = C()[:-1]
+print 'val=', val
+assert val == ('s', 0, 9)
+
+val = C()[3]
+print 'val=', val
+assert val == ('i', 3)")
+  (run "
+res = []
+class C:
+  def __setslice__(x, frm, to, item):
+    print 'setslice'
+    global res
+    res += ['s', frm, to, item]
+    print 'after setslice'
+  def __setitem__(x, item, val):
+    print 'setitem'
+    global res
+    res += ['i', item, val]
+  def __len__(x):
+    return 10
+
+x = C()
+x[1:4] = 5
+x[2] = 4
+
+assert res == ['s', 1, 4, 5, 'i', 2, 4]"))
