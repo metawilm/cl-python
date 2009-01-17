@@ -12,11 +12,10 @@
 (defgeneric conv (x)
   (:method ((x number)) x)
   (:method (x)          (clpython::py-float x)))
-   
-(defconstant |e| #.(exp 1))
+  
+(defconstant-once |e| (cl:exp 1))
+(defconstant-once |pi| cl:pi)
 (set-impl-status '(|pi| |e|) t)
-
-(set-impl-status '|pi| t)
 
 (defmacro def-unary-conv-func (math cl)
   `(defun ,math (x) (,cl (conv x))))
