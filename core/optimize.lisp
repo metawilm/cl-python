@@ -417,9 +417,9 @@
 (defmethod py-** ((x number) (y number) &optional z)
   (declare (optimize (speed 3) (safety 0) (debug 0)))
   (if z
-      (progn (check-type x 'integer)
-             (check-type y 'integer)
-             (check-type z 'integer)
+      (progn (check-type x integer)
+             (check-type y integer)
+             (check-type z integer)
              (mod (expt x y) z))
     (let ((res (expt x y)))
       (if (rationalp res)
