@@ -415,6 +415,8 @@ an assigment statement. This changes at least the returned 'store' form.")
 (defmacro [assert-stmt] (test raise-arg)
   ;; The decision whether or not to execute `assert' statements
   ;; is taken at compile-time.
+  ;; WISH: if assertion is a comparison like "a < b+3" then show values
+  ;;       of left and right side in error message.
   (when *__debug__*
     `(assert-stmt-1 ,test ',test ,raise-arg)))
 
