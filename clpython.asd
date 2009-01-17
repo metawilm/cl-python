@@ -75,6 +75,7 @@ are accepted in those libraries."
                                        (:file "lsetup")
                                        (:file "array" :depends-on ("lsetup"))
                                        (:file "binascii"  :depends-on ("lsetup"))
+                                       (:file "exceptions" :depends-on ("lsetup"))
                                        (:file "gc"  :depends-on ("lsetup"))
                                        (:file "math"  :depends-on ("lsetup"))
                                        (:file "operator" :depends-on ("lsetup"))
