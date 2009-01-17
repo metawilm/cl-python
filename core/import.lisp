@@ -239,9 +239,7 @@ it being set before CLPython is loaded, e.g. in a Lisp configuration file.)")))
 (defun calc-import-search-paths ()
   ;; Use current directory and `sys.path' as search paths (in that order)
   ;; XXX sys.path is now shared between all habitats; should perhaps be habitat-specific
-  (append (list ".")
-          (py-iterate->lisp-list 
-           (symbol-value (find-symbol "path" :clpython.module.sys)))
+  (append (py-iterate->lisp-list (habitat-search-paths *habitat*))
           cl-user::*clpython-module-search-paths*))
 
 (defvar *import-recompiled-files* nil

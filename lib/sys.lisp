@@ -9,8 +9,11 @@
 
 (in-package :clpython.module.sys)
 
-(defvar |argv| :todo "Comand line args passed to script; argv[0] is script name (rel or abs)")
-(set-impl-status '|argv| :todo)
+(defparameter |argv| (clpython::make-writable-attribute
+                      (lambda () (clpython::habitat-cmd-line-args clpython::*habitat*))
+                      (lambda (val) (setf (clpython::habitat-cmd-line-args clpython::*habitat*) val)))
+  "Comand line args passed to script; argv[0] is script name (rel or abs)")
+(set-impl-status '|argv| t)
 
 (defvar |byteorder| :n/a "Byte order of implementation: 'big' or 'little'")
 (set-impl-status '|byteorder| :n/a "Byte order is hidden in Lisp implementation.")
@@ -115,7 +118,9 @@
 (set-impl-status '|modules| :incomplete)
   
 ;; List of search paths
-(defvar |path| (clpython::make-py-list-from-list (list "."))
+(defparameter |path| (clpython::make-writable-attribute
+                      (lambda () (clpython::habitat-search-paths clpython::*habitat*))
+                      (lambda (val) (setf (clpython::habitat-search-paths clpython::*habitat*) val)))
   "List of directories to search for module to import")
 (set-impl-status '|path| t "only directories supported (not zip files etc).")
 

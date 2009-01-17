@@ -22,22 +22,14 @@
    (stderr          :initform *error-output* 
 		    :initarg :stderr
 		    :accessor habitat-stderr)
-   #+(or) ;; unused
-   (search-paths    :initarg :search-paths
-		    :initform ()
-		    :accessor habitat-search-paths)
    (loaded-mods     :initform ()
 		    :initarg :loaded-mods   
-		    :accessor habitat-loaded-mods
-		    :documentation "List of modules")
-   (autoload-p      :initform :builtin
-		    :initarg :autoload-p
-		    :accessor habitat-autoload-p
-		    :documentation "Whether modules are imported automatically")
-   (comp-mode       :initform nil
-		    :initarg :debug
-		    :accessor habitat-debug
-		    :documentation "Module compilation mode"))
+		    :accessor habitat-loaded-mods)
+   (cmd-line-args   :initform ()
+                    :initarg :cmd-line-args
+                    :accessor habitat-cmd-line-args)
+   (search-paths    :initform (make-py-list-from-list (list "."))
+                    :accessor habitat-search-paths))
   (:documentation "Python execution context"))
 
 (defun make-habitat (&rest options)

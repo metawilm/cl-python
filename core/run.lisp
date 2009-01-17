@@ -51,10 +51,14 @@
 
 (defun run-python-ast (ast &key (habitat *habitat*)
                                 (compile *compile-python-ast-before-running*)
-                                run-args
+                                module-run-args
+                                args
                                 compile-quiet)
   "Run Python AST in freshly bound habitat.
-If COMPILE is true, the AST is compiled into a function before running."
+HABITAT is the execution environment; a fresh one will be used otherwie.
+If COMPILE is true, the AST is compiled into a function before running.
+MODULE-RUN-ARGS is a list with options passed on to the module-function; e.g. %module-globals, module-name, src-module-path.
+ARGS are the command-line args, available as `sys.argv'; can be a string or a list of strings."
   (with-compiler-generated-syntax-errors ()
     (let* ((*habitat* habitat)
            (get-module-f `(lambda () ,ast))
@@ -63,12 +67,16 @@ If COMPILE is true, the AST is compiled into a function before running."
                          (*compile-verbose* (if compile-quiet nil *compile-verbose*)))
                      (compile nil get-module-f))
                  (coerce get-module-f 'function))))
+      (when args
+        (unless *habitat* (setf *habitat* (make-habitat)))
+        (setf (habitat-cmd-line-args *habitat*)
+          (if (stringp args) (py-string.split args " ") args)))
       (let* (module-function
              (*module-function-hook* (lambda (f) (setf module-function f))))
         (funcall fc)
         (unless module-function
           (break "Module ~A did not call *module-function*." fc))
-        (apply module-function run-args)))))
+        (apply module-function module-run-args)))))
 
 (defun compile-py-file (fname &key (verbose t))
   (let* ((module (pathname-name fname))

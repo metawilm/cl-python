@@ -1778,14 +1778,7 @@ finally:
   (find-symbol (string x) (load-time-value (find-package :clpython.user.builtin))))
 
 (defun builtin-value (x)
-  (let ((sym (builtin-name-p x)))
-    (lisp-symbol-value sym)))
-
-(defun lisp-symbol-value (x)
-  (check-type x symbol)
-  (or (and (boundp x) (symbol-value x))
-      (and (fboundp x) (symbol-function x))
-      (find-class x nil)))
+  (bound-in-some-way (builtin-name-p x)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;
