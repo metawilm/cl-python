@@ -1119,18 +1119,6 @@ LOCALS shares share tail structure with input arg locals."
   
     (values sure-locals new-locals sure-globals)))
 
-
-;; Temporary (?) hack to get things running on SBCL 1.0.16, 
-;; where instantiating a py-function leads to strange errors.
-;; See <http://common-lisp.net/pipermail/clpython-devel/2008-May/000048.html>
-(defvar *create-simple-lambdas-for-python-functions*
-    #+(or allegro lispworks) nil
-    #+sbcl t
-    #-(or allegro lispworks sbcl) t
-    "Whether Python function are real CLOS funcallable instances, or just normal lambdas.
-Note that in the latter case, functions miss their name and attribute dict, but should
-otherwise work well.")
-
 (defmacro [funcdef-stmt] (&whole whole &rest args)
   ;; Enable reuse by CPS version of macro
   (declare (ignore args))
