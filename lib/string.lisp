@@ -99,7 +99,7 @@
 (defun |translate| (string table &optional delete-chars)
   "Delete chars in DELETE-CHARS; TABLE is trans of 256 -> 256. If TABLE is None, then only delete chars."
   (check-type string string)
-  (check-type table (or string py-none))
+  (check-type table (or string clpython::py-none))
   (flet ((calc-filter ()
            (when delete-chars
              (let ((filter (make-array 256 :initial-element t)))
