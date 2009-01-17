@@ -110,9 +110,9 @@
   "Largest supported unicode code point")
 (set-impl-status '|maxunicode| t "Set to `char-code-limit'.")
 
-(defvar |modules| "todo"
+(defparameter |modules| (clpython::make-py-hash-table)
   "Mapping from module names (strings) to modules")
-(set-impl-status '|modules| :todo)
+(set-impl-status '|modules| :incomplete)
   
 ;; List of search paths
 (defvar |path| (clpython::make-py-list-from-list (list "."))
