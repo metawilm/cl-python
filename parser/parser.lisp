@@ -54,6 +54,10 @@ Most important options:
              (setf seq (adjust-array seq n))
              (apply #'parse seq options))))
 
+(defmacro with-source-locations (&body body)
+  `(let ((*python-form->source-location* (make-weak-key-hash-table :test 'eq)))
+     ,@body))
+
 (defun parse-module-with-yacc (yacc-version lexer &key incl-module (record-source-location *python-form->source-location*))
   "Collect all parsed top-level forms. If RECORD-SOURCE-LOCATION, the (new or existing)
 source location hash-table is returned as second value."
