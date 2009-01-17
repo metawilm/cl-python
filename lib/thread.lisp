@@ -17,7 +17,7 @@
   ;; For shootout benchmark chameneos-redux, :process-lock turned out to be faster.
   )
  
-(defclass lock (object)
+(defclass |lock| (object)
   ((id       :initarg :id       :accessor lock-id)
    (wait-msg :initarg :wait-msg :accessor lock-wait-msg))
   (:metaclass py-type))
