@@ -666,7 +666,10 @@ otherwise work well.")
   
 (def-py-method py-function.__repr__ (func)
   (with-output-to-string (s)
-    (print-object func s)))
+    (if (typep func 'py-function)
+        (print-object func s)
+      (print-unreadable-object (func s)
+        (format s "function ~A" (function-name func))))))
 
 (defmethod print-object ((x py-function) stream)
   (print-unreadable-object (x stream :identity t)
