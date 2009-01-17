@@ -1366,7 +1366,14 @@ LOCALS shares share tail structure with input arg locals."
 	    :interactive (lambda () 
 			   (format t "Enter new Lisp value for `~A': " name)
 			   (multiple-value-list (eval (read))))
-	  (return-from unbound-variable-error val)))
+	  (return-from unbound-variable-error val))
+        (import (val)
+          :report (lambda (stream) (format stream "Use the built-in module named `~A'." name))
+          :test (lambda (c)
+                  (declare (ignore c))
+                  (not (null (lisp-package-as-py-module name))))
+          :interactive (lambda () (list (lisp-package-as-py-module name)))
+          (return-from unbound-variable-error val)))
     (with-simple-restart (continue "Continue as if `~A' is currently bound." name)
       (py-raise '{NameError} "Variable `~A' is unbound." name))))
 
@@ -1772,9 +1779,13 @@ finally:
 
 (defun builtin-value (x)
   (let ((sym (builtin-name-p x)))
-    (or (and (boundp sym) (symbol-value sym))
-	(and (fboundp sym) (symbol-function sym))
-	(find-class sym nil))))
+    (lisp-symbol-value sym)))
+
+(defun lisp-symbol-value (x)
+  (check-type x symbol)
+  (or (and (boundp x) (symbol-value x))
+      (and (fboundp x) (symbol-function x))
+      (find-class x nil)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;
