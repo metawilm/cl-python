@@ -17,8 +17,8 @@
   (defun magicify (meth)
     (let ((name (symbol-name meth)))
       (intern (format nil "__~A~A_"
-                      (if (equal (aref name (1- (length name))) #\_) "" #\_)
-                      (string-downcase meth)))))
+                      (string-downcase meth)
+                      (if (equal (aref name (1- (length name))) #\_) "" #\_)))))
 
   (defun sym->op (op)
     (let ((name (format nil "~A-~A" '#:py op)))
