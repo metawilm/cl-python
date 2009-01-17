@@ -53,7 +53,7 @@
                 (line (second (assoc :line-no pos)))
                 (eof-seen (second (assoc :eof-seen pos)))
                 (token (yacc-clpython:yacc-parse-error-terminal c))
-                (value (yacc-clpython:yacc-parse-error-value c))
+                (value (maybe-unwrap-literal-value (yacc-clpython:yacc-parse-error-value c)))
                 (expected-tokens (yacc-clpython:yacc-parse-error-expected-terminals c)))
            
            (cond ((or eof-seen (eq token 'yacc-clpython:yacc-eof-symbol))
@@ -61,6 +61,8 @@
                  (t
                   (raise-syntax-error
                    (format nil "Parse error at line ~A, at token `~A'. ~
-                                ~_Expected one of: ~{`~A'~^ ~}.~%~
-                                [Internal error ~S caught due to ~S]"
-                           line value expected-tokens c '*catch-yacc-conditions*))))))))
+                                ~_Expected one of: ~{`~A'~^ ~}."
+			   ;;~%~[Internal error ~S caught due to ~S]"
+                           line value expected-tokens
+			   ;; c '*catch-yacc-conditions*
+			   ))))))))
