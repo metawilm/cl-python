@@ -13,7 +13,7 @@
 
 (defun run-builtin-test ()
   (with-subtest (:name "CLPython-Builtins")
-    (dolist (x '(:globals :hash :range :int :type))
+    (dolist (x '(:globals :hash :range :int :type :map))
       (test-builtin x))))
 
 (defgeneric test-builtin (kind))
@@ -70,3 +70,6 @@ assert len(hashes) > 1000"
 def f(): pass
 g = lambda: 42
 assert type(f) == type(g)"))
+
+(defmethod test-builtin ((x (eql :map)))
+  (run-no-error "assert map(lambda x,y: x+y, [1,2,3], [4,5,6]) == [5, 7, 9]"))

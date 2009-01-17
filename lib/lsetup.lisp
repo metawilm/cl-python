@@ -19,6 +19,10 @@
   (:use :clpython :common-lisp)
   (:export #:|hexlify|))
 
+(defpackage :clpython.module.exceptions
+  (:use :common-lisp)
+  (:export #:|ValueError| #:|SyntaxError|))
+
 (defpackage :clpython.module.gc
   (:use :clpython :common-lisp)
   (:export #:|disable| )

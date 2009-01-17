@@ -304,48 +304,25 @@ POS-ARGS is any iterable object; KW-DICT must be of type DICT."
 With multiple sequences, traversal is in parallel and FUNC must take
 multiple args. Shorter sequences are extended with None. If function is
 None, use identity function (multiple sequences -> list of tuples)."
-  
   (cond ((and (eq func *the-none*) (null (cdr sequences)))  ;; identity of one sequence
 	 (make-py-list-from-list (py-iterate->lisp-list (car sequences))))
-	
-	((null (cdr sequences)) ;; func takes 1 arg
-	 
-	 ;; Apply func to each val yielded before yielding next val
+        ((null (cdr sequences)) ;; func takes 1 arg
+         ;; Apply func to each val yielded before yielding next val
 	 ;; might be more space-efficient for large sequences when
 	 ;; function "reduces" data.
-
 	 (make-py-list-from-list
 	  (mapcar (lambda (val) (py-call func val))
 		  (py-iterate->lisp-list (car sequences)))))
-	
-	(t
-	 (let* ((vectors (mapcar (lambda (seq)
-				   (apply #'vector (py-iterate->lisp-list seq)))
-				 sequences)))
-	   
-	   (let ((num-active (loop for v in vectors
-				 when (> (length v) 0)
-				 count 1)))
-	     
-	     (make-py-list-from-list 
-	      (loop while (> num-active 0)
-		  for i from 0
-		  collect (let ((curr-items 
-				 (mapcar (lambda (vec)
-					   (let ((vec-length (1- (length vec))))
-					     (cond ((> vec-length i)
-						    (aref vec i))
-					      
-						   ((< vec-length i)
-						    *the-none*)
-					      
-						   ((= vec-length i) ;; last of this vec
-						    (decf num-active)
-						    (aref vec i)))))
-					 vectors)))
-			    (if (eq func *the-none*)
-				(make-tuple-from-list curr-items)
-			      (py-call func curr-items))))))))))
+        (t
+	 (let* ((lists (coerce (mapcar #'py-iterate->lisp-list sequences) 'vector))
+                (iters (loop for x across lists minimize (length x))))
+           (make-py-list-from-list
+            (loop for i from 0 below iters
+                collect (loop for i from 0 below (length lists)
+                            collect (or (pop (aref lists i)) *the-none*) into args
+                            finally (return (if (eq func *the-none*)
+                                                (make-tuple-from-list args)
+                                              (apply #'py-call func args))))))))))
 
 (defun {max} (item &rest items)
   (maxmin #'py-> item items))
