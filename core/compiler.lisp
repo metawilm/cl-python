@@ -1725,6 +1725,7 @@ finally:
           (exit (attr mgr '{__exit__}))
           (value (py-call (attr mgr '{__enter__})))
           (exc t))
+     (declare (ignorable value))
      (unwind-protect
          (handler-case (progn ,@(when var `((setf ,var value)))
                               ,block)
