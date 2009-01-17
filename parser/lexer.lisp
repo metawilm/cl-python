@@ -607,7 +607,8 @@ Coercion from float to int must be confirmed by the user.")
 (defun number-range (number-type)
   (check-type number-type symbol)
   (loop for prefix in (load-time-value (mapcar 'string '(#:most-negative- #:most-positive-)))
-      for sym-name = (read-from-string (concatenate 'string prefix (symbol-name number-type)))
+      for sym-name = (with-standard-io-syntax
+                       (read-from-string (concatenate 'string prefix (symbol-name number-type))))
       collect (symbol-value sym-name)))
 
 (defun float-suffix (type)
