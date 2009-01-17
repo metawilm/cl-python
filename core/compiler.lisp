@@ -174,7 +174,7 @@ Disabled by default, to not confuse the test suite.")
 
 (defmacro with-namespace (ns &body body &environment e)
   ;; XXX not always %locals needed (e.g. when no call expr in body)
-  (setf body (if *debug-no-locals-dict*
+  (setf body (if (or *debug-no-locals-dict* (not (ns.has-locals-dict ns)))
                  `(locally ,@body)
                `(flet ((%locals () ,(ns.locals-form ns)))
                   (declare (ignorable #'%locals))
@@ -220,7 +220,8 @@ Disabled by default, to not confuse the test suite.")
 
 (defclass namespace ()
   ((parent :accessor ns.parent :initarg :parent :initform nil)
-   (scope :accessor ns.scope :initarg :scope :initform (error "missing arg :scope"))))
+   (scope :accessor ns.scope :initarg :scope :initform (error "missing arg :scope"))
+   (has-locals-dict :accessor ns.has-locals-dict :initarg :has-locals-dict :initform t)))
 
 (defmethod ns.expand-with ((ns namespace) body-form environment)
   (declare (ignorable ns environment))
@@ -1202,7 +1203,8 @@ LOCALS shares share tail structure with input arg locals."
                                                     new-locals)
                                      :let-names (remove-duplicates (append destruct-nested-vars new-locals))
                                      :locals-names all-nontuple-func-locals
-                                     :scope :function)
+                                     :scope :function
+                                     :has-locals-dict (funcdef-should-save-locals-p suite))
                     ;; XXX this IGNORABLE declaration ends up at the wrong place, w.r.t. function args.
                     ,@(unless *warn-unused-function-vars*
 			`((declare (ignorable ,@nontuple-arg-names ,@new-locals))))
@@ -2355,9 +2357,8 @@ be bound."
 	(t form)))
     deleted-names))
   
-(defun funcdef-should-save-locals-p (ast env)
-  (when (or *allow-indirect-special-call*
-            (get-pydecl :function-must-save-locals env))
+(defun funcdef-should-save-locals-p (ast)
+  (when *allow-indirect-special-call*
     (return-from funcdef-should-save-locals-p t))
   
   (with-py-ast (form ast)
