@@ -117,4 +117,16 @@
       #+(or cmu sbcl) (make-hash-table :test 'py-hash-table-test)
       (error "Creating python dict not suported in this environment.")))
 
+
+;; None and NotImplemented are here, so that other modules like classes can use the compiler macros.
+
+(defclass py-none (object) () (:metaclass py-type))
+(defvar *the-none* (make-instance 'py-none))
+(defun none-p (x) (eq x *the-none*))
+;; This use of load-time-value is only guaranteed to work in modules loaded after this module.
+(define-compiler-macro none-p (x) `(eq ,x (load-time-value *the-none*)))
+
+(defclass py-notimplemented (object) () (:metaclass py-type))
+(defvar *the-notimplemented* (make-instance 'py-notimplemented))
+
 ) ;; eval-when

@@ -406,15 +406,6 @@
 (def-py-method py-type.__class__ :attribute (x)
   (py-class-of x))
 
-
-;; None
-
-(defclass py-none (object) () (:metaclass py-type))
-(defvar *the-none* (make-instance 'py-none))
-
-(defun none-p (x) (eq x (load-time-value *the-none*)))
-(define-compiler-macro none-p (x) `(eq ,x (load-time-value *the-none*)))
-
 ;; py-class-method
 
 (def-py-method py-class-method.__new__ :static (cls func)
@@ -849,9 +840,9 @@ otherwise work well.")
             
 (defun make-slice (start stop step)
   (make-instance 'py-slice
-    :start (or start *the-none*)
-    :stop  (or stop  *the-none*)
-    :step  (or step  *the-none*)))
+    :start (or start (load-time-value *the-none*))
+    :stop  (or stop  (load-time-value *the-none*))
+    :step  (or step  (load-time-value *the-none*))))
 
 (def-py-method py-slice.indices (x^ length^)
   "Return tuple of three integers: START, STOP, STEP.
@@ -919,9 +910,9 @@ In case of empty range, returns (0,0,1)."
 START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
   (check-type x py-slice)
   (check-type length integer)
-  (let* ((start      (or (slice-start x) *the-none*))
-	 (stop       (or (slice-stop x)  *the-none*))
-	 (step       (or (slice-step x)  *the-none*))
+  (let* ((start      (or (slice-start x) (load-time-value *the-none*)))
+	 (stop       (or (slice-stop x)  (load-time-value *the-none*)))
+	 (step       (or (slice-step x)  (load-time-value *the-none*)))
 	 reversed-p)
     (setf step  (if (none-p step) 1 (py-val->integer step))
 	  reversed-p (minusp step)
@@ -1046,7 +1037,7 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 	
 	(if val
 	    (bind-val val
-		      (if (eq object class) *the-none* object)
+		      (if (eq object class) (load-time-value *the-none*) object)
 		      class)
 	  (py-raise '{AttributeError}
 		    "No such attribute found for `super' object: ~S.~S; ~
@@ -1092,7 +1083,7 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
     (setf (slot-value x 'start) start
           (slot-value x 'stop) stop
           (slot-value x 'step) step))
-  *the-none*)
+  (load-time-value *the-none*))
 
 (defun xrange-iter-func (x)
   (with-slots (start stop step) x
@@ -1128,11 +1119,6 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 
 (defclass py-ellipsis (object) () (:metaclass py-type))
 (defvar *the-ellipsis* (make-instance 'py-ellipsis))
-
-;; NotImlemented
-
-(defclass py-notimplemented (object) () (:metaclass py-type))
-(defvar *the-notimplemented* (make-instance 'py-notimplemented))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; User objects (Object, Module, File, Property)
@@ -1429,7 +1415,7 @@ but the latter two classes are not in CPython.")
     (warn "Deleting attribute '~A' on built-in module ~A." attr x))
   (unless (remhash (py-string-val->symbol attr) (module-ht x))
     (py-raise '{AttributeError} "Module ~A has no attribute ~A (to delete)." x attr))
-  *the-none*)
+  (load-time-value *the-none*))
 
 (defun create-python-module (code)
   (check-type code string)
@@ -1650,9 +1636,9 @@ But if RELATIVE-TO package name is given, result may contains dots."
 
 (def-py-method py-property.__init__ (x &rest args)
   (with-parsed-py-arglist ("property.__init__" (fget fset fdel doc) args)
-    (setf (slot-value x 'fget) (or fget *the-none*)
-	  (slot-value x 'fset) (or fset *the-none*)
-	  (slot-value x 'fdel) (or fdel *the-none*)
+    (setf (slot-value x 'fget) (or fget (load-time-value *the-none*))
+	  (slot-value x 'fset) (or fset (load-time-value *the-none*))
+	  (slot-value x 'fdel) (or fdel (load-time-value *the-none*))
 	  (slot-value x 'doc)  (or doc  ""))))
 
 (def-py-method py-property.__get__ (x obj class)
@@ -1773,7 +1759,7 @@ But if RELATIVE-TO package name is given, result may contains dots."
 	     (mod (expt x y) z))
     (if (numberp y)
         (expt x y)
-      *the-notimplemented*)))
+      (load-time-value *the-notimplemented*))))
 
 (def-py-method py-number.__repr__ (x^) (format nil "~A" (deproxy x)))
 (def-py-method py-number.__str__ (x^)  (py-number.__repr__ x))
@@ -2047,12 +2033,12 @@ But if RELATIVE-TO package name is given, result may contains dots."
       do (setf (gethash k d2) v)
       finally (return d2)))
 
-(def-py-method dict.fromkeys :static (seq &optional (val *the-none*))
+(def-py-method dict.fromkeys :static (seq &optional (val (load-time-value *the-none*)))
   (let ((d (make-py-hash-table)))
     (map-over-object (lambda (key) (setf (gethash key d) val)) seq)
     d))
 
-(def-py-method dict.get (x k &optional (default *the-none*))
+(def-py-method dict.get (x k &optional (default (load-time-value *the-none*)))
   (or (gethash k x) default))
       
 (def-py-method dict.has_key (x k)
@@ -2230,7 +2216,7 @@ invocation form.")
 
 (def-py-method py-list.__cmp__ (x^ y^)
   (unless (and (vectorp x) (vectorp y))
-    (return-from py-list.__cmp__ *the-notimplemented*))
+    (return-from py-list.__cmp__ (load-time-value *the-notimplemented*)))
   (let ((x.len (length x))
 	(y.len (length y)))
     
@@ -2405,7 +2391,7 @@ invocation form.")
                                       (dotimes (i times)
                                         (let ((ix (+ start-incl (* step i))))
                                           (setf (aref x ix) (pop values)))))))))))
-  *the-none*)
+  (load-time-value *the-none*))
 
 (defvar *py-print-safe* nil)
 
@@ -2419,7 +2405,7 @@ invocation form.")
 
 (def-py-method py-list.append (x^ y)
   (vector-push-extend y x)
-  *the-none*)
+  (load-time-value *the-none*))
 
 (defmacro real-py-list.append (list item)
   "For internal use, e.g. list comprehensions."
@@ -2433,12 +2419,12 @@ invocation form.")
       ((<= i index))
     (setf (aref list i) (aref list (1- i))))
   (setf (aref list index) object)
-  *the-none*)
+  (load-time-value *the-none*))
 
 (def-py-method py-list.extend (x^ iterable)
   (loop for item in (py-iterate->lisp-list iterable)
       do (py-list.append x item))
-  *the-none*)
+  (load-time-value *the-none*))
        
 (def-py-method py-list.pop (x^ &optional index)
   "Remove and return item at index (default: last item)"
@@ -2469,7 +2455,7 @@ invocation form.")
     (unless (eq res x)
       (replace x res))
     
-    *the-none*))
+    (load-time-value *the-none*)))
 
 
 (defmacro make-py-list-unevaled-list (items)
@@ -2626,7 +2612,7 @@ invocation form.")
 (def-py-method py-string.__add__ (x^ y^)
   (if (stringp y)
       (concatenate 'string x y)
-    *the-notimplemented*))
+    (load-time-value *the-notimplemented*)))
 
 (def-py-method py-string.__cmp__ (x^ y^)
   (cond ((not (stringp y)) -1) ;; whatever
@@ -2756,7 +2742,7 @@ invocation form.")
 (def-py-method py-string.replace (x^ old new &optional count^)
   (substitute (py-val->string new) (py-val->string old) x :count count))
 
-(def-py-method py-string.split (x^ &optional (sep *the-none*)
+(def-py-method py-string.split (x^ &optional (sep (load-time-value *the-none*))
                                              (max-splits most-positive-fixnum))
   (let ((sep-sequence (cond ((none-p sep) (list #\Space #\Tab #\Return)) ;; definition of whitespace?
                             ((and (stringp sep)
@@ -2842,7 +2828,7 @@ invocation form.")
 
 (def-py-method py-tuple.__cmp__ (x^ y^)
   (unless (and (listp x) (listp y))
-    (return-from py-tuple.__cmp__ *the-notimplemented*))
+    (return-from py-tuple.__cmp__ (load-time-value *the-notimplemented*)))
   (let ((x.len (length x))
 	(y.len (length y)))
     
@@ -3584,7 +3570,7 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
 		 (let* ((__cmp__ (class.attr-no-magic x.class '{__cmp__})) ;; XXX bind
 			(cmp-res (when __cmp__ (py-call __cmp__ x y))))
 		   (when (and cmp-res
-			      (not (eq cmp-res *the-notimplemented*)))
+			      (not (eq cmp-res (load-time-value *the-notimplemented*))))
 		     (return-from py-cmp (normalize cmp-res)))))
 
 	       ;; The "rich comparison" operations __lt__, __eq__, __gt__ are
@@ -3615,7 +3601,7 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
 					       (if y-sub-of-x y x)
 					       (if y-sub-of-x x y)))))
 		 
-			  (when (and res (not (eq res *the-notimplemented*)))
+			  (when (and res (not (eq res (load-time-value *the-notimplemented*))))
 			    (let ((true? (py-val->lisp-bool res)))
 			      (when true?
 				(return-from py-cmp
@@ -3631,14 +3617,14 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
 	       (let* ((meth (class.attr-no-magic x.class '{__cmp__}))
 		      (res (when meth
 			     (py-call meth x y))))
-		 (when (and res (not (eq res *the-notimplemented*)))
+		 (when (and res (not (eq res (load-time-value *the-notimplemented*))))
 		   (let ((norm-res (normalize res)))
 		     (return-from py-cmp norm-res))))
 
 	       (let* ((meth (class.attr-no-magic y.class '{__cmp__}))
 		      (res (when meth
 			     (py-call meth y x))))
-		 (when (and res (not (eq res *the-notimplemented*)))
+		 (when (and res (not (eq res (load-time-value *the-notimplemented*))))
 		   (let ((norm-res (- (normalize res))))
 		     (return-from py-cmp norm-res))))
       
