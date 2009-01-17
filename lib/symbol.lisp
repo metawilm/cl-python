@@ -11,3 +11,6 @@
 
 (in-package :clpython.module.symbol)
 
+(defparameter |Symbol| (list :dummy :Symbol))
+(defparameter |Wild| (list :dummy :Wild))
+(defparameter |symbols| (list :dummy :symbols))

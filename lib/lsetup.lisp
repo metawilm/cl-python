@@ -113,7 +113,8 @@
   (:import-from :clpython.package #:defconstant-once +max-char-code+))
 
 (defpackage :clpython.module.symbol
-  (:use :clpython :common-lisp))
+  (:use :clpython :common-lisp)
+  (:export #:|Symbol| #:|Wild| #:|symbols|))
 
 (defpackage :clpython.module.sys
   (:use :clpython :common-lisp)
