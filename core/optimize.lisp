@@ -448,7 +448,8 @@
 	 ;; Newline after last item
 	 ,(unless comma?
 	    `(progn (fast-write-char #\Newline stdout)
-		    (force-output stdout)))
+		    #+(or)(force-output stdout) ;; hurts performance
+                    ))
 	 
 	 ;; Return value:
 	 nil)

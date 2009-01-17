@@ -3974,7 +3974,9 @@ the lisp list will be returned).")
   (let ((*print-pretty* nil))
     (let* ((write-func (if dest 
 			   (attr dest '{write})
-			 (lambda (s) (write-string s) (finish-output))))
+			 (lambda (s) (write-string s)
+                                 #+(or)(finish-output) ;; hurts performance
+                                 )))
 	   (softspace-val (if dest
 			      (handler-case 
 				  (attr dest '{softspace})
