@@ -12,8 +12,10 @@
 (defparameter *lock-counter* 0)
 
 #+allegro
-(defparameter *lock-implementation* :gate
-  "Implementation of locks: either :gate or :process-lock")
+(defparameter *lock-implementation* :process-lock
+  "Implementation of locks: either :gate or :process-lock."
+  ;; For shootout benchmark chameneos-redux, :process-lock turned out to be faster.
+  )
  
 (defclass lock (object)
   ((id       :initarg :id       :accessor lock-id)
