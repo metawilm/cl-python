@@ -3973,47 +3973,45 @@ the lisp list will be returned).")
 	(make-iterator-from-function :func f)))))
 
 
-(defvar *stdout-softspace* 0 "should a space be printed in front of next arg?")
+(defvar *stream-softspaces* (make-hash-table :test 'eq)
+  "should a space be printed in front of next arg?")
 
 (defun py-print (dest items comma?)
-  (let ((*print-pretty* nil))
-    (let* ((write-func (if dest 
-			   (attr dest '{write})
-			 (lambda (s) (write-string s)
-                                 #+(or)(finish-output) ;; hurts performance
-                                 )))
-	   (softspace-val (if dest
-			      (handler-case 
-				  (attr dest '{softspace})
-			      
-				({Exception} (c) (progn 
-						 (warn "PY-PRINT: exception while retrieving ~
-                                                    'softspace: ~S" c)
-						 nil))
-				(error (c) (progn (warn "PY-PRINT: getting attr 'softspace of ~S ~
-                                                     gave Lisp error: ~S" dest c)
-						  nil)))
-			    *stdout-softspace*))
-	   (softspace-p (py-val->lisp-bool softspace-val))
-	   (last-char-written nil))
-      (loop
-	  for x in items
-	  for i from 0
-	  do (when (or (> i 0)
-		       (and (= i 0) softspace-p))
-	       (py-call write-func " "))
-	     (let ((s (if (stringp x) x (py-str-string x))))
-	       (py-call write-func s)
-	       (when (> (length s) 0)
-		 (setf last-char-written (aref s (1- (length s)))))))
-      (unless comma?
-        (py-call write-func #.(string #\Newline)))
-      (let* ((printed-newline-already (or (not comma?)
-					  (char= last-char-written #\Newline)))
-	     (must-print-newline-next-time (py-bool (not printed-newline-already))))
-	(if dest
-	    (setf (attr dest '{softspace}) must-print-newline-next-time)
-	  (setf *stdout-softspace* must-print-newline-next-time)))))
+  (unless dest
+    (setf dest (clpython::habitat-stdout *habitat*)))
+  (assert dest)
+  (let* ((*print-pretty* nil)
+         (write-func (if (streamp dest)
+                         (lambda (s) (write-string s dest)) ;; No FINISH-OUTPUT: hurts performance
+                       (attr dest '{write})))
+         (softspace-val (if (streamp dest)
+                            (or (gethash dest *stream-softspaces*) 0)
+                          (handler-case 
+                              (attr dest '{softspace})
+                            (error (c)
+                              (warn "PY-PRINT: error retrieving attribute `softspace' of ~S: ~S"
+                                    dest c)
+                              0))))
+         (softspace-p (py-val->lisp-bool softspace-val))
+         (last-char-written nil))
+    (loop
+        for x in items
+        for i from 0
+        do (when (or (plusp i)
+                     (and (zerop i) softspace-p))
+             (py-call write-func " "))
+           (let ((s (if (stringp x) x (py-str-string x))))
+             (py-call write-func s)
+             (when (> (length s) 0)
+               (setf last-char-written (aref s (1- (length s)))))))
+    (unless comma?
+      (py-call write-func #.(string #\Newline)))
+    (let* ((printed-newline-already (or (not comma?)
+                                        (char= last-char-written #\Newline)))
+           (must-print-newline-next-time (py-bool (not printed-newline-already))))
+      (if (streamp dest)
+          (setf (gethash dest *stream-softspaces*) must-print-newline-next-time)
+        (setf (attr dest '{softspace}) must-print-newline-next-time))))
   (values))
 
 ;; Utils
