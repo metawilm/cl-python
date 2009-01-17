@@ -53,7 +53,8 @@
                                 (compile *compile-python-ast-before-running*)
                                 module-run-args
                                 args
-                                compile-quiet)
+                                compile-quiet
+                                time)
   "Run Python AST in freshly bound habitat.
 HABITAT is the execution environment; a fresh one will be used otherwie.
 If COMPILE is true, the AST is compiled into a function before running.
@@ -80,7 +81,9 @@ ARGS are the command-line args, available as `sys.argv'; can be a string or a li
         (funcall fc)
         (unless module-function
           (break "Module ~A did not call *module-function*." fc))
-        (apply module-function module-run-args)))))
+        (if time
+            (time (apply module-function module-run-args))
+          (apply module-function module-run-args))))))
 
 (defun compile-py-file (fname &key (verbose t))
   (let* ((module (pathname-name fname))
