@@ -3154,35 +3154,49 @@ finished; F will then not be called again."
   (let ((op (or (gethash iop *binary-iop->op-ht*)
 		(error "IOP ~S has no OP counterpart" iop))))
     (get-binary-op-func-name op)))
-  
+
+(defun generic-binary-op (x y l-meth r-meth op-syntax)
+  (let ((x.class (py-class-of x))
+        (y.class (py-class-of y)))
+    (multiple-value-bind (x-result x-val-class)
+        (class.attr-no-magic x.class l-meth)
+      (multiple-value-bind (y-result y-val-class)
+          (class.attr-no-magic y.class r-meth)
+        (let ((res (cond ((and x-result y-result)
+                          ;; The __rxxx__ goes before __xxx__, unless __xxx__ is defined in
+                          ;; a subclass of where __rxxx__ is defined.
+                          (let ((try-y-first (and (not (eq x-val-class y-val-class))
+                                                  (subtypep y-val-class x-val-class)))
+                                (ni (load-time-value *the-notimplemented*))
+                                res)
+                            (if try-y-first
+                                (progn (setf res (py-call y-result y x))
+                                       (when (eq res ni)
+                                         (setf res (py-call x-result x y))))
+                              (progn (setf res (py-call x-result x y))
+                                     (when (eq res ni)
+                                       (setf res (py-call y-result y x)))))
+                            res))
+                         ((or x-result y-result)
+                          (error "Operation ~A not asymmetrically defined for ~A, ~A: ~A, ~A."
+                                 op-syntax (py-class-of x) (py-class-of y) x-result y-result)))))
+          (if (or (null res)
+                  (eq res (load-time-value *the-notimplemented*)))
+              (raise-invalid-operands op-syntax x y)
+            res))))))
+
+(defun generic-binary-iop (x val i-meth)
+  (whereas ((iop-meth (class.attr-no-magic (py-class-of x) i-meth))
+            (res (py-call iop-meth x val)))
+    (unless (eq res (load-time-value *the-notimplemented*))
+      res)))
+
 (defmacro def-math-func (op-syntax op-func l-meth r-meth iop-syntax iop-func i-meth)
   `(progn
      
      (defgeneric ,op-func (x y)
        (:method ((x t) (y t))
-		(let* ((x.class (py-class-of x))
-		       (y.class (py-class-of y))
-		       (y-sub-of-x (and (not (eq x.class y.class))
-					(subtypep y.class x.class))))
-		  
-		  (loop
-		      with try-right = y-sub-of-x
-		      with finish = nil
-		      do (let* ((op-meth (class.attr-no-magic
-					  (if try-right y.class x.class)
-					  (if try-right ',r-meth ',l-meth)))
-				(res (and op-meth 
-					  (py-call op-meth
-						   (if try-right y x)
-						   (if try-right x y)))))
-			   (when res
-			     (unless (eq res (load-time-value *the-notimplemented*))
-			       (return res))))
-			 
-			 (if finish
-			     (raise-invalid-operands ',op-syntax x y)
-			   (setf try-right (not try-right)
-				 finish t))))))
+                (generic-binary-op x y ',l-meth ',r-meth ',op-syntax)))
      
      ,(when op-syntax
 	`(setf (gethash ',op-syntax *binary-op-funcs-ht*) ',op-func))
@@ -3190,11 +3204,7 @@ finished; F will then not be called again."
      ,(when iop-func
 	`(defgeneric ,iop-func (x val)
 	   (:method ((x t) (val t))
-		    (let* ((iop-meth (class.attr-no-magic (py-class-of x) ',i-meth))
-			   (res (and iop-meth 
-				     (py-call iop-meth x val))))
-		      (and iop-meth
-			   (not (eq res (load-time-value *the-notimplemented*))))))))
+                    (generic-binary-iop x val ',i-meth))))
      
      ,(when iop-syntax
 	`(setf (gethash ',iop-syntax *binary-iop-funcs-ht*) ',iop-func))
@@ -3202,22 +3212,21 @@ finished; F will then not be called again."
      ,(when (and iop-syntax op-syntax)
 	`(setf (gethash ',iop-syntax *binary-iop->op-ht*) ',op-syntax))))
 
-
 ;; /t/ is not Python syntax, but a hack to support __future__ feature
 ;; `true division'
-(def-math-func [+]   py-+    {__add__}      {__radd__}       [+=]   py-+=   {__iadd__}      )
-(def-math-func [-]   py--    {__sub__}      {__rsub__}       [-=]   py--=   {__isub__}      )
-(def-math-func [*]   py-*    {__mul__}      {__rmul__}       [*=]   py-*=   {__imul__}      )
-(def-math-func [/t/] py-/t/  {__truediv__}  {__rtruediv__}   [/t/]  py-/t/= {__itruediv__}  )
-(def-math-func [//]  py-//   {__floordiv__} {__rfloordiv__}  [//=]  py-//=  {__ifloordiv__} ) 
-(def-math-func [/]   py-/    {__div__}      {__rdiv__}       [/=]   py-/=   {__idiv__}      )
-(def-math-func [%]   py-%    {__mod__}      {__rmod__}       [%=]   py-%=   {__imod__}      )
-(def-math-func [<<]  py-<<   {__lshift__}   {__rlshift__}    [<<=]  py-<<=  {__ilshift__}   )
-(def-math-func [>>]  py->>   {__rshift__}   {__rrshift__}    [>>=]  py->>=  {__irshift__}   )
-(def-math-func [&]   py-&    {__and__}      {__rand__}       [&=]   py-&=   {__iand__}      )
-(def-math-func [\|]  py-\|   {__or__}       {__ror__}        [\|=]  py-\|=  {__ior__}       )
-(def-math-func [^]   py-^    {__xor__}      {__rxor__}       [^=]   py-^=   {__ixor__}      )
-(def-math-func [<divmod>] py-divmod {__divmod__} {__rdivmod__}   nil    nil     nil        )
+(progn (def-math-func [+]   py-+    {__add__}      {__radd__}       [+=]   py-+=   {__iadd__}      )
+       (def-math-func [-]   py--    {__sub__}      {__rsub__}       [-=]   py--=   {__isub__}      )
+       (def-math-func [*]   py-*    {__mul__}      {__rmul__}       [*=]   py-*=   {__imul__}      )
+       (def-math-func [/t/] py-/t/  {__truediv__}  {__rtruediv__}   [/t/]  py-/t/= {__itruediv__}  )
+       (def-math-func [//]  py-//   {__floordiv__} {__rfloordiv__}  [//=]  py-//=  {__ifloordiv__} ) 
+       (def-math-func [/]   py-/    {__div__}      {__rdiv__}       [/=]   py-/=   {__idiv__}      )
+       (def-math-func [%]   py-%    {__mod__}      {__rmod__}       [%=]   py-%=   {__imod__}      )
+       (def-math-func [<<]  py-<<   {__lshift__}   {__rlshift__}    [<<=]  py-<<=  {__ilshift__}   )
+       (def-math-func [>>]  py->>   {__rshift__}   {__rrshift__}    [>>=]  py->>=  {__irshift__}   )
+       (def-math-func [&]   py-&    {__and__}      {__rand__}       [&=]   py-&=   {__iand__}      )
+       (def-math-func [\|]  py-\|   {__or__}       {__ror__}        [\|=]  py-\|=  {__ior__}       )
+       (def-math-func [^]   py-^    {__xor__}      {__rxor__}       [^=]   py-^=   {__ixor__}      )
+       (def-math-func [<divmod>] py-divmod {__divmod__} {__rdivmod__}   nil    nil     nil         ))
 
 ;; a**b (to-the-power) is a special case:
 ;;   

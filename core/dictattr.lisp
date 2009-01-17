@@ -151,7 +151,7 @@
 ;;; Class attribute cache
 
 (defstruct (class-attr (:conc-name ca.))
-  getattribute class-val-dd getattr class-val-non-dd)
+  getattribute class-val-dd getattr class-val-non-dd class-val-class)
 
 (defparameter *ca-cache* (make-hash-table :test 'equal)
   "Mapping from (class, attr) to class-attr struct.")
@@ -207,7 +207,7 @@
   ;; (5)                                                  x               x
   ;; (6)                                                                  x
   ;(declare (optimize (speed 3) (safety 1) (debug 0)))
-  (let (__getattr__ __getattribute__ attr-val attr-is-dd)
+  (let (__getattr__ __getattribute__ attr-val attr-val-class attr-is-dd)
     (do-cpl (c class)
       (unless __getattribute__
         (whereas ((x (class.raw-attr-get c '{__getattribute__})))
@@ -215,6 +215,7 @@
       (unless attr-val
         (whereas ((x (class.raw-attr-get c attr)))
           (setf attr-val x
+                attr-val-class c
                 attr-is-dd (data-descriptor-p x))))
       (unless __getattr__
         (whereas ((x (class.raw-attr-get class '{__getattr__})))
@@ -222,7 +223,8 @@
     (make-class-attr :getattribute __getattribute__
                      :getattr __getattr__
                      :class-val-dd (when attr-is-dd attr-val)
-                     :class-val-non-dd (when (not attr-is-dd) attr-val))))
+                     :class-val-non-dd (when (not attr-is-dd) attr-val)
+                     :class-val-class attr-val-class)))
 
 (defun clear-ca-cache ()
   ;; TODO: only remove what's outdated, e.g. a class and its sublasses.
@@ -233,10 +235,11 @@
 ;;; Attribute lookup
 
 (defun class.attr-no-magic (class attr)
-  "Retrieve class.attr skipping magic hooks."
+  "Retrieve class.attr skipping magic hooks. Returns VALUE, FOUND-IN-CLS."
   (let ((ca (get-ca class attr)))
-    (or (ca.class-val-dd ca)
-        (ca.class-val-non-dd ca))))
+    (values (or (ca.class-val-dd ca)
+                (ca.class-val-non-dd ca))
+            (ca.class-val-class ca))))
 
 (defun x.class-attr-no-magic.bind (x attr)
   (let ((x.cls (py-class-of x)))
