@@ -16,10 +16,6 @@
   ((items :accessor set-items))
   (:metaclass py-type))
 
-(defclass |frozenset| (object)
-  ()
-  (:metaclass py-type))
-
 (def-py-method |py-set.__init__| (x &optional iterable)
   (setf (set-items x) (when iterable (py-iterate->lisp-list iterable))))
 
@@ -30,5 +26,13 @@
 
 (def-py-method |py-set.add| (x item)
   (push item (set-items x)))
+
+
+(defclass |frozenset| (object)
+  ((items :accessor set-items))
+  (:metaclass py-type))
+
+(def-py-method |frozenset.__init__| (x iterable)
+  (setf (set-items x) (py-iterate->lisp-list iterable)))
 
 ;; much TODO...
