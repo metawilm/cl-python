@@ -63,7 +63,11 @@ assert len(hashes) > 1000"
   (run-no-error "assert int('09', 16) == 9")
   (run-no-error "assert (2 == 2 == 2)")
   (run-no-error "assert 2 == 2 == 2")
-  (run-no-error "assert int('0FF', 16) == 0xFF == 255"))
+  (run-no-error "assert int('0FF', 16) == 0xFF == 255")
+  (run-no-error "
+class C:
+  def __int__(self): return 42
+assert int(C()) == 42"))
 
 (defmethod test-builtin ((x (eql :type)))
   (run-no-error "
