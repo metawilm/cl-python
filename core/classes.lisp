@@ -1282,6 +1282,9 @@ but the latter two classes are not in CPython.")
           (format s "module `~A'~_ Src: ~A~_ Binary: ~A"
                   name src-pathname bin-pathname))))))
 
+(def-py-method module.path (x)
+  (string (or (module-src-pathname x) (module-bin-pathname x) "<unknown source location>")))
+
 (defgeneric dir-items (item &rest args))
 
 (defmethod dir-items ((x module) &key (use-all t))
