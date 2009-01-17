@@ -247,9 +247,11 @@
       (bind-val m x x.cls)))) 
   
 (define-compiler-macro class.attr-no-magic (class attr)
-  `(let ((ca (get-ca ,class ,attr)))
-     (or (ca.class-val-dd ca)
-         (ca.class-val-non-dd ca))))
+  ;; Optimize the function calling and structure access.
+  `(locally (declare (optimize (speed 3) (safety 0) (debug 0)))
+     (let ((ca (get-ca ,class ,attr)))
+       (or (ca.class-val-dd ca)
+           (ca.class-val-non-dd ca)))))
 
 (defun instance.attr-no-magic (inst attr)
   (funky-dict-get (dict inst) attr))
