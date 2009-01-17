@@ -23,12 +23,12 @@
   (:metaclass py-type))
 
 #+allegro
-(defclass allegro-gate-lock (lock)
+(defclass allegro-gate-lock (|lock|)
   ((gate :initarg :gate :accessor lock-gate))
   (:metaclass py-type))
 
 #+allegro
-(defclass allegro-process-lock (lock)
+(defclass allegro-process-lock (|lock|)
    ((process-lock :initarg :process-lock :accessor lock-process-lock))
    (:metaclass py-type))
 
