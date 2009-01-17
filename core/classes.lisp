@@ -76,8 +76,11 @@
   (:metaclass py-type))
 
 (defclass py-writable-attribute-method (py-attribute-method)
-  (write-func)
+  ((write-func :initarg :writer :accessor attribute-writer))
   (:metaclass py-type))
+
+(defun make-writable-attribute (reader writer)
+  (make-instance 'py-writable-attribute-method :func reader :writer writer))
 
 (defclass py-static-method (py-method)
   ()
@@ -1334,7 +1337,7 @@ but the latter two classes are not in CPython.")
 
 (defmethod dir-items ((x package) &key use-all)
   (declare (ignore use-all))
-  (loop for s being each external-symbol in x collect (cons (symbol-name s) (lisp-symbol-value s))))
+  (loop for s being each external-symbol in x collect (cons (symbol-name s) (bound-in-some-way s))))
 
 (defmethod dir-items ((x module) &key (use-all t))
   (whereas ((all (and use-all (instance.attr-no-magic x '{__all__}))))
@@ -1505,17 +1508,6 @@ But if RELATIVE-TO package name is given, result may contains dots."
             (subseq name (1+ dot-ix))
           name)))))
 
-#||
-(assert (string-equal (clpython::relative-package-name :clpython.module.math)
-                      "math"))
-(assert (string-equal (clpython::relative-package-name :clpython.module.math
-                                                       :clpython.module)
-                      "math"))
-(assert (string-equal (clpython::relative-package-name :clpython.module.math
-                                                       :clpython)
-                      "module.math"))
-||#
-
 (def-py-method lisp-package.__repr__ (pkg)
   (with-output-to-string (s)
     (print-unreadable-object (pkg s :identity t :type nil)
@@ -1524,43 +1516,59 @@ But if RELATIVE-TO package name is given, result may contains dots."
               (package-name pkg)
               (loop for s being the external-symbol in pkg count s)))))
 
-(def-py-method lisp-package.__getattribute__ (pkg name)
+(defun bound-in-some-way (sym)
+  (cond ((boundp sym) 
+         (symbol-value sym))
+        ((fboundp sym)
+         (symbol-function sym))
+        ((find-class sym nil))
+        (t nil)))
+
+(def-py-method lisp-package.__setattr__ (pkg name new-val)
+  ;; Only allowed when symbol denotes writable attribute.
+  (let ((cur-val (lisp-package.__getattribute__ pkg name :writable-attr-ok t)))
+    (if (typep cur-val 'py-writable-attribute-method)
+        (funcall (attribute-writer cur-val) new-val)
+      (py-raise '{AttributeError} "Attribute `~A' of package ~A is not writable." name pkg))))
+         
+(def-py-method lisp-package.__getattribute__ (pkg name &key writable-attr-ok)
   (declare (optimize (speed 3) (safety 0) (debug 0)))
   (assert (stringp name))
   (flet ((todo-error ()
-	       (py-raise '{NotImplementedError} 
-			  "Attribute `~A' of module `~A' is not implemented yet."
-			  name (relative-package-name pkg)))
-	     
-	     (n/a-error ()
-	       (py-raise '{NotImplementedError}
-			  "Attribute `~A' of module `~A' is not applicable for this ~
+           (if writable-attr-ok
+               (return-from lisp-package.__getattribute__ nil)
+             (py-raise '{NotImplementedError} 
+                       "Attribute `~A' of module `~A' is not implemented yet."
+                       name (relative-package-name pkg))))
+         
+         (n/a-error ()
+           (if writable-attr-ok
+               (return-from lisp-package.__getattribute__ nil)
+             (py-raise '{NotImplementedError}
+                       "Attribute `~A' of module `~A' is not applicable for this ~
  implementation, therefore it is not implemented."
-			  name (relative-package-name pkg)))
-	     
-	     (unbound-error ()
-	       (py-raise '{AttributeError}
-			  "Attribute `~A' of module `~A' is unbound."
-			  name (relative-package-name pkg)))
-	     
-	     (no-attr-error ()
-	       (py-raise '{AttributeError}
-			  "Module `~A' (Lisp package ~A) has no attribute named `~A'."
-			  (relative-package-name pkg) pkg name))
+                       name (relative-package-name pkg))))
+         
+         (unbound-error ()
+           (if writable-attr-ok
+               (return-from lisp-package.__getattribute__ nil)
+             (py-raise '{AttributeError}
+                       "Attribute `~A' of module `~A' is unbound."
+                       name (relative-package-name pkg))))
+         
+         (no-attr-error ()
+           (if writable-attr-ok
+               (return-from lisp-package.__getattribute__ nil)
+             (py-raise '{AttributeError}
+                       "Module `~A' (Lisp package ~A) has no attribute named `~A'."
+                       (relative-package-name pkg) pkg name)))
 
-	     (incomplete-warning ()
-	       (warn "Attribute `~A' of module `~A' was accessed. ~
+         (incomplete-warning ()
+           (unless writable-attr-ok
+             (warn "Attribute `~A' of module `~A' was accessed. ~
  The implementation of this attribute is still incomplete, therefore ~
  unexpected results may occur."
-		     name (relative-package-name pkg)))
-
-             (bound-in-some-way (sym)
-               (cond ((boundp sym)
-                      (symbol-value sym))
-                     ((fboundp sym)
-                      (symbol-function sym))
-                     ((find-class sym nil))
-                     (t nil))))
+                   name (relative-package-name pkg)))))
     ;(declare (dynamic-extent todo-error n/a-error unbound-error no-attr-error))
     (multiple-value-bind (sym kind)
 	(find-symbol name pkg)
@@ -1582,7 +1590,12 @@ But if RELATIVE-TO package name is given, result may contains dots."
 			 (incomplete-warning))))
       
       (let ((val (or (bound-in-some-way sym) (unbound-error))))
-	val))))
+        (if (and (not writable-attr-ok)
+                 (typep val 'py-writable-attribute-method))
+            (funcall (py-method-func val))
+          val)))))
+
+
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Property (User object)
