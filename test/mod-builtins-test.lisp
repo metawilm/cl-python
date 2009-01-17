@@ -13,7 +13,7 @@
 
 (defun run-builtin-test ()
   (with-subtest (:name "CLPython-Builtins")
-    (dolist (x '(:globals :hash :range :int :type :map))
+    (dolist (x '(:globals :hash :range :int :type :map :list))
       (test-builtin x))))
 
 (defgeneric test-builtin (kind))
@@ -77,3 +77,13 @@ assert type(f) == type(g)"))
 
 (defmethod test-builtin ((x (eql :map)))
   (run-no-error "assert map(lambda x,y: x+y, [1,2,3], [4,5,6]) == [5, 7, 9]"))
+
+(defmethod test-builtin ((x (eql :list)))
+  (run-no-error "
+x = []
+x.insert(1, 10)
+assert x == [10]
+x.insert(1, 11)
+assert x == [10, 11]
+x.insert(12, 12)
+assert x == [10, 11, 12]"))

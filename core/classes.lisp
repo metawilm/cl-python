@@ -2319,6 +2319,16 @@ invocation form.")
   "For internal use, e.g. list comprehensions."
   `(vector-push-extend ,item ,list))
 
+(def-py-method py-list.insert (list index object)
+  "Insert OBJECT before index INDEX"
+  (setf index (min (max index 0) (length list)))
+  (vector-push-extend nil list)
+  (do ((i (1- (length list)) (1- i)))
+      ((<= i index))
+    (setf (aref list i) (aref list (1- i))))
+  (setf (aref list index) object)
+  *the-none*)
+       
 (def-py-method py-list.pop (x^ &optional index)
   "Remove and return item at index (default: last item)"
   (let* ((x.len (length x)))
