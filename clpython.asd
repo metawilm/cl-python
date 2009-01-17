@@ -63,7 +63,8 @@ are accepted in those libraries."
                                        (:file "optimize"     )
                                        (:file "run"          )
                                        (:file "habitat"      )
-                                       (:file "import"       )))))
+                                       (:file "import"       )
+                                       (:file "executable"   )))))
 
 (asdf:defsystem :clpython.lib
     :description "Python module library"

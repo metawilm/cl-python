@@ -54,7 +54,8 @@
                                 module-run-args
                                 args
                                 compile-quiet
-                                time)
+                                time
+                                cmd-args)
   "Run Python AST in freshly bound habitat.
 HABITAT is the execution environment; a fresh one will be used otherwie.
 If COMPILE is true, the AST is compiled into a function before running.
@@ -69,8 +70,8 @@ ARGS are the command-line args, available as `sys.argv'; can be a string or a li
                      (compile nil get-module-f))
                  (coerce get-module-f 'function))))
       (unless *habitat* (setf *habitat* (make-habitat)))
-      ;; set args:
-      (setf (habitat-cmd-line-args *habitat*) (make-py-list-from-list '("???.py")))
+      (setf (habitat-cmd-line-args *habitat*)
+        (make-py-list-from-list (or cmd-args '("???.py"))))
       (when args
         (typecase args
           (string (setf args (py-string.split args " ")))

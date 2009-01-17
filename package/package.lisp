@@ -256,3 +256,12 @@
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (import '(clpython:raise-syntax-error clpython:*raise-syntax-error-hook*)
           :clpython.parser))
+
+;;; There are small references from CLPython to the REPL
+
+(defpackage :clpython.app.repl
+  (:documentation "Python read-eval-print loop")
+  (:use :common-lisp :clpython :clpython.parser)
+  (:export #:repl #:*repl-compile* #:*repl-prof*
+           #:return-python-toplevel #:*repl-module-globals*)
+  (:import-from :clpython #:with-matching))

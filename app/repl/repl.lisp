@@ -9,12 +9,6 @@
 
 ;;;; Read-Eval-Print loop 
 
-(defpackage :clpython.app.repl
-  (:documentation "Python read-eval-print loop")
-  (:use :common-lisp :clpython :clpython.parser)
-  (:export #:repl #:*repl-compile* #:*repl-prof*)
-  (:import-from :clpython #:with-matching))
-
 (in-package :clpython.app.repl)
 (in-syntax *ast-user-readtable*)
 
@@ -136,7 +130,7 @@ KIND can be :ptime, :time, :space, :pspace or NIL."
                               (prof:show-call-graph)))
     ((nil)   (funcall f))))
 
-(defun repl ()
+(defun repl (&rest options)
   (format t "Welcome to CLPython, an implementation of Python in Common Lisp.~%")
   (format t "Running on: ~A ~A~%" (lisp-implementation-type) (lisp-implementation-version))
   (format t "REPL shortcuts: `:q' = quit, `:h' = help.~%")
@@ -144,7 +138,7 @@ KIND can be :ptime, :time, :space, :pspace or NIL."
   (with-repl-toplevel-aliases
       (clpython::with-python-compiler-style-warnings
           (with-ast-user-readtable ()
-            (repl-1)))))
+            (apply #'repl-1 options)))))
 
 (defvar *object-repr-char-limit* 300
   "At most this many characters are printed for an object represenation in the REPL (NIL = infinite)")
@@ -167,13 +161,13 @@ KIND can be :ptime, :time, :space, :pspace or NIL."
 
 (defvar *repl-module-globals*)
 
-(defun repl-1 ()
+(defun repl-1 (&key cmd-args)
   (let* ((*repl-module-globals* (clpython::make-eq-hash-table "repl module"))
          (mod-namespace (make-instance 'clpython::hash-table-ns
                           :dict-form '*repl-module-globals*
                           :scope :module
                           :parent (clpython::make-builtins-namespace)))
-         (clpython::*habitat* (clpython::make-habitat))
+         (clpython::*habitat* (clpython::make-habitat :cmd-line-args cmd-args))
          (*truncation-explain* t)
 	 acc)
     (declare (special clpython::*habitat*))
@@ -194,7 +188,8 @@ KIND can be :ptime, :time, :space, :pspace or NIL."
                             (clpython::run-python-ast suite :module-run-args
                                                       (list :%module-globals *repl-module-globals*)
                                                       :compile *repl-compile*
-                                                      :compile-quiet t))))
+                                                      :compile-quiet t
+                                                      :cmd-args cmd-args))))
              (nice-one-line-input-abbrev (total)
                (check-type total string)
                (loop while (and (plusp (length total))
@@ -419,7 +414,6 @@ Useful when re-parsing copied interpreter input."
                           (setf new (subseq new 0 (1+ (- (length new) (length prompt)))))))))
     (values new changed)))
 
-
 ;; Displaying stacktrace, todo
 #+(or) 
 (defun print-traceback ()
@@ -434,4 +428,4 @@ Useful when re-parsing copied interpreter input."
 (defmacro with-stack-trace-restart (&body body)
   `(restart-bind ((:stacktrace 'print-traceback))
      ,@body))
-       
+

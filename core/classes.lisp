@@ -796,6 +796,10 @@ otherwise work well.")
 (def-py-method py-function.__doc__ :attribute-write (func^ doc)
   (setf (documentation func 'function) doc))
 
+(def-py-method py-function._exe (func)
+  "Create executable from function"
+  (build-executable :function func))
+    
 ;; Enumerate (core object)
 
 (defclass py-enumerate (object)
@@ -2282,7 +2286,7 @@ invocation form.")
 	       (incf item (length x)))
 	     (unless (<= 0 item (1- (length x)))
 	       (py-raise '{ValueError}
-			 "String subscript outside range (got ~A, length string = ~A)"
+			 "Sequence subscript outside range (got ~A, length = ~A)"
 			 item (length x)))
 	     (funcall make-seq-func (aref x item) t))
     
