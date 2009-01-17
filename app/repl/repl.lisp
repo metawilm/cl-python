@@ -138,7 +138,8 @@ KIND can be :ptime, :time, :space, :pspace or NIL."
   (with-repl-toplevel-aliases
       (clpython::with-python-compiler-style-warnings
           (with-ast-user-readtable ()
-            (apply #'repl-1 options)))))
+            (let ((clpython::*muffle-sbcl-compiler-notes* t))
+              (apply #'repl-1 options))))))
 
 (defvar *object-repr-char-limit* 300
   "At most this many characters are printed for an object represenation in the REPL (NIL = infinite)")
@@ -326,7 +327,7 @@ KIND can be :ptime, :time, :space, :pspace or NIL."
 				  (write-char #\Newline))
 				(setf acc nil)
                                 t)))))))
-             #+allegro
+             #+(or allegro sbcl)
              (input-available-p ()
                (let ((ch (read-char-no-hang *standard-input*)))
                  (when ch
@@ -341,7 +342,7 @@ KIND can be :ptime, :time, :space, :pspace or NIL."
             (locally (declare (special *stdout-softspace*))
               (setf *stdout-softspace* (py-bool nil)))
             
-            (unless #+allegro (input-available-p)
+            (unless #+(or allegro sbcl) (input-available-p)
                     #-allegro nil
                     ;; When copy-pasting multiple lines of Python source code into the REPL,
                     ;; prevent several prompts being printed below the copied code.
