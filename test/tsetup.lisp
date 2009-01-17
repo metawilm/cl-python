@@ -62,8 +62,7 @@ seems to give implementations some freedom here. (In practice: Allegro=NIL, LisW
 
 (defmacro test-some-warning (&rest args)
   `(test-warning ,@args 
-                 :known-failure ,+compilation-warnings-muffled-by-compiler+
-                 :fail-info (format nil "Failure probably caused by ~S = ~S"
+                 :fail-info (format nil "~S = ~S"
                                     '+compilation-warnings-muffled-by-compiler+
                                     +compilation-warnings-muffled-by-compiler+)))
   

@@ -76,12 +76,8 @@
     (test-false x)
     (test-true err)
     (test-true (string= (pop (exception-args err)) "abc")
-               #-clpython-exceptions-are-python-objects :known-failure
-               #-clpython-exceptions-are-python-objects t
-               #-clpython-exceptions-are-python-objects :fail-info
-               #-clpython-exceptions-are-python-objects (format nil "Probably failed due to ~A = ~A"
-                                                                'clpython::*exceptions-are-python-objects*
-                                                                clpython::*exceptions-are-python-objects*))))
+               :fail-info (format nil "~A = ~A" 'clpython::*exceptions-are-python-objects*
+                                  clpython::*exceptions-are-python-objects*))))
 
 (defmethod test-lang ((kind (eql :assign-stmt)))
   (run-test 3 "a = 3; a")
@@ -489,7 +485,7 @@ assert f(1,a=3) == (1, {'a': 3})")
 def f():
   pass
 f.__name__ = 'g'
-assert f.__name__ == 'g'" :known-failure t :fail-info "Function name attrbute not writable yet"))
+assert f.__name__ == 'g'"))
 
 
 (defmethod test-lang ((kind (eql :generator-expr)))

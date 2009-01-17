@@ -179,7 +179,7 @@ def f(): pass" nil))
     (let ((s (apply #'concatenate 'string (mapcar 'string '(#\' #\\ #\\ #\' #\Space)))))
       (test-equal (ignore-errors (values (parse s :one-expr t))) "\\"))
     ;; trailing comma
-    (test-no-error (parse "def f(a=3,): pass") :known-failure t)
+    (test-no-error (parse "def f(a=3,): pass"))
     ;; backslash at end of whitespace line
     (test-equal (ps "
 if a:
