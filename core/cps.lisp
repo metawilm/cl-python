@@ -581,18 +581,6 @@ Note that CPS macros take the continuation as additional first parameter."
    (cps-convert ,finally-suite))
 ||#
 
-(defun schedule-finalization (object function)
-  "Schedule FUNCTION to be run when OBJECT is garbage collected."
-  (declare (ignorable object function))
-  #+allegro (excl:schedule-finalization object function)
-  #-allegro (error "Don't know how to SCHEDULE-FINALIZATION in this lisp."))
-
-(defun unschedule-finalization (sf)
-  "Removes a finalization function. SF is a value returned by SCHEDULE-FINALIZATION."
-  (declare (ignorable sf))
-  #+allegro (excl:unschedule-finalization sf)
-  #-allegro (error "Don't know how to UNSCHEDULE-FINALIZATION in this lisp."))
-
 (def-cps-macro [tuple-expr] (items)
   (loop
       with item-gensyms = (loop for i from 0 repeat (length items) collect (gensym (format nil "item-~A-" i)))
