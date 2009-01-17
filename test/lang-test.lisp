@@ -640,7 +640,18 @@ assert x == ['1', '2']"))
   )
 
 (defmethod test-lang ((kind (eql :slice-expr)))
-  )
+  (run-no-error "
+x = range(10)
+x[1:10:2] = [0,0,0,0,0]
+assert x == [0, 0, 2, 0, 4, 0, 6, 0, 8, 0]")
+  (run-no-error "
+x = range(10)
+x[1:3] = []
+assert x == [0, 3, 4, 5, 6, 7, 8, 9]")
+  (run-no-error "
+x = [1,2]
+x[:0] = 'abc'
+assert x == ['a', 'b', 'c', 1, 2]"))
 
 (defmethod test-lang ((kind (eql :subscription-expr)))
   )

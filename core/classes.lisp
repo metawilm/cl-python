@@ -812,6 +812,12 @@ otherwise work well.")
    (step  :initarg :step  :accessor slice-step))
   (:metaclass py-type))
 
+(defmethod print-object ((x py-slice) stream)
+  (print-unreadable-object (x stream)
+    (with-slots (start stop step) x
+      (format stream ":start ~A :stop ~A :step ~A"
+              start stop step))))
+            
 (defun make-slice (start stop step)
   (make-instance 'py-slice
     :start (or start *the-none*)
@@ -2279,8 +2285,9 @@ invocation form.")
 				    num)))
                          (:nonempty-stepped-slice
 			  (destructuring-bind (start stop step num) args
-			    (values (loop for i from start upto stop by step
-					collect (char x i))
+                            (values (if (plusp step)
+                                        (loop for i from start upto stop by step collect (aref x i))
+                                      (loop for i from start downto stop by (- step) collect (aref x i)))
 				    num))))
 		     (assert (= exp-num (length items)) ()
 		       "Expected ~A items, got ~A" exp-num (length items))
@@ -2322,14 +2329,53 @@ invocation form.")
     (format s "]")))
 
 (def-py-method py-list.__setitem__ (x^ item val)
-  (check-type item integer)
-  (when (< item 0)
-    (incf item (length x)))
-  (unless (<= 0 item (1- (length x)))
-    (py-raise '{ValueError}
-	      "<list>[i] = x : i outside range (got ~A, length list = ~A)"
-	      item (length x)))
-  (setf (aref x item) val))
+  (typecase item
+    (integer
+     (when (< item 0)
+       (incf item (length x)))
+     (unless (<= 0 item (1- (length x)))
+       (py-raise '{ValueError}
+                 "<list>[i] = x : i outside range (got ~A, length list = ~A)"
+                 item (length x)))
+     (setf (aref x item) val))
+    (py-slice
+     (let ((values (py-iterate->lisp-list val)))
+       (destructuring-bind (kind &rest args)
+           (multiple-value-list (slice-indices item (length x)))
+         (ecase kind
+           (:empty-slice-bogus (py-raise '{ValueError} "Invalid slice for assignment: ~A." item))
+           (:empty-slice-before (let ((copy (copy-seq x)))
+                                  (setf (fill-pointer x) 0)
+                                  (loop for v in values do (vector-push-extend v x))
+                                  (loop for v across copy do (vector-push-extend v x))
+                                  (setf (fill-pointer x) (+ (length copy) (length values)))))
+           (:empty-slice-after (loop for v in values do (vector-push-extend x v)))
+           (:empty-slice-between (let ((n-before (pop args)))
+                                   (let ((copy (subseq x (1+ n-before))))
+                                     (setf (fill-pointer x) n-before)
+                                     (loop for v in values do (vector-push-extend v x))
+                                     (loop for v across copy do (vector-push-extend v x))
+                                     (setf (fill-pointer x) (+ (length copy) (length values))))))
+           (:nonempty-slice (destructuring-bind (start-incl stop-incl num) args
+                              num
+                              (let ((copy-tail (subseq x (1+ stop-incl))))
+                                (setf (fill-pointer x) start-incl)
+                                (loop for v in values do (vector-push-extend v x))
+                                (loop for v across copy-tail do (vector-push-extend v x)))))
+           (:nonempty-stepped-slice (destructuring-bind (start-incl stop-incl step times) args
+                                      stop-incl
+                                      (unless (= times (length values))
+                                        (py-raise '{ValueError}
+                                                  "Attempt to assign sequence of ~A items to stepped slice of ~A items."
+                                                  (length values) times))
+                                      (when (minusp step)
+                                        (setf step (- step))
+                                        (rotatef start-incl stop-incl)
+                                        (setf values (nreverse values)))
+                                      (dotimes (i times)
+                                        (let ((ix (+ start-incl (* step i))))
+                                          (setf (aref x ix) (pop values)))))))))))
+  *the-none*)
 
 (defvar *py-print-safe* nil)
 
