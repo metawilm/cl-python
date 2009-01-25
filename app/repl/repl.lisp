@@ -189,8 +189,7 @@ KIND can be :ptime, :time, :space, :pspace or NIL."
                             (clpython::run-python-ast suite :module-run-args
                                                       (list :%module-globals *repl-module-globals*)
                                                       :compile *repl-compile*
-                                                      :compile-quiet t
-                                                      :cmd-args cmd-args))))
+                                                      :compile-quiet t))))
              (nice-one-line-input-abbrev (total)
                (check-type total string)
                (loop while (and (plusp (length total))

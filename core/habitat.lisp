@@ -17,7 +17,7 @@
    (stdout         :initform nil :initarg :stdout :accessor %habitat-stdout)
    (stderr         :initform nil :initarg :stderr :accessor %habitat-stderr)
    (loaded-mods    :initform () :initarg :loaded-mods   :accessor habitat-loaded-mods)
-   (cmd-line-args  :initform () :initarg :cmd-line-args :accessor habitat-cmd-line-args)
+   (cmd-line-args  :initform () :initarg :cmd-line-args :accessor %habitat-cmd-line-args)
    (search-paths   :initform (make-py-list-from-list (list ".")) :accessor habitat-search-paths))
   (:documentation "Python execution context"))
 
@@ -44,6 +44,18 @@
 
 (defmethod (setf habitat-stderr) (val (x habitat))
   (setf (%habitat-stderr x) val))
+
+(defgeneric (setf habitat-cmd-line-args) (val habitat))
+(defmethod (setf habitat-cmd-line-args) (val (x habitat))
+  (setf (%habitat-cmd-line-args x)
+    (typecase val
+      (string (py-string.split val " "))
+      (list (make-py-list-from-list val))
+      (t val))))
+(defgeneric habitat-cmd-line-args (habitat))
+(defmethod habitat-cmd-line-args ((x habitat))
+  (or (%habitat-cmd-line-args x)
+      (make-py-list-from-list '("???.py"))))
 
 (defun make-habitat (&rest options)
   (apply #'make-instance 'habitat options))

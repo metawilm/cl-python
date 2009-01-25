@@ -52,10 +52,9 @@
 (defun run-python-ast (ast &key (habitat *habitat*)
                                 (compile *compile-python-ast-before-running*)
                                 module-run-args
-                                args
                                 compile-quiet
                                 time
-                                cmd-args)
+                                args)
   "Run Python AST in freshly bound habitat.
 HABITAT is the execution environment; a fresh one will be used otherwie.
 If COMPILE is true, the AST is compiled into a function before running.
@@ -70,13 +69,8 @@ ARGS are the command-line args, available as `sys.argv'; can be a string or a li
                      (compile nil get-module-f))
                  (coerce get-module-f 'function))))
       (unless *habitat* (setf *habitat* (make-habitat)))
-      (setf (habitat-cmd-line-args *habitat*)
-        (make-py-list-from-list (or cmd-args '("???.py"))))
-      (when args
-        (typecase args
-          (string (setf args (py-string.split args " ")))
-          (list (setf args (make-py-list-from-list args))))
-        (py-list.extend (habitat-cmd-line-args *habitat*) args))
+      (when (or args (null (habitat-cmd-line-args *habitat*)))
+        (setf (habitat-cmd-line-args *habitat*) args))
       (let* (module-function
              (*module-function-hook* (lambda (f) (setf module-function f))))
         (funcall fc)
