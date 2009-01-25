@@ -14,3 +14,8 @@
 (defun |disable| ()
   (warn "Disabling GC not implemented: gc.disable() has no effect.")
   *the-none*)
+
+(defun |collect| (&optional generation)
+  (declare (ignorable generation))
+  #+allegro (excl:gc t)
+  #-allegro (warn "gc.collect() not implemented in this Lisp implementation"))
