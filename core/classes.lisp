@@ -2850,12 +2850,8 @@ invocation form.")
 
 ;; Efficient tuple functions
 
-(defun tuple-p-fast (x)
-  (listp x))
-
-(defun tuple-length-fast (x)
-  (assert (listp x))
-  (length x))
+(def-py-method py-tuple.__add__ (x^ y^)
+  (make-tuple-from-list (append x y)))
 
 (def-py-method py-tuple.__cmp__ (x^ y^)
   (unless (and (listp x) (listp y))
