@@ -1167,8 +1167,32 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
     (print-unreadable-object (x s :identity t :type nil)
       (format s "~A" (type-of x)))))
 
+(defvar *print-object-does-repr* t)
+(defvar *print-object-with-repr-show-errors* nil)
+(defvar *print-object-with-repr-error-level* 0)
+
 (defmethod print-object ((x object) stream)
-  (write-string (py-repr x) stream))
+  (multiple-value-bind (result error)
+      (when *print-object-does-repr*
+        (ignore-errors (values (py-repr x))))
+    (when result
+      (if (stringp result)
+          (write-string result stream)
+        (print-unreadable-object (x stream)
+          (format stream "Unprintable object of type ~A ~
+                            [repr() gave non-string result of type ~A]"
+                  (class-name (class-of x)) (class-name (class-of result)))))
+      (return-from print-object))
+    (let ((*print-object-does-repr* nil))
+      (print-unreadable-object (x stream)
+        (format stream "Unprintable object of type ~A" (class-name (class-of x)))
+        (when (and error *print-object-with-repr-show-errors*)
+          (let ((*print-object-with-repr-error-level* (1+ *print-object-with-repr-error-level*)))
+            (format stream " -- repr() gave [~A]"
+                    ;; Skip error details at lower levels, especially useful when __repr__ faulty.
+                    (if (<= *print-object-with-repr-error-level* 1)
+                        error
+                      (class-name (class-of error))))))))))
 
 (def-py-method object.__nonzero__ (x)
   "Objects are nonzero ('true') by default."
@@ -3998,8 +4022,11 @@ the lisp list will be returned).")
 
 (defun py-print (dest items comma?)
   (declare (special *habitat*))
-  (unless dest
-    (setf dest (clpython::habitat-stdout *habitat*)))
+  (setf dest (cond (dest)
+                   (*habitat* (clpython::habitat-stdout *habitat*))
+                   (t
+                    ;; e.g. when a __del__ method tries to print after habitat is gone
+                    *standard-output*)))
   (assert dest)
   (let* ((*print-pretty* nil)
          (write-func (if (streamp dest)
