@@ -136,10 +136,11 @@ KIND can be :ptime, :time, :space, :pspace or NIL."
   (format t "REPL shortcuts: `:q' = quit, `:h' = help.~%")
   (clpython::maybe-warn-set-search-paths nil)
   (with-repl-toplevel-aliases
-      (clpython::with-python-compiler-style-warnings
-          (with-ast-user-readtable ()
-            (let ((clpython::*muffle-sbcl-compiler-notes* t))
-              (apply #'repl-1 options))))))
+      (clpython.parser::with-source-locations
+          (clpython::with-python-compiler-style-warnings
+              (with-ast-user-readtable ()
+                (let ((clpython::*muffle-sbcl-compiler-notes* t))
+                  (apply #'repl-1 options)))))))
 
 (defvar *object-repr-char-limit* 300
   "At most this many characters are printed for an object represenation in the REPL (NIL = infinite)")
