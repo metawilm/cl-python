@@ -373,7 +373,7 @@ KIND can be :ptime, :time, :space, :pspace or NIL."
                     (t
                      (warn "Unknown command: ~S" cmd)))))
                
-               ((string= x "")
+               ((and (string= x "") #+allegro (not (input-available-p)))
                 (let ((total (apply #'concatenate 'string (nreverse acc))))
                   (setf acc ())
                   (loop
