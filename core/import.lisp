@@ -307,6 +307,7 @@ Used to avoid infinite recompilation/reloading loops.")
     (let ((find-paths search-paths))
       (when within-mod-path
         (push (truename within-mod-path) find-paths))
+      (setf find-paths (remove-duplicates find-paths :test 'equal))
       
       ;; Find the source or fasl file somewhere in the collection of search paths
       (multiple-value-bind (kind src-file bin-file find-path)
