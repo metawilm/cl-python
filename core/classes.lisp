@@ -1321,6 +1321,21 @@ but the latter two classes are not in CPython.")
 (def-py-method py-type.__str__ (x) ;; XXX deproxy not needed
   (py-type.__repr__ x))
 
+(defun class-finalizer-p (cls)
+  ;; Could perhaps be optimized by keeping track of whether any class has defined __del__. 
+  (not (null (class.attr-no-magic cls '{__del__}))))
+
+(defun generic-finalizer (x)
+  (whereas ((__del__ (x.class-attr-no-magic.bind x '{__del__})))
+    (py-call __del__)))
+  
+(defun maybe-add-finalizer (x)
+  (let ((cls (class-of x)))
+    (when (and (typep cls (ltv-find-class 'py-type))
+               (class-finalizer-p cls))
+      (schedule-finalization x #'generic-finalizer)
+      t)))
+
 (def-py-method py-type.__call__ (cls &rest args)
   (declare (optimize (speed 3) (safety 0) (debug 0))
            #+(or)(dynamic-extent args)) ;; XXX this declaration ends up in the wrong place
@@ -1340,25 +1355,27 @@ but the latter two classes are not in CPython.")
          ;; Inline common case: creating new classes with TYPE as requested metaclass
 	 (apply #'py-type.__new__ cls args))
         
-        (t (let ((__new__ (class.attr-no-magic cls '{__new__})))
-             (unless __new__
-               (break "Class ~A lacks __new__ method." cls))
-             #+(or)(warn "__new__: ~A" __new__)
-             (let* ((bound-new (if (eq (class-of __new__) (ltv-find-class 'py-static-method))
-                                   __new__ ;; inline common case
-                                 (bind-val __new__ cls (py-class-of cls))))
-                    (inst    (apply #'py-call bound-new cls args))) ;; including CLS as arg!
-	       
-               (when (or (eq (class-of inst) cls) ;; <- Efficiency optimization
-                         (subtypep (py-class-of inst) cls)) ;; <- real test
-                 ;; Don't run __init__ when inst is not of type cls
-                 (let ((__init__-unbound (class.attr-no-magic cls '{__init__})))
-                   ;;(format t "__init__-unbound: ~A~%" __init__-unbound)
-                   (if (functionp __init__-unbound)
-                       (apply __init__-unbound inst args) ;; inline common case
-                     (let ((__init__ (x.class-attr-no-magic.bind inst '{__init__})))
-                       (apply #'py-call __init__ args)))))
-               inst)))))
+        (t
+         ;; Object instantiation: x = C(..)
+         (let ((__new__ (class.attr-no-magic cls '{__new__})))
+           (unless __new__
+             (break "Class ~A lacks __new__ method." cls))
+           #+(or)(warn "__new__: ~A" __new__)
+           (let* ((bound-new (if (eq (class-of __new__) (ltv-find-class 'py-static-method))
+                                 __new__ ;; inline common case
+                               (bind-val __new__ cls (py-class-of cls))))
+                  (inst    (apply #'py-call bound-new cls args))) ;; including CLS as arg!
+             
+             (when (or (eq (class-of inst) cls) ;; <- Efficiency optimization
+                       (subtypep (py-class-of inst) cls)) ;; <- real test
+               ;; Don't run __init__ when inst is not of type cls
+               (let ((__init__-unbound (class.attr-no-magic cls '{__init__})))
+                 ;;(format t "__init__-unbound: ~A~%" __init__-unbound)
+                 (if (functionp __init__-unbound)
+                     (apply __init__-unbound inst args) ;; inline common case
+                   (let ((__init__ (x.class-attr-no-magic.bind inst '{__init__})))
+                     (apply #'py-call __init__ args)))))
+             inst)))))
 
 ;;; Module
 
