@@ -108,5 +108,5 @@ differs in structure from the template for ~A ast nodes, which is: ~A"
 (defmacro with-perhaps-matching ((form template &rest args) &body body)
   `(with-matching (,form ,template :must-hold nil ,@args)
      ,@body))
-;) ;; eval-when
+
 
