@@ -14,6 +14,14 @@
    #+sbcl cl-user::*POSIX-ARGV*
    #-sbcl (break "COMMAND-LINE-ARGS undefined in this implementation"))
 
+#+cmu
+(defun build-executable (&rest args)
+  ;; Error in function LISP::ASSERT-ERROR:
+  ;; The assertion (EQ (C::FUNCTIONAL-KIND (C::LAMBDA-HOME C::FUN)) :TOP-LEVEL) failed.
+  (declare (ignore args))
+  (error "Does not work in CMUCL yet (see <http://article.gmane.org/gmane.lisp.cmucl.devel/10782>)"))
+
+#-cmu
 (defun build-executable (&key filename function (habitat *habitat*) repl-module-globals
                               #+sbcl (ask-terminate t))
   (declare (special clpython.app.repl:*repl-module-globals*))

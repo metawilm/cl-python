@@ -216,12 +216,10 @@ Returns the loaded module, or NIL on error."
 (defun module-dotted-name (list-name)
   (format nil "~{~A~^.~}" list-name))
 
-(eval-when (:compile-toplevel :load-toplevel :execute)
-  (unless (boundp 'cl-user::*clpython-module-search-paths*)
-    (defvar cl-user::*clpython-module-search-paths* ()
-      "Default search paths for imported modules. Should at least contain the location
+(defvar #1=cl-user::*clpython-module-search-paths* (when (boundp '#1#) #1#)
+  "Default search paths for imported modules. Should at least contain the location
 of the Python stanard libraries. (This variable is in the CL-USER package to allow
-it being set before CLPython is loaded, e.g. in a Lisp configuration file.)")))
+it being set before CLPython is loaded, e.g. in a Lisp configuration file.)")
 
 (defun maybe-warn-set-search-paths (at-error)
   (cond ((or (not (boundp 'cl-user::*clpython-module-search-paths*))

@@ -1438,7 +1438,7 @@ but the latter two classes are not in CPython.")
            (let (res)
              (funky-dict-map (dict x) (lambda (k v) (push (cons (symbol-name k) v) res)))
              res))
-         (dir-items (py-class-of x) args)))
+         (apply #'dir-items (py-class-of x) args)))
 
 (defun copy-module-contents (&key from to)
   (check-type from module)
