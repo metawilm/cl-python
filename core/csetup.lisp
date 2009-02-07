@@ -39,46 +39,33 @@
       (return-from py-call res)))
   whole)
 
-#||
-         #+(or)
-         `(multiple-value-bind (.a .b .c)
-              (py-attr ,x ,attr :bind-class-attr nil)
-            (if (eq .a :class-attr)
-                (progn #+(or)(assert (functionp .b))
-                       #+(or)(warn "saving bound method ~A ~A" .b .c)
-                       (funcall .b .c ,@args))
-              (locally (declare (notinline py-call))
-                (py-call .a ,@args))))
-         
-         #+(or)
-         ((and (listp prim)
-               (eq (first prim) 'bind-val)
-               (= (length prim) 4))
-          ;; Optimize  (py-call (bind-val val x x.class) ..args..)
-          ;; where val is a function and x an instance, so it doesn't allocate
-          ;; bound method.
-          #+(or)(warn "inlining (py-call (bind-val ..) ..) ~A" whole)
-          (destructuring-bind (val x x.class) (cdr prim)
-            `(let ((.val ,val)
-                   (.x ,x)
-                   (.x.class ,x.class))
-               (if (functionp .val) ;; XXX Maybe check for user-defined subclasses of function?
-                   (progn #+(or)(warn "saving binding ~A" ',whole)
-                          (funcall .val .x ,@args))
-                 (py-call (bind-val .val .x .x.class) ,@args)))))
 
-         #+(or)
-         (t 
-          ;; Optimize case where PRIM is a function.
-          (let ((a (gensym "args"))
-                (p (gensym "prim")))
-            (let ((res `(locally (declare (optimize (speed 3)))
-                          (let ((,p ,prim))
-                            (with-stack-list (,a ,@args)
-                              (if (functionp ,p)
-                                  (progn #+(or)(warn "inlined py-call <function> ~A" ,p)
-                                         (apply 'funcall (the function ,p) ,a))
-                                (apply 'py-call ,p ,a)))))))
-              #+(or)(format t ";; py-call => ~A" res)
-              res))))))
-||#
+
+;; If a macro raises an ERROR, it is undefined whether the compiler
+;; catches that or passes it on outwards. CLHS on COMPILE: "compile is
+;; permitted, but not required, to establish a handler for conditions
+;; of type error."
+;; 
+;; In our case, certain syntax errors are detected during
+;; macroexpansion. By using non-ERROR conditions, as suggested by
+;; Nikodemus Siivola, we can communicate that event portably to an
+;; outer level. It does require that every compilation of a Python
+;; source file is wrapped in the WITH-form.
+;;
+;; <http://article.gmane.org/gmane.lisp.steel-bank.devel/11291>
+
+(define-condition raise-syntax-error-please (condition)
+  ((syntax-error-args :initarg :syntax-error-args :accessor rsep-syntax-error-args)))
+
+(defun compiler-detect-syntax-error (&rest syntax-error-args)
+  (signal (make-condition 'raise-syntax-error-please
+            :syntax-error-args syntax-error-args))
+  ;; If no-one is listening (so not inside with-compiler-generated-syntax-errors)
+  (break "Uncaught SyntaxError: ~A" (apply #'format nil syntax-error-args)))
+
+(defmacro with-compiler-generated-syntax-errors (() &body body)
+  `(handler-bind ((raise-syntax-error-please
+                   (lambda (c)
+                     (apply #'py-raise '{SyntaxError} (rsep-syntax-error-args c)))))
+     (let ((*raise-syntax-error-hook* 'compiler-detect-syntax-error))
+       ,@body)))

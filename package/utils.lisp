@@ -191,10 +191,10 @@ See function ALIST-VS-HT.")
   "Schedule FUNCTION to be run when OBJECT is garbage collected."
   (declare (ignorable object function))
   #+allegro (excl:schedule-finalization object function)
-  #-allegro (error "Don't know how to SCHEDULE-FINALIZATION in this lisp."))
+  #-allegro (warn "Don't know how to SCHEDULE-FINALIZATION in this lisp."))
 
 (defun unschedule-finalization (sf)
   "Removes a finalization function. SF is a value returned by SCHEDULE-FINALIZATION."
   (declare (ignorable sf))
   #+allegro (excl:unschedule-finalization sf)
-  #-allegro (error "Don't know how to UNSCHEDULE-FINALIZATION in this lisp."))
+  #-allegro (warn "Don't know how to UNSCHEDULE-FINALIZATION in this lisp."))

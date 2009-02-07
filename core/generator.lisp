@@ -236,9 +236,9 @@ former requires that this form is executed within RECEIVE-YIELDED-VALUE."
                         `(%cps-convert ,raise-arg
                              (lambda (.raise-arg)
                                (assert-stmt-1 .test-val ',test .raise-arg)
-                               (funcall ',assert-k nil)))
+                               (funcall ,assert-k nil)))
                       `(progn (assert-stmt-1 .test-val ',test ,raise-arg)
-                              (funcall ',assert-k nil))))
+                              (funcall ,assert-k nil))))
                  ,(%call-continuation)))))))
 
 (def-cps-macro [assign-stmt] (value targets &environment e)
@@ -410,7 +410,7 @@ former requires that this form is executed within RECEIVE-YIELDED-VALUE."
                                             (lambda (.v)
                                               (declare (ignore .v))
                                               (%cps-convert ,suite (lambda (arg)
-                                                                     (declare (ignore args))
+                                                                     (declare (ignore arg))
                                                                      (.continue-cont)))))
                             (.else-cont nil)))))
                (.continue-cont)))))))
@@ -552,6 +552,7 @@ former requires that this form is executed within RECEIVE-YIELDED-VALUE."
 
 (def-cps-macro [try-except-stmt] (suite except-clauses else-suite)
   `(flet ((.attempt-handle-error (.c)
+            (declare (ignorable .c))
             ,(loop with res = `(error .c)
                  for (exc var handler-suite) in (reverse except-clauses)
                  if exc
@@ -572,7 +573,7 @@ former requires that this form is executed within RECEIVE-YIELDED-VALUE."
           (.do-else ()
             ,(if else-suite
                  `(%cps-convert ,else-suite ,%current-continuation)
-               `(funcall ,%current-continuation))))
+               `(funcall ,%current-continuation nil))))
      (let ((gen-state (make-generator-state ,suite :sub-generator t)))
        (labels ((next-try-value (val-for-gener)
                   (handler-case

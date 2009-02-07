@@ -111,8 +111,7 @@ like .join (string.join), .sort (list.sort), etc")
 )
 
 (defvar *exec-stmt-compile-before-run* t
-  "The code in the `exec' statement is translated into a function, that is
-then (optionally) compiled and called. Should it be compiled before running?")
+  "Whether the code for `exec' statements is compiled before being run.")
 
 (defvar *exec-stmt-result-handler* nil)
 
@@ -697,12 +696,21 @@ an assigment statement. This changes at least the returned 'store' form.")
                                          :parent globals-ns
                                          :scope :exec-locals)
                                        locals)))
-        (funcall (coerce `(lambda (%exec-globals-ns %exec-locals-ns)
-                            (with-namespace (,globals-ns)
-                              (with-namespace (,locals-ns)
-                                ,(second ast))))
-                         'function)
-                 globals-param locals-param)))))
+        
+        (let ((lambda-expr `(lambda (%exec-globals-ns %exec-locals-ns)
+                              (with-namespace (,globals-ns)
+                                (with-namespace (,locals-ns)
+                                  ,(second ast))))))
+          (with-compiler-generated-syntax-errors ()
+            ;; WITH-COMPILER-GENERATED-SYNTAX-ERRORS is needed for e.g. making sure
+            ;; SyntaxError gets raised about the misplaced "yield" in:
+            ;;    exec 'yield 1'
+            ;; which might occur either during compilation (macroexpand) or runtime
+            ;; (if interpreted).
+            (let ((func (if *exec-stmt-compile-before-run*
+                            (compile nil lambda-expr)
+                          (coerce lambda-expr 'function))))
+              (funcall func globals-param locals-param))))))))
 
 ;;; `Call' expression
 
