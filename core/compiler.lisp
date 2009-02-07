@@ -166,6 +166,9 @@ Disabled by default, to not confuse the test suite.")
 (defparameter *debug-no-locals-dict* nil
   "A hack to analyze compiler output; don't use.")
 
+(defparameter *debug-dummy-outer-namespace* nil
+  "A debugging aid; don't use.")
+
 (defgeneric ns.expand-with (namespace body-form environment))
 (defgeneric ns.read-form (namespace name))
 (defgeneric ns.write-form (namespace name val-form))
@@ -189,9 +192,12 @@ Disabled by default, to not confuse the test suite.")
   (loop named lookup
       for try-ns = ns then (ns.parent try-ns)
       for form = (and try-ns (apply func try-ns args))
+      while try-ns
       when form
       do (return-from lookup (values form try-ns))
-      finally (error "No namespace for handling ~A ~A, from ~A." func args ns)))
+      finally (if *debug-dummy-outer-namespace*
+		  (return-from lookup `(ns-dummy-form ,func ,ns ,@args))
+		(error "No namespace for handling ~A ~A, from ~A." func args ns))))
 
 (defmacro namespace-set (key val &environment e)
   (check-type key symbol)
