@@ -3099,12 +3099,7 @@ finished; F will then not be called again."
       (format stream ":name ~A  :func ~A  :stopped ~A"
 	      name func stopped-yet))))
 
-(defclass generator-process (py-func-iterator)
-  ((process :initarg :process))
-  (:metaclass py-type))
-
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
 ;;; Calling objects (functions, classes, instances)
 
 (defun py-apply (f &rest args)
