@@ -176,15 +176,22 @@ Disabled by default, to not confuse the test suite.")
 (defgeneric ns.del-form (namespace name))
 (defgeneric ns.locals-form (namespace))
 
-(defmacro with-namespace (ns &body body &environment e)
+(defmacro with-namespace ((ns &key (define-%locals (not *debug-no-locals-dict*))
+                                   (define-%globals nil))
+                          &body body &environment e)
   ;; XXX not always %locals needed (e.g. when no call expr in body)
-  (setf body (if (or *debug-no-locals-dict* (not (ns.has-locals-dict ns)))
-                 `(locally ,@body)
-               `(flet ((%locals () ,(ns.locals-form ns)))
-                  (declare (ignorable #'%locals))
-                  ,@body)))
-  `(with-pydecl ((:namespace ,ns))
-     ,(ns.expand-with ns body e)))
+  (let ((new-body `(locally ,@body)))
+    (when define-%globals
+      (assert define-%locals () "define-%globals implies define-%locals")
+      (setf new-body `(flet ((%globals () (%locals)))
+                        (declare (ignorable #'%globals))
+                        ,new-body)))
+    (when define-%locals
+      (setf new-body `(flet ((%locals () ,(ns.locals-form ns)))
+                        (declare (ignorable #'%locals))
+                        ,new-body)))
+    `(with-pydecl ((:namespace ,ns))
+       ,(ns.expand-with ns new-body e))))
 
 (defun ns.find-form (func ns &rest args)
   (declare (dynamic-extent args))
@@ -227,8 +234,7 @@ Disabled by default, to not confuse the test suite.")
 
 (defclass namespace ()
   ((parent :accessor ns.parent :initarg :parent :initform nil)
-   (scope :accessor ns.scope :initarg :scope :initform (error "missing arg :scope"))
-   (has-locals-dict :accessor ns.has-locals-dict :initarg :has-locals-dict :initform t)))
+   (scope :accessor ns.scope :initarg :scope :initform (error "missing arg :scope"))))
 
 (defmethod ns.expand-with ((ns namespace) body-form environment)
   (declare (ignorable ns environment))
@@ -692,8 +698,8 @@ an assigment statement. This changes at least the returned 'store' form.")
                                          :scope :exec-locals)
                                        locals)))
         (funcall (coerce `(lambda (%exec-globals-ns %exec-locals-ns)
-                            (with-namespace ,globals-ns
-                              (with-namespace ,locals-ns
+                            (with-namespace (,globals-ns)
+                              (with-namespace (,locals-ns)
                                 ,(second ast))))
                          'function)
                  globals-param locals-param)))))
@@ -864,10 +870,10 @@ an assigment statement. This changes at least the returned 'store' form.")
            ;; Need a nested LET, as +cls-namespace+ may not be set when the ASSIGN-STMT
            ;; below is executed, as otherwise nested classes don't work.
            (let ((%class-namespace (make-eq-hash-table "class-namespace")))
-             (with-namespace ,(make-instance 'hash-table-ns
-                                :dict-form '%class-namespace
-                                :parent (get-module-namespace e) ;; not the lexical parent ns!
-                                :scope :class)
+             (with-namespace (,(make-instance 'hash-table-ns
+                                 :dict-form '%class-namespace
+                                 :parent (get-module-namespace e) ;; not the lexical parent ns!
+                                 :scope :class))
                ;; XXX enforce string-only keys
                ;; First, run the statements in the body of the class
                ;; definition. This will fill +cls-namespace+ with the
@@ -911,6 +917,20 @@ an assigment statement. This changes at least the returned 'store' form.")
     `(let ((hook *runtime-line-number-hook*))
        (when hook (funcall hook ,line-no)))))
 
+(defun apply-comparison-brackets (whole)
+  (let (args cmps)
+    (labels ((apply-brackets (form)
+			     (if (not ([comparison-expr-p] form))
+				 (push form args)
+			       (with-matching (form ([comparison-expr] ?cmp ?left ?right ?brackets))
+					      (if (and (not (eq form whole)) ?brackets)
+						  (push form args)
+						(progn (apply-brackets ?left)
+						       (push ?cmp cmps)
+						       (apply-brackets ?right)))))))
+      (apply-brackets whole)
+      (values (nreverse args) (mapcar #'get-binary-comparison-func-name (nreverse cmps))))))
+
 (defmacro [comparison-expr] (&whole whole cmp left right brackets)
   ;; "Formally, if a, b, c, ..., y, z are expressions and
   ;; op1, op2, ..., opN are comparison operators, then
@@ -919,30 +939,21 @@ an assigment statement. This changes at least the returned 'store' form.")
   ;; except that each expression is evaluated at most once."
   ;; http://python.org/doc/current/reference/expressions.html
   (declare (ignore cmp left right brackets))
-  (flet ((bracketize ()
-           (let (args cmps)
-             (labels ((apply-brackets (form)
-                        (if (not ([comparison-expr-p] form))
-                            (push form args)
-                          (with-matching (form ([comparison-expr] ?cmp ?left ?right ?brackets))
-                            (if (and (not (eq form whole)) ?brackets)
-                                (push form args)
-                              (progn (apply-brackets ?left)
-                                     (push ?cmp cmps)
-                                     (apply-brackets ?right)))))))
-               (apply-brackets whole)
-               (values (nreverse args) (nreverse cmps))))))
-    (multiple-value-bind (args cmps)
-        (bracketize)
-      (with-gensyms (x y)
-        `(let ((,x ,(pop args))
-               (,y ,(pop args)))
-           (py-bool (and ,(let ((py-@ (get-binary-comparison-func-name (pop cmps))))
-                            `(py-val->lisp-bool (,py-@ ,x ,y)))
-                         ,@(loop while cmps
-                               for py-@ = (get-binary-comparison-func-name (pop cmps))
-                               collect `(progn (shiftf ,x ,y ,(pop args))
-                                               (py-val->lisp-bool (,py-@ ,x ,y)))))))))))
+  (multiple-value-bind (args cmp-func-names)
+      (apply-comparison-brackets whole)
+    (with-gensyms (x y cmp-res comparison-expr)
+      `(block ,comparison-expr
+         (let* ((,x ,(pop args))
+                (,y ,(pop args))
+                (,cmp-res (,(pop cmp-func-names) ,x ,y)))
+           ,#1=(let ((exit-condition (if (null cmp-func-names) t `(not (py-val->lisp-bool ,cmp-res)))))
+                 `(when ,exit-condition
+                    (return-from ,comparison-expr ,cmp-res)))
+           ,@(loop for cmp-func-name = (pop cmp-func-names)
+                 while cmp-func-name
+                 collect `(progn (shiftf ,x ,y ,(pop args))
+                                 (setf ,cmp-res (,cmp-func-name ,x ,y))
+                                 ,#1#)))))))
 
 (defmacro [continue-stmt] (&environment e)
   (if (get-pydecl :inside-loop-p e)
@@ -1203,15 +1214,15 @@ LOCALS shares share tail structure with input arg locals."
                         collect `(,lambda-key-arg ,key-default-arg))
 		   ,(when *-arg  (second *-arg))
 		   ,(when **-arg (second **-arg)))
-                  (with-namespace ,(make-instance 'let-w/locals-ns
-                                     :parent (get-module-namespace e)
-                                     :names (append all-nontuple-func-locals
-                                                    destruct-nested-vars
-                                                    new-locals)
-                                     :let-names (remove-duplicates (append destruct-nested-vars new-locals))
-                                     :locals-names all-nontuple-func-locals
-                                     :scope :function
-                                     :has-locals-dict (funcdef-should-save-locals-p suite))
+                  (with-namespace (,(make-instance 'let-w/locals-ns
+                                      :parent (get-module-namespace e)
+                                      :names (append all-nontuple-func-locals
+                                                     destruct-nested-vars
+                                                     new-locals)
+                                      :let-names (remove-duplicates (append destruct-nested-vars new-locals))
+                                      :locals-names all-nontuple-func-locals
+                                      :scope :function)
+                                      :define-%locals ,(funcdef-should-save-locals-p suite))
                     ;; XXX this IGNORABLE declaration ends up at the wrong place, w.r.t. function args.
                     ,@(unless *warn-unused-function-vars*
 			`((declare (ignorable ,@nontuple-arg-names ,@new-locals))))
@@ -1430,32 +1441,30 @@ LOCALS shares share tail structure with input arg locals."
             (with-pydecl ((:context :module)
                           #+(or)(:mod-futures  :todo-parse-module-ast-future-imports)) ;; todo
               (let* ((*habitat* (or *habitat* (make-habitat))))
-                (with-namespace ,(or *module-namespace*
-                                     (make-instance 'hash-table-ns
-                                       :dict-form '%module-globals
-                                       :scope :module
-                                       :parent (make-builtins-namespace)))
+                (with-namespace (,(or *module-namespace*
+                                      (make-instance 'hash-table-ns
+                                        :dict-form '%module-globals
+                                        :scope :module
+                                        :parent (make-builtins-namespace)))
+                                 :define-%globals t)
                   (let ((*module-namespace* nil))
-                    (flet ((%globals () (%locals))) ;; with-namespace defines %locals
-                      (declare (ignorable #'%globals))
-                      
-                      (namespace-set {__name__} module-name)
-                      (namespace-set {__debug__} +the-true+)
-                      
-                      (when (and call-preload-hook (boundp '*module-preload-hook*))
-                        (let ((%module (make-instance 'module
-                                         :name module-name
-                                         :src-pathname src-module-path
-                                         :bin-pathname bin-module-path
-                                         :src-file-write-date src-file-write-date
-                                         :bin-file-write-date bin-file-write-date
-                                         :namespace-ht %module-globals)))
-                          (funcall *module-preload-hook* %module)))
-                      
-                      (with-py-errors (:name (python-module ,*current-module-name*))
-                        (locally (declare #+sbcl ,@(when *muffle-sbcl-compiler-notes*
-                                                     `((sb-ext:muffle-conditions sb-ext:compiler-note))))
-                          ,suite)))))))))
+                    (namespace-set {__name__} module-name)
+                    (namespace-set {__debug__} +the-true+)
+                    
+                    (when (and call-preload-hook (boundp '*module-preload-hook*))
+                      (let ((%module (make-instance 'module
+                                       :name module-name
+                                       :src-pathname src-module-path
+                                       :bin-pathname bin-module-path
+                                       :src-file-write-date src-file-write-date
+                                       :bin-file-write-date bin-file-write-date
+                                       :namespace-ht %module-globals)))
+                        (funcall *module-preload-hook* %module)))
+                    
+                    (with-py-errors (:name (python-module ,*current-module-name*))
+                      (locally (declare #+sbcl ,@(when *muffle-sbcl-compiler-notes*
+                                                   `((sb-ext:muffle-conditions sb-ext:compiler-note))))
+                        ,suite))))))))
      ;; (Optionally) Source form recording
      ,@(when (and *python-form->source-location* *current-module-path*) ;; *c-m-path* is nil in REPL
          (let (positions)

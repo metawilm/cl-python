@@ -10,7 +10,7 @@
 ;;;; Python language semantics test
 
 (in-package :clpython.test)
-(in-syntax *user-readtable*)
+(in-syntax *ast-user-readtable*)
 
 (defun run-lang-test ()
   (with-subtest (:name "CLPython-Lang")
@@ -23,7 +23,7 @@
                     :list-expr :module-stmt :print-stmt :return-stmt :slice-expr
                     :subscription-expr :suite-stmt :return-stmt :raise-stmt
                     :try-except-stmt :try-finally-stmt :tuple-expr :unary-expr
-                    :while-stmt :with-stmt :yield-stmt
+                    :while-stmt :with-stmt :yield-expr :yield-stmt
                     :attribute-semantics :number-method-lookups :getitem-methods))
       (test-lang node))))
 
@@ -769,6 +769,220 @@ class C:
 with C() as y:
   x.append(y)
 assert x == ['enter', 42, 'exit']"))
+
+(defparameter *cps-tests*
+    `(("pass" ())
+      ("yield 1" (1))
+      ("yield" ,(list *the-none*))
+      ("
+if 0:
+  yield 1
+elif []:
+  yield 2
+else:
+  yield 3
+  yield 31
+  if 1:
+    yield 4
+    yield 41
+  else:
+    yield 5" (3 31 4 41))
+      ("
+try:
+  1/0
+  print 'a'
+  yield 2
+except:
+  print 'x'
+  print 'y'
+  yield 3
+  print 'z'
+print 'below'" (3))
+      ("
+yield 1
+class C: pass
+class D:
+  pass
+yield 2" (1 2))
+      ("
+yield 1
+class C:
+  pass
+try:
+  print 'aap'
+  yield 2
+  1/0
+except C, e:
+  print 'never'
+  yield 20
+except:
+  yield 3
+  yield 4" (1 2 3 4))
+      ("
+try:
+  print 'start try'
+  yield 1
+  yield 2
+  1/0
+  yield 3
+  print 'end try'
+finally:
+  print 'start finally'
+  yield 40
+  yield 41
+  print 'end finally'
+print 'after try/finally'
+yield 5
+print 'still after try/finally'" (1 2 40 41))
+      ("
+y = (yield 3)
+yield y" ,(list 3 *the-none*))
+      ("print [1,2,3,4]
+print (1,2,3,4)" ())
+      ("
+for x in [1,2,3,4]:
+  yield x" (1 2 3 4))
+      ("
+for x in [1,2,3,4]:
+  if x != 3:
+    yield x" (1 2 4))
+      ("
+x = 1
+while x < 4:
+  yield x
+  x = x + 1
+" (1 2 3))
+      ("
+for x in [1,2,3,4,5]:
+  if x <= 3:
+     continue
+  if x == 5:
+     break
+  yielded = 0
+  for y in 'abcde':
+     while not yielded:
+       yield x
+       yielded = 1
+" (4))
+      ("assert ((yield 1), (yield 2)) == (None, None)" (1 2))
+      ("assert [(yield 1), (yield 2)] == [(yield 3), (yield 4)], 'Never' % (yield 5)" (1 2 3 4))
+      ("
+try:
+  yield 1
+  assert 0
+  yield 3
+except AssertionError:
+  yield 2" (1 2))
+      ("
+class C: pass
+yield 1
+x = C()
+x.a = 3
+yield x.a
+x.a += 1
+yield x.a" (1 3 4))
+      ("
+x = []
+def f(i):
+  x.append(i)
+  return i
+assert `(f(1), (yield f(2)), f(3), (yield f(4)))` == `(1, None, 3, None)`
+assert x == [1, 2, 3, 4]" (2 4))
+      ("
+x = []
+try:
+  try:
+    yield 1
+    1/0
+    yield 999
+  finally:
+    x.append('finally')
+    x.append((yield 2))
+except:
+  x.append('except')
+  x.append((yield 3))
+assert x == ['finally', None, 'except', None]" (1 2 3))
+      ("assert (1 and (yield 1)) == None" (1))
+      ("assert (1 or (yield 1)) == 1" ())
+      ("yield 1
+try:
+  try:
+    pass
+    pass
+    exec 'yield 1'
+  except KeyError:
+    yield 'never'
+    pass
+except SyntaxError:
+  yield 2
+" (1 2))))
+
+(defmacro with-dummy-namespace (&body body)
+  `(let ((%dummy-cps-namespace (make-hash-table :test 'eq)))
+     (setf (gethash '{None} %dummy-cps-namespace) *the-none*) ;; XXX extract setting builtins
+     (setf (gethash '{AssertionError} %dummy-cps-namespace) (find-class 'clpython.user.builtin.type.exception:AssertionError))
+     (clpython::with-namespace (,(make-instance 'clpython::hash-table-ns
+                                   :dict-form '%dummy-cps-namespace
+                                   :parent (clpython::make-builtins-namespace)
+                                   :scope :function)
+                                   :define-%globals t)
+       ,@body)))
+
+(defun make-test-gen (string &key debug (max 10))
+  "Returns yielded values. The values send as the result of each yield expression
+are increasing integers starting from 1, up to MAX.
+MAX is a safey limit, in case the code erroneously goes into an endless loop."
+  (flet ((wformat (&rest args)
+           (when debug (apply #'format t args)))) 
+    (let* ((ast `([suite-stmt] ,(nconc (parse string :incl-module nil))))
+           (gener (eval `(with-dummy-namespace
+                             (clpython::make-generator ,ast))))
+           (yielded ()))
+      (block iterate
+        (wformat "G: ~A~%" gener)
+        (wformat "Starting G with next()~%")
+        (let ((values (multiple-value-list
+                       (handler-case (clpython::generator.next gener)
+                         ({StopIteration} ()
+                           (wformat " exhausted~%")
+                           :exhausted)))))
+          (wformat "  yield #1: ~S~%" values)
+          (unless (keywordp (car values))
+            (wformat "First value not a keyword; assuming yielded value: ~A" values)
+            (setf values (cons :yield values)))
+          (ecase (car values)
+            (:exhausted
+             (return-from iterate))
+            (:implicit-return
+             (return-from iterate))
+            (:yield
+             (push (second values) yielded)
+             (loop for val = (multiple-value-list
+                              (handler-case (clpython::generator.send gener *the-none*)
+                                ({StopIteration} ()
+                                  (wformat " exhausted~%")
+                                  :exhausted)))
+                 for i from 1 below (1+ max)
+                 while val do
+                   (unless (keywordp (car val))
+                     (wformat "First value not a keyword; assuming yielded value: ~A" val)
+                     (setf val (cons :yield val)))
+                   (case (car val)
+                     (:exhausted
+                      (return-from iterate))
+                     (:yield
+                      (wformat "  yield #~A: ~A~%" (1+ i) (second val))
+                      (push (second val) yielded))
+                     (:implicit-return
+                      (return-from iterate))
+                     (t (error "invalid values from gener: ~A" val)))
+                 finally (when (> i max)
+                           (warn "Generator manually stopped (but perhaps not exhausted).~%")))))))
+      (nreverse yielded))))
+
+(defmethod test-lang ((kind (eql :yield-expr)))
+  (loop for (src expected) in *cps-tests*
+      do (eval `(test-equal (make-test-gen ',src :debug nil) ',expected))))
 
 (defmethod test-lang ((kind (eql :yield-stmt)))
   (run-no-error "
