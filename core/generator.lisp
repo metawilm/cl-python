@@ -676,6 +676,7 @@ former requires that this form is executed within RECEIVE-YIELDED-VALUE."
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; Debugging
 
+#+allegro
 (defmacro view-cps (string)
   (format t "Code: ~A~%" string)
   (let ((ast (parse string :one-expr t)))
