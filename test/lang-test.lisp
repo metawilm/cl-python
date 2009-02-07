@@ -296,7 +296,17 @@ for x in range(5):
       if x < y:
         assert ((x < y) < z) == (1 < z)
       else:
-        assert ((x < y) < z) == (0 < z)"))
+        assert ((x < y) < z) == (0 < z)")
+  (run-no-error "
+le = 0
+class C:
+  def __le__(self, other):
+    global le
+    le += 1
+    return []
+x, y = C(), C()
+assert (x <= y) == []
+assert le > 0" :known-failure t :fail-info "<= should use __le__, not __cmp__."))
 
 (defmethod test-lang ((kind (eql :continue-stmt)))
   (run-error "break" {SyntaxError})

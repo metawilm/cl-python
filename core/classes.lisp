@@ -3709,7 +3709,7 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
 		     -1
 		   1))))))
 
-
+;; XXX these functions should call __le__ etc, not __cmp__ ?!
 (def-comparison  [<]  py-<   (=  (the (integer -1 1) (py-cmp x y)) -1))
 (def-comparison  [>]  py->   (=  (the (integer -1 1) (py-cmp x y))  1))
 (def-comparison [==] py-==  (=  (the (integer -1 1) (py-cmp x y))  0))
