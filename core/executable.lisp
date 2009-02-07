@@ -78,7 +78,7 @@
                                 (run-file path)
                               (print-usage))))))
                  exit-status)))))
-    
+    (declare (ignorable #'toplevel))
     (flet (#+sbcl (build-sbcl ()
                     (when (and ask-terminate
                                (not (y-or-n-p
