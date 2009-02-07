@@ -919,8 +919,6 @@ except SyntaxError:
 
 (defmacro with-dummy-namespace (&body body)
   `(let ((%dummy-cps-namespace (make-hash-table :test 'eq)))
-     (setf (gethash '{None} %dummy-cps-namespace) *the-none*) ;; XXX extract setting builtins
-     (setf (gethash '{AssertionError} %dummy-cps-namespace) (find-class 'clpython.user.builtin.type.exception:AssertionError))
      (clpython::with-namespace (,(make-instance 'clpython::hash-table-ns
                                    :dict-form '%dummy-cps-namespace
                                    :parent (clpython::make-builtins-namespace)
