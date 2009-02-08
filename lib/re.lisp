@@ -18,6 +18,9 @@
 
 (defconstant |I| 2)
 
+(defconstant-once |X| 64)
+(defconstant-once |VERBOSE| |X|)
+
 (defun |compile| (pattern &optional flags)
   (make-instance '|reg-exp|
     :pattern pattern
