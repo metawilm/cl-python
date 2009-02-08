@@ -1246,11 +1246,13 @@ Basically the Python equivalent of ENSURE-CLASS."
   (symbol-name (class-name cls)))
 
 (def-py-method py-type.__dict__ :attribute-read (cls)
-  (dict cls))
+  (make-instance 'funky-dict-wrapper
+    :getter (lambda () (dict cls))
+    :setter (lambda (new) (setf (dict cls) new))))
 
 (def-py-method py-type.__dict__ :attribute-write (cls new-dict)
   ;; XXX check NEW-DICT is of (sub)type DICT.
-  (setf (slot-value cls 'dict) new-dict))
+  (setf (dict cls) new-dict))
 
 (def-py-method py-type.__bases__ :attribute-read (cls)
   (assert (classp cls))
@@ -1988,8 +1990,6 @@ But if RELATIVE-TO package name is given, result may contains dots."
 
 (def-proxy-class dict)
 
-;; MAKE-DICT is defined elsewhere.
-
 (def-py-method dict.__new__ :static (cls &rest kwargs)
   (let ((ht (make-py-hash-table)))
     (if (eq cls (ltv-find-class 'dict))
@@ -2170,10 +2170,6 @@ invocation form.")
 (def-py-method dict.values (x)
   (make-py-list-from-list (loop for v being the hash-value in x collect v)))
 
-(defun clear-dict (x)
-  (clrhash x))
-
-
 ;; Dicts used for namespaces
 
 (defclass symbol-hash-table (object)
@@ -2181,6 +2177,7 @@ invocation form.")
   (:metaclass py-type))
 
 (defvar *ht->symbol-hash-table* (make-hash-table :test 'eq))
+;; Is there a reason to make the mapping unique?
 
 (defun make-symbol-hash-table (ht)
   (check-type ht hash-table)
@@ -2209,11 +2206,38 @@ invocation form.")
   (with-output-to-string (s)
     (let ((*print-escape* t))
       (print-unreadable-object (d s :type t)
-        (format s "{~{~A: ~S~^, ~}}" (loop for k being the hash-key in (sht-ht d)
-                                    using (hash-value v)
-                                    nconc (list (string k) v)))))))
+        (format s "{~_ ~{~A: ~S~^,~_ ~}~_}" (loop for k being the hash-key in (sht-ht d)
+                                                using (hash-value v)
+                                                nconc (list (string k) v)))))))
 
+(def-py-method symbol-hash-table.items (d)
+  (loop for key being each hash-key in (sht-ht d)
+      using (hash-value value)
+      collect (make-tuple-from-list (list (string key) value))))
+  
 ;; TODO: add the other dict methods
+
+;;; Proxies for funky dicts
+
+(defclass funky-dict-wrapper (object)
+  ((getter :initarg :getter :accessor fdw-getter)
+   (setter :initarg :setter :accessor fdw-setter))
+  (:metaclass py-type))
+
+(defun funky-dict-wrapper.alist (w)
+  (let (items)
+    (funky-dict-map (funcall (fdw-getter w)) (lambda (k v) (push (cons k v) items)))
+    items))
+
+(def-py-method funky-dict-wrapper.__repr__ (w)
+  (with-output-to-string (s)
+    (let ((*print-escape* t))
+      (print-unreadable-object (w s :type t)
+        (format s "{~_ ~{~A: ~S~^,~_ ~}~_}" (loop for (k . v) in (funky-dict-wrapper.alist w)
+                                                nconc (list (string k) v)))))))
+
+(def-py-method funky-dict-wrapper.keys (w)
+  (make-py-list-from-list (loop for (k . nil) in (funky-dict-wrapper.alist w) collect (string k))))
 
 ;; List (Lisp object: adjustable array)
 
