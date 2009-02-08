@@ -13,7 +13,7 @@
 
 (defun run-builtin-test ()
   (with-subtest (:name "CLPython-Builtins")
-    (dolist (x '(:globals :hash :range :int :type :map :list))
+    (dolist (x '(:globals :hash :isinstance :int :range :type :map :list))
       (test-builtin x))))
 
 (defgeneric test-builtin (kind))
@@ -49,12 +49,6 @@ for i in range(60):
 assert len(hashes) > 1000"
                 :fail-info "Ensure tuple hashes nicely distributed."))
 
-(defmethod test-builtin ((x (eql :range)))
-  (run-no-error "assert range(3) == list(xrange(3)) == [0,1,2]")
-  (run-no-error "assert range(1,3) == list(xrange(1,3)) == [1,2]")
-  (run-no-error "assert range(1,10,2) == list(xrange(1,10,2)) == [1,3,5,7,9]")
-  (run-no-error "assert range(10,1,-2) == list(xrange(10,1,-2)) == [10,8,6,4,2]"))
-
 (defmethod test-builtin ((x (eql :int)))
   (run-no-error "assert int(3) == 3")
   (run-no-error "assert int('3') == 3")
@@ -68,15 +62,11 @@ assert len(hashes) > 1000"
 class C:
   def __int__(self): return 42
 assert int(C()) == 42"))
-
-(defmethod test-builtin ((x (eql :type)))
-  (run-no-error "
-def f(): pass
-g = lambda: 42
-assert type(f) == type(g)"))
-
-(defmethod test-builtin ((x (eql :map)))
-  (run-no-error "assert map(lambda x,y: x+y, [1,2,3], [4,5,6]) == [5, 7, 9]"))
+  
+(defmethod test-builtin ((x (eql :isinstance)))
+  (run-no-error "assert isinstance(3, int)")
+  (run-no-error "assert isinstance(3, (float, int))")
+  (run-no-error "assert isinstance(3, (int, float))"))
 
 (defmethod test-builtin ((x (eql :list)))
   (run-no-error "
@@ -87,3 +77,21 @@ x.insert(1, 11)
 assert x == [10, 11]
 x.insert(12, 12)
 assert x == [10, 11, 12]"))
+
+(defmethod test-builtin ((x (eql :map)))
+  (run-no-error "assert map(lambda x,y: x+y, [1,2,3], [4,5,6]) == [5, 7, 9]"))
+
+(defmethod test-builtin ((x (eql :range)))
+  (run-no-error "assert range(3) == list(xrange(3)) == [0,1,2]")
+  (run-no-error "assert range(1,3) == list(xrange(1,3)) == [1,2]")
+  (run-no-error "assert range(1,10,2) == list(xrange(1,10,2)) == [1,3,5,7,9]")
+  (run-no-error "assert range(10,1,-2) == list(xrange(10,1,-2)) == [10,8,6,4,2]"))
+
+(defmethod test-builtin ((x (eql :type)))
+  (run-no-error "
+def f(): pass
+g = lambda: 42
+assert type(f) == type(g)"))
+
+
+

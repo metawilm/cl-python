@@ -162,7 +162,7 @@
 	   "__div__" "__rdiv__" "__idiv__"  "__lshift__" "__rlshift__" "__irshift__"
 	   "__and__" "__rand__" "__iand__"  "__rshift__" "__rrshift__" "__irshift__"
 	   "__or__"  "__ror__"  "__ior__"   "__divmod__" "__rdivmod__"
-	   "__xor__" "__rxor__" "__ixor__"  "__pow__" "__ipow__"
+	   "__xor__" "__rxor__" "__ixor__"  "__pow__" "__rpow__" "__ipow__"
 	   ;; unary
 	   "__invert__" "__pos__" "__neg__" "__contains__" "__cmp__" "__abs__" "__len__"
            "__float__"

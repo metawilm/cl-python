@@ -1801,7 +1801,7 @@ But if RELATIVE-TO package name is given, result may contains dots."
 (def-py-method py-number.__neg__ (x^) (- x))
 (def-py-method py-number.__nonzero__ (x^) (py-bool (/= x 0)))
 (def-py-method py-number.__pos__ (x^) x)
-(def-py-method py-number.__pow__ (x^ y^ &optional z^) 
+(def-py-method py-number.__pow__ (x^ y^ &optional z^)
   (if z
       (progn (setf z (py-val->integer z))
 	     (mod (expt x y) z))
@@ -3436,14 +3436,14 @@ finished; F will then not be called again."
 (defgeneric py-** (x y &optional z))
 
 (defmethod py-** (x y &optional z)
-  (let* ((op-meth (x.class-attr-no-magic.bind x '{__pow__}))
-	 (res (and op-meth (if z
-			       (py-call op-meth y z)
-			     (py-call op-meth y)))))
-    
-    (if (and res (not (eq res (load-time-value *the-notimplemented*))))
-	res
-      (raise-invalid-operands '** x y))))
+  (if z
+      ;; XXX should also do __rpow__ for three-arg case...
+      (let* ((op-meth (x.class-attr-no-magic.bind x '{__pow__})) 
+             (res (and op-meth (py-call op-meth y z))))
+        (if (and res (not (eq res (load-time-value *the-notimplemented*))))
+            res
+          (raise-invalid-operands '** x y)))
+    (generic-binary-op x y 'clpython.user:__pow__ 'clpython.user:__rpow__ 'clpython.ast.operator:**)))
 
 (setf (gethash '[**] *binary-op-funcs-ht*) 'py-**)
 

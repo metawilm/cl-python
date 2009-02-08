@@ -236,14 +236,15 @@ POS-ARGS is any iterable object; KW-DICT must be of type DICT."
   (or (gethash x *intern-hashtable*)
       (setf (gethash x *intern-hashtable*) x)))
   
-
 (defun {isinstance} (x cls)
-  (let ((cls (deproxy cls)))
-    (if (listp cls)
-	(some (lambda (c) ({isinstance} x c)) cls)
-      (py-bool (or (eq cls (load-time-value (find-class 'object)))
-		   (typep x cls)
-		   (subtypep (py-class-of x) cls))))))
+  (flet ((lisp-isinstance (x cls)
+           (or (eq cls (load-time-value (find-class 'object)))
+               (typep x cls)
+               (subtypep (py-class-of x) cls))))
+    (let ((cls (deproxy cls)))
+      (py-bool (if (listp cls)
+                   (some (lambda (c) (lisp-isinstance x c)) cls)
+                 (lisp-isinstance x cls))))))
 
 (defun isinstance-1 (x cls)
   ;; CLS is either a class or a _tuple_ of classes (only tuple is
