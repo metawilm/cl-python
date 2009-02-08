@@ -182,14 +182,9 @@
 
 (defmacro do-cpl ((c class) &body body)
   "Loop over the superclasses relevant for attribute lookup."
-  `(block .looper
-     (dolist (,c (closer-mop:class-precedence-list ,class))
-       (when (or (eq ,c (ltv-find-class 'standard-class))
-                 #+(or)(eq ,c (ltv-find-class 'dict-mixin))
-                 (eq ,c (ltv-find-class 'standard-generic-function)))
-         (return-from .looper))
-       (when (typep ,c (ltv-find-class 'dict-mixin)) ;; check needed?
-         ,@body))))
+  `(dolist (,c (closer-mop:class-precedence-list ,class))
+     (when (typep ,c (ltv-find-class 'dict-mixin))
+       ,@body)))
 
 (defun calculate-ca (class attr)
   ;; There are two modes for retrieving an attribute, characterized by whether the

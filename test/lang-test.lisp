@@ -574,7 +574,8 @@ assert b(-2) == -1")
     (run-error "[f for f in 1, lambda x: x if x >= 0 else -1]" {SyntaxError})))
 
 (defmethod test-lang ((kind (eql :if-stmt)))
-  )
+  (run-no-error "def f(): pass
+if f(): pass" :fail-info "Functions inherit __nonzero__ from object."))
 
 (defmethod test-lang ((kind (eql :import-stmt)))
   (run-no-error "import sys
