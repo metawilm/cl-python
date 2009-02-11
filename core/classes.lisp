@@ -3467,7 +3467,7 @@ finished; F will then not be called again."
         (if (and res (not (eq res (load-time-value *the-notimplemented*))))
             res
           (raise-invalid-operands '** x y)))
-    (generic-binary-op x y 'clpython.user:__pow__ 'clpython.user:__rpow__ 'clpython.ast.operator:**)))
+    (generic-binary-op x y '{__pow__} '{__rpow__} 'clpython.ast.operator:**)))
 
 (setf (gethash '[**] *binary-op-funcs-ht*) 'py-**)
 
