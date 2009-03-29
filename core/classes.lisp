@@ -637,6 +637,10 @@ otherwise work well.")
    (lambda       :initarg :lambda       :initform nil :accessor py-function-lambda))
   (:metaclass funcallable-python-class))
 
+;; XXX On LispWorks this is not guaranteed to work:
+;;  http://article.gmane.org/gmane.lisp.lispworks.general/8999
+;; Maybe switch to simple lambda's there too?
+
 (defun set-funcallable-instance-function (inst func)
   (closer-mop:set-funcallable-instance-function inst func))
 
