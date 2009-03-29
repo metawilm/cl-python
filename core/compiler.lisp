@@ -2325,7 +2325,7 @@ Non-negative integer denoting the number of args otherwise."
               (lambda () ,@body))))
   
 (defun call-with-py-errors (f)
-  (let ((*with-py-error-level* (fast (1+ (the fixnum *with-py-error-level*)))))
+  (let ((*with-py-error-level* (fastest (1+ (the fixnum *with-py-error-level*)))))
     (check-max-with-py-error-level)
     ;; Using handler-bind, so uncatched errors are shown in precisely
      ;; the context where they occur.
