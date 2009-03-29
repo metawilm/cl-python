@@ -220,20 +220,24 @@ KIND can be :ptime, :time, :space, :pspace or NIL."
                    (when (car vals) ;; skip NIL
                      (remember-value (car vals))
                      (block repr
-                       (loop
-                         (with-simple-restart
-                             (:continue "Retry printing the object.")
-                           ;; Write string with quotes around it; convert other objects
-                           ;; using __str__ and print without quotes.
-                           (loop for val in vals
-                               do (if (stringp val)
-                                      (print-string-truncated (py-repr val))
-                                    (let ((str-val (ignore-errors (py-str-string val :circle t))))
-                                      (if str-val
-                                          (print-string-truncated (py-val->string str-val))
-                                        (format t "~A" val))))
-                                  (write-char #\Newline)))
-                         (return-from repr)))))))
+                       (unless (and (null (cdr vals))
+                                    (clpython::none-p (car vals))) 
+                         (loop
+                           (with-simple-restart
+                               (:continue "Retry printing the object.")
+                             ;; Write string with quotes around it; convert other objects
+                             ;; using __str__ and print without quotes.
+                             (loop for val in vals
+                                 do (if (stringp val)
+                                        (print-string-truncated (py-repr val))
+                                      (multiple-value-bind (str-val error)
+                                          (ignore-errors (py-str-string val :circle t))
+                                        (if str-val
+                                            (print-string-truncated (py-val->string str-val))
+                                          (progn (format t ";; Warning: printing ~A gave:~%;;   ~A~%" val error)
+                                                 (format t "~A" val)))))
+                                    (write-char #\Newline)))
+                           (return-from repr))))))))
 	     (handle-as-python-code (total &key print-error (ast-finished :maybe))
                ;; Return T if this succeeded somehow, i.e. parsing as Lisp
                ;; should not be attempted.
@@ -343,7 +347,7 @@ KIND can be :ptime, :time, :space, :pspace or NIL."
               (setf *stdout-softspace* (py-bool nil)))
             
             (unless #+(or allegro sbcl) (input-available-p)
-                    #-allegro nil
+                    #-(or allegro sbcl) nil
                     ;; When copy-pasting multiple lines of Python source code into the REPL,
                     ;; prevent several prompts being printed below the copied code.
                     (format t (nth (if acc 1 0) *prompts*))
