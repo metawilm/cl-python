@@ -89,7 +89,7 @@ like .join (string.join), .sort (list.sort), etc")
   (defconstant-once +optimize-fast+    '(optimize (speed 3) (safety 1)))
   (defconstant-once +optimize-fastest+ '(optimize (speed 3) (safety 0) (debug 0))))
 
-(defmacro fast (&body body)
+(defmacro fastest (&body body)
   `(locally (declare ,+optimize-fastest+)
      ,@body))
 
@@ -2232,7 +2232,7 @@ Non-negative integer denoting the number of args otherwise."
 	until (or (= num-filled-by-pos-args max-to-fill-with-pos)
 		  (symbolp (car %args))) ;; the empty list NIL is a symbol, too
 	      
-	do (setf (svref arg-val-vec num-filled-by-pos-args) (fast (pop %args)))
+	do (setf (svref arg-val-vec num-filled-by-pos-args) (fastest (pop %args)))
 	   (incf num-filled-by-pos-args)
 	   
 	finally
@@ -2240,15 +2240,15 @@ Non-negative integer denoting the number of args otherwise."
 	    (cond ((fa-*-arg fa)
 		   (setf for-*
 		     ;; Reconsing because %args might be dynamic-extent.
-		     (loop until (symbolp (car %args)) collect (fast (pop %args)))))
+		     (loop until (symbolp (car %args)) collect (fastest (pop %args)))))
 		  (t (raise-wrong-args-error)))))
     
     ;; All remaining arguments are keyword arguments;
     ;; they have to be matched to the remaining pos and
     ;; key args by name.
     (loop
-      	for key = (fast (pop %args))
-        for val = (fast (pop %args))
+      	for key = (fastest (pop %args))
+        for val = (fastest (pop %args))
 	while key do
 	  ;; `key' is a keyword symbol
 	  (or (block find-key-index
@@ -2308,7 +2308,7 @@ Non-negative integer denoting the number of args otherwise."
 (defvar *with-py-error-level* 0)
 
 (defun check-max-with-py-error-level ()
-  (fast
+  (fastest
    (when (> (the fixnum *with-py-error-level*) (the fixnum *max-py-error-level*))
      (py-raise '{RuntimeError} "Stack overflow (~A)" *max-py-error-level*))))
 

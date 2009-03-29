@@ -89,7 +89,7 @@
   (let ((i 0))
     (declare (type (integer 0 #.most-positive-fixnum) i))
     (lambda ()
-      (fast
+      (fastest
        (when (< i (length x))
 	 (prog1 (string (aref x i))
 	   (incf i)))))))
@@ -98,7 +98,7 @@
   (let ((i 0))
     (declare (type (integer 0 #.most-positive-fixnum) i))
     (lambda ()
-      (fast
+      (fastest
        (when (< i (length x))
 	 (prog1 (aref x i)
 	   (incf i)))))))
