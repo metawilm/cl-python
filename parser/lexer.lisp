@@ -273,10 +273,8 @@ On EOF returns: eof-token, eof-token."
                                     but got: '~A' (~S) (line ~A)." c2 c2 curr-line-no))))
                            (incf curr-line-no))
                             
-                          (t (with-simple-restart 
-                                 (:continue "Discard the character `~A' and continue parsing." c)
-                               (raise-syntax-error "Nobody expected this character: `~A' (line ~A)."
-                                                   c curr-line-no))))))))))))))
+                          (t (raise-syntax-error "Nobody expected this character: `~A' (line ~A)."
+                                                 c curr-line-no)))))))))))))
 
 (defgeneric read-kind (kind c1 &rest args)
   (:method :around (kind c1 &rest args)
