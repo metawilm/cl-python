@@ -1913,12 +1913,18 @@ But if RELATIVE-TO package name is given, result may contains dots."
 
 (def-py-method py-int.__init__ (&rest args) nil)
 
+(defun careful-floor-1ret (x y)
+  "ANSI requires second arg to be non-zero. Test for that."
+  (if (zerop y)
+      (py-raise '{ZeroDivisionError} "Attempt to divide ~A by zero." x)
+    (values (floor x y))))
+
 (def-py-method py-int.__floordiv__ (x^ y^)
-  (values (floor x y)))
+  (careful-floor-1ret x y))
 
 (def-py-method py-int.__div__ (x^ y^)
   (cond ((and (integerp x) (integerp y))
-	 (floor x y))
+	 (careful-floor-1ret x y))
 	((and (numberp x) (numberp y))
 	 (/ x y))
 	(t (load-time-value *the-notimplemented*))))
