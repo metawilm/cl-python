@@ -222,4 +222,4 @@ are accepted in those libraries."
 (defmethod asdf:operation-done-p ((o asdf:test-op)
 				  (c (eql (asdf:find-system :clpython))))
   "Testing is never finished."
-  (values nil))
+  nil)
