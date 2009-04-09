@@ -442,6 +442,7 @@
 (defmethod py-unary-- ((x number))
   (- x))
 
+#+(or)
 (defun py-print-cmhelper (x stream)
   ;; Quickly prints obj to stdout
   ;; If X is a string, returns last char of it; otherwise returns NIL
@@ -461,6 +462,7 @@
             #-allegro (write-string (py-str-string x) stream)
             nil)))
 
+#+(or)
 (defmacro fast-write-char (char stream)
   ;; #+allegro `(excl::fast-write-char ,char ,stream)
   `(write-char ,char ,stream))
