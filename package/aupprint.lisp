@@ -27,7 +27,7 @@
            (write-string (symbol-name s) stream)
            (when *ast-user-print-delims* (write-char post stream))
            (return-from ast-user-print-symbol)))
-  (with-standard-io-syntax (format stream "~A" s)))
+  (with-standard-io-syntax (format stream "~S" s)))
 
 (defun dummy (stream x)
   (format stream "dummy ~A" x))
