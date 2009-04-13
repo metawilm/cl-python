@@ -1431,6 +1431,7 @@ but the latter two classes are not in CPython.")
       collect (cons (string key) val)))
 
 (defmethod dir-items ((x class) &rest args)
+  (declare (ignore args))
   (let (res)
     (do-cpl (c x)
       (class.raw-attr-map c (lambda (k v)
