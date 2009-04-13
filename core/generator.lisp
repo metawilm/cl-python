@@ -189,8 +189,9 @@ former requires that this form is executed within RECEIVE-YIELDED-VALUE."
               (flet (,(ecase node-type
                         (:stmt `(%call-continuation () `(funcall ,%k nil))) ;; enforce no value
                         (:expr `(%call-continuation (val) `(funcall ,%k ,val))))) ;; enforce value
+                (declare (ignorable #'%call-continuation))
                 (let ((%current-continuation %k))
-                  (declare (ignorable #'%call-continuation %current-continuation))
+                  (declare (ignorable %current-continuation))
                   ,@body)))
             (setf (gethash ',node *cps-macro-functions*) ',fname))))
 
@@ -494,7 +495,8 @@ former requires that this form is executed within RECEIVE-YIELDED-VALUE."
                   ,(%call-continuation `(make-py-list-from-tuple .tuple)))))
 
 (def-cps-macro [module-stmt] (&rest args)
-  (declare (ignore args))
+  #+(or)(declare (ignore args))  ;; ends up in the wrong place
+  args ;; so it's used
   (error "Should not happen: module is not a generator."))
 
 (def-cps-macro [pass-stmt] ()
@@ -544,7 +546,8 @@ former requires that this form is executed within RECEIVE-YIELDED-VALUE."
         (t
          `(%cps-convert ,(car stmts)
                         (named-function (suite ,(intern (format nil "\"~A; ...\"" 
-                                                                (clpython.parser:py-pprint (cadr stmts)) #.*package*)))
+                                                                (clpython.parser:py-pprint (cadr stmts)))
+                                                        #.*package*))
                           (lambda (val)
                             (declare (ignore val))
                             (%cps-convert ([suite-stmt] ,(cdr stmts))
