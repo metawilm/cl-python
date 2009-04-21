@@ -355,9 +355,7 @@ output to a string does not start with a newline."
     ([yield-expr] (format stream "(yield~@[ ~A~])" (second x)))
     ([yield-stmt] (format stream "yield~@[ ~A~]" (second x)))
     
-    (t (with-standard-io-syntax
-	 #+(or)(warn "uncatched in py-pprint-1: ~A" x)
-	 (format stream "~A" x)))))
+    (t (format stream "(~{~S~^ ~})" x))))
 
   
 (defun print-arg-list (stream pos-args key-args *-arg **-arg)
