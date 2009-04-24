@@ -163,7 +163,7 @@ KIND can be :ptime, :time, :space, :pspace or NIL."
 
 (defvar *repl-module-globals*)
 
-(defun repl-1 (&key cmd-args)
+(defun repl-1 (&key cmd-args lisp-exit)
   (let* ((*repl-module-globals* (clpython::make-eq-hash-table "repl module"))
          (mod-namespace (make-instance 'clpython::hash-table-ns
                           :dict-form '*repl-module-globals*
@@ -335,7 +335,12 @@ KIND can be :ptime, :time, :space, :pspace or NIL."
              (input-available-p ()
                (let ((ch (read-char-no-hang *standard-input*)))
                  (when ch
-                   (prog1 t (unread-char ch))))))
+                   (prog1 t (unread-char ch)))))
+
+             (exit-repl ()
+               (if lisp-exit
+                   (clpython.package::quit)
+                 (return-from repl-1 (values)))))
       (clear-history)
       (loop 
         (with-simple-restart (return-python-toplevel
@@ -357,7 +362,7 @@ KIND can be :ptime, :time, :space, :pspace or NIL."
               (cond
                ((eq x 'eof)
                 (terpri *standard-output*)
-                (return-from repl-1))
+                (exit-repl))
                ((and (> (length x) 0)
                      (char= (aref x 0) #\:))
                 (multiple-value-bind (cmd ix)
@@ -367,7 +372,7 @@ KIND can be :ptime, :time, :space, :pspace or NIL."
                     (:h
                      (print-cmds))
                     (:q
-                     (return-from repl-1 (values)))
+                     (exit-repl))
                     ((:time :ptime :space :pspace)
                      (if (eq *repl-prof* cmd)
                          (progn (setf *repl-prof* nil)

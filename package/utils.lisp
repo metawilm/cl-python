@@ -198,3 +198,25 @@ See function ALIST-VS-HT.")
   (declare (ignorable sf))
   #+allegro (excl:unschedule-finalization sf)
   #-allegro (warn "Don't know how to UNSCHEDULE-FINALIZATION in this lisp."))
+
+(defun quit (&optional code)
+  ;; Adapted from Rob Warnock's post "How to programmatically exit?"
+  ;;  http://groups.google.nl/group/comp.lang.lisp/msg/94c9a579608dcd9a
+  #+allegro (excl:exit code :quiet t) ;; added (:quiet t) -WB
+  #+clisp (#+lisp=cl ext:quit #-lisp=cl lisp:quit code)
+  #+cmu (ext:quit code)
+  #+cormanlisp (win32:exitprocess code)
+  #+gcl (lisp:bye code)                 ; XXX Or is it LISP::QUIT?
+  #+lispworks (lw:quit :status code)
+  #+lucid (lcl:quit code)
+  #+sbcl (sb-ext:quit
+          :unix-code (typecase code (number code) (null 0) (t 1)))
+  #+kcl (lisp::bye)                     ; XXX Does this take an arg?
+  #+scl (ext:quit code)                 ; XXX Pretty sure this *does*.
+  #+(or openmcl mcl) (ccl::quit)
+  #+abcl (cl-user::quit)
+  #+ecl (si:quit)
+  #+poplog (poplog::bye)                ; XXX Does this take an arg?
+  #-(or allegro clisp cmu cormanlisp gcl lispworks lucid sbcl
+        kcl scl openmcl mcl abcl ecl poplog)
+  (error "QUIT not-implemented in this implementation"))
