@@ -97,24 +97,23 @@ it will be interned if INTERN, otherwise an error is raised."
 
 ;;; Readtable that takes in everything available
 
-(defun setup-omnivore-readmacro (&key function package (readtable *readtable*))
+(defun setup-omnivore-readmacro (&key function initial-forms (readtable *readtable*))
   "Create a readtable that dispatches all characters to FUNCTION.
-The reader will initially return (in-package PACKAGE), and then the result(s) of calling FUNCTION on the stream.
-The in-package form ensures that compilation and loading of the fasl file satisfies CLHS 3.2.4.4
-\"Additional Constraints on Externalizable Objects\". As a side effect, the function call of FUNCTION
-is executed with *PACKAGE* bound to PACKAGE."
+The reader will initially return the INITAL-FORMS one by one, and then the result(s) of
+calling FUNCTION on the stream.
+
+INITIAL-FORMS typically contains an IN-PACKAGE form to ensure that compilation and loading of
+the fasl file satisfies CLHS 3.2.4.4 \"Additional Constraints on Externalizable Objects\".
+As a side effect, the function call of FUNCTION is executed with *PACKAGE* bound to PACKAGE."
   (check-type function function)
-  (check-type package package)
   (check-type readtable readtable)
-  (let* ((initial-p t)
-         (read-func (lambda (stream char)
-                      (unread-char char stream)
-                      (if initial-p
-                          (progn (setf initial-p nil)
-                                 `(in-package ,(package-name package)))
-                        (funcall function stream)))))
+  (flet ((omnivore-read-func (stream char)
+           (unread-char char stream)
+           (if initial-forms
+               (pop initial-forms)
+             (funcall function stream))))
     (dotimes (i 256) ;; use file encoding or char-code-limit?
-      (set-macro-character (code-char i) read-func t readtable)))
+      (set-macro-character (code-char i) #'omnivore-read-func t readtable)))
   readtable)
 
 (defmacro with-ast-user-readtable (&body body)

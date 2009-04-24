@@ -132,10 +132,10 @@ with KIND one of :module, :package
                  ;; ERROR with normal *readtable*, otherwise interactive
                  ;; debugging becomes impossible.
                  (with-standard-io-syntax (error c)))))
-     ;; Note that SETUP-OMNIVORE-READMACRO can't be in a LOAD-TIME-VALUE form, as
-     ;; it contains state (initial character or not) that must be renewed for every file.
+     ;; The below SETUP-OMNIVORE-READMACRO can't be shared (e.g. inside LOAD-TIME-VALUE), as
+     ;; it contains state (the initial forms).
      (let ((*readtable* (setup-omnivore-readmacro :function #'clpython.parser:parse
-                                                  :package (find-package :clpython)
+                                                  :initial-forms '((in-package :clpython))
                                                   :readtable (copy-readtable nil))))
        ,@body)))
 
