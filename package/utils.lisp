@@ -13,7 +13,9 @@
   "Raise a Python exception with given format string"
   (error exc-type :args (cons string format-args)))
 
-(defmacro with-auto-mode-recompile ((&key verbose) &body body)
+(defmacro with-auto-mode-recompile ((&key verbose
+                                          (restart-name #+allegro 'excl::recompile-due-to-incompatible-fasl #-allegro nil))
+                                    &body body)
   "Automatically recompile on ANSI/Modern conflicts."
   (assert (atom verbose))
   `(handler-bind
@@ -22,10 +24,10 @@
 	     excl::fasl-casemode-mismatch)
 	 (lambda (c)
 	   (declare (ignore c))
-	   (let ((r (find-restart 'excl::recompile-due-to-incompatible-fasl)))
+	   (let ((r (and ',restart-name (find-restart ',restart-name))))
 	     (when r
 	       ,@(when verbose
-		   `((format t "Recompiling ~A due to incompatible fasl..."
+		   `((format t "; Recompiling ~A due to incompatible fasl"
 			     (or *load-pathname* *compile-file-pathname* "file"))))
 	       (invoke-restart r))))))
      ,@body))
