@@ -359,6 +359,7 @@ KIND can be :ptime, :time, :space, :pspace or NIL."
                     (force-output *standard-output*)) ;; stream T would mean *terminal-io*
 
             (let ((x (read-line *standard-input* nil 'eof)))
+              ;; XXX Let future debugger interface use *debug-io*?
               (cond
                ((eq x 'eof)
                 (terpri *standard-output*)
