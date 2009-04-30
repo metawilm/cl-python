@@ -374,7 +374,7 @@ former requires that this form is executed within RECEIVE-YIELDED-VALUE."
     (let ((res `(progn ,del-form ,(%call-continuation))))
       (loop for v in (reverse values)
           for tmp in (reverse temps)
-          do (setf res `(%cps-convert ,v (lambda (tmp) ,res))))
+          do (setf res `(%cps-convert ,v (lambda (,tmp) ,res))))
       res)))
 
 (def-cps-macro [dict-expr] (vk-list)

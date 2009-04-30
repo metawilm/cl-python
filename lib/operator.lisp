@@ -80,7 +80,7 @@
 
 #.`(progn ,@(loop for (meth op) in
                   '((truth bool))
-                for name = (intern (string-downcase op))
+                for name = (intern (string-downcase meth))
                 collect `(defun ,name (x) (,(sym->op op) x))
                 collect `(eval-when (:load-toplevel :execute)
                            (export ',name))))
@@ -89,7 +89,7 @@
 #.`(progn ,@(loop for (meth op) in
                   '((is_ is)
                     (is_not is-not))
-                for name = (intern (string-downcase op))
+                for name = (intern (string-downcase meth))
                 collect `(defun ,name (x y) (,(sym->op op) x y))
                 collect `(eval-when (:load-toplevel :execute)
                            (export ',name))))

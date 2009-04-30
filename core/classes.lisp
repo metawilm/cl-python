@@ -3601,11 +3601,13 @@ finished; F will then not be called again."
   "Return pointer address. This might change during the life time of the object,
 e.g. due to moving by the GC. Python has reference counting, and guarantees a
 fixed id during the object's lifetime."
+  (declare (ignorable x))
   #+allegro (excl:lispval-to-address x)
+  #+ccl (ccl:%address-of x)
   #+cmu (kernel:get-lisp-obj-address x)
   #+lispworks (system:object-address x)
   #+sbcl (sb-kernel:get-lisp-obj-address x)
-  #-(or allegro cmu lispworks sbcl) (error "TODO: id() not implemented for this Lisp implementation"))
+  #-(or allegro ccl cmu lispworks sbcl) (error "TODO: id() not implemented for this Lisp implementation"))
 
 (defgeneric py-cmp (x y)
   (:documentation

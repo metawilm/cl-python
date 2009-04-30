@@ -24,7 +24,8 @@
 #-cmu
 (defun build-executable (&key filename function (habitat *habitat*) repl-module-globals
                               #+sbcl (ask-terminate t))
-  (declare (special clpython.app.repl:*repl-module-globals*))
+  (declare (special clpython.app.repl:*repl-module-globals*)
+           (ignorable habitat))
   (when (and function (not repl-module-globals))
     (setf repl-module-globals clpython.app.repl:*repl-module-globals*))
   (unless filename

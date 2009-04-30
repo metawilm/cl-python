@@ -17,6 +17,7 @@
                                           (restart-name #+allegro 'excl::recompile-due-to-incompatible-fasl #-allegro nil))
                                     &body body)
   "Automatically recompile on ANSI/Modern conflicts."
+  (declare (ignorable restart-name))
   (assert (atom verbose))
   `(handler-bind
        (#+allegro
@@ -204,6 +205,7 @@ See function ALIST-VS-HT.")
 (defun quit (&optional code)
   ;; Adapted from Rob Warnock's post "How to programmatically exit?"
   ;;  http://groups.google.nl/group/comp.lang.lisp/msg/94c9a579608dcd9a
+  (declare (ignorable code))
   #+allegro (excl:exit code :quiet t) ;; added (:quiet t) -WB
   #+clisp (#+lisp=cl ext:quit #-lisp=cl lisp:quit code)
   #+cmu (ext:quit code)

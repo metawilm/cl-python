@@ -113,7 +113,7 @@
 (extensions:define-hash-table-test 'py-hash-table-test #'py-==->lisp-val #'py-hash)
 
 (defun make-py-hash-table ()
-  (or #+(or allegro lispworks) (make-hash-table :test 'py-==->lisp-val :hash-function 'py-hash)
+  (or #+(or allegro ccl lispworks) (make-hash-table :test 'py-==->lisp-val :hash-function 'py-hash)
       #+(or cmu sbcl) (make-hash-table :test 'py-hash-table-test)
       (error "Creating python dict not suported in this environment.")))
 

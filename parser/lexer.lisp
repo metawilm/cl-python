@@ -456,13 +456,14 @@ C must be either a character or NIL."
                       (multiple-value-bind (ch.a ch.b)
                           (case c 
                             ;; These clauses must leave s.ix at last handled character
+                            ;; Cross-reference: #'(py-pprint-1 (string)) does the inverse.
                             ((#\\ #\' #\" #\a #\b) c)
                             (#\f   #\Page)
                             (#\n   #\Newline)
                             (#\r   #\Return)
                             (#\Newline nil) ;; ignore newline after backslash
                             (#\t   #\Tab)
-                            (#\v   #\VT)
+                            (#\v   #.(code-char 11)) ;; #\VT or #\PageUp
                             (#\N (if unicode ;; unicode char by name: u"\N{latin capital letter l with stroke}"
                                      (progn (let ((c.next (aref s (incf s.ix))))
                                               (unless (char= c.next #\{)

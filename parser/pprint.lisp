@@ -102,6 +102,7 @@ output to a string does not start with a newline."
 		   ((alphanumericp ch)  (write-char ch stream))
 		   
 		   (t (loop for ch across
+                            ;; Cross-reference: #'(read-kind (string) ..) does the inverse.
 			    (case ch
 			      (#\Bell      "\\a") 
 			      (#\Backspace "\\b")
@@ -109,7 +110,7 @@ output to a string does not start with a newline."
 			      (#\Newline   "\\n")
 			      (#\Return    "\\r")
 			      (#\Tab       "\t")
-			      (#\VT        "\v")
+			      (#.(code-char 11) "\v") ;; #\VT or #\PageUp
 			      (#\Space     " " )
 			      
 			      ;; Maybe there are more cases to catch before
