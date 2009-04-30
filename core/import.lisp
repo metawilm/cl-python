@@ -48,9 +48,9 @@
 (defparameter *use-asdf-binary-locations* t
   "Whether to store fasl files in directory determined by asdf-binary-locations.")
 
-(defgeneric compiled-file-name (kind modname filepath &key include-dir create-dir)
-  (:method :around (kind modname filepath &key include-dir create-dir)
-           (declare (ignore include-dir filepath kind))
+(defgeneric compiled-file-name (kind modname filepath)
+  (:method :around (kind modname filepath)
+           (declare (ignore filepath kind))
            (check-type modname string)
            (let ((bin-path (call-next-method))
                  bin-path-2)
@@ -62,26 +62,20 @@
                                         (make-instance 'asdf:cl-source-file
                                           :parent (asdf:find-system :clpython)
                                           :pathname bin-path)))))
-                    (when (and new-path create-dir)
+                    (when new-path
                       (setf new-path (ensure-directories-exist new-path)))))))
              (or bin-path-2 bin-path)))
   
-  (:method ((kind (eql :module)) modname filepath &key include-dir create-dir)
-           (declare (ignore include-dir create-dir))
+  (:method ((kind (eql :module)) modname filepath)
            (derive-pathname filepath
                             :name (pathname-name modname :case :common)
                             :type *py-compiled-file-type* ))
   
-  (:method ((kind (eql :package)) modname filepath &key (include-dir t) create-dir)
-           (declare (ignore create-dir))
-           (merge-pathnames
-            (if include-dir
-                (make-pathname :directory `(:relative ,(pathname-name modname :case :common))
-                               :case :common)
-              modname)
-            (derive-pathname filepath
-                             :type *py-compiled-file-type* 
-                             :name *package-indicator-filename*))))
+  (:method ((kind (eql :package)) modname filepath)
+           (declare (ignore modname))
+           (derive-pathname filepath
+                            :type *py-compiled-file-type* 
+                            :name *package-indicator-filename*)))
   
 (defun lisp-package-as-py-module (modname)
   "Return Lisp package with given name.
@@ -101,23 +95,27 @@ As for case: both MODNAME's own name its upper-case variant are tried."
 Returns values KIND SRC-PATH BIN-PATH FIND-PATH, or NIL if not found,
 with KIND one of :module, :package
       SRC-PATH, BIN-PATH the truenames of the existing files."
-  (loop for path in search-paths
-      for src-path = (find-if #'probe-file (source-file-names :module name path))
-      for bin-path = (find-if #'probe-file (list (compiled-file-name :module name path)))
-      for pkg-src-path = (find-if #'probe-file (source-file-names :package name path))
-      for pkg-bin-path = (find-if #'probe-file (list (compiled-file-name :package name path)))
+  (let ((probe-src-func #'probe-file)
+        (probe-fasl-func (lambda (f) (and (probe-file f)
+                                          #+allegro (excl::check-fasl-magic f nil)))))
+    ;; Intention of PROBE-FASL-FUNC is that it also checks the fasl version
+    (loop for path in search-paths
+        for src-path = (find-if probe-src-func (source-file-names :module name path))
+        for bin-path = (find-if probe-fasl-func (list (compiled-file-name :module name path)))
+        for pkg-src-path = (find-if probe-src-func (source-file-names :package name path))
+        for pkg-bin-path = (find-if probe-fasl-func (list (compiled-file-name :package name path)))
 			 
-      if (and (not must-be-package)
-              (or src-path bin-path))
-      return (values :module
-                     (when src-path (probe-file src-path))
-                     (when bin-path (probe-file bin-path))
-                     path)
-      else if (or pkg-src-path pkg-bin-path)
-      return (values :package
-                     (when pkg-src-path (probe-file pkg-src-path))
-                     (when pkg-bin-path (probe-file pkg-bin-path))
-                     path)))
+        if (and (not must-be-package)
+                (or src-path bin-path))
+        return (values :module
+                       (when src-path (probe-file src-path))
+                       (when bin-path (probe-file bin-path))
+                       path)
+        else if (or pkg-src-path pkg-bin-path)
+        return (values :package
+                       (when pkg-src-path (funcall probe-src-func pkg-src-path))
+                       (when pkg-bin-path (funcall probe-fasl-func pkg-bin-path))
+                       path))))
 
 (defparameter *import-force-recompile* nil)
 (defparameter *import-force-reload*    nil)
@@ -139,6 +137,17 @@ with KIND one of :module, :package
                                                   :readtable (copy-readtable nil))))
        ,@body)))
 
+(defmacro with-proper-compiler-settings (&body body)
+  "The idea is to save as much debug information as possible."
+  #+clpython-source-level-debugging
+  `(let ((compiler:save-source-level-debug-info-switch t)
+         (compiler:save-local-names-switch t)
+         (compiler:tail-call-self-merge-switch nil)
+         (compiler:tail-call-non-self-merge-switch nil))
+     ,@body)
+  #-clpython-source-level-debugging
+  `(progn ,@body))
+  
 (defun %compile-py-file (filename &key (mod-name (error ":mod-name required"))
                                        (output-file (error ":output-file required")))
   "Compile Python source file into FASL. Source file must exist.
@@ -149,12 +158,14 @@ Caller is responsible for deciding if recompiling is really necessary."
   (let ((*current-module-path* filename) ;; used by compiler
         (*current-module-name* mod-name))
     (with-auto-mode-recompile (:verbose *import-compile-verbose*)
-      (with-python-code-reader ()
-        (handler-bind (#+sbcl(sb-int:simple-compiler-note #'muffle-warning))
-          (compile-file filename
-                        :output-file output-file
-                        :verbose *import-compile-verbose*))))))
-
+      (handler-bind (#+sbcl (sb-int:simple-compiler-note #'muffle-warning))
+        (with-proper-compiler-settings
+          (clpython.parser::with-source-locations
+              (with-python-code-reader ()
+                (compile-file filename
+                              :output-file output-file
+                              :verbose *import-compile-verbose*))))))))
+  
 (defun %load-compiled-python-file (bin-filename
                                    &key (mod-name (error ":mod-name required"))
                                         (context-mod-name mod-name)
@@ -170,33 +181,63 @@ Returns the loaded module, or NIL on error."
     (flet ((do-loading ()
 	     (let* (new-module
                     module-function
+                    module-source
                     (*module-function-hook* (lambda (f) (setf module-function f)))
 		    (*module-preload-hook* (lambda (mod)
                                              (setf new-module mod)
                                              ;; Need to register module before it is fully loaded,
                                              ;; otherwise infinite recursion if two modules import
                                              ;; each other.
-                                             (add-loaded-module mod habitat))))
-               (with-auto-mode-recompile (:verbose *import-load-verbose*)
-		   (unless (load bin-filename :verbose *import-load-verbose*)
-                     ;; Might happen if loading fails and there is a restart that lets LOAD return NIL.
-                     (return-from %load-compiled-python-file)))
+                                             (add-loaded-module mod habitat)))
+                    (*module-source-hook* (lambda (&rest info)
+                                            (setf module-source info))))
+               #-clpython-source-level-debugging
+               (declare (ignorable module-source))
+               
+               (with-auto-mode-recompile (:verbose *import-load-verbose* :restart-name delete-fasl-try-again)
+                 (unless (load bin-filename :verbose *import-load-verbose*)
+                   ;; Might happen if loading fails and there is a restart that lets LOAD return NIL.
+                   (return-from %load-compiled-python-file)))
+               
+               #+(or)
+               (format t "module-function=~A module-source=~A~%" module-function module-source)
+               
                (if module-function
-                   (progn (let ((*current-module-name* mod-name))
-                            (declare (special *current-module-name*))
-                            (loop named execute-toplevel
-                                do (with-simple-restart
-                                       (continue "Retry evaluating top-level forms in module `~A'" mod-name)
-                                     (funcall module-function)
-                                     (return-from execute-toplevel))))
-                          ;; XXX call module-function with :%module-globals if updating existing mod
-                          (unless new-module
-                            (break "CLPython bug: module ~A did not call *module-preload-hook* upon loading"
-                                   mod-name))
-                          (when (and old-module update-existing-mod)
-                            (copy-module-contents :from new-module :to old-module)
-                            (setf new-module old-module))
-                          (values new-module t))
+                   
+                   (progn
+                     ;; Allegro looks for the .fasl file right next to the source file. When using e.g.
+                     ;; asdf-binary-locations this assumption does not hold, and Allegro fails to load
+                     ;; the source information. By explicitly loading the info from the fasl now,
+                     ;; there's no need for Allegro to look for the fasl file anymore.
+                     #+clpython-source-level-debugging
+                     (excl::load-source-debug-info bin-filename)
+                     
+                     #+(or) ;; debug
+                     (let ((*print-level* 3))
+                       (excl::dump-lisp-source module-function))
+                     
+                     ;; BUGin Allegro beta prevents this IF from working correctly
+                     ;; (if module-source
+                     ;; This REGISTER-... must happen after LOAD of the fasl file, as source information
+                     ;; is not available from the fasl during loading.
+                     #+clpython-source-level-debugging
+                     (apply #'register-python-source module-source)
+                     
+                     (let ((*current-module-name* mod-name))
+                       (declare (special *current-module-name*))
+                       (loop named execute-toplevel
+                           do (with-simple-restart
+                                  (continue "Retry evaluating top-level forms in module `~A'" mod-name)
+                                (funcall module-function)
+                                (return-from execute-toplevel))))
+                     ;; XXX call module-function with :%module-globals if updating existing mod
+                     (unless new-module
+                       (break "CLPython bug: module ~A did not call *module-preload-hook* upon loading"
+                              mod-name))
+                     (when (and old-module update-existing-mod)
+                       (copy-module-contents :from new-module :to old-module)
+                       (setf new-module old-module))
+                     (values new-module t))
                  (progn (warn "The FASL of module ~A was not produced by CLPython ~
                                (or CLPython bug: module did not call *module-function-hook*)." mod-name)
                         (values (make-instance 'module :name "non-Python fasl" :bin-pathname bin-filename)
@@ -332,8 +373,7 @@ Used to avoid infinite recompilation/reloading loops.")
           (warn "Requested recompilation of ~A can not be performed: no source file available."
                 bin-file))
         (when src-file
-          (setf bin-file (compiled-file-name kind just-mod-name src-file
-                                             :include-dir nil :create-dir t))
+          (setf bin-file (compiled-file-name kind just-mod-name src-file))
           (unless (gethash bin-file *import-recompiled-files*)
             (when (or force-recompile
                       (not (probe-file bin-file))
@@ -371,6 +411,7 @@ Used to avoid infinite recompilation/reloading loops.")
                             (and (probe-file src-file) (probe-file bin-file)))
                     :report (lambda (s) (format s "Recompile and re-import module `~A' ~
                                                    from file ~A" dotted-name src-file))
+                  (setf new-module 'recompiling-fasl)
                   (delete-file bin-file)
                   (return-from py-import ;; Restart the py-import call
                     (apply #'py-import mod-name-as-list options))))
@@ -382,7 +423,10 @@ Used to avoid infinite recompilation/reloading loops.")
                        (if error-p
                            (apply #'py-raise '{ImportError} args)
                          (apply #'warn args)))))
-              (cond ((eq new-module 'uninitialized)
+              (cond ((eq new-module 'recompiling-fasl)
+                     ;; We'll retry the py-import call; no need for a message now.
+                     )
+                    ((eq new-module 'uninitialized)
                      ;; An unwinding restart was invoked from within the LOAD.
                      (log-abort nil))
                     ((null new-module)

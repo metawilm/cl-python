@@ -224,3 +224,14 @@ See function ALIST-VS-HT.")
   #-(or allegro clisp cmu cormanlisp gcl lispworks lucid sbcl
         kcl scl openmcl mcl abcl ecl poplog)
   (error "QUIT not-implemented in this implementation"))
+
+(defun abbreviate-to-one-line (string)
+  (whereas ((ix (position #\Newline string)))
+    (setf string (concatenate 'string (subseq string 0 ix) "...")))
+  string)
+
+(defun register-feature (feature present-p)
+  (check-type feature keyword)
+  (if present-p
+      (pushnew feature *features*)
+    (setf *features* (remove feature *features*))))

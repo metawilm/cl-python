@@ -160,248 +160,6 @@ Disabled by default, to not confuse the test suite.")
      ,@body))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;;; Namespaces
-
-(defparameter *debug-no-locals-dict* nil
-  "A hack to analyze compiler output; don't use.")
-
-(defparameter *debug-dummy-outer-namespace* nil
-  "A debugging aid; don't use.")
-
-(defgeneric ns.expand-with (namespace body-form environment))
-(defgeneric ns.read-form (namespace name))
-(defgeneric ns.write-form (namespace name val-form))
-(defgeneric ns.write-runtime-form (namespace name-form val-form))
-(defgeneric ns.del-form (namespace name))
-(defgeneric ns.locals-form (namespace))
-
-(defmacro with-namespace ((ns &key (define-%locals (not *debug-no-locals-dict*))
-                                   (define-%globals nil))
-                          &body body &environment e)
-  ;; XXX not always %locals needed (e.g. when no call expr in body)
-  (let ((new-body `(locally ,@body)))
-    (when define-%globals
-      (assert define-%locals () "define-%globals implies define-%locals")
-      (setf new-body `(flet ((%globals () (%locals)))
-                        (declare (ignorable #'%globals))
-                        ,new-body)))
-    (when define-%locals
-      (setf new-body `(flet ((%locals () ,(ns.locals-form ns)))
-                        (declare (ignorable #'%locals))
-                        ,new-body)))
-    `(with-pydecl ((:namespace ,ns))
-       ,(ns.expand-with ns new-body e))))
-
-(defun ns.find-form (func ns &rest args)
-  (declare (dynamic-extent args))
-  (check-type func function)
-  (loop named lookup
-      for try-ns = ns then (ns.parent try-ns)
-      for form = (and try-ns (apply func try-ns args))
-      while try-ns
-      when form
-      do (return-from lookup (values form try-ns))
-      finally (if *debug-dummy-outer-namespace*
-		  (return-from lookup `(ns-dummy-form ,func ,ns ,@args))
-		(error "No namespace for handling ~A ~A, from ~A." func args ns))))
-
-(defmacro namespace-set (key val &environment e)
-  (check-type key symbol)
-  (let ((ns (get-pydecl :namespace e)))
-    (ns.write-form ns key val)))
-
-(defmacro namespace-set-runtime (key-form val &environment e)
-  (let ((ns (get-pydecl :namespace e)))
-    (ns.write-runtime-form ns key-form val)))
-
-(defmacro namespace-get (key &environment e)
-  (check-type key symbol)
-  (let ((ns (get-pydecl :namespace e)))
-    (ns.read-form ns key)))
-
-(defun get-module-namespace (e)
-  (loop for ns = (get-pydecl :namespace e) then (ns.parent ns)
-      while ns
-      when (member (ns.scope ns) '(:function :module :exec-globals))
-      return ns
-      finally (error "No global namespace found, as parent.")))
-                         
-(defmacro module-namepace-get (key &environment e)
-  (check-type key symbol)
-  (let ((ns (get-module-namespace e)))
-    (ns.read-form ns key)))
-
-(defclass namespace ()
-  ((parent :accessor ns.parent :initarg :parent :initform nil)
-   (scope :accessor ns.scope :initarg :scope :initform (error "missing arg :scope"))))
-
-(defmethod ns.expand-with ((ns namespace) body-form environment)
-  (declare (ignorable ns environment))
-  body-form)
-
-(defclass excl-ns (namespace)
-  ((excluded-names :accessor ns.excluded-names :initarg :excluded-names)))
-
-(defmethod ns.read-form :around ((ns excl-ns) (s symbol))
-  (unless (member s (ns.excluded-names ns))
-    (call-next-method)))
-
-(defmethod ns.write-form :around ((ns excl-ns) (s symbol) val-form)
-  (declare (ignore val-form))
-  (unless (member s (ns.excluded-names ns))
-    (call-next-method)))
-
-(defmethod ns.del-form :around ((ns excl-ns) (s symbol))
-  (unless (member s (ns.excluded-names ns))
-    (call-next-method)))
-
-(defclass mapping-ns (namespace)
-  ((mapping-form :accessor ns.mapping-form :initarg :mapping-form)))
-
-(defmethod ns.read-form ((ns mapping-ns) (s symbol))
-  `(or (py-subs ,(ns.mapping-form ns) ,(symbol-name s))
-       ,(when (ns.parent ns)
-          (ns.read-form (ns.parent ns) s))))
-
-(defmethod ns.write-form ((ns mapping-ns) (s symbol) val-form)
-  `(setf (py-subs ,(ns.mapping-form ns) ,(symbol-name s)) ,val-form))
-
-(defmethod ns.del-form ((ns mapping-ns) (s symbol))
-  `(prog1 (py-subs ,(ns.mapping-form ns) ,(symbol-name s))
-     (setf (py-subs ,(ns.mapping-form ns) ,(symbol-name s)) nil)))
- 
-(defmethod ns.locals-form ((ns mapping-ns))
-  (ns.mapping-form ns))
-
-(defclass mapping-w/excl-ns (mapping-ns excl-ns)
-  ())
-
-(defclass let-ns (namespace)
-  ((names :accessor ns.names :initarg :names)))
-
-(defmethod ns.read-form ((ns let-ns) (s symbol))
-  (when (member s (ns.names ns)) s))
-
-(defmethod ns.write-form ((ns let-ns) (s symbol) val-form)
-  (when (member s (ns.names ns))
-    `(setf ,s ,val-form)))
-
-(defmethod ns.del-form ((ns let-ns) (s symbol))
-  (when (member s (ns.names ns))
-    `(prog1 ,s (setf ,s nil))))
-
-(defmethod ns.expand-with ((ns let-ns) body-form environment)
-  (declare (ignore environment))
-  `(let ,(ns.names ns)
-     ,body-form))
-
-(defmethod ns.locals-form ((ns let-ns))
-  `(make-locals-dict ',(ns.names ns) (list ,@(loop for name in (ns.names ns)
-                                                 collect (ns.read-form ns name)))))
-
-(defun make-locals-dict (name-list value-list)
-  (loop with ht = (make-eq-hash-table "locals-dict")
-      for name in name-list
-      for val in value-list
-      unless (null val) ;; unbound var
-      do (setf (gethash name ht) val)
-      finally (return ht)))
-
-(defclass let-w/locals-ns (let-ns)
-  ((locals-names :accessor ns.locals-names :initarg :locals-names)
-   (let-names :accessor ns.let-names :initarg :let-names)))
-
-(defmethod print-object ((x let-w/locals-ns) stream)
-  (print-unreadable-object (x stream :type t)
-    (format stream ":locals-names ~A  :let-names ~A"
-            (ns.locals-names x) (ns.let-names x))))
-
-(defmethod ns.expand-with ((ns let-w/locals-ns) body-form environment)
-  (declare (ignore environment))
-  `(let ,(ns.let-names ns)
-     ,body-form))
-
-(defmethod ns.locals-form ((ns let-w/locals-ns))
-  `(make-locals-dict ',(ns.locals-names ns) (list ,@(loop for name in (ns.names ns)
-                                                       collect (ns.read-form ns name)))))
-
-(defclass hash-table-ns (namespace)
-  ((dict-form :accessor ns.dict-form :initarg :dict-form :initform (error "required"))))
-
-(defmethod ns.read-form ((ns hash-table-ns) (s symbol))
-  `(or (gethash ',s ,(ns.dict-form ns))
-       ,(when (ns.parent ns)
-          (ns.read-form (ns.parent ns) s))))
-
-(defmethod ns.write-form ((ns hash-table-ns) (s symbol) val-form)
-  `(setf (gethash ',s ,(ns.dict-form ns)) ,val-form))
-
-(defmethod ns.write-runtime-form ((ns hash-table-ns) name-form val-form)
-  `(setf (gethash ,name-form ,(ns.dict-form ns)) ,val-form))
-       
-(defmethod ns.del-form ((ns hash-table-ns) (s symbol))
-  `(remhash ',s ,(ns.dict-form ns)))
-
-(defmethod ns.locals-form ((ns hash-table-ns))
-  (ns.dict-form ns))
-
-(defclass hash-table-w/excl-ns (hash-table-ns excl-ns)
-  ())
-
-#||
-(defclass package-ns (namespace)
-  ((package :accessor ns.package :initarg :package)
-   (incl-builtins :accessor ns.incl-builtins :initarg :incl-builtins :initform nil)))
-
-(defmethod package-ns-intern ((ns package-ns) (s symbol))
-  (intern (symbol-name s) (ns.package ns)))
-
-(defmethod ns.read-form ((ns package-ns) (s symbol))
-  (let ((ps (package-ns-intern ns s)))
-    `(or (and (boundp ',ps) (symbol-value ',ps))
-         ,(when (ns.incl-builtins ns)
-            `(builtin-value ',s)))))
-
-(defmethod ns.write-form ((ns package-ns) (s symbol) val-form)
-  (let ((ps (package-ns-intern ns s)))
-    `(setf (symbol-value ',ps) ,val-form)))
-
-(defmethod ns.del-form ((ns package-ns) (s symbol))
-  (let ((ps (package-ns-intern ns s)))
-    `(prog1 (boundp ',ps)
-       (makunbound ',ps))))
-
-(defmethod ns.locals-form ((ns package-ns))
-  `(loop for x being the symbols in ,(ns.package ns)
-       when (and (eq (symbol-package x)  ,(ns.package ns))
-                 (boundp x))
-       collect (progn (warn "name: ~A" x) x) into names
-       and collect (symbol-value x) into values
-       finally (return (make-locals-dict names values))))
-||#
-
-(defclass builtins-ns (namespace)
-  ())
-
-(defun make-builtins-namespace ()
-  (make-instance 'clpython::builtins-ns :scope :builtins))
-
-(defmethod ns.read-form ((ns builtins-ns) (s symbol))
-  (when (builtin-value s)
-    `(load-time-value (builtin-value ',s))))
-
-(defmethod ns.locals-form ((ns builtins-ns))
-  `(error "Namespace ~A does not have locals()." ,ns))
-
-(defmethod ns.write-form ((ns builtins-ns) (s symbol) val-form)
-  (declare (ignore val-form))
-  `(error "Namespace ~A not writable (attempt to set ~A)." ,ns ,s))
-
-(defmethod ns.del-form ((ns builtins-ns) (s symbol))
-  `(error "Namespace ~A not writable (attempt to delete ~A)." ,ns ',s))
-
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; Setf expansion
 
 ;; In addition to the standard 5 values, there is also a "delete" form
@@ -502,7 +260,7 @@ an assigment statement. This changes at least the returned 'store' form.")
                (match-p targets '(([list-expr] ?items))))
            (= (length (second value)) (length (second (car targets)))))
       
-      ;; Note that by using RHS, we force values to be evaluated before targets.
+      ;; Note that by using PSETF, we force values to be evaluated before targets.
       `(psetf ,@(mapcan #'list (second (car targets)) (second value)))
     
     whole))
@@ -667,12 +425,12 @@ an assigment statement. This changes at least the returned 'store' form.")
   (multiple-value-bind (globals-ns globals-param)
       (typecase globals
         (symbol-hash-table (break "never"))
-        (eq-hash-table     (values (make-instance 'hash-table-ns
+        (eq-hash-table     (values (make-hash-table-ns
                                      :dict-form '%exec-globals-ns
                                      :scope :exec-globals
                                      :parent (make-builtins-namespace))
                                    globals))
-        (t                 (values (make-instance 'mapping-ns
+        (t                 (values (make-mapping-ns
                                      :mapping-form '%exec-globals-ns
                                      :scope :exec-globals
                                      :parent (make-builtins-namespace))
@@ -684,13 +442,13 @@ an assigment statement. This changes at least the returned 'store' form.")
       (multiple-value-bind (locals-ns locals-param)
           (typecase locals
             (symbol-hash-table (break "never"))
-            (eq-hash-table     (values (make-instance 'hash-table-w/excl-ns
+            (eq-hash-table     (values (make-hash-table-w/excl-ns
                                          :dict-form '%exec-locals-ns
                                          :excluded-names locals-excluded-names
                                          :parent globals-ns
                                          :scope :exec-locals)
                                        locals))
-            (t                 (values (make-instance 'mapping-w/excl-ns
+            (t                 (values (make-mapping-w/excl-ns
                                          :mapping-form '%exec-locals-ns
                                          :excluded-names locals-excluded-names
                                          :parent globals-ns
@@ -878,7 +636,7 @@ an assigment statement. This changes at least the returned 'store' form.")
            ;; Need a nested LET, as +cls-namespace+ may not be set when the ASSIGN-STMT
            ;; below is executed, as otherwise nested classes don't work.
            (let ((%class-namespace (make-eq-hash-table "class-namespace")))
-             (with-namespace (,(make-instance 'hash-table-ns
+             (with-namespace (,(make-hash-table-ns
                                  :dict-form '%class-namespace
                                  :parent (get-module-namespace e) ;; not the lexical parent ns!
                                  :scope :class))
@@ -1222,7 +980,7 @@ LOCALS shares share tail structure with input arg locals."
                         collect `(,lambda-key-arg ,key-default-arg))
 		   ,(when *-arg  (second *-arg))
 		   ,(when **-arg (second **-arg)))
-                  (with-namespace (,(make-instance 'let-w/locals-ns
+                  (with-namespace (,(make-let-w/locals-ns
                                       :parent (get-module-namespace e)
                                       :names (append all-nontuple-func-locals
                                                      destruct-nested-vars
@@ -1411,91 +1169,91 @@ LOCALS shares share tail structure with input arg locals."
     (with-simple-restart (continue "Continue as if `~A' is currently bound." name)
       (py-raise '{NameError} "Variable `~A' is unbound." name))))
 
-(defvar *module-function-hook*)
+(defparameter *module-function-hook* nil)
+
+(defparameter *module-source-hook* nil
+  "Called when module is imported, with source/binary path names and module source code as args.")
 
 (defvar *module-namespace* nil)
 
-(defstruct (module-source-information
-            (:conc-name msi-)
-            (:constructor make-msi (original-filename original-source subform-positions)))
-  original-filename original-source subform-positions)
-
 (defparameter *muffle-sbcl-compiler-notes* nil)
 
-(defmacro [module-stmt] (suite) ;; &environment e)
+(defmacro [module-stmt] (suite)
   "If *MODULE-NAMESPACE* is bound, it is used."
   (assert *current-module-name* (*current-module-name*)
     "~S is unbound - should be the module currently being compiled." *current-module-name*)
-  `(flet ((module-function
-              (&key (%module-globals (make-eq-hash-table "module"))
-                    (call-preload-hook t)
-                    ;; The dotted name, used as module.__name__ and its __repr__
-                    (module-name (or *current-module-name* ;; load time
-                                     ',*current-module-name*)) ;; compile time
-                    ;; Determine source location at compile time
-                    (src-module-path ,(when *compile-file-truename*
-                                        (derive-pathname *compile-file-truename*)))
-                    (src-file-write-date ,(when *compile-file-truename*
-                                            (file-write-date *compile-file-truename*)))
-                    ;; Determine fasl location at load time 
-                    (bin-module-path (load-time-value *load-truename*))
-                    (bin-file-write-date (load-time-value (when *load-truename*
-                                                            (file-write-date *load-truename*)))))
-            ;; GLOBALS-HANDLER determines how references to globals (module-level variables) are handled.
-            ;; INITIAL-GLOBALS is an alist containing pre-set global variables: ((sym . val) ..)
-            ;; CALL-PRELOAD-HOOK specifies whether *module-preload-hook* is called before the body is run.
-            ;; MODULE-NAME is stored in __name__.
-            (declare (optimize (debug 3)))
-            (with-pydecl ((:context :module)
-                          #+(or)(:mod-futures  :todo-parse-module-ast-future-imports)) ;; todo
-              (let* ((*habitat* (or *habitat* (make-habitat))))
-                (with-namespace (,(or *module-namespace*
-                                      (make-instance 'hash-table-ns
-                                        :dict-form '%module-globals
-                                        :scope :module
-                                        :parent (make-builtins-namespace)))
-                                 :define-%globals t)
-                  (let ((*module-namespace* nil))
-                    (namespace-set {__name__} module-name)
-                    (namespace-set {__debug__} +the-true+)
-                    
-                    (when (and call-preload-hook (boundp '*module-preload-hook*))
-                      (let ((%module (make-instance 'module
-                                       :name module-name
-                                       :src-pathname src-module-path
-                                       :bin-pathname bin-module-path
-                                       :src-file-write-date src-file-write-date
-                                       :bin-file-write-date bin-file-write-date
-                                       :namespace-ht %module-globals)))
-                        (funcall *module-preload-hook* %module)))
-                    
-                    (with-py-errors (:name (python-module ,*current-module-name*))
-                      (locally (declare #+sbcl ,@(when *muffle-sbcl-compiler-notes*
-                                                   `((sb-ext:muffle-conditions sb-ext:compiler-note))))
-                        ,suite))))))))
-     ;; (Optionally) Source form recording
-     ,@(when (and *python-form->source-location* *current-module-path*) ;; *c-m-path* is nil in REPL
-         (let (positions)
-           (with-py-ast ((subform &key value target) suite :into-nested-namespaces t)
-             (declare (ignore value))
-             (unless target
-	       (whereas ((source-position (gethash subform *python-form->source-location*)))
-                 (push (list* :form subform source-position) positions)))
-             subform)
-           `((when *module->source-positions*
-               (setf (gethash ,(truename *current-module-path*) *module->source-positions*)
-                 (make-msi ,(truename *current-module-path*) ,(slurp-file *current-module-path*) ',positions))
-               #+(or)(format t ";;; Source code added to file ~A:~% ~S"
-                             ',(truename *current-module-path*)
-                             (gethash ,(truename *current-module-path*) *module->source-positions*))))))
-     ;; Module registration
-     (if (boundp '*module-function-hook*)
-         (funcall *module-function-hook* #'module-function) ;; imported by Python code
-       (progn ;; importing of fasl using (load ..)
-         ,(when *current-module-path*
-            `(format t ";;; Executing Python top-level forms (source: ~A)~%" ',(truename *current-module-path*)))
-         (funcall #'module-function)))
-     (values)))
+  (let ((module-function-name (intern (format nil "module-function-~A" *current-module-name*) #.*package*))
+        #+clpython-source-level-debugging
+        (python-source-info (module-suite-source-info suite)))
+    `(progn (defun ,module-function-name
+                (&key (%module-globals (make-eq-hash-table "module"))
+                      (call-preload-hook t)
+                      ;; The dotted name, used as module.__name__ and its __repr__
+                      (module-name (or *current-module-name* ;; load time
+                                       ',*current-module-name*)) ;; compile time
+                      ;; Determine source location at compile time
+                      (src-module-path ,(when *compile-file-truename*
+                                          (derive-pathname *compile-file-truename*)))
+                      (src-file-write-date ,(when *compile-file-truename*
+                                              (file-write-date *compile-file-truename*)))
+                      ;; Determine fasl location at load time 
+                      (bin-module-path (load-time-value *load-truename*))
+                      (bin-file-write-date (load-time-value (when *load-truename*
+                                                              (file-write-date *load-truename*)))))
+              ;; GLOBALS-HANDLER determines how references to globals (module-level variables) are handled.
+              ;; INITIAL-GLOBALS is an alist containing pre-set global variables: ((sym . val) ..)
+              ;; CALL-PRELOAD-HOOK specifies whether *module-preload-hook* is called before the body is run.
+              ;; MODULE-NAME is stored in __name__.
+              (declare (optimize (debug 3))
+                       #+clpython-source-level-debugging
+                       (pydecl (:python-source-info ,python-source-info)))
+              (with-pydecl ((:context :module)
+                            #+(or)(:mod-futures  :todo-parse-module-ast-future-imports)) ;; todo
+                (let* ((*habitat* (or *habitat* (make-habitat))))
+                  (with-namespace (,(or *module-namespace*
+                                        (make-hash-table-ns
+                                         :dict-form '%module-globals
+                                         :scope :module
+                                         :parent (make-builtins-namespace)))
+                                   :define-%globals t)
+                    (let ((*module-namespace* nil))
+                      (namespace-set {__name__} module-name)
+                      (namespace-set {__debug__} +the-true+)
+                      
+                      (when (and call-preload-hook (boundp '*module-preload-hook*))
+                        (let ((%module (make-instance 'module
+                                         :name module-name
+                                         :src-pathname src-module-path
+                                         :bin-pathname bin-module-path
+                                         :src-file-write-date src-file-write-date
+                                         :bin-file-write-date bin-file-write-date
+                                         :namespace-ht %module-globals)))
+                          (funcall *module-preload-hook* %module)))
+                      
+                      (with-py-errors (:name (python-module ,*current-module-name*))
+                        (locally (declare #+sbcl ,@(when *muffle-sbcl-compiler-notes*
+                                                     `((sb-ext:muffle-conditions sb-ext:compiler-note))))
+                          ,suite)))))))
+
+            #+clpython-source-level-debugging
+            ,@(when (and python-source-info *current-module-path*) ;; *c-m-path* is nil in REPL
+                ;; Cannot include ',python-source-info literally in the source, as that turns out un-EQ
+                ;; to the Lisp source forms in the Lisp source records. Storing it in the declaration
+                ;; keeps it EQ, however, so that's where REGISTER-PYTHON-SOURCE retrieves it.
+                `((when *module-source-hook*
+                    (funcall *module-source-hook*
+                             :module-function (symbol-function ',module-function-name)
+                             :source-path ,(truename *current-module-path*)
+                             :source ,(slurp-file *current-module-path*)))))
+            
+            ;; Module registration
+            (if *module-function-hook*
+                (funcall *module-function-hook* (symbol-function ',module-function-name)) ;; imported by Python code
+              (progn ;; importing of fasl using (load ..)
+                ,(when *current-module-path*
+                   `(format t ";;; Executing Python top-level forms (source: ~A)~%" ',(truename *current-module-path*)))
+                (funcall ',module-function-name)))
+            (values))))
 
 (defmacro [pass-stmt] ()
   nil)
@@ -1526,20 +1284,8 @@ LOCALS shares share tail structure with input arg locals."
               (if *want-DEL-setf-expansion* del-form store-form) ;; delete/store-form
               `(py-subs ,it ,su))))) ;; read-form
 
-(defun maybe-with-source-info (form)
-  (whereas ((loc (and *python-form->source-location*
-                      (gethash form *python-form->source-location*))))
-    (return-from maybe-with-source-info
-      `(with-debug-frame (:form ,(py-pprint form)
-                                :file ,(or *compile-file-truename* *current-module-path*)
-                                :char ,loc)
-         ,form)))
-  form)
-
 (defmacro [suite-stmt] (stmts)
-  (if (null (cdr stmts))
-      (maybe-with-source-info (car stmts))
-    `(progn ,@(mapcar #'maybe-with-source-info stmts))))
+  `(progn ,@stmts))
 
 #+(or)
 (define-compiler-macro [suite-stmt] (&whole whole stmts &environment e)
@@ -2039,42 +1785,43 @@ Non-negative integer denoting the number of args otherwise."
                       :arg-kwname-vec   ,arg-kwname-vec
                       :*-arg            ',*-arg
                       :**-arg           ',**-arg)))))
-       (named-function ,name
-	 (lambda (&rest %args)
-	   (declare (dynamic-extent %args)
-		    #.+optimize-std+)
-           (let (,@pos-key-arg-names ,@(when *-arg `(,*-arg)) ,@(when **-arg `(,**-arg))
-		 ,@(when (and some-args-p (not *-arg) (not **-arg))
-		     `((only-pos-args (only-pos-args %args)))))
-             ;; There are two ways to parse the argument list:
-             ;; - The pop way, which quickly assigns the variables a local name (only usable
-             ;;   when there are a correct number of positional arguments).
-             ;; - The array way, where a temporary array is created and a arg-parse function
-             ;;   is called (used everywhere else).
-             ,(let ((the-array-way
-                     `(let ((arg-val-vec (make-array ,(+ num-pos-key-args
-							 (if (or *-arg **-arg) 1 0)
-							 (if **-arg 1 0)) :initial-element nil)))
-			(declare (dynamic-extent arg-val-vec))
-			(parse-py-func-args %args arg-val-vec fa)
-                        ,@(loop for p in pos-key-arg-names and i from 0
-			      collect `(setf ,p (svref arg-val-vec ,i)))
-			,@(when  *-arg
-			    `((setf ,*-arg (svref arg-val-vec ,num-pos-key-args))))
-                        ,@(when **-arg
-			    `((setf ,**-arg (svref arg-val-vec ,(1+ num-pos-key-args)))))))
-                    (the-pop-way
-		     `(progn ,@(loop for p in pos-key-arg-names collect `(setf ,p (pop %args))))))
-		
-		(cond ((or *-arg **-arg)  the-array-way)
-		      (some-args-p        `(if (and only-pos-args
-                                                    (= (the fixnum only-pos-args) ,num-pos-key-args))
-					       ,the-pop-way
-					     ,the-array-way))
-		      (t `(when %args (raise-wrong-args-error)))))
-	     
-	     (locally #+(or)(declare (optimize (safety 3) (debug 3)))
-                      ,@body)))))))
+       ,(let ((fname (intern (format nil "~A.~A" *current-module-name* name) #.*package*)))
+          `(flet ((,fname (&rest %args)
+                    (declare #+(or)(dynamic-extent %args)
+                             #.+optimize-std+)
+                    (let (,@pos-key-arg-names ,@(when *-arg `(,*-arg)) ,@(when **-arg `(,**-arg))
+                          ,@(when (and some-args-p (not *-arg) (not **-arg))
+                              `((only-pos-args (only-pos-args %args)))))
+                      ;; There are two ways to parse the argument list:
+                      ;; - The pop way, which quickly assigns the variables a local name (only usable
+                      ;;   when there are a correct number of positional arguments).
+                      ;; - The array way, where a temporary array is created and a arg-parse function
+                      ;;   is called (used everywhere else).
+                      ,(let ((the-array-way
+                              `(let ((arg-val-vec (make-array ,(+ num-pos-key-args
+                                                                  (if (or *-arg **-arg) 1 0)
+                                                                  (if **-arg 1 0)) :initial-element nil)))
+                                 (declare (dynamic-extent arg-val-vec))
+                                 (parse-py-func-args %args arg-val-vec fa)
+                                 ,@(loop for p in pos-key-arg-names and i from 0
+                                       collect `(setf ,p (svref arg-val-vec ,i)))
+                                 ,@(when  *-arg
+                                     `((setf ,*-arg (svref arg-val-vec ,num-pos-key-args))))
+                                 ,@(when **-arg
+                                     `((setf ,**-arg (svref arg-val-vec ,(1+ num-pos-key-args)))))))
+                             (the-pop-way
+                              `(progn ,@(loop for p in pos-key-arg-names collect `(setf ,p (pop %args))))))
+                         
+                         (cond ((or *-arg **-arg)  the-array-way)
+                               (some-args-p        `(if (and only-pos-args
+                                                             (= (the fixnum only-pos-args) ,num-pos-key-args))
+                                                        ,the-pop-way
+                                                      ,the-array-way))
+                               (t `(when %args (raise-wrong-args-error)))))
+                      
+                      (locally #+(or)(declare (optimize (safety 3) (debug 3)))
+                               ,@body))))
+                  #',fname)))))
 
 #+allegro
 (progn
@@ -2143,7 +1890,8 @@ Non-negative integer denoting the number of args otherwise."
   "Bind N to nofargs, as machine integer (not regular fixnum)"
   `(let* ((,n (excl::ll :register :nargs)))
      ,@body))
-  
+
+#-clpython-source-level-debugging ;; named-function goes wrong
 (define-compiler-macro py-arg-function (&whole whole
                                                name (pos-args key-args *-arg **-arg) &body body)
   ;; More efficient argument-parsing, for functions that take only a few positional arguments.
@@ -2306,6 +2054,7 @@ Non-negative integer denoting the number of args otherwise."
 
 (defparameter *max-py-error-level* 1000) ;; max number of nested try/except; for b1.py
 (defvar *with-py-error-level* 0)
+(defvar *debug-with-py-errors-enabled* nil)
 
 (defun check-max-with-py-error-level ()
   (fastest
@@ -2315,16 +2064,14 @@ Non-negative integer denoting the number of args otherwise."
 (defmacro with-py-errors ((&key (name 'with-py-errors-func)) &body body)
   (check-type name (or symbol list))
   (with-gensyms (f)
-    `(let ((,f (named-function ,name
-                 (lambda () ,@body))))
+    `(let ((,f #+clpython-source-level-debugging (lambda () ,@body) ;; goes wrong with source lookup
+               #-clpython-source-level-debugging (named-function ,name (lambda () ,@body))))
        (declare (dynamic-extent ,f))
        (call-with-py-errors ,f))))
 
-(defmacro with-debug-frame (name &body body)
-  `(funcall (named-function ,name
-              (lambda () ,@body))))
-  
 (defun call-with-py-errors (f)
+  (unless *debug-with-py-errors-enabled*
+    (return-from call-with-py-errors (funcall f)))
   (let ((*with-py-error-level* (fastest (1+ (the fixnum *with-py-error-level*)))))
     (check-max-with-py-error-level)
     ;; Using handler-bind, so uncatched errors are shown in precisely

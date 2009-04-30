@@ -50,10 +50,15 @@ ARGS are the command-line args, available as `sys.argv'; can be a string or a li
             (time (apply module-function module-run-args))
           (apply module-function module-run-args))))))
 
-(defun compile-py-file (fname &key (verbose t))
+(defun compile-py-file (fname &key (verbose t) source-information)
   (let* ((module (pathname-name fname))
          (fasl-file (compiled-file-name :module module fname))
          (*import-force-recompile* t)
          (*import-compile-verbose* verbose))
     (declare (special *import-force-recompile* *import-compile-verbose*))
-    (%compile-py-file fname :mod-name module :output-file fasl-file)))
+    (flet ((do-compile ()
+             (%compile-py-file fname :mod-name module :output-file fasl-file)))
+      (if source-information
+          (clpython.parser::with-source-locations
+              (do-compile))
+        (do-compile)))))

@@ -46,3 +46,10 @@
 #+allegro
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (require :yacc))
+
+
+(defparameter *source-level-debugging*
+    #+#1=(and allegro-version>= (version>= 8 2)) t
+    #-#1# nil)
+
+(register-feature :clpython-source-level-debugging *source-level-debugging*)

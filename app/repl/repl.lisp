@@ -130,6 +130,16 @@ KIND can be :ptime, :time, :space, :pspace or NIL."
                               (prof:show-call-graph)))
     ((nil)   (funcall f))))
 
+(defmacro maybe-with-ldb-backend (&body body)
+  #+clpython-source-level-debugging
+  `(unwind-protect (excl::with-ldb-backend (:python) ,@body)
+     
+     ;; Delete all temp breakpoints upon quitting the REPL to ease debugging.
+     ;; XXXX This removes also all non-Python breakpoints.
+     (excl::delete-temp-breakpoints-except))
+  #-clpython-source-level-debugging
+  `(progn ,@body))
+
 (defun repl (&rest options)
   (format t "Welcome to CLPython, an implementation of Python in Common Lisp.~%")
   (format t "Running on: ~A ~A~%" (lisp-implementation-type) (lisp-implementation-version))
@@ -140,7 +150,8 @@ KIND can be :ptime, :time, :space, :pspace or NIL."
           (clpython::with-python-compiler-style-warnings
               (with-ast-user-readtable ()
                 (let ((clpython::*muffle-sbcl-compiler-notes* t))
-                  (apply #'repl-1 options)))))))
+                  (maybe-with-ldb-backend
+                   (apply #'repl-1 options))))))))
 
 (defvar *object-repr-char-limit* 300
   "At most this many characters are printed for an object represenation in the REPL (NIL = infinite)")
@@ -165,7 +176,7 @@ KIND can be :ptime, :time, :space, :pspace or NIL."
 
 (defun repl-1 (&key cmd-args lisp-exit)
   (let* ((*repl-module-globals* (clpython::make-eq-hash-table "repl module"))
-         (mod-namespace (make-instance 'clpython::hash-table-ns
+         (mod-namespace (clpython::make-hash-table-ns
                           :dict-form '*repl-module-globals*
                           :scope :module
                           :parent (clpython::make-builtins-namespace)))

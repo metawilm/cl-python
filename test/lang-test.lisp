@@ -920,7 +920,7 @@ except SyntaxError:
 
 (defmacro with-dummy-namespace (&body body)
   `(let ((%dummy-cps-namespace (make-hash-table :test 'eq)))
-     (clpython::with-namespace (,(make-instance 'clpython::hash-table-ns
+     (clpython::with-namespace (,(clpython::make-hash-table-ns
                                    :dict-form '%dummy-cps-namespace
                                    :parent (clpython::make-builtins-namespace)
                                    :scope :function)

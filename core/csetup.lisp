@@ -19,11 +19,8 @@
     #+cmu nil    ;; CMUCL does not allow arbitrary meta/superclasses in conditions
     #-(or allegro lispworks cmu) nil)
 
-(if *exceptions-are-python-objects*
-    (pushnew :clpython-exceptions-are-python-objects *features*)
-  (setf *features* (remove :clpython-exceptions-are-python-objects *features*)))
+(register-feature :clpython-exceptions-are-python-objects *exceptions-are-python-objects*)
 )
-
 
 (define-compiler-macro py-call (&whole whole prim &rest args)
   (with-perhaps-matching (prim ([attributeref-expr] ?x ([identifier-expr] ?attr-sym)))

@@ -58,13 +58,17 @@ are accepted in those libraries."
                                        (:file "dictattr"     )
                                        (:file "classes"      )
                                        (:file "exceptions"   )
+                                       (:file "namespace"    )
                                        (:file "compiler"     )
                                        (:file "generator"    )
                                        (:file "optimize"     )
                                        (:file "run"          )
                                        (:file "habitat"      )
                                        (:file "import"       )
-                                       (:file "executable"   )))))
+                                       (:file "executable"   )
+                                       
+                                       #+(and allegro-version>= (version>= 8 2))
+                                       (:file "source"       )))))
 
 (asdf:defsystem :clpython.lib
     :description "Python module library"

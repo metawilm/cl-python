@@ -773,6 +773,15 @@ otherwise work well.")
     (setf x (py-function-lambda x)))
   (eval `(disassemble ,x)))
 
+#+clpython-source-level-debugging
+(def-py-method py-function._src :attribute (x)
+  (when (typep x 'py-function)
+    (setf x (py-function-lambda x)))
+  (when (excl::closurep x) ;; needed?
+    (setq x (excl::cl_shared x)))
+  (let ((*print-level* 2))
+    (excl::dump-lisp-source x)))
+
 (defmethod py-function-name ((x function))
   #+allegro (format nil "~A" (excl::func_name x))
   #-allegro (call-next-method))

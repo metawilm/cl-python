@@ -55,7 +55,8 @@ Most important options:
              (apply #'parse seq options))))
 
 (defmacro with-source-locations (&body body)
-  `(let ((*python-form->source-location* (make-weak-key-hash-table :test 'eq)))
+  `(let (#+clpython-source-level-debugging
+         (*python-form->source-location* (make-weak-key-hash-table :test 'eq)))
      ,@body))
 
 (defun parse-module-with-yacc (yacc-version lexer &key incl-module (record-source-location *python-form->source-location*))

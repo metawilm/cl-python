@@ -195,7 +195,8 @@
            #:with-auto-mode-recompile #:whereas #:sans #:named-function #:slurp-file
            #:with-stack-list #:without-redefinition-warnings #:defconstant-once
            #:+max-char-code+ #:char-code-type #:ltv-find-class #:make-weak-key-hash-table
-           #:schedule-finalization #:unschedule-finalization))
+           #:schedule-finalization #:unschedule-finalization
+           #:register-feature))
 
 ;;; CLPYTHON.PARSER - Parser and Lexer
 
