@@ -204,128 +204,107 @@
 
 (defun parse-format-string (string)
   "Returns a FORMAT-STRING struct that can be called in MAKE-FORMATTED-STRING."
-  
   (check-type string string)
-	   
   (let ((s.len (length string))
 	(res ())
 	(i 0))
-    
-    (labels ((next-ch-nil   () (prog1 (and (< i s.len) (char string i))
-				 (incf i)))
-	     (next-ch-error () (or (next-ch-nil)
-				   (py-raise '{ValueError}
-                                             "Unfinished format string (~S)." string)))
-	     (unread-ch     () (progn (decf i)
-				      (assert (and (>= i 0))))))
-      
+    (labels ((next-ch-nil ()
+               (prog1 (and (< i s.len) (char string i))
+                 (incf i)))
+	     (next-ch-error ()
+               (or (next-ch-nil)
+                   (py-raise '{ValueError} "Unfinished format string (~S)." string)))
+	     (unread-ch () 
+               (decf i)
+               (assert (and (>= i 0)))))
       (loop
 	(let ((dispatch-c (next-ch-nil)))
-	  
-	  (case dispatch-c
-	    
-	    ((nil) (return))
-	    
-	    (#\% 
-	     (let* ((mapping-key
-		     (if (char= (next-ch-error) #\( ) ;; "%(name)s" % {'name': 'john'}
-			 (coerce (loop for c = (next-ch-error) until (char= c #\)) collect c)
-				 'string)
-		       (progn (unread-ch)
-			      nil)))
-		    
-		    (conversion-flags
-		     (loop for c = (next-ch-error)
-			 while (member c '( #\# #\0 #\- #\Space #\+ ) :test #'char=)
-			 collect c into flags
-			 finally (unread-ch)
-				 (return flags)))
-		    
-		    (minimum-field-width
-		     (let ((c (next-ch-error)))
-		       (cond ((char= c #\*) ;; to be supplied as argument
-			      :arg) 
-			     
-			     ((digit-char-p c 10)
-			      (loop with res = 0
-				  while (digit-char-p c 10) 
-				  do (setf res (+ (* 10 res) (digit-char-p c 10))
-					   c (next-ch-error))
-				  finally (unread-ch)
-					  (return res)))
-			     
-			     (t (unread-ch)
-				nil))))
-		    
-		    (precision
-		     (if (char= (next-ch-error) #\.)
-			 
-			 (let ((c (next-ch-error)))
-			   (cond ((digit-char-p c)
-				  (loop with res = 0
-				      while (digit-char-p c 10) 
-				      do (setf res (+ (* 10 res) (digit-char-p c 10))
-					       c (next-ch-error))
-				      finally (unread-ch)
-					      (return res)))
-					     
-				 ((char= c #\*) ;; to be supplied as argument
-				  :arg)
-				 
-				 (t (py-raise '{ValueError}
-					      "Format string contains illegal precision ~@
+          (unless dispatch-c
+            (return))
+          (if (char= dispatch-c #\%)
+              (let ((next (next-ch-nil)))
+                (cond ((not next)
+                       (py-raise '{ValueError} "Unfinished format string (~S)." string))
+                      ((char= next #\%)
+                       (push (list :literal "%") res))
+                      (t (unread-ch)
+                         (let* ((mapping-key
+                                 (if (char= (next-ch-error) #\( ) ;; "%(name)s" % {'name': 'john'}
+                                     (coerce (loop for c = (next-ch-error) until (char= c #\)) collect c)
+                                             'string)
+                                   (progn (unread-ch)
+                                          nil)))
+                                (conversion-flags
+                                 (loop for c = (next-ch-error)
+                                     while (member c '( #\# #\0 #\- #\Space #\+ ) :test #'char=)
+                                     collect c into flags
+                                     finally (unread-ch)
+                                             (return flags)))
+                                (minimum-field-width
+                                 (let ((c (next-ch-error)))
+                                   (cond ((char= c #\*) ;; to be supplied as argument
+                                          :arg) 
+                                         ((digit-char-p c 10)
+                                          (loop with res = 0
+                                              while (digit-char-p c 10) 
+                                              do (setf res (+ (* 10 res) (digit-char-p c 10))
+                                                       c (next-ch-error))
+                                              finally (unread-ch)
+                                                      (return res)))
+                                         (t (unread-ch)
+                                            nil))))
+                                (precision
+                                 (if (char= (next-ch-error) #\.)
+                                     (let ((c (next-ch-error)))
+                                       (cond ((digit-char-p c)
+                                              (loop with res = 0
+                                                  while (digit-char-p c 10) 
+                                                  do (setf res (+ (* 10 res) (digit-char-p c 10))
+                                                           c (next-ch-error))
+                                                  finally (unread-ch)
+                                                          (return res)))
+                                             
+                                             ((char= c #\*) ;; to be supplied as argument
+                                              :arg)
+                                             (t (py-raise '{ValueError}
+                                                          "Format string contains illegal precision ~@
                                                (got ~A after dot; expected number)." c))))
-		       
-		       (progn (unread-ch)
-			      nil)))
-		    
-		    
-		    (ignored-C-synax-length-modifier
-		     (unless (member (next-ch-error) '( #\h #\l #\L ) :test #'char=)
-		       (unread-ch)))
-		    
-		    (conversion-type
-		     (let ((c (next-ch-error)))
-		       (unless (position c "diouxXeEfFgGcrs%" :test #'char=)
-			 (py-raise '{ValueError}
-				   "In format string, unrecognized conversion type found: `~A'." c))
-		       
-		       (case c ;; Some codes are redundant
-			 ((#\d #\u) #\i)  
-			 (#\F       #\f)
-			 (t         c)))))
-	       
-	       (declare (ignore ignored-C-synax-length-modifier))
-	       
-	       (push (list :format mapping-key conversion-flags minimum-field-width
-			   precision conversion-type)
-		     res)))
-	    
-	    (t ;; string literal
-	     (let ((end-ix (position #\% string :start i)))
-	       (push (list :literal (subseq string (1- i) end-ix)) 
-		     res)
-	       (setf i (or end-ix (length string)))))))))
-    
-    
-    (let* ((fmt-ops (remove-if-not (lambda (res) (eq (car res) :format)) 
-				   res))
-	   
-	   (kind (let ((num-not-map (count nil (mapcar #'second fmt-ops))))
+                                   (progn (unread-ch)
+                                          nil)))
+                                (ignored-C-synax-length-modifier
+                                 (unless (member (next-ch-error) '( #\h #\l #\L ) :test #'char=)
+                                   (unread-ch)))
+                                (conversion-type
+                                 (let ((c (next-ch-error)))
+                                   (unless (position c "diouxXeEfFgGcrs%" :test #'char=)
+                                     (py-raise '{ValueError}
+                                               "In format string, unrecognized conversion type found: `~A'." c))
+                                   (case c ;; Some codes are redundant
+                                     ((#\d #\u) #\i)  
+                                     (#\F       #\f)
+                                     (t         c)))))
+                           (declare (ignore ignored-C-synax-length-modifier))
+                           (push (list :format mapping-key conversion-flags minimum-field-width
+                                       precision conversion-type)
+                                 res)))))
+            ;; string literal
+            (let ((end-ix (position #\% string :start i)))
+              (push (list :literal (subseq string (1- i) end-ix)) 
+                    res)
+              (setf i (or end-ix (length string))))))))
+    (let* ((fmt-ops (remove-if-not (lambda (res) (eq (car res) :format)) res))
+           (kind (let ((num-not-map (count nil (mapcar #'second fmt-ops))))
 		   (cond ((= num-not-map 0)                :mapping)
 			 ((= num-not-map (length fmt-ops)) :list)
 			 (t (py-raise '{ValueError}
 				      "Both mapping and non-mapping formatting operations ~
                                        found in format string (~S)." string)))))
-	   
-	   (num-args (ecase kind
-		       
-		       (:list (loop for (format nil nil min-fld-width prec nil) in fmt-ops
+           (num-args (ecase kind
+                       (:list (loop for (format nil nil min-fld-width prec nil) in fmt-ops
 				  do (assert (eq format :format))
 				  count t
 				  count (eq min-fld-width :arg)
 				  count (eq prec :arg)))
-
 		       (:mapping (loop for (format nil nil min-fld-width prec nil) in fmt-ops
 				     do (assert (eq format :format))
 				     when (or (eq min-fld-width :arg)
