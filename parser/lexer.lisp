@@ -358,7 +358,7 @@ C must be either a character or NIL."
   (loop with chs-seen
       for i from 0 below (length s)
       for ch = (let ((c (lex-read-char :eof-error nil)))
-                 (push c chs-seen)
+                 (when c (push c chs-seen))
                  c)
       for ch-correct = (and ch (char= ch (aref s i)))
       while ch-correct
