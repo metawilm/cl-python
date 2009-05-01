@@ -29,6 +29,17 @@
 
 (set-impl-status '(|name| |error| |urandom| #+allegro |environ|) t)
 
+(defun |listdir| (path)
+  ;; Not sure this is correct
+  (check-type path string)
+  (let ((last (and (plusp (length path))
+                   (aref path (1- (length path))))))
+    (unless (member last '(#\\ #\/))
+      (setf path (concatenate 'string path "/"))))
+  (clpython::make-py-list-from-list (mapcar 'namestring (directory path))))
+
+(set-impl-status '(|listdir|) t)
+
 (do-external-symbols (s :clpython.module.os)
   (unless (clpython::impl-status s)
     (set-impl-status s :todo)))
