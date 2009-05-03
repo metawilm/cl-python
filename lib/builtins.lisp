@@ -235,41 +235,27 @@ POS-ARGS is any iterable object; KW-DICT must be of type DICT."
     (setf *intern-hashtable* (make-hash-table :test 'equal)))
   (or (gethash x *intern-hashtable*)
       (setf (gethash x *intern-hashtable*) x)))
-  
-(defun {isinstance} (x cls)
-  (flet ((lisp-isinstance (x cls)
-           (or (eq cls (load-time-value (find-class 'object)))
-               (typep x cls)
-               (subtypep (py-class-of x) cls))))
-    (let ((cls (deproxy cls)))
-      (py-bool (if (listp cls)
-                   (some (lambda (c) (lisp-isinstance x c)) cls)
-                 (lisp-isinstance x cls))))))
 
-(defun isinstance-1 (x cls)
-  ;; CLS is either a class or a _tuple_ of classes (only tuple is
-  ;; allowed, not other iterables).
-  (if (typep cls 'py-tuple)
-      (dolist (c (py-iterate->lisp-list cls))
-        (when (subtypep (py-class-of x) c)
-          (return-from isinstance-1 t)))
-    (subtypep (py-class-of x) cls)))
+(defun class-tuple-tester (x cls test)
+  "Is (test x c) for some class C?
+CLS is a class or tuple (list) of classes."
+  (let ((cls (deproxy cls)))
+    (py-bool (if (listp cls)
+                 (some (lambda (c) (funcall test x c)) cls)
+               (funcall test x cls)))))
 
+(defun {isinstance} (x cs)
+  (flet ((isinstance-test (x c)
+           (or (eq c (load-time-value (find-class 'object)))
+               (typep x c)
+               (subtypep (py-class-of x) c))))
+    (class-tuple-tester x cs #'isinstance-test)))
 
 (defun {issubclass} (x cls)
-  ;; SUPER is either a class, or a tuple of classes -- denoting
-  ;; Lisp-type (OR c1 c2 ..).
-  (py-bool (issubclass-1 x cls)))
-
-(defun issubclass-1 (x cls)
-  (if (typep cls 'py-tuple)
-      
-      (dolist (c (py-iterate->lisp-list cls))
-	(when (issubclass-1 x c)
-	  (return-from issubclass-1 t)))
-    
-    (or (eq cls (load-time-value (find-class 'object)))
-	(subtypep x cls))))
+  (flet ((issubclass-test (x c)
+           (or (eq c (load-time-value (find-class 'object)))
+               (subtypep x c))))
+    (class-tuple-tester x cls #'issubclass-test)))
 
 (defun {iter} (x &optional y)
   ;; Return iterator for iterable X
