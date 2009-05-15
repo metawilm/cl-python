@@ -137,17 +137,24 @@ KIND can be :ptime, :time, :space, :pspace or NIL."
   `(progn ,@body))
 
 (defun repl (&rest options)
-  (format t "Welcome to CLPython, an implementation of Python in Common Lisp.~%")
-  (format t "Running on: ~A ~A~%" (lisp-implementation-type) (lisp-implementation-version))
-  (format t "REPL shortcuts: `:q' = quit, `:h' = help.~%")
-  (clpython::maybe-warn-set-search-paths nil)
-  (with-repl-toplevel-aliases
-      (clpython.parser::with-source-locations
-          (clpython::with-python-compiler-style-warnings
-              (with-ast-user-readtable ()
-                (let ((clpython::*muffle-sbcl-compiler-notes* t))
-                  (maybe-with-ldb-backend
-                   (apply #'repl-1 options))))))))
+  (clpython::%reset-import-state)
+
+  ;; This is a kind of hack to make importing modules a lot faster, while we
+  ;; don't really record source location information.
+  (let (#+allegro (excl:*load-xref-info* nil)
+        #+allegro (excl:*record-xref-info* nil))
+  
+    (format t "Welcome to CLPython, an implementation of Python in Common Lisp.~%")
+    (format t "Running on: ~A ~A~%" (lisp-implementation-type) (lisp-implementation-version))
+    (format t "REPL shortcuts: `:q' = quit, `:h' = help.~%")
+    (clpython::maybe-warn-set-search-paths nil)
+    (with-repl-toplevel-aliases
+        (clpython.parser::with-source-locations
+            (clpython::with-python-compiler-style-warnings
+                (with-ast-user-readtable ()
+                  (let ((clpython::*muffle-sbcl-compiler-notes* t))
+                    (maybe-with-ldb-backend
+                     (apply #'repl-1 options)))))))))
 
 (defvar *object-repr-char-limit* 300
   "At most this many characters are printed for an object represenation in the REPL (NIL = infinite)")
@@ -194,8 +201,8 @@ KIND can be :ptime, :time, :space, :pspace or NIL."
                (loop repeat 3 do (remember-value *the-none*)))
 	     (run-ast-func (suite)
                (lambda () (let ((clpython::*module-namespace* mod-namespace))
-                            (clpython::run-python-ast suite :module-run-args
-                                                      (list :%module-globals *repl-module-globals*)
+                            (clpython::run-python-ast suite
+                                                      :module-globals *repl-module-globals*
                                                       :compile *repl-compile*
                                                       :compile-quiet t))))
              (nice-one-line-input-abbrev (total)

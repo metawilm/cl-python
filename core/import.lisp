@@ -72,11 +72,11 @@
                             :type *py-compiled-file-type* ))
   
   (:method ((kind (eql :package)) modname filepath)
-           (declare (ignore modname))
            (derive-pathname filepath
+                            :directory `(:relative ,(pathname-name modname :case :common))
                             :type *py-compiled-file-type* 
                             :name *package-indicator-filename*)))
-  
+
 (defun lisp-package-as-py-module (modname)
   "Return Lisp package with given name.
 First a package with that name as subpackage of CLPYTHON.MODULE is searched.
@@ -85,9 +85,8 @@ As for case: both MODNAME's own name its upper-case variant are tried."
   (check-type modname symbol)
   (let ((variants (list (symbol-name modname) (string-upcase modname))))
     (dolist (v variants)
-      (whereas ((pkg (or (find-package (concatenate 'string
-                                         (string (package-name :clpython.module)) "." v))
-                         (find-package v))))
+      (whereas ((pkg (find-package (concatenate 'string
+                                     (string (package-name :clpython.module)) "." v))))
         (return-from lisp-package-as-py-module pkg)))))
 
 (defun find-py-file (name search-paths &key must-be-package)
@@ -96,8 +95,10 @@ Returns values KIND SRC-PATH BIN-PATH FIND-PATH, or NIL if not found,
 with KIND one of :module, :package
       SRC-PATH, BIN-PATH the truenames of the existing files."
   (let ((probe-src-func #'probe-file)
-        (probe-fasl-func (lambda (f) (and (probe-file f)
-                                          #+allegro (excl::check-fasl-magic f nil)))))
+        (probe-fasl-func (lambda (f) (whereas ((path (probe-file f)))
+                                       #+allegro (unless (excl::check-fasl-magic path nil)
+                                                   (setf path nil))
+                                       path))))
     ;; Intention of PROBE-FASL-FUNC is that it also checks the fasl version
     (loop for path in search-paths
         for src-path = (find-if probe-src-func (source-file-names :module name path))
@@ -122,32 +123,50 @@ with KIND one of :module, :package
 (defparameter *import-compile-verbose* #+sbcl nil #-sbcl t)
 (defparameter *import-load-verbose*    t)
 
-(defmacro with-python-code-reader (() &body body)
-  ;; The Python parser handles all reading.
-  `(handler-bind
-       ((error (lambda (c)
-                 (signal c)
-                 ;; ERROR with normal *readtable*, otherwise interactive
-                 ;; debugging becomes impossible.
-                 (with-standard-io-syntax (error c)))))
-     ;; The below SETUP-OMNIVORE-READMACRO can't be shared (e.g. inside LOAD-TIME-VALUE), as
-     ;; it contains state (the initial forms).
-     (let ((*readtable* (setup-omnivore-readmacro :function #'clpython.parser:parse
-                                                  :initial-forms '((in-package :clpython))
-                                                  :readtable (copy-readtable nil))))
-       ,@body)))
+(defun call-with-python-code-reader (initial-forms func)
+  "Let the Python parser handle all reading."
+  (handler-bind
+      ((error (lambda (c)
+                (signal c)
+                ;; ERROR with normal *readtable*, otherwise interactive
+                ;; debugging becomes impossible.
+                (with-standard-io-syntax (error c)))))
+    ;; The below SETUP-OMNIVORE-READMACRO can't be shared (e.g. inside LOAD-TIME-VALUE), as
+    ;; it contains state (the initial forms).
+    (let ((*readtable* (setup-omnivore-readmacro :function #'clpython.parser:parse
+                                                 :initial-forms initial-forms
+                                                 :readtable (copy-readtable nil))))
+      (funcall func))))
 
 (defmacro with-proper-compiler-settings (&body body)
+  `(call-with-proper-compiler-settings (lambda () ,@body)))
+
+(defun call-with-proper-compiler-settings (func)
   "The idea is to save as much debug information as possible."
   #+clpython-source-level-debugging
-  `(let ((compiler:save-source-level-debug-info-switch t)
-         (compiler:save-local-names-switch t)
-         (compiler:tail-call-self-merge-switch nil)
-         (compiler:tail-call-non-self-merge-switch nil))
-     ,@body)
+  (let ((compiler:save-source-level-debug-info-switch t)
+        (compiler:save-local-names-switch t)
+        (compiler:tail-call-self-merge-switch nil)
+        (compiler:tail-call-non-self-merge-switch nil))
+    (funcall func))
   #-clpython-source-level-debugging
-  `(progn ,@body))
-  
+  (funcall func))
+
+(defmacro with-noisy-compiler-warnings-muffled (&body body)
+  `(call-with-noisy-compiler-warnings-muffled (lambda () ,@body)))
+
+(defun call-with-noisy-compiler-warnings-muffled (func)
+  (handler-bind (#+sbcl (sb-int:simple-compiler-note #'muffle-warning)
+                 #+allegro (warning (lambda (c)
+                                      (when (loop for arg in (slot-value c 'excl::format-arguments)
+                                                thereis (and (stringp arg)
+                                                             (search "is incompatible for numeric operation" arg)))
+                                        ;; The compiler macro for != expands into inline guarded to /=.
+                                        ;; When arg is not a number, like for:  if x != 'a'
+                                        ;; this warning will come. Spurious because of the (numberp etc) guard.
+                                        (muffle-warning c)))))
+    (funcall func)))
+
 (defun %compile-py-file (filename &key (mod-name (error ":mod-name required"))
                                        (output-file (error ":output-file required")))
   "Compile Python source file into FASL. Source file must exist.
@@ -158,102 +177,76 @@ Caller is responsible for deciding if recompiling is really necessary."
   (let ((*current-module-path* filename) ;; used by compiler
         (*current-module-name* mod-name))
     (with-auto-mode-recompile (:verbose *import-compile-verbose*)
-      (handler-bind (#+sbcl (sb-int:simple-compiler-note #'muffle-warning))
-        (with-proper-compiler-settings
-          (clpython.parser::with-source-locations
-              (with-python-code-reader ()
-                (compile-file filename
-                              :output-file output-file
-                              :verbose *import-compile-verbose*))))))))
-  
+      (with-noisy-compiler-warnings-muffled
+          (with-proper-compiler-settings
+              (clpython.parser::with-source-locations
+                  (call-with-python-code-reader
+                   `((in-package :clpython)
+                     #+(or)(in-module :name ',mod-name
+                                      :src-pathname ',filename
+                                      :bin-pathname ',output-file))
+                   (lambda ()
+                     (compile-file filename
+                                   :output-file output-file
+                                   :verbose *import-compile-verbose*)))))))))
+
 (defun %load-compiled-python-file (bin-filename
                                    &key (mod-name (error ":mod-name required"))
                                         (context-mod-name mod-name)
                                         (habitat (error "habitat required"))
-                                        (update-existing-mod t))
+                                        #+(or)(update-existing-mod t))
   "Loads and registers given compiled Python file.
-Returns the loaded module, or NIL on error."
+Returns the (updated) loaded module, or NIL on error."
   (check-type bin-filename pathname)
   (check-type mod-name (or symbol string))
   (check-type context-mod-name (or symbol string))
   (assert (probe-file bin-filename))
-  (let* ((old-module (when habitat (get-loaded-module :bin-pathname bin-filename :habitat habitat))))
-    (flet ((do-loading ()
-	     (let* (new-module
-                    module-function
-                    module-source
-                    (*module-function-hook* (lambda (f) (setf module-function f)))
-		    (*module-preload-hook* (lambda (mod)
-                                             (setf new-module mod)
-                                             ;; Need to register module before it is fully loaded,
-                                             ;; otherwise infinite recursion if two modules import
-                                             ;; each other.
-                                             (add-loaded-module mod habitat)))
-                    (*module-source-hook* (lambda (&rest info)
-                                            (setf module-source info))))
-               #-clpython-source-level-debugging
-               (declare (ignorable module-source))
-               
-               (with-auto-mode-recompile (:verbose *import-load-verbose* :restart-name delete-fasl-try-again)
-                 (unless (load bin-filename :verbose *import-load-verbose*)
-                   ;; Might happen if loading fails and there is a restart that lets LOAD return NIL.
-                   (return-from %load-compiled-python-file)))
-               
-               #+(or)
-               (format t "module-function=~A module-source=~A~%" module-function module-source)
-               
-               (if module-function
-                   
-                   (progn
-                     ;; Allegro looks for the .fasl file right next to the source file. When using e.g.
-                     ;; asdf-binary-locations this assumption does not hold, and Allegro fails to load
-                     ;; the source information. By explicitly loading the info from the fasl now,
-                     ;; there's no need for Allegro to look for the fasl file anymore.
-                     #+clpython-source-level-debugging
-                     (excl::load-source-debug-info bin-filename)
-                     
-                     #+(or) ;; debug
-                     (let ((*print-level* 3))
-                       (excl::dump-lisp-source module-function))
-                     
-                     ;; BUGin Allegro beta prevents this IF from working correctly
-                     ;; (if module-source
-                     ;; This REGISTER-... must happen after LOAD of the fasl file, as source information
-                     ;; is not available from the fasl during loading.
-                     #+clpython-source-level-debugging
-                     (apply #'register-python-source module-source)
-                     
-                     (let ((*current-module-name* mod-name))
-                       (declare (special *current-module-name*))
-                       (loop named execute-toplevel
-                           do (with-simple-restart
-                                  (continue "Retry evaluating top-level forms in module `~A'" mod-name)
-                                (funcall module-function)
-                                (return-from execute-toplevel))))
-                     ;; XXX call module-function with :%module-globals if updating existing mod
-                     (unless new-module
-                       (break "CLPython bug: module ~A did not call *module-preload-hook* upon loading"
-                              mod-name))
-                     (when (and old-module update-existing-mod)
-                       (copy-module-contents :from new-module :to old-module)
-                       (setf new-module old-module))
-                     (values new-module t))
-                 (progn (warn "The FASL of module ~A was not produced by CLPython ~
-                               (or CLPython bug: module did not call *module-function-hook*)." mod-name)
-                        (values (make-instance 'module :name "non-Python fasl" :bin-pathname bin-filename)
-                                t))))))
-      (let (new-module success)
-        (unwind-protect
-            (progn (multiple-value-setq (new-module success)
-                     (do-loading))
-                   (assert success) ;; Second value is sanity check
-                   new-module)
-          (unless success
-            ;; Remove exactly this version of the module from the list of loaded modules.
-            ;; If there was an other (older) version of the module, it's still there.
-            (remove-loaded-module :bin-pathname bin-filename
-                                  :bin-file-write-date (file-write-date bin-filename)
-                                  :habitat habitat)))))))
+  
+  (let (module new-module-p success)
+    (unwind-protect
+        (handler-bind ((module-import-pre 
+                        (lambda (c)
+                          ;; Being muffled means condition was intended for an earlier handler,
+                          ;; corresponding to a nested inner import action.
+                          (unless (mip.muffled c)
+                            ;; Need to register module before it is fully loaded,
+                            ;; otherwise infinite recursion if two modules import
+                            ;; each other.
+                            (add-loaded-module (mip.module c) habitat)
+                            (when (mip.module-new-p c)
+                              (setf new-module-p t))
+                            (setf module (mip.module c))
+                            (setf (mip.muffled c) t)))))
+          
+          (with-auto-mode-recompile (:verbose *import-load-verbose* :restart-name delete-fasl-try-again)
+            (unless (load bin-filename :verbose *import-load-verbose*)
+              ;; Might happen if loading errs and there is a restart that lets LOAD return NIL.
+              (return-from %load-compiled-python-file)))
+          
+          ;; Allegro looks for the .fasl file right next to the source file. When using e.g.
+          ;; asdf-binary-locations this assumption does not hold, and Allegro fails to load
+          ;; the source information. By explicitly loading the info from the fasl now,
+          ;; there's no need for Allegro to look for the fasl file anymore.
+          #+clpython-source-level-debugging
+          (excl::load-source-debug-info bin-filename)
+          
+          #+(or) ;; debug
+          (let ((*print-level* 3))
+            (excl::dump-lisp-source module-function))
+          
+          ;; This REGISTER-... must happen after LOAD of the fasl file, as source information
+          ;; is not available from the fasl during loading.
+          #+clpython-source-level-debugging
+          (apply #'register-python-source module-source)
+          
+          #+(or)(add-loaded-module module habitat)
+          (setf success t)
+          
+          module)
+    
+      (unless success
+        (when new-module-p
+          (remove-loaded-module module habitat))))))
 
 (defun module-dotted-name (list-name)
   (format nil "~{~A~^.~}" list-name))
@@ -294,28 +287,40 @@ Used to avoid infinite recompilation/reloading loops.")
 		  &rest options
 		  &key must-be-package
                        (habitat (or *habitat* (error "PY-IMPORT called without habitat")))
-		       (force-reload *import-force-reload*)
+                       (force-reload *import-force-reload*)
                        (force-recompile *import-force-recompile*)
                        within-mod-path
                        within-mod-name
 		       (search-paths (calc-import-search-paths))
                        (%outer-mod-name-as-list mod-name-as-list)
                        (*import-recompiled-files* (or *import-recompiled-files*
-                                                      (make-hash-table :test 'equal))))
-  "Returns the (sub)module, which may have been freshly imported, or raises ImportError."
+                                                      (make-hash-table :test 'equal)))
+                       (if-not-found-value :not-found if-not-found-p))
+  "Returns the (sub)module, which may have been freshly imported.
+If module could not be found and IF-NOT-FOUND is specified, that value is returned.
+Otherwise raises ImportError."
   (declare (special *habitat*)
            (optimize (debug 3)))
   (check-type mod-name-as-list list)
   (check-type habitat habitat)
+  
   ;; Builtin modules are represented by Lisp module child packages of clpython.module
   ;; (e.g. clpython.module.sys).
   (when (= (length mod-name-as-list) 1)
     (whereas ((pkg (lisp-package-as-py-module (car mod-name-as-list))))
-      (return-from py-import pkg)))
+      (return-from py-import (values pkg :lisp-package))))
   
   (let* ((just-mod-name (string (car (last mod-name-as-list))))
-         (dotted-name (module-dotted-name mod-name-as-list)))
-
+         (dotted-name (module-dotted-name mod-name-as-list)) )
+    
+    ;; If name already registered in sys.modules, return it.
+    ;; (Example: os.py sets the "os.path" entry)
+    ;; XXX this should not happen for e.g. module "dist", as that is in either "distutils.dist" or "setuptools.dist".
+    ;; Need to figure out the exact rule; use this dot check for now.
+    (unless force-reload
+      (whereas ((mod (gethash dotted-name (find-symbol-value '#:|modules| :clpython.module.sys))))
+        (return-from py-import (values mod :sys.modules))))
+           
     ;; In case of a dotted import ("import a.b.c"), recursively import the parent "a.b"
     ;; and set the search path to only the location of that package.
     (when (> (length mod-name-as-list) 1)
@@ -355,6 +360,15 @@ Used to avoid infinite recompilation/reloading loops.")
       (multiple-value-bind (kind src-file bin-file find-path)
           (find-py-file just-mod-name find-paths :must-be-package must-be-package)
         (unless kind
+          (when if-not-found-p
+            (return-from py-import (values if-not-found-value :not-found-value)))
+          
+          ;; For "import XYZ", if XYZ names a package, import it. Note that a file named XYZ.py
+          ;; on the search path takes precedence.
+          (when (= (length mod-name-as-list) 1)
+            (whereas ((pkg (find-package (symbol-name (car mod-name-as-list)))))
+              (return-from py-import (values pkg :lisp-package))))
+          
           (maybe-warn-set-search-paths t)
           (py-raise '{ImportError}
                     "Could not find ~A `~A'.~:@_Search paths tried: ~{~S~^, ~_~}~@[~:@_Import ~
@@ -393,7 +407,7 @@ Used to avoid infinite recompilation/reloading loops.")
           (whereas ((m (get-loaded-module :bin-pathname bin-file
                                           :bin-file-write-date (file-write-date bin-file)
                                           :habitat habitat)))
-            (return-from py-import m)))
+            (return-from py-import (values m :already-imported-not-force-reload))))
         
         (let ((new-mod-dotted-name (if (and within-mod-path (eq find-path within-mod-path))
                                        (progn (assert (not (default-module-name-p within-mod-name)))
@@ -408,7 +422,10 @@ Used to avoid infinite recompilation/reloading loops.")
                 (delete-fasl-try-again ()
                     :test (lambda (c)
                             (declare (ignore c))
-                            (and (probe-file src-file) (probe-file bin-file)))
+                            (and src-file 
+                                 bin-file
+                                 (probe-file src-file)
+                                 (probe-file bin-file)))
                     :report (lambda (s) (format s "Recompile and re-import module `~A' ~
                                                    from file ~A" dotted-name src-file))
                   (setf new-module 'recompiling-fasl)
@@ -435,7 +452,7 @@ Used to avoid infinite recompilation/reloading loops.")
                      (log-abort t))
                     (t
                      ;; Imported successfully
-                     (return-from py-import new-module))))))))))
+                     (return-from py-import (values new-module :imported-successfully)))))))))))
 
 (defun builtin-module-attribute (module attr)
   (check-type module symbol)
@@ -454,3 +471,12 @@ Used to avoid infinite recompilation/reloading loops.")
   (check-type path string)
   (whereas ((pathname (probe-file path)))
     (if (directory-p pathname) :directory :file)))
+
+(defun %reset-import-state ()
+  ;; ugly hack
+  (when clpython::*all-modules*
+    (check-type clpython::*all-modules* hash-table)
+    (clrhash clpython::*all-modules*))
+  (whereas ((ht (symbol-value (find-symbol (symbol-name '#:|modules|) :clpython.module.sys))))
+    (check-type ht hash-table)
+    (clrhash ht)))

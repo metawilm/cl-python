@@ -21,7 +21,7 @@
 
 (defun run-python-ast (ast &key (habitat *habitat*)
                                 (compile *compile-python-ast-before-running*)
-                                module-run-args
+                                (module-globals (clpython::make-eq-hash-table "run-python-ast"))
                                 compile-quiet
                                 time
                                 args)
@@ -36,19 +36,26 @@ ARGS are the command-line args, available as `sys.argv'; can be a string or a li
            (fc (if compile
                    (let ((*compile-print* (if compile-quiet nil *compile-print*))
                          (*compile-verbose* (if compile-quiet nil *compile-verbose*)))
-                     (compile nil get-module-f))
+                     ;; Same context as for importing a module
+                     (with-proper-compiler-settings
+                         (with-noisy-compiler-warnings-muffled
+                             (compile nil get-module-f))))
                  (coerce get-module-f 'function))))
       (unless *habitat* (setf *habitat* (make-habitat)))
       (when (or args (null (habitat-cmd-line-args *habitat*)))
         (setf (habitat-cmd-line-args *habitat*) args))
-      (let* (module-function
-             (*module-function-hook* (lambda (f) (setf module-function f))))
-        (funcall fc)
-        (unless module-function
-          (break "Module ~A did not call *module-function*." fc))
-        (if time
-            (time (apply module-function module-run-args))
-          (apply module-function module-run-args))))))
+      (let (result)
+        (handler-bind ((module-import-pre
+                        (lambda (c)
+                          ;; skip initializing module (?)
+                          (check-type module-globals hash-table)
+                          (macrolet ((run () `(setf result (funcall (mip.run-tlv-func c) module-globals))))
+                            (if time
+                                (time (run))
+                              (run)))
+                          (invoke-restart 'abort-loading))))
+          (funcall fc))
+        result))))
 
 (defun compile-py-file (fname &key (verbose t) source-information)
   (let* ((module (pathname-name fname))

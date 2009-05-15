@@ -449,3 +449,17 @@ finally:
       (p "(yield x)")
       (p "(yield x, y)")
       )))
+
+#||
+(run-no-error "
+(defparameter *foo* 42)
+
+assert 42 == #~(or *foo*)")
+
+"
+(in-package :cl-user)
+(in-syntax *python-lisp-readtable*)
+
+(clpython:in-module :src-pathname #p\"foo.py\")
+"
+||#

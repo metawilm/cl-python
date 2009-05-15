@@ -29,6 +29,7 @@
                                                             ,@(when options (list options))))))
 
 (excl.yacc:build-grammar python-grammar nil nil)
+(mop:finalize-inheritance (find-class 'python-grammar))
 
 ;; For lexer
 

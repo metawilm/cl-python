@@ -97,7 +97,7 @@ use the CLTL-like environment accessors in this Lisp: \"~A ~A\"."
         ;; environment. Apparently the problem is not triggered by the current compiler
         ;; set-up, but let's keep the check for now.
         (when (and (null res) (eq var :context))
-          (warn "Env info for var ~S is missing; assuming global scope." var)
+          (break "Env info for var ~S is missing; assuming global scope." var)
           (setf res :module)))
     res))
 

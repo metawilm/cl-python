@@ -62,9 +62,9 @@ are accepted in those libraries."
                                        (:file "compiler"     )
                                        (:file "generator"    )
                                        (:file "optimize"     )
-                                       (:file "run"          )
                                        (:file "habitat"      )
                                        (:file "import"       )
+                                       (:file "run"          )
                                        (:file "executable"   )
                                        
                                        #+(or) ;;(and allegro-version>= (version>= 8 2))

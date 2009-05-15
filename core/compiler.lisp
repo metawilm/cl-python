@@ -1096,13 +1096,14 @@ LOCALS shares share tail structure with input arg locals."
   ;; Returns the imported (sub)modules as multiple values: <module x.y.z>, <module a.b>.
   `(values ,@(loop for (mod-name-as-list bind-name) in items
                  for top-name = (car mod-name-as-list)
-                 collect `(let* ((args (list :within-mod-path (when src-module-path
-                                                                (derive-pathname src-module-path))
-                                             :within-mod-name module-name))
+                 collect `(let* ((args (list :within-mod-path ',(careful-derive-pathname *compile-file-truename* nil)
+                                             :within-mod-name ',*current-module-name*))
                                  (top-module (apply #'py-import '(,top-name)
                                                     :must-be-package ,(not (null (cdr mod-name-as-list)))
                                                     args))
-                                 (deep-module (apply #'py-import ',mod-name-as-list args)))
+                                 (deep-module ,(if (cdr mod-name-as-list)
+                                                   `(apply #'py-import ',mod-name-as-list args)
+                                                 `top-module)))
                             ([assign-stmt] top-module
                                            (([identifier-expr] ,(or bind-name top-name))))
                             deep-module))))
@@ -1110,11 +1111,13 @@ LOCALS shares share tail structure with input arg locals."
 (defvar *inside-import-from-stmt* nil)
 
 (defmacro [import-from-stmt] (mod-name-as-list items &environment e)
-  `(let ((m (py-import '(,(car mod-name-as-list)) :within-mod-path src-module-path)))
+  `(let* ((args (list :within-mod-path ',(careful-derive-pathname *compile-file-truename* nil)
+                      :within-mod-name ',*current-module-name*))
+          (m (apply #'py-import '(,(car mod-name-as-list)) args)))
      (declare (ignorable m)) ;; Ensure topleve module is imported relative to current mod
      (whereas ((mod-obj ,(if (= (length mod-name-as-list) 1)
                              'm
-                           `(py-import ',mod-name-as-list))))
+                           `(apply #'py-import ',mod-name-as-list args))))
        ,(case items
           ([*] (assert (typep (get-pydecl :namespace e) 'hash-table-ns)
                    () "Can't do `from .. import *' in this namespace: ~A."
@@ -1184,82 +1187,143 @@ LOCALS shares share tail structure with input arg locals."
 
 (defparameter *muffle-sbcl-compiler-notes* nil)
 
-(defmacro [module-stmt] (suite)
-  "If *MODULE-NAMESPACE* is bound, it is used."
-  (assert *current-module-name* (*current-module-name*)
-    "~S is unbound - should be the module currently being compiled." *current-module-name*)
-  (let ((module-function-name (intern (format nil "module-function-~A" *current-module-name*) #.*package*))
-        #+clpython-source-level-debugging
-        (python-source-info (module-suite-source-info suite)))
-    `(progn (defun ,module-function-name
-                (&key (%module-globals (make-eq-hash-table "module"))
-                      (call-preload-hook t)
-                      ;; The dotted name, used as module.__name__ and its __repr__
-                      (module-name (or *current-module-name* ;; load time
-                                       ',*current-module-name*)) ;; compile time
-                      ;; Determine source location at compile time
-                      (src-module-path ,(when *compile-file-truename*
-                                          (derive-pathname *compile-file-truename*)))
-                      (src-file-write-date ,(when *compile-file-truename*
-                                              (file-write-date *compile-file-truename*)))
-                      ;; Determine fasl location at load time 
-                      (bin-module-path (load-time-value *load-truename*))
-                      (bin-file-write-date (load-time-value (when *load-truename*
-                                                              (file-write-date *load-truename*)))))
-              ;; GLOBALS-HANDLER determines how references to globals (module-level variables) are handled.
-              ;; INITIAL-GLOBALS is an alist containing pre-set global variables: ((sym . val) ..)
-              ;; CALL-PRELOAD-HOOK specifies whether *module-preload-hook* is called before the body is run.
-              ;; MODULE-NAME is stored in __name__.
-              (declare (optimize (debug 3))
-                       #+clpython-source-level-debugging
-                       (pydecl (:python-source-info ,python-source-info)))
-              (with-pydecl ((:context :module)
-                            #+(or)(:mod-futures  :todo-parse-module-ast-future-imports)) ;; todo
-                (let* ((*habitat* (or *habitat* (make-habitat))))
-                  (with-namespace (,(or *module-namespace*
-                                        (make-hash-table-ns
-                                         :dict-form '%module-globals
-                                         :scope :module
-                                         :parent (make-builtins-namespace)))
-                                   :define-%globals t)
-                    (let ((*module-namespace* nil))
-                      (namespace-set {__name__} module-name)
-                      (namespace-set {__debug__} +the-true+)
-                      
-                      (when (and call-preload-hook (boundp '*module-preload-hook*))
-                        (let ((%module (make-instance 'module
-                                         :name module-name
-                                         :src-pathname src-module-path
-                                         :bin-pathname bin-module-path
-                                         :src-file-write-date src-file-write-date
-                                         :bin-file-write-date bin-file-write-date
-                                         :namespace-ht %module-globals)))
-                          (funcall *module-preload-hook* %module)))
-                      
-                      (with-py-errors (:name (python-module ,*current-module-name*))
-                        (locally (declare #+sbcl ,@(when *muffle-sbcl-compiler-notes*
-                                                     `((sb-ext:muffle-conditions sb-ext:compiler-note))))
-                          ,suite)))))))
+(defvar *compile-time-module-name* nil)
 
-            #+clpython-source-level-debugging
-            ,@(when (and python-source-info *current-module-path*) ;; *c-m-path* is nil in REPL
-                ;; Cannot include ',python-source-info literally in the source, as that turns out un-EQ
-                ;; to the Lisp source forms in the Lisp source records. Storing it in the declaration
-                ;; keeps it EQ, however, so that's where REGISTER-PYTHON-SOURCE retrieves it.
-                `((when *module-source-hook*
-                    (funcall *module-source-hook*
-                             :module-function (symbol-function ',module-function-name)
-                             :source-path ,(truename *current-module-path*)
-                             :source ,(slurp-file *current-module-path*)))))
-            
-            ;; Module registration
-            (if *module-function-hook*
-                (funcall *module-function-hook* (symbol-function ',module-function-name)) ;; imported by Python code
-              (progn ;; importing of fasl using (load ..)
-                ,(when *current-module-path*
-                   `(format t ";;; Executing Python top-level forms (source: ~A)~%" ',(truename *current-module-path*)))
-                (funcall ',module-function-name)))
-            (values))))
+(defvar %compile-time-module% nil
+  "For compilation use")
+
+
+(define-condition module-import-pre ()
+  ((module :initarg :module :accessor mip.module)
+   (module-new-p :initarg :module-new-p :accessor mip.module-new-p)
+   (source :initarg :source :accessor mip.source)
+   (init-func :initarg :init-func :accessor mip.init-func)
+   (run-tlv-func :initarg :run-tlv-func :accessor mip.run-tlv-func)
+   (muffled :initform nil :accessor mip.muffled)))
+
+(defmethod print-object ((x module-import-pre) stream)
+  (print-unreadable-object (x stream :type t)
+    (format stream ":module ~A" (mip.module x))))
+
+(defvar *load-file->module* (make-hash-table :test 'equal)
+  "Mapping from loading file name to Python module")
+
+(defmacro in-module (&rest args)
+  `(eval-when (:load-toplevel :execute)
+     (in-module-1 ,@args)))
+
+(defun in-module-1 (&rest args)
+  "Ensures the module exists"
+  (unless *load-truename*
+    (break "*LOAD-TRUENAME* is not set?!"))
+  (setf (gethash (derive-pathname *load-truename*) *load-file->module*)
+    (apply #'ensure-module args))
+  (unless *habitat*
+    (warn "IN-MODULE-1: Creating *habitat*")
+    (setf *habitat* (make-habitat))))
+
+(defun careful-derive-pathname (pathname default)
+  (if pathname
+      (derive-pathname pathname)
+    default))
+  
+(defmacro init-module-namespace (module-name)
+  `(progn (namespace-set {__name__} ,module-name)
+          (namespace-set {__debug__} +the-true+)))
+
+(defmacro with-module-toplevel-context (() &body body)
+  ;; Consider *module-namespace* ?
+  `(with-pydecl ((:context :module))
+     (with-namespace (,(make-hash-table-ns
+                        :dict-form '%module-globals
+                        :scope :module
+                        :parent (make-builtins-namespace))
+                      :define-%globals t)
+       ,@body)))
+
+;;; TODO: parse __future__ imports
+
+(defmacro with-stmt-decl (() &body body)
+  `(locally (declare #+sbcl ,@(when *muffle-sbcl-compiler-notes*
+                                `((sb-ext:muffle-conditions sb-ext:compiler-note))))
+     ,@body))
+
+(defun module-init (&key src-pathname bin-pathname current-module-name defun-wrappers source)
+  (multiple-value-bind (module module-new-p)
+      (ensure-module :src-pathname src-pathname :bin-pathname bin-pathname)
+    (let ((%module-globals (module-ht module)))
+      (check-type %module-globals hash-table)
+      (flet ((init-module ()
+               (with-module-toplevel-context ()
+                 (init-module-namespace current-module-name)))
+             (run-top-level-forms (&optional module-globals)
+               (let (result (i -1))
+                 (dolist (f defun-wrappers result)
+                   (loop named tlf
+                       do #+(or)(format t "Evaluating top-level form ~A in ~A~%" (incf i) current-module-name)
+                          (with-simple-restart (retry "Retry evaluating this top-level form in module `~A'"
+                                                      current-module-name)
+                            (setf result (funcall f (or module-globals %module-globals)))
+                            (return-from tlf)))))))
+        ;; Give outer function a chance to influence module loading actions:
+        (restart-case
+            (progn (signal 'module-import-pre
+                           :module module
+                           :module-new-p module-new-p
+                           :source source
+                           :init-func #'init-module
+                           :run-tlv-func #'run-top-level-forms)
+                   ;; If not overruled, take the normal loading steps:
+                   (invoke-restart 'continue-loading
+                                   :init module-new-p
+                                   :run-tlv t
+                                   :globals %module-globals))
+          (continue-loading (&key (init t) (run-tlv t) (globals %module-globals))
+            (check-type globals hash-table)
+            (setf %module-globals globals)
+            (when init
+              (init-module))
+            (when run-tlv
+              (run-top-level-forms))
+            t)
+          (abort-loading ()
+            nil))))))
+    
+(defmacro [module-stmt] (suite &environment e)
+  (declare (ignorable e))
+  (assert ([suite-stmt-p] suite))
+  "If *MODULE-NAMESPACE* is bound, it is used."
+  (flet ((wrap-in-funcs ()
+           "Reason for wrapping top-level forms in functions, is that Allegro's upcoming
+            source-level debugging probably only works for code inside defuns."
+           (loop for stmt in (with-matching (suite ([suite-stmt] ?stmts))
+                               ?stmts)
+               for i from 0
+               for func-name = (make-symbol (format nil "stmt-~A" i))
+               collect (list `(defun ,func-name (%module-globals)
+                                (declare (optimize debug))
+                                (with-module-toplevel-context ()
+                                  (with-py-errors (:name (python-module ,*current-module-name*))
+                                    (with-stmt-decl ()
+                                      ,stmt))))
+                             func-name))))
+    (let ((module-function-name (make-symbol (format nil "~A.__module_init__" *current-module-name*)))
+          (defun-wrappers (wrap-in-funcs)))
+      `(progn
+         ,@(mapcar #'first defun-wrappers) ;; One function for each top-level form
+         
+         (defun ,module-function-name ()
+           (declare (optimize debug))
+           #+clpython-source-level-debugging
+           (declare (pydecl (:python-source-info ,(module-suite-source-info suite))))
+           
+           (module-init :src-pathname ,(careful-derive-pathname *compile-file-truename* nil)
+                        :bin-pathname (load-time-value (careful-derive-pathname *load-truename* #P"__main__"))
+                        :current-module-name ,*current-module-name*
+                        :defun-wrappers ',(mapcar #'second defun-wrappers)
+                        :source ,(when *compile-file-truename*
+                                   (slurp-file (derive-pathname *compile-file-truename*)))))
+         (funcall ',module-function-name)))))
 
 (defmacro [pass-stmt] ()
   nil)

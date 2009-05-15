@@ -64,13 +64,12 @@
                                src-file-write-date bin-file-write-date
                                habitat)
   (check-type habitat habitat)
-  (loop for m in (habitat-loaded-mods habitat)
+  (loop named search
+      for m in (habitat-loaded-mods habitat)
       when (and (or (null src-pathname)
-                    (progn (check-type src-pathname pathname)
-                           (equal (module-src-pathname m) src-pathname)))
+                    (pathname-considered-equal (module-src-pathname m) src-pathname))
                 (or (null bin-pathname)
-                    (progn (check-type bin-pathname pathname)
-                           (equal (module-bin-pathname m) bin-pathname)))
+                    (pathname-considered-equal (module-bin-pathname m) bin-pathname))
                 (or (null src-file-write-date)
                     (= (module-src-file-write-date m) src-file-write-date))
                 (or (null bin-file-write-date)
@@ -80,17 +79,21 @@
 (defun add-loaded-module (module habitat)
   (check-type module module)
   (check-type habitat habitat)
-  ;; In general, don't remove the old module with same pathnames:
-  ;; when re-import goes wrong, the new failed module is popped,
-  ;; so the old one is available again.
-  (remove-loaded-module :src-pathname (module-src-pathname module)
-                        :bin-pathname (module-bin-pathname module)
-                        :habitat habitat)
+  (remove-loaded-module module habitat)
   (push module (habitat-loaded-mods habitat))
   (setf (gethash (module-name module) (builtin-module-attribute 'sys "modules")) module))
 
-(defun remove-loaded-module (&rest args &key habitat &allow-other-keys)
-  (whereas ((m (apply #'get-loaded-module args)))
-    (setf (habitat-loaded-mods habitat)
-      (remove m (habitat-loaded-mods habitat)))
-    (remhash (module-name m) (builtin-module-attribute 'sys "modules"))))
+(defun remove-loaded-module (module habitat)
+  (setf (habitat-loaded-mods habitat)
+    (remove (module-bin-pathname module) (habitat-loaded-mods habitat)
+            :key #'module-bin-pathname
+            :test #'pathname-considered-equal))
+  (remhash (module-name module) (builtin-module-attribute 'sys "modules")))
+
+(defun pathname-considered-equal (x y)
+  (check-type x pathname)
+  (check-type y pathname)
+  (if (and (probe-file x)
+           (probe-file y))
+      (equal (truename x) (truename y))
+    (string-equal (namestring x) (namestring y))))

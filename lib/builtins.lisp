@@ -380,12 +380,11 @@ None, use identity function (multiple sequences -> list of tuples)."
 (defun {reload} (m &optional (verbose 1))
   ;; VERBOSE is not a CPython argument
   ;; XXX Not sure these are the right semantics.
-  (let* ((*import-force-recompile* t)
-         #+(or)(*import-force-reload* t)
+  (let* ((*import-force-reload* t)
          (v (py-val->lisp-bool verbose))
          (*import-compile-verbose* v)
          (*import-load-verbose*    v)
-         (mod-name-as-symbol-list (list (py-string-val->symbol (slot-value m 'name)))))
+         (mod-name-as-symbol-list (list (py-string-val->symbol (slot-value m 'name))))) ;; XXX only works for toplevel modules
     ;; XXX should recompile certain pathname, not modulename
     (let ((new-mod (funcall 'py-import mod-name-as-symbol-list)))
       (copy-module-contents :from new-mod :to m)

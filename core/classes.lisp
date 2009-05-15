@@ -1435,7 +1435,7 @@ but the latter two classes are not in CPython.")
 ;;; Module
 
 (defclass module (dicted-object)
-  ((namespace-ht   :initarg :namespace-ht :accessor module-ht)
+  ((namespace-ht   :initarg :namespace-ht :accessor module-ht :initform (make-eq-hash-table "module"))
    (name           :initarg :name           
 		   :type string
 		   :initform "__main__" 
@@ -1448,18 +1448,68 @@ but the latter two classes are not in CPython.")
                    :type (or pathname null))
    (bin-pathname   :initarg :bin-pathname :initform nil :accessor module-bin-pathname
                    :type (or pathname null))
-   (src-file-write-date :initarg :src-file-write-date :accessor module-src-file-write-date)
-   (bin-file-write-date :initarg :bin-file-write-date :accessor module-bin-file-write-date))
+   (src-file-write-date :initarg :src-file-write-date :initform nil :accessor module-src-file-write-date)
+   (bin-file-write-date :initarg :bin-file-write-date :initform nil :accessor module-bin-file-write-date))
   (:metaclass py-type))
+
+;;; Keep a registry of all loaded modules.
+
+(defvar *all-modules* (make-weak-key-hash-table :test 'eq))
+
+(defmethod initialize-instance :after ((m module) &rest args)
+  (declare (ignore args))
+  (with-slots (name src-pathname src-file-write-date bin-pathname bin-file-write-date namespace-ht)
+      m
+    (when (and src-pathname (not src-file-write-date))
+      (assert (probe-file src-pathname))
+      (setf src-file-write-date (file-write-date src-pathname)))
+    (when (and bin-pathname (not bin-file-write-date))
+      (unless (string-equal (namestring bin-pathname) "__main__") ;; XXX ugly
+        (assert (probe-file (probe-file bin-pathname)))
+        (setf bin-file-write-date (file-write-date bin-pathname))))
+    (when (string= name "__main__")
+      (setf name (pathname-name (or src-pathname bin-pathname)))))
+  (check-type (module-ht m) hash-table)
+  (setf (gethash m *all-modules*) t))
+
+(defun find-module-fuzzy (x)
+  (etypecase x
+    (module
+     x)
+    (string
+     (find-module-fuzzy (pathname x)))
+    (pathname
+     (or (find-module :src-pathname x)
+         (find-module :bin-pathname x)))))
+
+(defun find-module (&key src-pathname bin-pathname)
+  (loop for m being the hash-key in *all-modules*
+      when (or (and src-pathname (equalp (module-src-pathname m) src-pathname))
+               (and bin-pathname (equalp (module-bin-pathname m) bin-pathname)))
+      return m))
+
+(defun ensure-module (&rest args)
+  "Returns MODULE, NEW-P"
+  (or (apply #'find-module :allow-other-keys t args)
+      (values (apply #'make-instance 'module args) t)))
+
+(defmethod make-load-form ((m module) &optional environment)
+  (declare (ignore environment))
+  `(ensure-module :name ',(module-name m)
+                  :src-pathname ,(module-src-pathname m)
+                  :bin-pathname ,(module-bin-pathname m)
+                  :packagep ,(module-package-p m)))
+
 
 (def-py-method module.__repr__ (x^)
   (with-output-to-string (s)
     (print-unreadable-object (x s :identity t)
-      (with-slots (name builtinp src-pathname bin-pathname) x
+      (with-slots (name builtinp src-pathname bin-pathname src-file-write-date bin-file-write-date) x
         (if builtinp
             (format s "builtin module `~A'" name)
-          (format s "module `~A'~_ Src: ~A~_ Binary: ~A"
-                  name src-pathname bin-pathname))))))
+          (format s "module `~A'~_ :src ~S~_ :binary ~S~_ :src-time ~A :bin-time ~A"
+                  name src-pathname bin-pathname
+                  src-file-write-date bin-file-write-date))))))
 
 (def-py-method module.path (x)
   (string (or (module-src-pathname x) (module-bin-pathname x) "<unknown source location>")))
@@ -1507,7 +1557,11 @@ but the latter two classes are not in CPython.")
     (or (gethash attr.sym (module-ht x))
         ;; should be coupled to the namespace
         (builtin-value attr)
-        (py-raise '{AttributeError} "Module ~A has no attribute ~A." x attr))))
+        (py-import (list attr.sym)
+                   :within-mod-name (module-name x)
+                   :within-mod-path (module-src-pathname x)
+                   :if-not-found-value nil)
+        (py-raise '{AttributeError} "Module ~A has no attribute `~A'." x attr))))
 
 (def-py-method module.__setattr__ (x^ attr val)
   (when (slot-value x 'builtinp)
@@ -1655,6 +1709,13 @@ But if RELATIVE-TO package name is given, result may contains dots."
          (symbol-function sym))
         ((find-class sym nil))
         (t nil)))
+
+(defun find-symbol-value (symbol pkg)
+  (let ((sym (or (find-symbol (symbol-name symbol) (or (find-package pkg)
+                                                       (error "No such package: ~A." pkg)))
+                 (error "Symbol ~S not found in package ~A." symbol pkg))))
+    (or (bound-in-some-way sym)
+        (error "Symbol ~A not bound in any way." sym))))
 
 (def-py-method lisp-package.__setattr__ (pkg name new-val)
   ;; Only allowed when symbol denotes writable attribute.
