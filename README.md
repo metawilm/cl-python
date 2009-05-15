@@ -47,4 +47,3 @@ There are two mailing lists, both low-traffic:
 
 * [clpython-devel](http://common-lisp.net/cgi-bin/mailman/listinfo/clpython-devel) for general discussion and bug reports;
 * [clpython-announce](http://common-lisp.net/cgi-bin/mailman/listinfo/clpython-announce) for announcements of new releases.
-
