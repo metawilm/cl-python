@@ -137,8 +137,7 @@ CLASSDEF, FUNCDEF or LAMBDA."
   
   (defparameter *allowed-node-tg/val* '(+normal-value+ +normal-target+ +suite+
                                         +namespace-suite+ +global-decl-target+
-                                        +augassign-target/value+ +delete-target+
-                                        +suite+ +namespace-suite+))
+                                        +augassign-target/value+ +delete-target+))
 ) ;; eval-when
 
 (defmacro def-ast-node (node args &rest options)
