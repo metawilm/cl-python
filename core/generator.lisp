@@ -198,9 +198,11 @@ former requires that this form is executed within RECEIVE-YIELDED-VALUE."
 (defun raise-stop-iteration () 
   (py-raise '{StopIteration} "Generator is finished."))
 
-(defmacro %cps-convert (ast k)
-  (cond ((null ast)
+(defmacro %cps-convert (ast k &key nil-allowed)
+  (cond ((and (null ast) (not nil-allowed))
          (break "%CPS-CONVERT of NIL (k=~S)" k))
+        ((null ast)
+         `(funcall ,k ,ast))
         ((listp ast)
          (cond ((eq (car ast) :do-not-cps-convert)
                 `(progn ,@(cdr ast)
@@ -382,13 +384,14 @@ former requires that this form is executed within RECEIVE-YIELDED-VALUE."
     (loop for (k v) on (reverse vk-list) by #'cddr
         do (setf res `(%cps-convert ,v
                           (lambda (v) (sub/dict-set .dict ,k v) ,res))))
-    (setf res `(let ((.dict (make-dict)))
+    (setf res `(let ((.dict (make-py-hash-table)))
                  ,res))
     res))
 
 (def-cps-macro [exec-stmt] (&rest args)
-   `(with-pydecl ((:ignore-cps-hook t))
-       ([exec-stmt] ,@args)))
+  `(progn (with-pydecl ((:ignore-cps-hook t))
+            ([exec-stmt] ,@args))
+          (%call-continuation)))
 
 (def-cps-macro [for-in-stmt] (target source suite else-suite)
   `(let ((stmt-k ,%current-continuation))
@@ -438,9 +441,8 @@ former requires that this form is executed within RECEIVE-YIELDED-VALUE."
 
 (def-cps-macro [identifier-expr] (name)
   (check-type name symbol)
-  (%call-continuation
-   `(with-pydecl ((:ignore-cps-hook t))
-                 ([identifier-expr] ,name))))
+  (%call-continuation `(with-pydecl ((:ignore-cps-hook t))
+                         ([identifier-expr] ,name))))
 
 (def-cps-macro [if-expr] (condition then else)
   `(%cps-convert ,condition
@@ -462,8 +464,16 @@ former requires that this form is executed within RECEIVE-YIELDED-VALUE."
                                               ,res)))))
           res))))
 
-;; [import-stmt] : keep
-;; [import-from-stmt] : keep
+(def-cps-macro [import-stmt] (&rest args)
+  `(progn (with-pydecl ((:ignore-cps-hook t))
+            ([import-stmt] ,@args))
+          (%call-continuation)))
+
+(def-cps-macro [import-from-stmt] (&rest args)
+  `(progn (with-pydecl ((:ignore-cps-hook t))
+            ([import-from-stmt] ,@args))
+          ,(%call-continuation)))
+
 ;; [lambda-expr] : keep -- goes to our [funcdef-stmt]
 
 (def-cps-macro [listcompr-expr] (item for-in/if-clauses)
@@ -516,10 +526,12 @@ former requires that this form is executed within RECEIVE-YIELDED-VALUE."
     res))
 
 (def-cps-macro [raise-stmt] (exc var tb)
-  `(%cps-convert ,exc (lambda (.exc)
-                       ,(if tb
-                            `(%cps-convert ,tb (lambda (.tb) (raise-stmt-1 ,exc ,var .tb)))
-                          `(raise-stmt-1 ,exc ,var ,tb)))))
+  (if exc
+      `(%cps-convert ,exc (lambda (.exc)
+                            ,(if tb
+                                 `(%cps-convert ,tb (lambda (.tb) (raise-stmt-1 ,exc ,var .tb)))
+                               `(raise-stmt-1 ,exc ,var ,tb))))
+    `(raise-stmt-1 ,exc ,var ,tb)))
   
 (def-cps-macro [return-stmt] (&optional value &environment e)
   ;; VALUE can be given, if this is inside a generator.
@@ -530,7 +542,19 @@ former requires that this form is executed within RECEIVE-YIELDED-VALUE."
         (t 
          (%mark-generator-finished))))
 
-;; [slice-expr] : keep
+(def-cps-macro [slice-expr] (start stop step)
+    `(%cps-convert ,start
+                   (lambda (.start)
+                     (%cps-convert ,stop
+                                   (lambda (.stop)
+                                     (%cps-convert ,step
+                                                   (lambda (.step)
+                                                     ,(%call-continuation
+                                                       `(with-pydecl ((:ignore-cps-hook t))
+                                                          ([slice-expr] .start .stop .step))))
+                                                   :nil-allowed t))
+                                   :nil-allowed t))
+                   :nil-allowed t))
 
 (def-cps-macro [subscription-expr] (item subs)
   `(%cps-convert ,item (lambda (.item)
