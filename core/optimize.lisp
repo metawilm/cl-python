@@ -235,7 +235,7 @@
       `(let ((.x ,x)
              (.y ,y))
          (if (and (numberp .x) (numberp .y))
-             (py-bool (= (the integer .x) (the integer .y)))
+             (py-bool (= (the number .x) (the number .y)))
            (locally (declare (notinline py-==))
              (py-== .x .y))))
     whole))
