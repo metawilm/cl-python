@@ -45,11 +45,15 @@
 (defvar |copyright| "Copyright (c) Franz Inc. and Willem Broekema.")
 (set-impl-status '|copyright| t)
 
-(defvar |builtin_module_names| *the-empty-tuple*
-  #+(or)(clpython::make-tuple-from-list
-	 (loop for hk being the hash-value in clpython::*builtin-modules*
-	     collect (string (clpython::py-module-name hk)))))
-(set-impl-status '|builtin_module_names| :incomplete "Currently always return empty list.")
+(defvar *implementation* "posix"
+  ;; Let's see if we can get away with always setting this to "posix".
+  "Identifier for implementation-specific path behaviour. Must be one of: 'mac', 'posix', 'nt', 'os2', 'c2', 'riscos'.
+The corresponding module must be defined as package, e.g. :clpython.module.posix")
+
+(defvar |builtin_module_names| 
+    (make-tuple-from-list (list *implementation*)))
+
+(set-impl-status '|builtin_module_names| t)
 
 (defvar |displayhook| *the-none*
   "Func of one arg, called by REPL to print val")
