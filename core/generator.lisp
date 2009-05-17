@@ -529,8 +529,8 @@ former requires that this form is executed within RECEIVE-YIELDED-VALUE."
   (if exc
       `(%cps-convert ,exc (lambda (.exc)
                             ,(if tb
-                                 `(%cps-convert ,tb (lambda (.tb) (raise-stmt-1 ,exc ,var .tb)))
-                               `(raise-stmt-1 ,exc ,var ,tb))))
+                                 `(%cps-convert ,tb (lambda (.tb) (raise-stmt-1 .exc ,var .tb)))
+                               `(raise-stmt-1 .exc ,var ,tb))))
     `(raise-stmt-1 ,exc ,var ,tb)))
   
 (def-cps-macro [return-stmt] (&optional value &environment e)
