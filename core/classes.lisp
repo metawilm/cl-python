@@ -1644,14 +1644,14 @@ But if RELATIVE-TO package name is given, result may contains dots."
          (unbound-error ()
            (if writable-attr-ok
                (return-from lisp-package.__getattribute__ nil)
-             (py-raise '{AttributeError}
+             (py-raise (if *inside-import-from-stmt* '{ImportError} '{AttributeError})
                        "Attribute `~A' of module `~A' is unbound."
                        name (relative-package-name pkg))))
          
          (no-attr-error ()
            (if writable-attr-ok
                (return-from lisp-package.__getattribute__ nil)
-             (py-raise '{AttributeError}
+             (py-raise (if *inside-import-from-stmt* '{ImportError} '{AttributeError})
                        "Module `~A' (Lisp package ~A) has no attribute named `~A'."
                        (relative-package-name pkg) pkg name)))
 

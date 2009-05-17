@@ -1104,6 +1104,8 @@ LOCALS shares share tail structure with input arg locals."
                                            (([identifier-expr] ,(or bind-name top-name))))
                             deep-module))))
 
+(defvar *inside-import-from-stmt* nil)
+
 (defmacro [import-from-stmt] (mod-name-as-list items &environment e)
   `(let ((m (py-import '(,(car mod-name-as-list)) :within-mod-path src-module-path)))
      (declare (ignorable m)) ;; Ensure topleve module is imported relative to current mod
@@ -1118,7 +1120,8 @@ LOCALS shares share tail structure with input arg locals."
                     do (namespace-set-runtime (ensure-user-symbol k) v)))
           (t `(progn
                 ,@(loop for (item bind-name) in items
-                      collect `([assign-stmt] ([attributeref-expr] mod-obj ([identifier-expr] ,item))
+                      collect `([assign-stmt] (let ((*inside-import-from-stmt* t))
+                                                ([attributeref-expr] mod-obj ([identifier-expr] ,item)))
                                               (([identifier-expr] ,(or bind-name item)))))))))))
        
 (defmacro [lambda-expr] (args expr)
