@@ -266,3 +266,10 @@
   (:export #:repl #:*repl-compile* #:*repl-prof*
            #:return-python-toplevel #:*repl-module-globals*)
   (:import-from :clpython #:with-matching))
+
+;; Ensure that CLPython starts with repl's symbol, for code that uses :clpython
+;; and has the symbol 'repl somewhere.
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (import 'clpython.app.repl:repl :clpython))
+
+  

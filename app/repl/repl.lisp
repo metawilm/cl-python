@@ -12,10 +12,6 @@
 (in-package :clpython.app.repl)
 (in-syntax *ast-user-readtable*)
 
-(eval-when (:compile-toplevel :load-toplevel :execute)
-  (import 'clpython.app.repl:repl :clpython)
-  (export 'clpython.app.repl:repl :clpython))
-
 ;;; Restarts
 
 #+allegro
