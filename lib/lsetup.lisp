@@ -26,6 +26,10 @@
   (:export #:|disable| )
   (:import-from :clpython #:*try-except-currently-handled-exception*))
 
+(defpackage :clpython.module.imp
+  (:use :clpython :common-lisp)
+  (:export #:|get_magic| #:|find_module| #:|load_module|))
+
 (defpackage :clpython.module.math
   (:use :clpython :common-lisp)
   (:export #:|pi| #:|e|
@@ -87,6 +91,9 @@
            #:|readlink| #:|remove| #:|removedirs| #:|rename| #:|renames| #:|rmdir|
            #:|stat| #:|stat_float_times| #:|statvfs| #:|symlink| #:|tempnam| #:|tmpnam|
            #:|TMP_MAX| #:|unlink| #:|utime| #:|walk| ))
+
+(defpackage :clpython.module.posix
+  (:use :clpython :common-lisp))
 
 (defpackage :clpython.module._random
   (:use :clpython :common-lisp)
