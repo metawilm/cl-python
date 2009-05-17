@@ -27,8 +27,8 @@ There are dependencies on:
 Install
 -------
 
-To compile and load CLPython you need [asdf](http://www.cliki.net/asdf): first create a link from
-the repository to file _clpython.asd_, then load the system:
+To compile and load CLPython you need [asdf](http://www.cliki.net/asdf). First create a link from
+the repository to files _clpython.asd_ and _clpython-test.asd_. Then load the system:
 
     (asdf:operate 'asdf:load-op :clpython)
 
