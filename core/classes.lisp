@@ -1624,7 +1624,8 @@ But if RELATIVE-TO package name is given, result may contains dots."
       (py-raise '{AttributeError} "Attribute `~A' of package ~A is not writable." name pkg))))
          
 (def-py-method lisp-package.__getattribute__ (pkg name &key writable-attr-ok)
-  (declare (optimize (speed 3) (safety 0) (debug 0)))
+  (declare (optimize (speed 3) (safety 0) (debug 0))
+           (special *inside-import-from-stmt*))
   (assert (stringp name))
   (flet ((todo-error ()
            (if writable-attr-ok
