@@ -17,6 +17,14 @@
   (:use :clpython :common-lisp)
   (:export #:|hexlify|))
 
+(defpackage :clpython.module.cStringIO
+  (:use :common-lisp)
+  (:export ))
+
+(defpackage :clpython.module.errno
+  (:use :common-lisp)
+  (:export ))
+
 (defpackage :clpython.module.exceptions
   (:use :common-lisp)
   (:export #:|ValueError| #:|SyntaxError|))
@@ -44,56 +52,13 @@
   (:export) ;; symbols will be filled upon package loading
   (:shadow #:|eq| #:|mod| #:|index| #:|abs| #:|not|))
 
-(defpackage :clpython.module.os
-  (:use :clpython :common-lisp)
-  (:export #:|name|
-           #:|path|
-           #:|error| #:|strerror|
-           #:|confstr| #:|confstr_names| #:|getloadavg| #:|sysconf| #:|sysconf_names|
-           #:|curdir| #:|pardir| #:|sep| #:|altsep| #:|extsep| #:|pathsep| #:|defpath|
-           #:|linese| #:|devnull|
-           #:|urandom|
-
-           ;; OS functionality
-           #:|environ| #:|getenv| #:|putenv| #:|unsetenv|
-           #:|ctermid|
-           #:|umask| #:|uname|
-           
-           #:|getegid| #:|geteuid| #:|getgid| #:|getgroups| #:|getlogin| #:|getpgid|
-           #:|getpgrp| #:|getpid| #:|getppid| #:|getuid|
-           #:|setegid| #:|seteuid| #:|setgroups| #:|setpgrp| #:|setpgid| #:|setreuid|
-           #:|setregid| #:|getsid| #:|setsid| #:|setuid|
-
-           #:|abort| #:|execl| #:|execle| #:|execlp| #:|execlpe| #:|execv| #:|execve|
-           #:|execvp| #:|execvpe| #:|_exit| #:|fork| #:|forkpty| #:|kill| #:|killpg|
-           #:|nice| #:|plock| #:|popen| #:|popen2| #:|popen3| #:|popen3| #:|popen4|
-           #:|spawnl| #:|spawnle| #:|spawnlp| #:|spawnlpe| #:|spawnv| #:|spawnve|
-           #:|spawnvp| #:|spawnvpe| #:|startfile| #:|system| #:|times| #:|wait|
-           #:|waitpid| #:|wait3| #:|wait4|
-
-           ;; File handling (14.1.1)
-           #:|fdopen| #:|tmpfile|
-           
-           #:|close| #:|dup| #:|dup2| #:|fdatasync| #:|fpathconf| #:|fstat| #:|fstatvfs|
-           #:|fsync| #:|ftruncate| #:|isattylseek| #:|open| #:|openpty| #:|pipe| #:|read|
-           #:|tcgetpgrp| #:|tcsetpgrp| #:|ttyname| #:|write|
-           
-           #:|O_RDONLY| #:|O_WRONLY| #:|O_RDWR| #:|O_APPEND| #:|O_CREAT| #:|O_EXCL|
-           #:|O_TRUNC| #:|O_DSYNC| #:|O_RSYNC| #:|O_SYNC| #:|O_NDELAY| #:|O_NONBLOCK|
-           #:|O_NOCTTY| #:|O_SLOCK| #:|O_EXLOCK| #:|O_BINARY| #:|O_NOINHERIT|
-           #:|O_TEMPORARY| #:|O_RANDOM| #:|O_SEQUENTIAL| #:|O_TEXT| #:|SEEK_SET|
-           #:|SEEK_CUR| #:|SEEK_END|
-
-           ;; 14.1.4 ...
-           #:|chdir| #:|fchdir| #:|getcwd| #:|getcwdu| #:|chroot| #:|chmod| #:|chown|
-           #:|lchown| #:|link| #:|listdir| #:|lstat| #:|mkfifo| #:|mknod| #:|major|
-           #:|minor| #:|makedev| #:|mkdir| #:|makedirs| #:|pathconf| #:|pathconf_names|
-           #:|readlink| #:|remove| #:|removedirs| #:|rename| #:|renames| #:|rmdir|
-           #:|stat| #:|stat_float_times| #:|statvfs| #:|symlink| #:|tempnam| #:|tmpnam|
-           #:|TMP_MAX| #:|unlink| #:|utime| #:|walk| ))
-
 (defpackage :clpython.module.posix
-  (:use :clpython :common-lisp))
+  (:use :clpython :common-lisp)
+  (:shadow #:|open| #:|read| #:|close| #:|remove| #:|error|)
+  (:export #:|open| #:|read| #:|close| #:|remove| #:|unlink| #:|stat| #:|error|
+           #:|O_RDONLY| #:|O_WRONLY| #:|O_RDWR| #:|O_NONBLOCK| #:|O_NDELAY| #:|O_APPEND|
+           #:|O_SHLOCK| #:|O_EXLOCK| #:|O_SYNC| #:|O_NOFOLLOW| #:|O_CREAT| #:|O_TRUNC|
+           #:|O_EXCL| #:|O_NOCTTY| #:|O_DIRECTORY|))
 
 (defpackage :clpython.module._random
   (:use :clpython :common-lisp)
@@ -112,6 +77,40 @@
            #:|X| #:|VERBOSE|
            )
   (:import-from :clpython #:def-proxy-class))
+
+(defpackage :clpython.module._socket
+  (:use :clpython :common-lisp)
+  (:shadow #:|error|)
+  (:export #:|error| #:|socket| #:|gethostname| #:|gethostbyaddr|
+           #:|AF_UNSPEC| #:|AF_UNIX| #:|AF_INET| #:|AF_DECnet| #:|AF_APPLETALK| #:|AF_SNA| #:|AF_ROUTE|
+           #:|AF_IPX| #:|AF_INET6|
+           #:|AI_PASSIVE| #:|AI_CANONNAME| #:|AI_NUMERICHOST| #:|AI_MASK| #:|AI_ALL| #:|AI_V4MAPPED_CFG|
+           #:|AI_ADDRCONFIG| #:|AI_DEFAULT| #:|AI_V4MAPPED|
+           #:|EAI_ADDRFAMILY| #:|EAI_AGAIN| #:|EAI_BADFLAGS| #:|EAI_FAIL| #:|EAI_FAMILY| #:|EAI_MEMORY| #:|EAI_NODATA|
+           #:|EAI_NONAME| #:|EAI_SERVICE| #:|EAI_SOCKTYPE| #:|EAI_SYSTEM| #:|EAI_BADHINTS| #:|EAI_PROTOCOL| #:|EAI_MAX|
+           #:|INADDR_ALLHOSTS_GROUP| #:|INADDR_ANY| #:|INADDR_BROADCAST| #:|INADDR_LOOPBACK| #:|INADDR_MAX_LOCAL_GROUP|
+           #:|INADDR_NONE| #:|INADDR:_UNSPEC_GROUP| #:|IPPORT_RESERVED| #:|IPPORT_USERRESERVED|
+           #:|IPPROTO_HOPOPTS| #:|IPPROTO_IP| #:|IPPROTO_ICMP| #:|IPPROTO_IGMP| #:|IPPROTO_GGP| #:|IPPROTO_IPIP|
+           #:|IPPROTO_IPV4| #:|IPPROTO_TCP| #:|IPPROTO_EGP| #:|IPPROTO_PUP| #:|IPPROTO_UDP| #:|IPPROTO_IDP|
+           #:|IPPROTO_TP| #:|IPPROTO_XTP| #:|IPPROTO_IPV6| #:|IPPROTO_ROUTING| #:|IPPROTO_FRAGMENT| #:|IPPROTO_RSVP|
+           #:|IPPROTO_GRE| #:|IPPROTO_ESP| #:|IPPROTO_AH| #:|IPPROTO_ICMPV6| #:|IPPROTO_NONE| #:|IPPROTO_DSTOPTS|
+           #:|IPPROTO_HELLO| #:|IPPROTO_ND| #:|IPPROTO_EON| #:|IPPROTO_PIM| #:|IPPROTO_IPCOMP| #:|IPPROTO_RAW|
+           #:|IPPROTO_MAX|
+           #:|IPV6_RTHDR_TYPE_0| #:|IPV6_UNICAST_HOPS| #:|IPV6_MULTICAST_IF| #:|IPV6_MULTICAST_HOPS| #:|IPV6_MULTICAST_LOOP| 
+           #:|IPV6_JOIN_GROUP| #:|IPV6_LEAVE_GROUP| #:|IPV6_PKTINFO| #:|IPV6_HOPLIMIT| #:|IPV6_NEXTHOP| #:|IPV6_HOPOPTS| 
+           #:|IPV6_DSTOPTS| #:|IPV6_RTHDR| #:|IPV6_CHECKSUM| #:|IPV6_V6ONLY|
+           #:|IP_DEFAULT_MULTICAST_LOOP| #:|IP_DEFAULT_MULTICAST_TTL| #:|IP_OPTIONS| #:|IP_TOS| #:|IP_TTL| #:|IP_RECVOPTS| 
+           #:|IP_RECVRETOPTS| #:|IP_RECVDSTADDR| #:|IP_RETOPTS| #:|IP_HDRINCL| #:|IP_MULTICAST_IF| #:|IP_MULTICAST_TTL| 
+           #:|IP_MULTICAST_LOOP| #:|IP_ADD_MEMBERSHIP| #:|IP_DROP_MEMBERSHIP| #:|IP_MAX_MEMBERSHIPS|
+           #:|MSG_OOB| #:|MSG_PEEK| #:|MSG_DONTROUTE| #:|MSG_EOR| #:|MSG_TRUNC| #:|MSG_CTRUNC| #:|MSG_WAITALL| #:|MSG_DONTWAIT|
+           #:|NI_NOFQDN| #:|NI_NUMERICHOST| #:|NI_NAMEREQD| #:|NI_NUMERICSERV| #:|NI_DGRAM| #:|NI_MAXSERV| #:|NI_MAXHOST|
+           #:|SHUT_RD| #:|SHUT_WR| #:|SHUT_RDWR| 
+           #:|SOCK_STREAM| #:|SOCK_DGRAM| #:|SOCK_RAW| #:|SOCK_RDM| #:|SOCK_SEQPACKET| 
+           #:|SOL_IP| #:|SOL_TCP| #:|SOL_UDP| #:|SOL_SOCKET| 
+           #:|SO_DEBUG| #:|SO_ACCEPTCONN| #:|SO_REUSEADDR| #:|SO_KEEPALIVE| #:|SO_DONTROUTE| #:|SO_BROADCAST|
+           #:|SO_USELOOPBACK| #:|SO_LINGER| #:|SO_OOBINLINE| #:|SO_REUSEPORT| #:|SO_SNDBUF| #:|SO_RCVBUF|
+           #:|SO_SNDLOWAT| #:|SO_RCVLOWAT| #:|SO_SNDTIMEO| #:|SO_RCVTIMEO| #:|SO_ERROR| #:|SO_TYPE| 
+           #:|TCP_NODELAY| #:|TCP_MAXSEG|))
 
 (defpackage :clpython.module.string
   (:use :clpython :common-lisp)

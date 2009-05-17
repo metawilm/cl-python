@@ -42,9 +42,10 @@
       (print-object x s)))
   
   (defun define-exception-subclass (exc-name &rest supers)
-  (ensure-class exc-name
-                :direct-superclasses supers
-                :metaclass 'py-type)))
+    (dolist (s supers) (check-type s symbol))
+    (ensure-class exc-name
+                  :direct-superclasses supers
+                  :metaclass 'py-type)))
 
 #-clpython-exceptions-are-python-objects
 (progn 
