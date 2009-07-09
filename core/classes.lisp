@@ -30,6 +30,15 @@
   (declare (ignore initargs))
   (finalize-inheritance cls))
 
+(def-py-method py-type.__repr__ (x)
+  (with-output-to-string (s)
+    (print-unreadable-object (x s :identity t)
+      (format s "class `~A'" (class-name x))
+      (when (symbol-package (class-name x))
+        (let ((*package* #.(find-package :common-lisp)))
+          (format s " (~S)" (class-name x)))))))
+
+  
 ;; Lisp type/object
 (defclass py-lisp-type (py-type)
   ()
@@ -677,10 +686,10 @@ otherwise work well.")
       (print-unreadable-object (func s)
         (multiple-value-bind (fname symbol)
             (function-name func)
-          (format s "function ~S" fname)
+          (format s "function `~A'" fname)
           (when symbol
             (let ((*package* #.(find-package :common-lisp)))
-              (format s " (symbol ~S)" symbol))))))))
+              (format s " (~S)" symbol))))))))
 
 (defmethod print-object ((x py-function) stream)
   (print-unreadable-object (x stream :identity t)
