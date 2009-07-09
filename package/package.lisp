@@ -268,8 +268,9 @@
   (:import-from :clpython #:with-matching))
 
 ;; Ensure that CLPython starts with repl's symbol, for code that uses :clpython
-;; and has the symbol 'repl somewhere.
+;; and has the symbol 'repl somewhere, and export it.
 (eval-when (:compile-toplevel :load-toplevel :execute)
-  (import 'clpython.app.repl:repl :clpython))
+  (import 'clpython.app.repl:repl :clpython)
+  (export 'clpython.app.repl:repl :clpython))
 
   
