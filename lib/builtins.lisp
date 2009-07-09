@@ -31,7 +31,6 @@
 	  ({long}         py-int          )
 	  ({number}       py-number       )
 	  ({object}       object          )
-          ({open}         py-file         )
 	  ({property}     py-property     )
 	  ({slice}        py-slice        )
           ({set}          |py-set|        )
@@ -331,6 +330,10 @@ None, use identity function (multiple sequences -> list of tuples)."
     
 (defun {oct} (n)
   (py-oct n))
+
+(defun {open} (name &optional mode buffering)
+  (declare (ignore buffering)) ;; todo
+  (funcall (find-symbol (symbol-name '#:open) 'clpython.module.posix) name nil mode))
 
 (defun {ord} (s)
   (let ((s2 (deproxy s)))

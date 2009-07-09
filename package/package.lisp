@@ -116,7 +116,7 @@
   (:export "__import__" "abs" "apply" "callable" "chr" "cmp" "coerce" "compile"
 	   "delattr" "dir" "divmod" "eval" "execfile" "filter" "getattr" "globals"
 	   "hasattr" "hash" "hex" "id" "input" "intern" "isinstance" "issubclass"
-	   "iter" "len" "locals" "map" "max" "min" "oct" "ord" "pow" "range"
+	   "iter" "len" "locals" "map" "max" "min" "oct" "open" "ord" "pow" "range"
 	   "raw_input" "reduce" "reload" "repr" "round" "setattr" "sorted" "sum"
 	   "unichr" "vars" "zip"))
 
@@ -137,7 +137,7 @@
 (defpackage :clpython.user.builtin.type
   (:use :clpython.user.builtin.type.exception)
   (:export "basestring" "bool" "buffer" "classmethod" "complex" "dict" "enumerate" "file"
-	   "float" "frozenset" "int" "list" "long" "number" "object" "open" "property" "set"
+	   "float" "frozenset" "int" "list" "long" "number" "object" "property" "set"
            "slice" "staticmethod" "str" "super" "tuple" "type" "unicode" "xrange"))
 
 (defpackage :clpython.user.builtin.value
