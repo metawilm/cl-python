@@ -646,11 +646,13 @@ otherwise work well.")
 
 (defgeneric function-name (f)
   (:method ((f function))
-           (let ((data (gethash f *simple-function-data*)))
-             (if data
-                 (string (sfd-name data))
-               #+allegro (string (excl::func_name f))
-               #-allegro "[a function]")))
+           (let ((data (gethash f *simple-function-data*))
+                 (related-lisp-symbol #+allegro (or (excl::fn_symdef f) (string (excl::func_name f)))
+                                      #-allegro nil))
+             (values (if data
+                         (string (sfd-name data))
+                       (or (and #1=related-lisp-symbol (symbol-name #1#)) "[a function]"))
+                     related-lisp-symbol)))
   (:method ((f py-function)) (string (py-function-name f))))
 
 (defun make-py-function (&key name context-name lambda)
@@ -673,7 +675,12 @@ otherwise work well.")
     (if (typep func 'py-function)
         (print-object func s)
       (print-unreadable-object (func s)
-        (format s "function ~A" (function-name func))))))
+        (multiple-value-bind (fname symbol)
+            (function-name func)
+          (format s "function ~S" fname)
+          (when symbol
+            (let ((*package* #.(find-package :common-lisp)))
+              (format s " (symbol ~S)" symbol))))))))
 
 (defmethod print-object ((x py-function) stream)
   (print-unreadable-object (x stream :identity t)
