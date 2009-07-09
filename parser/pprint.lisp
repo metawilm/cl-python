@@ -95,7 +95,7 @@ output to a string does not start with a newline."
 			 (graphic-char-p ch))     (write-char ch stream))
 		   
 		   ((> (char-code ch) 255)
-		    (format stream "\u~v,vX"
+		    (format stream "\\u~v,vX"
 			    (if (> (char-code ch) #xFFFF) 8 4)
 			    #\0 (char-code ch)))
 		   
@@ -109,14 +109,14 @@ output to a string does not start with a newline."
 			      (#\Page      "\\p")
 			      (#\Newline   "\\n")
 			      (#\Return    "\\r")
-			      (#\Tab       "\t")
-			      (#.(code-char 11) "\v") ;; #\VT or #\PageUp
+			      (#\Tab       "\\t")
+			      (#.(code-char 11) "\\v") ;; #\VT or #\PageUp
 			      (#\Space     " " )
 			      
 			      ;; Maybe there are more cases to catch before
 			      ;; we encode the character in octal code?
 			      
-			      (t (format nil "\0~3,vO" #\0 (char-code ch))))
+			      (t (format nil "\\0~3,vO" #\0 (char-code ch))))
 			    
 			  do (write-char ch stream)))))
       
