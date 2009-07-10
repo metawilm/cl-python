@@ -2194,10 +2194,18 @@ be bound."
            (write-string ";;; Warning: " stream)
            (let ((mod (if (default-module-name-p *current-module-name*)
                           nil
-                        *current-module-name*)))
+                        *current-module-name*))
+                 (fspec compiler::.function-spec.))
+             (when (and (listp fspec)
+                        (eq (first fspec) 'flet)
+                        (listp (second fspec))
+                        (eq (car (second fspec)) 'python-module))
+               ;; (flet (python-module urllib) urllib.FancyURLopener.redirect_internal)
+               ;; -> urllib.FancyURLopener.redirect_internal
+               (setf fspec (third fspec)))
              (format stream "~Aunction `~A': unused variable `~A'."
                      (if mod (format nil "Module `~A', f" *current-module-name*) "F")
-                     compiler::.function-spec.
+                     fspec
                      (car (simple-condition-format-arguments c))))))
 
 #+allegro
