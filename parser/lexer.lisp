@@ -1,4 +1,4 @@
-;; -*- Mode: LISP; Syntax: COMMON-LISP; Package: CLPYTHON.PARSER; Readtable: PY-AST-READTABLE -*-
+;; -*- Mode: LISP; Syntax: COMMON-LISP; Package: CLPYTHON.PARSER; Readtable: PY-AST-USER-READTABLE -*-
 ;; 
 ;; This software is Copyright (c) Franz Inc. and Willem Broekema.
 ;; Franz Inc. and Willem Broekema grant you the rights to
@@ -10,7 +10,7 @@
 ;;;; Lexer for Python code
 
 (in-package :clpython.parser)
-(in-syntax *ast-readtable*)
+(in-syntax *ast-user-readtable*)
 
 (defvar *warn-indent* t "Warn if suspicious indentation")
 (defvar *lex-debug* nil "Print the tokens returned by the lexer")
@@ -76,7 +76,8 @@
    (bracket-level :accessor ls-bracket-level :initform 0  :type fixnum)
    (open-deco                                :initform nil)
    (debug         :accessor ls-debug         :initform *lex-debug* :initarg :debug)
-   (warn-indent   :accessor ls-warn-indent   :initform *warn-indent*)))
+   (warn-indent   :accessor ls-warn-indent   :initform *warn-indent*)
+   (return-count                             :initform 0)))
 
 (define-symbol-macro %lex-last-read-char-ix%   (ls-last-read-char-ix *lex-state*))
 (define-symbol-macro %lex-next-unread-char-ix% (1+ (ls-last-read-char-ix *lex-state*)))
@@ -140,7 +141,7 @@ On EOF returns: eof-token, eof-token."
         (let ((*lex-state* lex-state))
           (block lexer
             (with-slots (last-read-char-ix curr-line-no yacc-version
-                         tokens-todo indent-stack bracket-level open-deco debug) lex-state
+                         tokens-todo indent-stack bracket-level open-deco debug return-count) lex-state
               (when (eq op :report-location) ;; used when GRAMMAR-PARSE-ERROR occurs (Allegro CL Yacc)
                 (return-from lexer
                   `((:line-no ,curr-line-no)
@@ -148,7 +149,7 @@ On EOF returns: eof-token, eof-token."
               (when (= last-read-char-ix -1)
                 ;; Check leading whitespace. This will go unnoticed by the lexer otherwise.
                 (destructuring-bind (newline-p new-indent eof-p)
-                    (read-kind :whitespace (lex-read-char))
+                    (read-kind :whitespace (lex-read-char :eof-error nil))
                   (declare (ignore newline-p))
                   (when (and (not eof-p) (plusp new-indent))
                     (restart-case
@@ -156,6 +157,7 @@ On EOF returns: eof-token, eof-token."
                       (cl-user::continue () :report "Continue parsing, ignoring the leading whitespace.")))))
               (flet ((lex-return (token value source-loc &optional msg)
                        (when debug (format t "Lexer returns: ~S ~S ~S~@[ ~A~]~%" token value source-loc msg))
+                       (incf return-count)
                        (return-from lexer (values token value source-loc)))
                      (lex-todo (token value)
                        (when debug (format t "Lexer todo: ~S ~S~%" token value))
@@ -166,6 +168,8 @@ On EOF returns: eof-token, eof-token."
                 (loop 
                   (let ((c (lex-read-char :eof-error nil)))
                     (cond ((not c)
+                           (when (zerop return-count) ;; grammar does not like empty files, so dummy content
+                             (lex-return '[identifier] '{None} nil))
                            (when *lex-fake-eof-after-toplevel-form*
                              (with-simple-restart (muffle "Muffle")
                                (when debug (format t "Lexer signals: next-eof-real~%"))
