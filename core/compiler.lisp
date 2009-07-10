@@ -456,9 +456,10 @@ an assigment statement. This changes at least the returned 'store' form.")
                                        locals)))
         
         (let ((lambda-expr `(lambda (%exec-globals-ns %exec-locals-ns)
-                              (with-namespace (,globals-ns)
-                                (with-namespace (,locals-ns)
-                                  ,(second ast))))))
+                              (with-pydecl ((:context :module))
+                                (with-namespace (,globals-ns)
+                                  (with-namespace (,locals-ns)
+                                    ,(second ast)))))))
           (with-compiler-generated-syntax-errors ()
             ;; WITH-COMPILER-GENERATED-SYNTAX-ERRORS is needed for e.g. making sure
             ;; SyntaxError gets raised about the misplaced "yield" in:

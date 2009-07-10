@@ -430,7 +430,10 @@ class C:
   exec 'b = 4'
   assert locals().has_key('b')
 assert C.a == 3
-assert C.b == 4"))
+assert C.b == 4")
+  (run-no-error "
+exec 'def f(): return 3'
+assert f() == 3"))
 
 (defmethod test-lang ((kind (eql :for-in-stmt)))
   (run-no-error "for i in []: 1/0")
