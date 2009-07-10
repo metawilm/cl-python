@@ -30,15 +30,6 @@
   (declare (ignore initargs))
   (finalize-inheritance cls))
 
-(def-py-method py-type.__repr__ (x)
-  (with-output-to-string (s)
-    (print-unreadable-object (x s :identity t)
-      (format s "class `~A'" (class-name x))
-      (when (symbol-package (class-name x))
-        (let ((*package* #.(find-package :common-lisp)))
-          (format s " (~S)" (class-name x)))))))
-
-  
 ;; Lisp type/object
 (defclass py-lisp-type (py-type)
   ()
@@ -1361,6 +1352,9 @@ but the latter two classes are not in CPython.")
 (defvar *class-display-without-py-prefix* t
   "Whether to show class names without `py-' prefix: `int' instead of `py-int' etc.")
 
+(defmethod print-object ((x py-type) stream)
+  (write-string (py-type.__repr__ x) stream))
+
 (def-py-method py-type.__repr__ (x) ;; XXX deproxy not needed
   (check-type x class)
   (let ((name (if *class-display-without-py-prefix*
@@ -1374,7 +1368,10 @@ but the latter two classes are not in CPython.")
       (print-unreadable-object (x s :identity t)
         (format s "~@[meta~*~]class ~A"
                 (typep x (ltv-find-class 'py-meta-type))
-                name)))))
+                name)
+      (when (symbol-package (class-name x))
+        (let ((*package* #.(find-package :common-lisp)))
+          (format s " (~S)" (class-name x))))))))
 
 (def-py-method py-type.__str__ (x) ;; XXX deproxy not needed
   (py-type.__repr__ x))
