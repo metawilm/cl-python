@@ -459,7 +459,9 @@ an assigment statement. This changes at least the returned 'store' form.")
                               (with-pydecl ((:context :module))
                                 (with-namespace (,globals-ns)
                                   (with-namespace (,locals-ns)
-                                    ,(second ast)))))))
+                                    (let ((.res ,(second ast)))
+                                      (when *exec-stmt-result-handler*
+                                        (funcall *exec-stmt-result-handler* .res)))))))))
           (with-compiler-generated-syntax-errors ()
             ;; WITH-COMPILER-GENERATED-SYNTAX-ERRORS is needed for e.g. making sure
             ;; SyntaxError gets raised about the misplaced "yield" in:

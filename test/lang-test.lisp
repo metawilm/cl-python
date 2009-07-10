@@ -433,7 +433,10 @@ assert C.a == 3
 assert C.b == 4")
   (run-no-error "
 exec 'def f(): return 3'
-assert f() == 3"))
+assert f() == 3")
+  (run-no-error "# not quite exec-stmt, but implementation of eval is much the same
+a = eval('2+3')
+assert a == 5"))
 
 (defmethod test-lang ((kind (eql :for-in-stmt)))
   (run-no-error "for i in []: 1/0")
