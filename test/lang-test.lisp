@@ -1003,7 +1003,22 @@ MAX is a safey limit, in case the code erroneously goes into an endless loop."
 
 (defmethod test-lang ((kind (eql :yield-expr)))
   (loop for (src expected) in *cps-tests*
-      do (eval `(test-equal (make-test-gen ',src :debug nil) ',expected))))
+      do (eval `(test-equal (make-test-gen ',src :debug nil) ',expected)))
+  (run-no-error "
+def f(): 
+  assert [2,4,6] == [(yield item) for item in (yield list) if (yield (item, item))]
+g = f()
+print 1, g.next()
+print 2, g.send('abc')
+print 3, g.send(1)
+print 4, g.send(2)
+print 5, g.send(3)
+print 6, g.send(4)
+print 7, g.send(5)
+try:
+  print 8, g.send(6)
+except StopIteration:
+  print 'ok'"))
 
 (defmethod test-lang ((kind (eql :yield-stmt)))
   (run-no-error "

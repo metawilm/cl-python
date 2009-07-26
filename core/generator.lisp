@@ -88,9 +88,7 @@
 
 (defmacro receive-yielded-value (&body body)
   `(let ((val (catch '.generator-body (progn ,@body (error-fall-through ',body)))))
-     #+(or)(warn "receive-yielded-value = ~A" val)
-     (or val (error (error "No yielded value received.")))))
-
+     (or val (error "No yielded value received."))))
 
 (defclass generator (object)
   ;; XXX make funcallable instance? but should not be allowed by py-call it...
@@ -260,7 +258,9 @@ former requires that this form is executed within RECEIVE-YIELDED-VALUE."
          (lambda (.assign-value) ,res ,(%call-continuation)))))
 
 (def-cps-macro [attributeref-expr] (item attr)
-  `(%cps-convert ,item (lambda (item-val) ,(%call-continuation `(attr item-val ',(second attr))))))
+  (with-gensyms (e-item)
+    `(%cps-convert ,item (lambda (,e-item)
+                           ,(%call-continuation `(attr ,e-item ',(second attr)))))))
 
 (def-cps-macro [augassign-stmt] (op place val &environment e)
   (let ((py-@= (get-binary-iop-func-name op))
@@ -282,27 +282,31 @@ former requires that this form is executed within RECEIVE-YIELDED-VALUE."
             res)))))
 
 (def-cps-macro [backticks-expr] (item)
-  `(%cps-convert ,item (lambda (.x) ,(%call-continuation `(py-repr .x)))))
+  (with-gensyms (e-item)
+    `(%cps-convert ,item (lambda (,e-item)
+                           ,(%call-continuation `(py-repr ,e-item))))))
 
 (def-cps-macro [binary-expr] (op x y)
-  `(%cps-convert ,x (lambda (x-val)
-                     (%cps-convert ,y (lambda (y-val)
-                                       ,(%call-continuation `(,(get-binary-op-func-name op) x-val y-val)))))))
+  (with-gensyms (e-x e-y)
+    `(%cps-convert ,x (lambda (,e-x)
+                        (%cps-convert ,y
+                                      (lambda (,e-y)
+                                        ,(%call-continuation `(,(get-binary-op-func-name op) ,e-x ,e-y))))))))
 
 (def-cps-macro [binary-lazy-expr] (op left right)
-  (with-gensyms (binary-lazy-k)
-      `(let ((,binary-lazy-k ,%current-continuation))
-         (%cps-convert ,left
-             (lambda (.left) (if (py-val->lisp-bool .left)
-                                 ,(if (eq op '[or])
-                                      `(funcall ,binary-lazy-k .left)
-                                    `(%cps-convert ,right ,binary-lazy-k))
-                               ,(if (eq op '[or])
-                                    `(%cps-convert ,right ,binary-lazy-k)
-                                  `(funcall ,binary-lazy-k .left))))))))
+  (with-gensyms (binary-lazy-k e-left)
+    `(let ((,binary-lazy-k ,%current-continuation))
+       (%cps-convert ,left
+                     (lambda (,e-left) (if (py-val->lisp-bool ,e-left)
+                                           ,(if (eq op '[or])
+                                                `(funcall ,binary-lazy-k ,e-left)
+                                              `(%cps-convert ,right ,binary-lazy-k))
+                                         ,(if (eq op '[or])
+                                              `(%cps-convert ,right ,binary-lazy-k)
+                                            `(funcall ,binary-lazy-k ,left))))))))
 
 (def-cps-macro [break-stmt] ()
-  `(.break-cont)) ;; see [for-in-stmt] and [while-stmt]
+  `(%break-cont))
 
 (def-cps-macro [call-expr] (primary pos-args kwd-args *-arg **-arg)
   (with-gensyms (call-k)
@@ -340,29 +344,29 @@ former requires that this form is executed within RECEIVE-YIELDED-VALUE."
 (def-cps-macro [comparison-expr] (cmp left right brackets)
   (multiple-value-bind (args cmp-func-names)
       (apply-comparison-brackets `([comparison-expr] ,cmp ,left ,right ,brackets))
-    (with-gensyms (comparison-k)
+    (with-gensyms (comparison-k e-left e-right cmp-res)
         (%call-continuation
          `(let ((,comparison-k ,%current-continuation))
             (%cps-convert ,(pop args)
-                (lambda (.left)
+                (lambda (,e-left)
                   (%cps-convert ,(pop args)
-                      (lambda (.right)
-                        (let (.cmp-res)
-                          (flet ((cmp-right (.cmp-func .right &optional last)
-                                            (setf .cmp-res (funcall .cmp-func .left .right))
-                                            (if (or last (not (py-val->lisp-bool .cmp-res)))
-                                                (funcall ,comparison-k .cmp-res)
-                                              (setf .left .right))))
-                            (cmp-right ',(pop cmp-func-names) .right ',(null cmp-func-names))
+                      (lambda (,e-right)
+                        (let (,cmp-res)
+                          (flet ((cmp-right (.cmp-func ,e-right &optional last)
+                                            (setf ,cmp-res (funcall .cmp-func ,e-left ,e-right))
+                                            (if (or last (not (py-val->lisp-bool ,cmp-res)))
+                                                (funcall ,comparison-k ,cmp-res)
+                                              (setf ,e-left ,e-right))))
+                            (cmp-right ',(pop cmp-func-names) ,e-right ',(null cmp-func-names))
                             ,@(loop while cmp-func-names
                                     collect `(%cps-convert ,(pop args)
-                                                 (lambda (.right)
+                                                 (lambda (,e-right)
                                                    (cmp-right ',(pop cmp-func-names)
-                                                              .right
+                                                              ,e-right
                                                               ',(null cmp-func-names))))))))))))))))
 
 (def-cps-macro [continue-stmt] ()
-  `(.continue-cont)) ;; see [for-in-stmt]
+  `(%continue-cont))
 
 (def-cps-macro [del-stmt] (item &environment e)
   ;; yield can occur in subscripts and attributes:
@@ -381,43 +385,50 @@ former requires that this form is executed within RECEIVE-YIELDED-VALUE."
 
 (def-cps-macro [dict-expr] (vk-list)
   (let ((res (%call-continuation '.dict)))
-    (loop for (k v) on (reverse vk-list) by #'cddr
-        do (setf res `(%cps-convert ,v
-                          (lambda (v) (sub/dict-set .dict ,k v) ,res))))
-    (setf res `(let ((.dict (make-py-hash-table)))
-                 ,res))
-    res))
+    (with-gensyms (val)
+      (loop for (k v) on (reverse vk-list) by #'cddr
+          do (setf res `(%cps-convert ,v
+                                      (lambda (,val) (setf (gethash ,k .dict) ,val) ,res)))))
+    `(let ((.dict (make-py-hash-table)))
+       ,res)))
 
 (def-cps-macro [exec-stmt] (&rest args)
   `(progn (with-pydecl ((:ignore-cps-hook t))
             ([exec-stmt] ,@args))
-          (%call-continuation)))
+          ,(%call-continuation)))
 
 (def-cps-macro [for-in-stmt] (target source suite else-suite)
-  `(let ((stmt-k ,%current-continuation))
-     (%cps-convert ,source
-         (lambda (source)
-           (let* ((.it-fun (get-py-iterate-fun source)))
-             (labels ((.break-cont ()
-                        (funcall stmt-k nil))
-                      (.else-cont (val)
-                        (declare (ignore val))
-                        ,(if else-suite
-                             `(%cps-convert ,else-suite (lambda (.val)
-                                                          (declare (ignore .val))
-                                                          (.break-cont)))
-                           `(.break-cont)))
-                      (.continue-cont ()
-                        (let ((.x (funcall .it-fun)))
-                          (if .x
-                              (%cps-convert ([assign-stmt] .x (,target))
-                                            (lambda (.v)
-                                              (declare (ignore .v))
-                                              (%cps-convert ,suite (lambda (arg)
-                                                                     (declare (ignore arg))
-                                                                     (.continue-cont)))))
-                            (.else-cont nil)))))
-               (.continue-cont)))))))
+  (with-gensyms (e-source it-fun for-cont for-break-cont else-cont)
+    `(let ((stmt-k ,%current-continuation))
+       (declare (ignorable stmt-k))
+       (%cps-convert ,source
+                     (lambda (,e-source)
+                       (let* ((,it-fun (get-py-iterate-fun ,e-source)))
+                         (labels (,@(when (contains-continue-stmt-p suite)
+                                      `((%continue-cont () (,for-cont))))
+                                    ,@(when (contains-break-stmt-p suite)
+                                        `((%break-cont () (,for-break-cont))))
+                                    (,for-break-cont ()
+                                      (funcall stmt-k nil))
+                                    (,else-cont (val)
+                                      (declare (ignore val))
+                                      ,(if else-suite
+                                           `(%cps-convert ,else-suite (lambda (val)
+                                                                        (declare (ignore val))
+                                                                        (,for-break-cont)))
+                                         `(,for-break-cont)))
+                                    (,for-cont ()
+                                      ,(with-gensyms (x)
+                                         `(let ((,x (funcall ,it-fun)))
+                                            (if ,x
+                                                (%cps-convert ([assign-stmt] ,x (,target))
+                                                              (lambda (val)
+                                                                (declare (ignore val))
+                                                                (%cps-convert ,suite (lambda (arg)
+                                                                                       (declare (ignore arg))
+                                                                                       (,for-cont)))))
+                                              (,else-cont nil))))))
+                           (,for-cont))))))))
 
 (def-cps-macro [funcdef-stmt] (decorators
                                fname (pos-args key-args *-arg **-arg)
@@ -445,21 +456,22 @@ former requires that this form is executed within RECEIVE-YIELDED-VALUE."
                          ([identifier-expr] ,name))))
 
 (def-cps-macro [if-expr] (condition then else)
-  `(%cps-convert ,condition
-       (lambda (.c) (if (py-val->lisp-bool .c)
-                        (%cps-convert ,then ,%current-continuation)
-                      (%cps-convert ,else ,%current-continuation)))))
+  (with-gensyms (c)
+    `(%cps-convert ,condition
+                   (lambda (,c) (if (py-val->lisp-bool ,c)
+                                    (%cps-convert ,then ,%current-continuation)
+                                  (%cps-convert ,else ,%current-continuation))))))
 
 (def-cps-macro [if-stmt] (if-clauses else-clause)
-  (with-gensyms (if-stmt-k)
+  (with-gensyms (if-stmt-k e-cond)
     `(let ((,if-stmt-k ,%current-continuation))
        ,(let ((res (if else-clause 
                        `(%cps-convert ,else-clause ,if-stmt-k)
                      `(funcall ,if-stmt-k nil))))
           (loop for (cond body) in (reverse if-clauses)
               do (setf res `(%cps-convert ,cond
-                                          (lambda (.cond)
-                                            (if (py-val->lisp-bool .cond)
+                                          (lambda (,e-cond)
+                                            (if (py-val->lisp-bool ,e-cond)
                                                 (%cps-convert ,body ,if-stmt-k)
                                               ,res)))))
           res))))
@@ -467,42 +479,40 @@ former requires that this form is executed within RECEIVE-YIELDED-VALUE."
 (def-cps-macro [import-stmt] (&rest args)
   `(progn (with-pydecl ((:ignore-cps-hook t))
             ([import-stmt] ,@args))
-          (%call-continuation)))
+          ,(%call-continuation)))
 
 (def-cps-macro [import-from-stmt] (&rest args)
   `(progn (with-pydecl ((:ignore-cps-hook t))
             ([import-from-stmt] ,@args))
           ,(%call-continuation)))
 
-;; [lambda-expr] : keep -- goes to our [funcdef-stmt]
+(def-cps-macro [lambda-expr] (&rest args)
+  (%call-continuation `(with-pydecl ((:ignore-cps-hook t))
+                         ([lambda-expr] ,@args))))
 
 (def-cps-macro [listcompr-expr] (item for-in/if-clauses)
-  ;; Convert into a suite like this:
-  ;;   list = []
-  ;;   for a in b:
-  ;;     if k:
-  ;;       x.append(item)
-  ;;   list  # implicitly returned from the suite
-  (let ((list (gensym "list")))
-    `([suite-stmt] (;; list = []
-                    ([assign-stmt] ([list-expr] nil) (([identifier-expr] ,list)))
-                    ;; list.append(item)
-                    ,@(loop with res = `(real-py-list.append ,list ,item)
-                          for clause in (reverse for-in/if-clauses)
-                          do (setf res (ecase (car clause) ;; These subexpr may yield, therefore expand into AST
-                                         ;; for a in b:
-                                         ([for-in-clause] (destructuring-bind (target source) (cdr clause)
-                                                            (setf res `([for-in-stmt] ,target ,source ,res nil))))
-                                         ;; if k:
-                                         ([if-clause] (let ((test (second clause)))
-                                                        (setf res `([if-stmt] ((,test ,res)) ())))))))
-                    ([identifier-expr] ,list))))) ;; list
+  (with-gensyms (result-list)
+    `(let ((,result-list (make-py-list-from-list ())))
+       ,(loop with builder = `([call-expr] ([attributeref-expr] ,result-list ([identifier-expr] {append}))
+                                             (,item) nil nil nil)
+            for clause in (reverse for-in/if-clauses)
+            do (setf builder
+                 (ecase (car clause)
+                   ([for-in-clause] (destructuring-bind (target source) (cdr clause)
+                                      `([for-in-stmt] ,target ,source ,builder nil)))
+                   ([if-clause] (let ((test (second clause)))
+                                  `([if-stmt] ((,test ,builder)) nil)))))
+            finally (return `(%cps-convert ,builder 
+                                           (lambda (x2) 
+                                             (declare (ignore x2))
+                                             ,(%call-continuation result-list))))))))
 
 (def-cps-macro [list-expr] (items)
   ;; Relies on tuples being Lisp lists.
-  `(%cps-convert ([tuple-expr] ,items)
-                (lambda (.tuple)
-                  ,(%call-continuation `(make-py-list-from-tuple .tuple)))))
+  (with-gensyms (e-tuple)
+    `(%cps-convert ([tuple-expr] ,items)
+                   (lambda (,e-tuple)
+                     ,(%call-continuation `(make-py-list-from-tuple ,e-tuple))))))
 
 (def-cps-macro [module-stmt] (&rest args)
   #+(or)(declare (ignore args))  ;; ends up in the wrong place
@@ -526,12 +536,16 @@ former requires that this form is executed within RECEIVE-YIELDED-VALUE."
     res))
 
 (def-cps-macro [raise-stmt] (exc var tb)
-  (if exc
-      `(%cps-convert ,exc (lambda (.exc)
-                            ,(if tb
-                                 `(%cps-convert ,tb (lambda (.tb) (raise-stmt-1 .exc ,var .tb)))
-                               `(raise-stmt-1 .exc ,var ,tb))))
-    `(raise-stmt-1 ,exc ,var ,tb)))
+  `(progn
+     (or ,%current-continuation) ;; suppress warning that it's unused
+     ,(with-gensyms (e-exc e-tb)
+        (if exc
+            `(%cps-convert ,exc (lambda (,e-exc)
+                                  ,(if tb
+                                       `(%cps-convert ,tb
+                                                      (lambda (,e-tb) (raise-stmt-1 ,e-exc ,var ,e-tb)))
+                                     `(raise-stmt-1 ,e-exc ,var ,tb))))
+          `(raise-stmt-1 ,exc ,var ,tb)))))
   
 (def-cps-macro [return-stmt] (&optional value &environment e)
   ;; VALUE can be given, if this is inside a generator.
@@ -543,23 +557,25 @@ former requires that this form is executed within RECEIVE-YIELDED-VALUE."
          (%mark-generator-finished))))
 
 (def-cps-macro [slice-expr] (start stop step)
+  (with-gensyms (e-start e-stop e-step)
     `(%cps-convert ,start
-                   (lambda (.start)
+                   (lambda (,e-start)
                      (%cps-convert ,stop
-                                   (lambda (.stop)
+                                   (lambda (,e-stop)
                                      (%cps-convert ,step
-                                                   (lambda (.step)
+                                                   (lambda (,e-step)
                                                      ,(%call-continuation
                                                        `(with-pydecl ((:ignore-cps-hook t))
-                                                          ([slice-expr] .start .stop .step))))
+                                                          ([slice-expr] ,e-start ,e-stop ,e-step))))
                                                    :nil-allowed t))
                                    :nil-allowed t))
-                   :nil-allowed t))
+                   :nil-allowed t)))
 
 (def-cps-macro [subscription-expr] (item subs)
-  `(%cps-convert ,item (lambda (.item)
+  (with-gensyms (e-subs e-item)
+    `(%cps-convert ,item (lambda (,e-item)
                         (%cps-convert ,subs
-                            (lambda (.subs) ,(%call-continuation `(py-subs .item .subs)))))))
+                            (lambda (,e-subs) ,(%call-continuation `(py-subs ,e-item ,e-subs))))))))
 
 (def-cps-macro [suite-stmt] (stmts)
   (cond ((null stmts)
@@ -572,89 +588,91 @@ former requires that this form is executed within RECEIVE-YIELDED-VALUE."
                         (named-function (suite ,(intern (format nil "\"~A; ...\"" 
                                                                 (clpython.parser:py-pprint (cadr stmts)))
                                                         #.*package*))
-                          (lambda (val)
-                            (declare (ignore val))
+                          (lambda (e-val)
+                            (declare (ignore e-val))
                             (%cps-convert ([suite-stmt] ,(cdr stmts))
                                           ,%current-continuation)))))))
 
 (def-cps-macro [try-except-stmt] (suite except-clauses else-suite)
-  `(flet ((.attempt-handle-error (.c)
-            (declare (ignorable .c))
-            ,(loop with res = `(error .c)
-                 for (exc var handler-suite) in (reverse except-clauses)
-                 if exc
-                 do (setf res `(%cps-convert ,exc
-                                   (lambda (.exc)
-                                     (let ((applicable (typecase .exc 
-                                                         ;; exception class, or typle of exception classes
-                                                         (list (some (lambda (x) (typep .c x)) .exc))
-                                                         (t    (typep .c .exc)))))
-                                       (if applicable
-                                           (progn ,@(when var `(([assign-stmt] .c (,var))))
-                                                  (%cps-convert ,handler-suite ,%current-continuation))
-                                         ,res)))))
-                 else ;; blank "except:" catches all
-                 do (setf res `(progn ,@(when var `(([assign-stmt] .c (,var))))
-                                      (%cps-convert ,handler-suite ,%current-continuation)))
-                 finally (return res)))
-          (.do-else ()
-            ,(if else-suite
-                 `(%cps-convert ,else-suite ,%current-continuation)
-               `(funcall ,%current-continuation nil))))
-     (let ((gen-state (make-generator-state ,suite :sub-generator t)))
-       (labels ((next-try-value (val-for-gener)
-                  (handler-case
-                      (receive-yielded-value (with-py-errors ()
-                                               (generator-state-input-value gen-state val-for-gener)))
-                    ({Exception} (c) (.attempt-handle-error c))
-                    (:no-error (val)
-                      (case val
-                        (:implicit-return (.do-else))
-                        (:explicit-return ,(%mark-generator-finished))
-                        (t ,(%store-continuation `(lambda (val-for-gener) (next-try-value val-for-gener)))
-                           (yield-value val)))))))
-         (next-try-value *the-none*)))))
-
-(def-cps-macro [try-finally-stmt] (try-suite finally-suite)
-  `(let ((stmt-k ,%current-continuation))
-     (block try-finally-block
-       (let ((gen-state (make-generator-state ,try-suite :sub-generator t))
-             (finalization-scheduled nil))
-         (labels ((run-finally (generator-finished-p)
-                    (%cps-convert ,finally-suite
-                                  (lambda (val)
-                                    (declare (ignore val))
-                                    ;; Whole finally-body executed -> remove finalization
-                                    (when finalization-scheduled
-                                      (unschedule-finalization finalization-scheduled))
-                                    (when generator-finished-p
-                                      ,(%mark-generator-finished)))))
-                  (next-val (val-for-generator)
-                    ;; Get new val from TRY:
-                    ;;  - if this results in an error, run the FINALLY (which may raise another
-                    ;;    exception itself) and raise the error again;
-                    ;;  - if this does not result in an error, then FINALLY is not yet run.
-                    (handler-case (receive-yielded-value (with-py-errors ()
-                                                           (generator-state-input-value gen-state val-for-generator)))
-                      ({Exception} (c)
-                        (run-finally t)
-                        (error c))
+  (with-gensyms (e-exc)
+    `(flet ((.attempt-handle-error (.c)
+              (declare (ignorable .c))
+              ,(loop with res = `(error .c)
+                   for (exc var handler-suite) in (reverse except-clauses)
+                   if exc
+                   do (setf res `(%cps-convert ,exc
+                                               (lambda (,e-exc)
+                                                 (let ((applicable (typecase ,e-exc 
+                                                                     ;; exception class, or typle of exception classes
+                                                                     (list (some (lambda (x) (typep .c x)) ,e-exc))
+                                                                     (t    (typep .c ,e-exc)))))
+                                                   (if applicable
+                                                       (progn ,@(when var `(([assign-stmt] .c (,var))))
+                                                              (%cps-convert ,handler-suite ,%current-continuation))
+                                                     ,res)))))
+                   else ;; blank "except:" catches all
+                   do (setf res `(progn ,@(when var `(([assign-stmt] .c (,var))))
+                                        (%cps-convert ,handler-suite ,%current-continuation)))
+                   finally (return res)))
+            (.do-else ()
+              ,(if else-suite
+                   `(%cps-convert ,else-suite ,%current-continuation)
+                 `(funcall ,%current-continuation nil))))
+       (let ((gen-state (make-generator-state ,suite :sub-generator t)))
+         (labels ((next-try-value (val-for-gener)
+                    (handler-case
+                        (receive-yielded-value (with-py-errors ()
+                                                 (generator-state-input-value gen-state val-for-gener)))
+                      ({Exception} (c) (.attempt-handle-error c))
                       (:no-error (val)
                         (case val
-                          ((:implicit-return :explicit-return)
-                           ;; :implicit = normal end of TRY block.
-                           ;; :explicit = TRY block did a RETURN, which means generator is finished.
-                           (run-finally (eq val :explicit-return))
-                           (funcall stmt-k nil))
-                          (t
-                           ;; The TRY block yields a value. Maybe the generator will never be run
-                           ;; further. To ensure the FINALLY block is run some time, schedule
-                           ;; finalization function.
-                           (unless finalization-scheduled
-                             (setf finalization-scheduled (schedule-finalization gen-state 'generator-state-close)))
-                           ,(%store-continuation `(lambda (v) (next-val v)))
-                           (yield-value val)))))))
-           (next-val *the-none*))))))
+                          (:implicit-return (.do-else))
+                          (:explicit-return ,(%mark-generator-finished))
+                          (t ,(%store-continuation `(lambda (val-for-gener) (next-try-value val-for-gener)))
+                             (yield-value val)))))))
+           (next-try-value *the-none*))))))
+
+(def-cps-macro [try-finally-stmt] (try-suite finally-suite)
+  (with-gensyms (finalization-scheduled)
+    `(let ((stmt-k ,%current-continuation))
+       (block try-finally-block
+         (let ((gen-state (make-generator-state ,try-suite :sub-generator t))
+               (,finalization-scheduled nil))
+           (labels ((run-finally (generator-finished-p)
+                      (%cps-convert ,finally-suite
+                                    (lambda (val)
+                                      (declare (ignore val))
+                                      ;; Whole finally-body executed -> remove finalization
+                                      (when ,finalization-scheduled
+                                        (unschedule-finalization ,finalization-scheduled))
+                                      (when generator-finished-p
+                                        ,(%mark-generator-finished)))))
+                    (next-val (val-for-generator)
+                      ;; Get new val from TRY:
+                      ;;  - if this results in an error, run the FINALLY (which may raise another
+                      ;;    exception itself) and raise the error again;
+                      ;;  - if this does not result in an error, then FINALLY is not yet run.
+                      (handler-case (receive-yielded-value (with-py-errors ()
+                                                             (generator-state-input-value gen-state val-for-generator)))
+                        ({Exception} (c)
+                          (run-finally t)
+                          (error c))
+                        (:no-error (val)
+                          (case val
+                            ((:implicit-return :explicit-return)
+                             ;; :implicit = normal end of TRY block.
+                             ;; :explicit = TRY block did a RETURN, which means generator is finished.
+                             (run-finally (eq val :explicit-return))
+                             (funcall stmt-k nil))
+                            (t
+                             ;; The TRY block yields a value. Maybe the generator will never be run
+                             ;; further. To ensure the FINALLY block is run some time, schedule
+                             ;; finalization function.
+                             (unless ,finalization-scheduled
+                               (setf ,finalization-scheduled (schedule-finalization gen-state 'generator-state-close)))
+                             ,(%store-continuation `(lambda (v) (next-val v)))
+                             (yield-value val)))))))
+             (next-val *the-none*)))))))
 
 (def-cps-macro [tuple-expr] (items)
   (with-gensyms (tuple-k)
@@ -667,35 +685,59 @@ former requires that this form is executed within RECEIVE-YIELDED-VALUE."
            finally (return res)))))
 
 (def-cps-macro [unary-expr] (op val)
-  (let ((py-op-func (get-unary-op-func-name op)))
-    `(%cps-convert ,val
-         (lambda (.val)
-           ,(%call-continuation `(funcall (function ,py-op-func) .val))))))
+  (with-gensyms (e-val)
+    (let ((py-op-func (get-unary-op-func-name op)))
+      `(%cps-convert ,val
+                     (lambda (,e-val)
+                       ,(%call-continuation `(funcall (function ,py-op-func) ,e-val)))))))
+
+(defun contains-break-stmt-p (suite)
+  "Whether SUITE contains BREAK stmt (not within inner loop)."
+  (with-py-ast (form suite)
+    (case (car form)
+      (([for-in-stmt] [while-stmt]) (values nil t))
+      (([funcdef-stmt] [classdef-stmt]) (values nil t))
+      (([break-stmt]) (return-from contains-break-stmt-p t))
+      (t form)))
+  nil)
+
+(defun contains-continue-stmt-p (suite)
+  "Whether SUITE contains BREAK stmt (not within inner loop)."
+  (with-py-ast (form suite)
+    (case (car form)
+      (([for-in-stmt] [while-stmt]) (values nil t))
+      (([funcdef-stmt] [classdef-stmt]) (values nil t))
+      (([continue-stmt]) (return-from contains-continue-stmt-p t))
+      (t form)))
+  nil)
 
 (def-cps-macro [while-stmt] (test suite else-suite)
   (let ((stmt-k %current-continuation))
-    `(labels ((.break-cont () ;; see [break-stmt]
-                           (funcall ,stmt-k nil))
-              (.loop-again ()
-                           (%cps-convert ,test
-                               (lambda (val)
-                                 (if (py-val->lisp-bool val)
-                                     (%cps-convert ,suite
-                                         (lambda (v) (declare (ignore v)) (.loop-again)))
-                                   ,(if else-suite
-                                        `(%cps-convert ,else-suite ,stmt-k)
-                                      `(funcall ,stmt-k nil)))))))
-       (.loop-again))))
+    (with-gensyms (while-cont)
+      `(labels (,@(when (contains-break-stmt-p suite)
+                    `((%break-cont () (funcall ,stmt-k nil))))
+                  ,@(when (contains-continue-stmt-p suite)
+                      `((%continue-cont () (,while-cont))))
+                  (,while-cont ()
+                    (%cps-convert ,test
+                                  (lambda (val)
+                                    (if (py-val->lisp-bool val)
+                                        (%cps-convert ,suite
+                                                      (lambda (v) (declare (ignore v)) (,while-cont)))
+                                      ,(if else-suite
+                                           `(%cps-convert ,else-suite ,stmt-k)
+                                         `(funcall ,stmt-k nil)))))))
+         (,while-cont)))))
 
 ;; [with-stmt]: keep?
 
 (def-cps-macro [yield-expr] (val)
-  (with-gensyms (yield-cont)
+  (with-gensyms (yield-cont e-val)
     `(let ((,yield-cont ,%current-continuation))
        (%cps-convert ,val
-                     (lambda (val)
+                     (lambda (,e-val)
                        ,(%store-continuation `(lambda (x) (funcall ,yield-cont (parse-generator-input x))))
-                       (yield-value val))))))
+                       (yield-value ,e-val))))))
     
 (def-cps-macro [yield-stmt] (&optional value)
   ;; A yield statement is a yield expression whose value is not used.
