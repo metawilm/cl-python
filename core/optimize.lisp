@@ -540,7 +540,7 @@
 				 (format nil "~D" x)))
 
 (defmethod py-repr ((x string))
-  ;; A rough filter for now
+  ;; A rough filter for now; this lets unicode characters outside ASCII through.
   (if (every #'alphanumericp x) (format nil "'~A'" x) (py-string.__repr__ x)))
 
 (defmethod py-repr ((x vector)) (py-list.__repr__ x))

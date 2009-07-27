@@ -17,13 +17,16 @@
     (pushnew :clpython-allegro-modern-mode *features*)))
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
+  (defun get-external-symbols (pkg)
+    (loop for s being each external-symbol in (find-package pkg) collect s))
+  
   (defun cascade-external-symbols (pkg &optional used-pkg-list)
     (dolist (p (or used-pkg-list (package-use-list pkg)))
       (unless (eq p (find-package :common-lisp))
 	(do-external-symbols (s p)
 	  ;; Test whether not shadowed (like by symbol in the Common Lisp package) 
 	  (when (eq s (find-symbol (symbol-name s) pkg))
-	    (export s pkg)))))))
+	    (export (cons s (get-external-symbols pkg)) pkg)))))))
 
 
 ;; The exported symbols are given as #:symbols if case is irrelevant, 
@@ -271,6 +274,6 @@
 ;; and has the symbol 'repl somewhere, and export it.
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (import 'clpython.app.repl:repl :clpython)
-  (export 'clpython.app.repl:repl :clpython))
+  (export (cons 'clpython.app.repl:repl (get-external-symbols :clpython)) :clpython))
 
   

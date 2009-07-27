@@ -116,7 +116,7 @@
   (or #+(or allegro ccl lispworks) (make-hash-table :test 'py-==->lisp-val :hash-function 'py-hash)
       #+cmu (make-hash-table :test 'py-hash-table-test)
       #+sbcl (make-hash-table :test 'py-==->lisp-val)
-      (error "Creating python dict not suported in this environment.")))
+      #-(or allegro ccl lispworks cmu sbcl) (error "Creating python dict not suported in this environment.")))
 
 
 ;; None and NotImplemented are here, so that other modules like classes can use the compiler macros.

@@ -1257,7 +1257,7 @@ LOCALS shares share tail structure with input arg locals."
                (with-module-toplevel-context ()
                  (init-module-namespace current-module-name)))
              (run-top-level-forms (&optional module-globals)
-               (let (result (i -1))
+               (let (result)
                  (dolist (f defun-wrappers result)
                    (loop named tlf
                        do #+(or)(format t "Evaluating top-level form ~A in ~A~%" (incf i) current-module-name)

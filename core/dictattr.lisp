@@ -79,9 +79,7 @@
     #-(or allegro ccl cmu lispworks sbcl) (error "Define +use-standard-instance-access-setf+ ~
 for this implementation"))
 
-  (if +use-standard-instance-access-setf+
-      (pushnew :clpython-use-standard-instance-access-setf *features*)
-    (setf *features* (remove :clpython-use-standard-instance-access-setf *features*))))
+  (register-feature :clpython-use-standard-instance-access-setf +use-standard-instance-access-setf+))
 
 (defconstant-once +py-class-classname-slot-index+
   (class-slot-ix +py-class-classname-slot-name+ 'py-type 'py-meta-type))

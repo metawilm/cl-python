@@ -437,8 +437,7 @@ C must be either a character or NIL."
                                  (incf s.ix uni-len))
                         (progn (vector-push-extend #\\ res)
                                (vector-push-extend c res)
-                               (incf s.ix))))
-                 finally (return res)))
+                               (incf s.ix))))))
   
            (replace-non-unicode-escapes (s)
              (unless (find #\\ s)
