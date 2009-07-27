@@ -630,6 +630,11 @@ otherwise work well.")
                                :name name
                                :attributes (make-hash-table :test 'eq))))
 
+(defgeneric py-function-lambda (x)
+  ;; XXX this function is also used when *create-simple-lambdas-for-python-functions*
+  ;; which is not quite kosher.
+  (:method ((x function)) x))
+
 (defclass py-function (standard-generic-function dicted-object)
   ;; mop:funcallable-standard-class defines :name initarg, but how to to access it portably...
   ((fname        :initarg :fname        :initform nil :accessor py-function-name)
