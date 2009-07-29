@@ -80,6 +80,9 @@ source location hash-table is returned as second value."
           (values forms *python-form->source-location*)
         forms))))
 
+(defparameter *signal-toplevel-form-finished-conditions* nil
+  "Whether to signal toplevel-form-finished-condition between top-level forms.")
+
 (defmacro with-parser-eof-detection ((at-real-eof-var) &body body)
   (check-type at-real-eof-var symbol)
   `(let* ((*lex-fake-eof-after-toplevel-form* t)
@@ -88,11 +91,13 @@ source location hash-table is returned as second value."
      (handler-bind ((next-eof-real (lambda (c)
                                      (declare (ignore c))
                                      (setf ,at-real-eof-var t)
-                                     (invoke-restart (find-restart 'muffle))))
+                                     (unless *signal-toplevel-form-finished-conditions*
+                                       (invoke-restart (find-restart 'muffle)))))
                     (next-eof-fake-after-toplevel-form
                      (lambda (c)
                        (declare (ignore c))
-                       (invoke-restart (find-restart 'muffle)))))
+                       (unless *signal-toplevel-form-finished-conditions*
+                         (invoke-restart (find-restart 'muffle))))))
        ,@body)))
 
 (defgeneric handle-parser-condition (yacc-version condition lexer))

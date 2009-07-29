@@ -58,8 +58,13 @@
 
 (defvar *lex-fake-eof-after-toplevel-form* nil)
 
-(define-condition next-eof-fake-after-toplevel-form () ())
-(define-condition next-eof-real () ())
+(define-condition toplevel-form-finished-condition ()
+  ((char-ix :initarg :char-ix :accessor toplevel-form-finished-condition.char-ix))
+  (:report (lambda (c stream) (print-unreadable-object (c stream :type t)
+                                (format stream " :char-ix ~A" (toplevel-form-finished-condition.char-ix c))))))
+
+(define-condition next-eof-fake-after-toplevel-form (toplevel-form-finished-condition) ())
+(define-condition next-eof-real (toplevel-form-finished-condition) ())
 
 ;; Lexer state
 
@@ -173,7 +178,7 @@ On EOF returns: eof-token, eof-token."
                            (when *lex-fake-eof-after-toplevel-form*
                              (with-simple-restart (muffle "Muffle")
                                (when debug (format t "Lexer signals: next-eof-real~%"))
-                               (signal 'next-eof-real)))
+                               (signal 'next-eof-real :char-ix %lex-next-unread-char-ix%)))
                            (lex-todo (lexer-eof-token yacc-version) (lexer-eof-token yacc-version))
                            (loop while (plusp (pop indent-stack))
                                do (lex-todo '[dedent] '[dedent]))
@@ -247,7 +252,7 @@ On EOF returns: eof-token, eof-token."
                                                    (lex-looking-at-token "finally"))))
                                  (with-simple-restart (muffle "Muffle")
                                    (when debug (format t "Lexer signals: next-eof-fake-after-toplevel-form~%"))
-                                   (signal 'next-eof-fake-after-toplevel-form))
+                                   (signal 'next-eof-fake-after-toplevel-form :char-ix %lex-next-unread-char-ix%))
                                  (lex-todo (lexer-eof-token yacc-version) (lexer-eof-token yacc-version)))
                                (cond ((< (car indent-stack) new-indent) ; one indent
                                       (push new-indent indent-stack)
