@@ -551,10 +551,83 @@ try:
   assert False
 except NameError:
   pass"
-  )))
+  ))
+  (run-no-error "
+def f():
+  x = 'fl'
+  class C:
+    global x  # does not hold for method m 
+    y = x
+    def m(self):
+      return x
+  return C().m()
+
+x = 'gl'
+
+assert f() == 'fl'" :fail-info "`global' in a class def must not leak into the methods within")
+  (run-no-error "
+a = 'global'
+  
+def f():
+    a = 'af'
+    def g():
+      global a
+      def h():
+        assert a == 'global'
+      return h()
+    return g()
+
+f()")
+  (run-no-error "
+x = 0
+
+def f():
+  x = 'local'
+  def g():
+    global x
+    print x
+    x += 1
+  g()
+
+f()
+
+assert x == 1"))
 
 (defmethod test-lang ((kind (eql :identifier-expr)))
-  )
+  (run-no-error "
+def f():
+   x = 3
+   class C:
+     assert x == 3")
+  (run-no-error "
+def f():
+  x = 1
+  def g():
+    y = 2
+    def h():
+      return (x,y)
+    return h
+  return g
+
+assert f()()() == (1,2)")
+  (run-no-error "
+ok = ''
+class C:
+  x = 1
+  class D:
+    y = 2
+    class E:
+      global ok
+      try:
+        x
+      except NameError:
+        ok += 'x'
+      try:
+        y
+      except NameError:
+        ok += 'y'
+
+assert ok == 'xy'"))
 
 (defmethod test-lang ((kind (eql :if-expr)))
   (run-no-error "x = (1 if True else 0); assert x == 1")
@@ -944,7 +1017,10 @@ except SyntaxError:
   `(let ((%dummy-cps-namespace (make-hash-table :test 'eq)))
      (clpython::with-namespace (,(clpython::make-hash-table-ns
                                    :dict-form '%dummy-cps-namespace
-                                   :parent (clpython::make-builtins-namespace)
+                                   :parent (clpython::make-hash-table-ns
+                                            :dict-form '(make-hash-table)
+                                            :scope :module
+                                            :parent (clpython::make-builtins-namespace))
                                    :scope :function)
                                    :define-%globals t)
        ,@body)))

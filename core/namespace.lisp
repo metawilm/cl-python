@@ -56,7 +56,12 @@
   (check-type func function)
   (loop named lookup
       for try-ns = ns then (ns.parent try-ns)
-      for form = (and try-ns (apply func try-ns args))
+      for form = (cond ((not try-ns) nil)
+                       ((and (not (eq ns try-ns))
+                             (eq (ns.scope try-ns) :class))
+                        ;; class namespaces can't be closed over / referenced like function namespaces
+                        nil)
+                       (t (apply func try-ns args)))
       while try-ns
       when form
       do (return-from lookup (values form try-ns))
@@ -78,13 +83,6 @@
   (let ((ns (get-pydecl :namespace e)))
     (ns.read-form ns key)))
 
-(defun get-module-namespace (e)
-  (loop for ns = (get-pydecl :namespace e) then (ns.parent ns)
-      while ns
-      when (member (ns.scope ns) '(:function :module :exec-globals))
-      return ns
-      finally (error "No global namespace found, as parent.")))
-                         
 (defmacro module-namepace-get (key &environment e)
   (check-type key symbol)
   (let ((ns (get-module-namespace e)))
@@ -100,6 +98,20 @@
 #-clpython-namespaces-are-classes
 (defstruct (namespace (:conc-name ns.))
   parent scope)
+
+(defmethod print-object ((namespace namespace) stream)
+  (print-unreadable-object (namespace stream :type t)
+    (pprint-logical-block (stream nil)
+      (unless (member 'ns.attributes (trace))
+        (format stream "~{~S ~S~^ ~:_~}" (ns.attributes namespace))))))
+
+(defgeneric ns.attributes (namespace)
+  (:method-combination append))
+
+(defmethod ns.attributes append ((namespace namespace))
+  (list :context (loop for ns = namespace then (ns.parent ns)
+                     while ns
+                     collect (cons (ns.scope ns) (type-of ns)))))
 
 (defmethod make-load-form ((ns namespace) &optional environment)
   (declare (ignore environment))
@@ -127,6 +139,9 @@
     (unless (member s (ns.excluded-names ns))
       (call-next-method))))
 
+(defmethod ns.attributes append ((namespace excl-ns))
+  (list :excluded-names (ns.excluded-names namespace)))
+  
 #+clpython-namespaces-are-classes
 (progn
   (defclass mapping-ns (namespace)
@@ -244,10 +259,8 @@
   (declare (ignore environment))
   (my-make-load-form ns))
 
-(defmethod print-object ((x let-w/locals-ns) stream)
-  (print-unreadable-object (x stream :type t)
-    (format stream ":locals-names ~A  :let-names ~A"
-            (ns.locals-names x) (ns.let-names x))))
+(defmethod ns.attributes append ((x let-w/locals-ns))
+  (list :locals-names (mapcar #'symbol-name (ns.locals-names x)) :let-names (ns.let-names x)))
 
 (defmethod ns.expand-with ((ns let-w/locals-ns) body-form environment)
   (declare (ignore environment))
@@ -315,6 +328,9 @@
   (defmethod ns.del-form :around ((ns hash-table-w/excl-ns) (s symbol))
     (unless (member s (ns.excluded-names ns))
       (call-next-method))))
+
+(defmethod ns.attributes append ((x hash-table-w/excl-ns))
+  (list :excluded-names (ns.excluded-names x)))
 
 (defmethod make-load-form ((ns hash-table-w/excl-ns) &optional environment)
   (declare (ignore environment))
@@ -384,3 +400,16 @@
 (defmethod ns.del-form ((ns builtins-ns) (s symbol))
   `(error "Namespace ~A not writable (attempt to delete ~A)." ,ns ',s))
 
+
+(defgeneric get-module-namespace (context)
+  (:method (environment)
+           #+allegro (check-type environment sys::augmentable-environment)
+           (get-module-namespace (get-pydecl :namespace environment)))
+  (:method ((namespace namespace))
+           (loop for ns = namespace then (ns.parent ns)
+               while ns
+               when (member (ns.scope ns) '(:module :exec-globals))
+               return ns
+               finally (break "No global namespace found among parents, for: ~A" namespace))))
+           
+                         

@@ -631,21 +631,24 @@ an assigment statement. This changes at least the returned 'store' form.")
            ;; Need a nested LET, as +cls-namespace+ may not be set when the ASSIGN-STMT
            ;; below is executed, as otherwise nested classes don't work.
            (let ((%class-namespace (make-eq-hash-table "class-namespace")))
-             (with-namespace (,(make-hash-table-ns
+             (with-namespace (,(make-hash-table-w/excl-ns
                                  :dict-form '%class-namespace
-                                 :parent (get-module-namespace e) ;; not the lexical parent ns!
+                                 :excluded-names class-cumul-declared-globals
+                                 :parent (get-pydecl :namespace e)
                                  :scope :class))
                ;; XXX enforce string-only keys
                ;; First, run the statements in the body of the class
                ;; definition. This will fill +cls-namespace+ with the
                ;; class attributes and methods.
                
-               ;; Note that the local class variables are not locally visible
-               ;; i.e. they don't extend ":lexically-visible-vars".
+               ;; Local class variables are not locally visible (they don't extend ":lexically-visible-vars")
+               ;; Variables declared `global' in a class scope are not global in sub-scopes.
                (with-pydecl ((:context :class)
                              (:context-stack ,new-context-stack)
-                             (:lexically-declared-globals
-                              ,class-cumul-declared-globals))
+                             (:inside-class-p t)
+                             (:declared-globals-current-scope ,class-cumul-declared-globals)
+                             ;; :lexically-declared-globals is unchanged
+                             )
                  ,(if *mangle-private-variables-in-class*
                       (mangle-suite-private-variables cname suite)
                     suite))
@@ -793,7 +796,7 @@ an assigment statement. This changes at least the returned 'store' form.")
                                   ,(union (set-difference
                                            (target-get-bound-vars target)
                                            (nconc (ast-deleted-variables suite)
-                                                  (get-pydecl :lexically-declared-globals e)))
+                                                  (get-pydecl :declared-globals-current-scope e)))
                                           (get-pydecl :safe-lex-visible-vars e))))
                      ,suite)
                    (go .continue) ;; prevent warning about unused tag
@@ -936,14 +939,13 @@ LOCALS shares share tail structure with input arg locals."
       (when **-arg (push (second **-arg) nontuple-arg-names))
 
       (multiple-value-bind (all-nontuple-func-locals new-locals func-cumul-declared-globals)
-	  (suite-globals-locals suite
-				  nontuple-arg-names
-				  (get-pydecl :lexically-declared-globals e))
+	  (suite-globals-locals suite nontuple-arg-names (get-pydecl :lexically-declared-globals e))
 	
 	(let* ((new-context-stack (cons fname (get-pydecl :context-stack e))) ;; fname can be :lambda
 	       (context-fname     (ensure-user-symbol
 				   (format nil "~{~A~^.~}" (reverse new-context-stack))))
 	       (body-decls       `((:lexically-declared-globals ,func-cumul-declared-globals)
+                                   (:declared-globals-current-scope ,func-cumul-declared-globals)
 				   (:context :function)
 				   (:context-stack ,new-context-stack)
 				   (:inside-function-p t)
@@ -976,7 +978,7 @@ LOCALS shares share tail structure with input arg locals."
 		   ,(when *-arg  (second *-arg))
 		   ,(when **-arg (second **-arg)))
                   (with-namespace (,(make-let-w/locals-ns
-                                      :parent (get-module-namespace e)
+                                      :parent (get-pydecl :namespace e)
                                       :names (append all-nontuple-func-locals
                                                      destruct-nested-vars
                                                      new-locals)
@@ -1038,7 +1040,8 @@ LOCALS shares share tail structure with input arg locals."
   ;; FUNCDEF-STMT is handled.
   (declare (ignore names))
   (when (and *warn-bogus-global-declarations*
-             (not (get-pydecl :inside-function-p e)))
+             (not (or (get-pydecl :inside-function-p e)
+                      (get-pydecl :inside-class-p e))))
     (warn "Bogus `global' statement found at top-level.")))
 
 (defparameter *debug-assume-variables-bound* nil
@@ -1047,10 +1050,16 @@ LOCALS shares share tail structure with input arg locals."
 (define-setf-expander [identifier-expr] (name &environment e)
   ;; XXX safe-lexical-vars
   ;; XXX built-in non-shadowable values like True, False, None, Ellipsis, NotImplemented
-  (let ((ns (get-pydecl :namespace e)))
+  (let* ((ns (get-pydecl :namespace e))
+         (global-p (member name (get-pydecl :declared-globals-current-scope e)))
+         (module-ns (get-module-namespace e)))
     (with-gensyms (store)
-      (let ((store-form (ns.find-form #'ns.write-form ns name store))
-            (del-form `(if ,(ns.find-form #'ns.del-form ns name)
+      (let ((store-form (if global-p
+                            (ns.write-form module-ns name store)
+                          (ns.find-form #'ns.write-form ns name store)))
+            (del-form `(if ,(if global-p
+                                (ns.del-form module-ns name)
+                              (ns.find-form #'ns.del-form ns name))
                            nil
                          ,(unless *debug-assume-variables-bound*
                             `(unbound-variable-error ',name :expect-value nil)))))
@@ -1058,7 +1067,12 @@ LOCALS shares share tail structure with input arg locals."
                 () ;; values
                 `(,store) ;; stores
                 (if *want-DEL-setf-expansion* del-form store-form) ;; write/delete form
-                `(or ,(ns.find-form #'ns.read-form ns name)
+
+                ;; Can have that in deepest namespace it's global,
+                ;; but a higher namespace has local with that name.
+                `(or ,(if global-p
+                          (ns.read-form module-ns name)
+                        (ns.find-form #'ns.read-form ns name))
                      ,(unless *debug-assume-variables-bound*
                         `(unbound-variable-error ',name :expect-value t)))))))) ;; read form
 
@@ -1357,7 +1371,7 @@ LOCALS shares share tail structure with input arg locals."
   
   (let* ((deleted-vars (ast-deleted-variables whole))
          (deleted-safe (intersection deleted-vars (get-pydecl :safe-lex-visible-vars e)))
-         (global-safe (intersection (get-pydecl :lexically-declared-globals e) 
+         (global-safe (intersection (get-pydecl :declared-globals-current-scope e) 
                                     (get-pydecl :safe-lex-visible-vars e))))
     ;; This is a nice place for some sanity checks
     (assert (not deleted-safe) () "Bug: deleted vars ~A found in :safe-lex-visible-vars" deleted-safe)
@@ -2286,37 +2300,3 @@ be bound."
   `(flet ((.f () ,@body))
      (declare (dynamic-extent #'.f))
      (call-with-better-python-style-warnings #'.f)))
-
-
-;; `global' in a class def leaks into the methods within:
-;; 
-;; def f():
-;;   x = 'fl'
-;;   class C:
-;;     global x
-;;     y = x
-;;     def m(self):
-;;       return x
-;;   print C().m()
-;;
-;; x = 'gl'
-;;
-;; f()
-;; => prints 'fl'
-
-
-;; When a function defines x as global, for inner
-;; functions it's a global too:
-;; ---
-;; a = 'global'
-;; 
-;; def f():
-;;   a = 'af'
-;;   def g():
-;;     global a
-;;     def h():
-;;       print a
-;;     return h
-;;   return g
-;; ---
-;; f()()() -> prints 'global', not 'af'

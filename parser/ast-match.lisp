@@ -98,7 +98,7 @@ differs in structure from the template for ~A ast nodes, which is: ~A"
            `((declare (ignore .bindings))))
        ,@(when must-hold
            `((assert .match-p () 
-               "Form does not match required pattern: ~A != ~A" ,form ',template)))
+               "Form does not match required pattern: ~S != ~S" ,form ',template)))
        (when .match-p
          (let ,(loop for wc in wildcards
                    collect `(,wc (cdr (assoc ',wc .bindings))))

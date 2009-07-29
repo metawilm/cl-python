@@ -19,10 +19,12 @@
     '(:context                    ;; Innermost context, one of (:class :module :function).
       :context-stack              ;; List of class and function names, innermost first; car is :lambda if in anonymous function.
       :function-must-save-locals  ;; T to force functions to  support `locals()' call in body (normally deduced from body).
-      :inside-function-p          ;; T iff inside FUNCDEF       (to check RETURN).
+      :inside-function-p          ;; T iff inside FUNCDEF       (to check RETURN and GLOBAL).
+      :inside-class-p             ;; T iff inside CLASSDEF      (to check GLOBAL).
       :inside-loop-p              ;; T iff inside WHILE of FOR  (to check BREAK, CONTINUE).
       :inside-setf-py-attr        ;; T if insides a (setf (py-attr ..) ..) form (work around Allegro CL bug).
-      :lexically-declared-globals ;; List of variable names declared global in an outer scope (also global in inner scopes).
+      :declared-globals-current-scope ;; List of variable that in the current scope must be treated as globals
+      :lexically-declared-globals ;; Variables declared global by functions
       :lexically-visible-vars     ;; List of variable names that can be closed over (excludes globals).
       :mod-futures                ;; The features imported from the __future__ module.
       #+(or):mod-globals-names          ;; Vector of variable names at the module level.
