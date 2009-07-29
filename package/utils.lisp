@@ -241,3 +241,8 @@ See function ALIST-VS-HT.")
   (if present-p
       (pushnew feature *features*)
     (setf *features* (remove feature *features*))))
+
+(defmacro with-gensyms (list &body body)
+  `(let ,(loop for x in list
+	     collect `(,x (gensym ,(symbol-name x))))
+     ,@body))

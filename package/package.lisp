@@ -199,7 +199,7 @@
            #:with-stack-list #:without-redefinition-warnings #:defconstant-once
            #:+max-char-code+ #:char-code-type #:ltv-find-class #:make-weak-key-hash-table
            #:schedule-finalization #:unschedule-finalization
-           #:register-feature))
+           #:register-feature #:with-gensyms))
 
 ;;; CLPYTHON.PARSER - Parser and Lexer
 

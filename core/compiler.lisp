@@ -151,14 +151,6 @@ Disabled by default, to not confuse the test suite.")
   ;; XXX remove, use *load-truename*
   "The path of the Python file being compiled; saved in module's `filepath' slot.")
 
-
-;;; Gensym handling
-
-(defmacro with-gensyms (list &body body)
-  `(let ,(loop for x in list
-	     collect `(,x (gensym ,(symbol-name x))))
-     ,@body))
-
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; Setf expansion
 
