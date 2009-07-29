@@ -66,7 +66,8 @@ http://groups.google.nl/group/comp.lang.lisp/msg/2520fe9bc7749328?dmode=source"
         (setq plist (cddr plist))))))
 
 (defgeneric slurp-file (file)
-  (:documentation "Returns file/stream contents as string")
+  (:documentation "Returns file/stream contents as string.
+The element type can be CHARACTER or (UNSIGNED-BYTE <=8).")
   (:method ((fname string))
            (slurp-file (pathname fname)))
   (:method ((fname pathname))
@@ -76,9 +77,14 @@ http://groups.google.nl/group/comp.lang.lisp/msg/2520fe9bc7749328?dmode=source"
            (with-open-file (f fname :direction :input :element-type '(unsigned-byte 8))
              (slurp-file f)))
   (:method ((s stream))
-	   (let ((vec (make-array (file-length s) :element-type '(unsigned-byte 8))))
+	   (let ((vec (make-array (file-length s) :element-type (stream-element-type s))))
 	     (read-sequence vec s)
-	     (map 'string #'code-char vec))))
+             (cond ((eq (stream-element-type s) 'character)
+                    vec)
+                   ((subtypep (stream-element-type s) '(unsigned-byte 8))
+                    (map 'string #'code-char vec))
+                   (t (break "Unexpected file element type: expected CHARACTER or (UNSIGNED-BYTE <=8), got: ~A."
+                             (stream-element-type s)))))))
 
 (defmacro named-function (name lambda-form)
   (declare (ignorable name))
