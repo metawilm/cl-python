@@ -21,12 +21,14 @@
     (loop for s being each external-symbol in (find-package pkg) collect s))
   
   (defun cascade-external-symbols (pkg &optional used-pkg-list)
-    (dolist (p (or used-pkg-list (package-use-list pkg)))
-      (unless (eq p (find-package :common-lisp))
-	(do-external-symbols (s p)
-	  ;; Test whether not shadowed (like by symbol in the Common Lisp package) 
-	  (when (eq s (find-symbol (symbol-name s) pkg))
-	    (export (cons s (get-external-symbols pkg)) pkg)))))))
+    (let (to-export)
+      (dolist (p (or used-pkg-list (package-use-list pkg)))
+        (unless (eq p (find-package :common-lisp))
+          (do-external-symbols (s p)
+            ;; Test whether not shadowed (like by symbol in the Common Lisp package) 
+            (when (eq s (find-symbol (symbol-name s) pkg))
+              (push s to-export)))))
+      (export (append to-export (get-external-symbols pkg)) pkg))))
 
 
 ;; The exported symbols are given as #:symbols if case is irrelevant, 
