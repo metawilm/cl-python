@@ -220,7 +220,9 @@ See function ALIST-VS-HT.")
   #+lispworks (lw:quit :status code)
   #+lucid (lcl:quit code)
   #+sbcl (sb-ext:quit
-          :unix-code (typecase code (number code) (null 0) (t 1)))
+          :unix-status (typecase code (number code)
+                                 (null 0)
+                                 (t 1)))
   #+kcl (lisp::bye)                     ; XXX Does this take an arg?
   #+scl (ext:quit code)                 ; XXX Pretty sure this *does*.
   #+(or openmcl mcl) (ccl::quit)
