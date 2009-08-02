@@ -67,7 +67,8 @@ http://groups.google.nl/group/comp.lang.lisp/msg/2520fe9bc7749328?dmode=source"
 
 (defgeneric slurp-file (file)
   (:documentation "Returns file/stream contents as string.
-The element type can be CHARACTER or (UNSIGNED-BYTE <=8).")
+The element type can be CHARACTER or (UNSIGNED-BYTE <=8).
+If the stream length can not be determined (e.g. for standard input), all available chars are read.")
   (:method ((fname string))
            (slurp-file (pathname fname)))
   (:method ((fname pathname))
@@ -76,15 +77,29 @@ The element type can be CHARACTER or (UNSIGNED-BYTE <=8).")
            #-allegro
            (with-open-file (f fname :direction :input :element-type '(unsigned-byte 8))
              (slurp-file f)))
-  (:method ((s stream))
-	   (let ((vec (make-array (file-length s) :element-type (stream-element-type s))))
-	     (read-sequence vec s)
-             (cond ((eq (stream-element-type s) 'character)
+  (:method ((stream stream))
+           (let* ((stream-type (stream-element-type stream))
+                  (array-element-type (cond ((subtypep stream-type 'character)
+                                             'character)
+                                            ((subtypep (stream-element-type stream) '(unsigned-byte 8))
+                                             '(unsigned-byte 8))
+                                            (t (error "Unexpected stream element type: expected CHARACTER ~
+                                                       or (UNSIGNED-BYTE <=8), got: ~A." stream-type))))
+                  (stream-length (handler-case (file-length stream)
+                                   (type-error () 
+                                     ;; CLHS: "not a stream associated with a file"
+                                     nil)))
+                  (vec (if stream-length
+                           (let* ((vec (make-array (file-length stream) :element-type array-element-type))
+                                  (num-read (read-sequence vec stream)))
+                             (adjust-array vec num-read))
+                         (prog1 (coerce (loop for ch = (read-char-no-hang stream) while ch collect ch)
+                                        'string)
+                           (setf array-element-type 'character)))))
+             (cond ((equal array-element-type 'character)
                     vec)
-                   ((subtypep (stream-element-type s) '(unsigned-byte 8))
-                    (map 'string #'code-char vec))
-                   (t (break "Unexpected file element type: expected CHARACTER or (UNSIGNED-BYTE <=8), got: ~A."
-                             (stream-element-type s)))))))
+                   ((equal array-element-type '(unsigned-byte 8))
+                    (map 'string #'code-char vec))))))
 
 (defmacro named-function (name lambda-form)
   (declare (ignorable name))
