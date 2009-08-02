@@ -127,12 +127,7 @@ with KIND one of :module, :package
 
 (defun call-with-python-code-reader (initial-forms func)
   "Let the Python parser handle all reading."
-  (handler-bind
-      ((error (lambda (c)
-                (signal c)
-                ;; ERROR with normal *readtable*, otherwise interactive
-                ;; debugging becomes impossible.
-                (with-standard-io-syntax (error c)))))
+  (with-sane-debugging ("Error occured while reading input with the Python readtable:")
     ;; The below SETUP-OMNIVORE-READMACRO can't be shared (e.g. inside LOAD-TIME-VALUE), as
     ;; it contains state (the initial forms).
     (let ((*readtable* (setup-omnivore-readmacro :function #'clpython.parser:parse

@@ -258,3 +258,17 @@ See function ALIST-VS-HT.")
   #+lispworks (lispworks:file-directory-p pathname)
   #+(or cmu sbcl) (null (pathname-type pathname))
   #-(or allegro cmu lispworks sbcl) (error "TODO: No DIRECTORY-P for this implementation."))
+
+(defmacro with-sane-debugging ((error-prefix &rest args) &body body)
+  "Reset the readtable and other i/o variables uncaught errors occur."
+  (check-type error-prefix string)
+  (with-gensyms (c)
+    `(handler-bind
+         ((error (lambda (,c)
+                   (signal ,c)
+                   (with-standard-io-syntax
+                     (format t "~&; ")
+                     (format t ',error-prefix ,@args)
+                     (format t "~%")
+                     (error ,c)))))
+       ,@body)))
