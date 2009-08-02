@@ -588,13 +588,13 @@ former requires that this form is executed within RECEIVE-YIELDED-VALUE."
                         ;; (lambda (x) (declare (ignore x)) ,(%mark-generator-finished))))
         (t
          `(%cps-convert ,(car stmts)
-                        (named-function (suite ,(intern (format nil "\"~A; ...\"" 
-                                                                (clpython.parser:py-pprint (cadr stmts)))
-                                                        #.*package*))
-                          (lambda (e-val)
-                            (declare (ignore e-val))
-                            (%cps-convert ([suite-stmt] ,(cdr stmts))
-                                          ,%current-continuation)))))))
+                        ,(let ((flet-name (intern (format nil "suite \"~A; ...\"" (clpython.parser:py-pprint (cadr stmts)))
+                                                  #.*package*)))
+                           `(flet ((,flet-name (e-val)
+                                     (declare (ignore e-val))
+                                     (%cps-convert ([suite-stmt] ,(cdr stmts))
+                                                   ,%current-continuation)))
+                              #',flet-name))))))
 
 (def-cps-macro [try-except-stmt] (suite except-clauses else-suite)
   (with-gensyms (e-exc)

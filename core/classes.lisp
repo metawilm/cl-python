@@ -4138,27 +4138,27 @@ next value gotten by iterating over X. Returns NIL, NIL upon exhaustion.")
 		      ;; request of every new value. For efficiency that's not done.
 		      
 		      ;; (excl:named-function (:py-iterate-fun using __iter__)
-		      (lambda ()
-			(handler-case (values (if next-meth-bound
-						  (py-call next-meth-bound)
-						(funcall next-meth-unbound iterator)))
-			  ({StopIteration} () (values nil nil))
-			  (:no-error (val)  (values val t)))))) ;; )
+                      (flet ((using-__iter__ ()
+                               (handler-case (values (if next-meth-bound
+                                                         (py-call next-meth-bound)
+                                                       (funcall next-meth-unbound iterator)))
+                                 ({StopIteration} () (values nil nil))
+                                 (:no-error (val)  (values val t)))))
+                        #'using-__iter__)))
 		   
-		   
-		   (__getitem__ ;; Fall-back: call __getitem__ with successive integers
+                   (__getitem__ ;; Fall-back: call __getitem__ with successive integers
 		    (let ((index 0))
-		      ;; (excl:named-function (:py-iterate-fun using __getitem__)
-		      (lambda ()
-			(handler-case (values (py-call __getitem__ index))
-			  
-			  ;; ok if this happens when index = 0: then it's an empty sequence
-			  ({IndexError} () (values nil nil)) 
-			  
-			  (:no-error (val) (progn (incf index)
-						  (values val t))))))) ;; )
-		   
-		   (t
+                      ;; (excl:named-function (:py-iterate-fun using __getitem__)
+                      (flet ((using-__getitem__ ()
+                               (handler-case (values (py-call __getitem__ index))
+                                 ({IndexError} ()
+                                   ;; can even happen index = 0: then it's an empty sequence
+                                   (values nil nil))
+                                 (:no-error (val)
+                                   (incf index)
+                                   (values val t)))))
+                        #'using-__getitem__)))
+                   (t
 		    (py-raise '{TypeError} "Iteration over non-sequence: ~A." x))))))
 
 (defgeneric map-over-object (func object)
