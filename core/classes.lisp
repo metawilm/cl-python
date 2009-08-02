@@ -3919,7 +3919,6 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
 (defmacro def-py-shortcut-func (funcname method &key error)
   `(defgeneric ,funcname (x)
      (:method ((x t))
-	      #+(or)(warn "~A T: ~S" ',funcname x)
 	      (let ((,method (x.class-attr-no-magic.bind x ',method)))
                 (if ,method
                     (py-call ,method)
@@ -3937,8 +3936,11 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
 (def-py-shortcut-func py-len  {__len__} )
 (def-py-shortcut-func py-nonzero {__nonzero__} )
 (def-py-shortcut-func py-float {__float__})
-(without-redefinition-warnings 
- (def-py-shortcut-func py-hash  {__hash__}))
+
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (without-redefinition-warnings
+   (def-py-shortcut-func py-hash  {__hash__})))
+
 (def-py-shortcut-func py-index {__index__})
 
 (defun py-contains (x item)
