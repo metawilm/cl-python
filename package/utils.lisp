@@ -105,7 +105,9 @@ The element type can be CHARACTER or (UNSIGNED-BYTE <=8).")
 
 (defmacro without-redefinition-warnings (&body body)
   #+allegro `(excl:without-redefinition-warnings ,@body)
-  #-allegro `(progn ,@body))
+  #+sbcl `(handler-bind ((sb-kernel:redefinition-warning #'muffle-warning))
+            ,@body)
+  #-(or allegro sbcl) `(progn ,@body))
 
 (defmacro fast (&body body)
   `(locally (declare (optimize (speed 3)))
