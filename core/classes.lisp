@@ -1463,7 +1463,7 @@ but the latter two classes are not in CPython.")
 
 (defmethod initialize-instance :after ((m module) &rest args)
   (declare (ignore args))
-  (with-slots (name src-pathname src-file-write-date bin-pathname bin-file-write-date namespace-ht)
+  (with-slots (name src-pathname src-file-write-date bin-pathname bin-file-write-date)
       m
     (when (and src-pathname (not src-file-write-date))
       (assert (probe-file src-pathname))

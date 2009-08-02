@@ -59,7 +59,7 @@
 
 (defclass stat-result (clpython::object)
   ;; todo make named-tuple?
-  (#+allegro(stat :accessor sr-stat :initarg :stat))
+  ((stat :accessor sr-stat :initarg :stat))
   (:metaclass clpython::py-type))
 
 (defun |stat| (path)
@@ -67,7 +67,7 @@
   (let ((stat #+allegro (handler-case (excl.osi:stat path)
                           (excl.osi:syscall-error (c)
                             (py-raise '{OSError} (format nil "~A" c))))
-              #-allegro (break "TODO")))
+              #-allegro (error "TODO")))
     (make-instance 'stat-result :stat stat)))
 
 (def-py-method stat-result.st_mode :attribute (x)

@@ -1331,7 +1331,9 @@ LOCALS shares share tail structure with input arg locals."
                         :defun-wrappers ',(mapcar #'second defun-wrappers)
                         :source ,(when *compile-file-truename*
                                    (slurp-file (derive-pathname *compile-file-truename*)))))
-         (funcall ',module-function-name)))))
+         
+         #+lispworks (funcall (symbol-function ',module-function-name)) ;; suppress warning about #:|__main__.__module_init__| being undefined
+         #-lispworks (funcall ',module-function-name)))))
 
 (defmacro [pass-stmt] ()
   nil)
