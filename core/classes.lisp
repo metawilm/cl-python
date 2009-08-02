@@ -2244,7 +2244,7 @@ invocation form.")
          :func (lambda () (multiple-value-bind (ok key val) (next-fn)
                             (when ok (funcall func key val))))))
     (let ((vec (loop with vec = (make-array (* 2 (hash-table-count hash-table)))
-                   for i from -1
+                   with i = -1
                    for key being each hash-key in hash-table
                    using (hash-value val)
                    do (setf (svref vec (incf i)) key
