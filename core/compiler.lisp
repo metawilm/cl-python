@@ -1237,19 +1237,23 @@ LOCALS shares share tail structure with input arg locals."
       (derive-pathname pathname)
     default))
   
-(defun init-module-namespace (module-namespace module-name)
+(defun init-module-namespace (module-globals module-name)
   ;; should dispatch on namespace type?
-  (check-type module-namespace hash-table)
-  (setf (gethash '{__name__} module-namespace) module-name
-        (gethash '{__debug__} module-namespace) +the-true+))
+  (etypecase module-globals
+    (hash-table (setf (gethash '{__name__} module-globals) module-name
+                      (gethash '{__debug__} module-globals) +the-true+))
+    (package (setf (symbol-value (intern (symbol-name '{__name__}) module-globals)) module-name
+                   (symbol-value (intern (symbol-name '{__debug__}) module-globals)) +the-true+))))
+                                         
 
 (defmacro with-module-toplevel-context (() &body body)
   ;; Consider *module-namespace* ?
   `(with-pydecl ((:context :module))
-     (with-namespace (,(make-hash-table-ns
-                        :dict-form '%module-globals
-                        :scope :module
-                        :parent (make-builtins-namespace))
+     (with-namespace (,(or *module-namespace*
+                           (make-hash-table-ns
+                            :dict-form '%module-globals
+                            :scope :module
+                            :parent (make-builtins-namespace)))
                       :define-%globals t)
        ,@body)))
 
@@ -1313,8 +1317,9 @@ LOCALS shares share tail structure with input arg locals."
                for func-name = (make-symbol (format nil "stmt-~A" i))
                collect (list `(defun ,func-name (%module-globals)
                                 (declare (optimize debug))
+                                (declare (ignorable %module-globals)) ;; when using a package-ns for module globals
                                 (with-module-toplevel-context ()
-                                  (with-py-errors (:name (python-module ,*current-module-name*))
+                                  (with-py-errors (:name ,(intern (format nil "python-module ~A" *current-module-name*) #.*package*))
                                     (with-stmt-decl ()
                                       ,stmt))))
                              func-name))))

@@ -47,7 +47,8 @@ ARGS are the command-line args, available as `sys.argv'; can be a string or a li
       (let (result)
         (handler-bind ((module-import-pre
                         (lambda (c)
-                          (check-type module-globals hash-table)
+                          ;; At the moment there are only hashtable or package module namespaces:
+                          (check-type module-globals (or hash-table package))
                           (flet ((run ()
                                    (funcall (mip.init-func c) module-globals) ;; always set __name__, __debug__
                                    (setf result (funcall (mip.run-tlv-func c) module-globals))))

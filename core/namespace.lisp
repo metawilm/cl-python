@@ -100,7 +100,7 @@
   parent scope)
 
 (defmethod print-object ((namespace namespace) stream)
-  (print-unreadable-object (namespace stream :type t)
+  (print-unreadable-object (namespace stream :type t :identity t)
     (pprint-logical-block (stream nil)
       (unless (member 'ns.attributes (trace))
         (format stream "~{~S ~S~^ ~:_~}" (ns.attributes namespace))))))
@@ -336,17 +336,34 @@
   (declare (ignore environment))
   (my-make-load-form ns))
 
-#|| ;; no use case for this yet
-(defclass package-ns (namespace)
-  ((package :accessor ns.package :initarg :package)
-   (incl-builtins :accessor ns.incl-builtins :initarg :incl-builtins :initform nil)))
 
-(defmethod package-ns-intern ((ns package-ns) (s symbol))
+#+clpython-namespaces-are-classes
+(progn
+  (defclass package-ns (namespace)
+    ((package :accessor ns.package :initarg :package)
+     (incl-builtins :accessor ns.incl-builtins :initarg :incl-builtins :initform nil)))
+  
+  (defun make-package-ns (&rest args)
+    (apply #'make-instance 'package-ns args)))
+
+#-clpython-namespaces-are-classes
+(defstruct (package-ns (:include namespace)))
+
+(defmethod make-load-form ((ns package-ns) &optional environment)
+  (declare (ignore environment))
+  (my-make-load-form ns))
+
+(defmethod ns.attributes append ((x package-ns))
+  (list :package (ns.package x) :incl-builtins (ns.incl-builtins x)))
+
+(defun package-ns-intern (ns s)
+  (check-type ns package-ns)
+  (check-type s symbol)
   (intern (symbol-name s) (ns.package ns)))
 
 (defmethod ns.read-form ((ns package-ns) (s symbol))
   (let ((ps (package-ns-intern ns s)))
-    `(or (and (boundp ',ps) (symbol-value ',ps))
+    `(or (bound-in-some-way ',ps)
          ,(when (ns.incl-builtins ns)
             `(builtin-value ',s)))))
 
@@ -363,10 +380,10 @@
   `(loop for x being the symbols in ,(ns.package ns)
        when (and (eq (symbol-package x)  ,(ns.package ns))
                  (boundp x))
-       collect (progn (warn "name: ~A" x) x) into names
+       collect x into names
        and collect (symbol-value x) into values
        finally (return (make-locals-dict names values))))
-||#
+
 
 #+clpython-namespaces-are-classes
 (progn
@@ -404,7 +421,8 @@
 (defgeneric get-module-namespace (context)
   (:method (environment)
            #+allegro (check-type environment sys::augmentable-environment)
-           (get-module-namespace (get-pydecl :namespace environment)))
+           (get-module-namespace (or (get-pydecl :namespace environment)
+                                     (error "Cannot determine module namespace: environment ~A has no namespace" environment))))
   (:method ((namespace namespace))
            (loop for ns = namespace then (ns.parent ns)
                while ns
