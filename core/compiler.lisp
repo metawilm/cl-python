@@ -1235,9 +1235,11 @@ LOCALS shares share tail structure with input arg locals."
       (derive-pathname pathname)
     default))
   
-(defmacro init-module-namespace (module-name)
-  `(progn (namespace-set {__name__} ,module-name)
-          (namespace-set {__debug__} +the-true+)))
+(defun init-module-namespace (module-namespace module-name)
+  ;; should dispatch on namespace type?
+  (check-type module-namespace hash-table)
+  (setf (gethash '{__name__} module-namespace) module-name
+        (gethash '{__debug__} module-namespace) +the-true+))
 
 (defmacro with-module-toplevel-context (() &body body)
   ;; Consider *module-namespace* ?
@@ -1261,17 +1263,16 @@ LOCALS shares share tail structure with input arg locals."
       (ensure-module :src-pathname src-pathname :bin-pathname bin-pathname)
     (let ((%module-globals (module-ht module)))
       (check-type %module-globals hash-table)
-      (flet ((init-module ()
-               (with-module-toplevel-context ()
-                 (init-module-namespace current-module-name)))
-             (run-top-level-forms (&optional module-globals)
+      (flet ((init-module (&optional (module-globals %module-globals))
+               (init-module-namespace module-globals current-module-name))
+             (run-top-level-forms (&optional (module-globals %module-globals))
                (let (result)
                  (dolist (f defun-wrappers result)
                    (loop named tlf
                        do #+(or)(format t "Evaluating top-level form ~A in ~A~%" (incf i) current-module-name)
                           (with-simple-restart (retry "Retry evaluating this top-level form in module `~A'"
                                                       current-module-name)
-                            (setf result (funcall f (or module-globals %module-globals)))
+                            (setf result (funcall f module-globals))
                             (return-from tlf)))))))
         ;; Give outer function a chance to influence module loading actions:
         (restart-case

@@ -47,9 +47,10 @@ ARGS are the command-line args, available as `sys.argv'; can be a string or a li
       (let (result)
         (handler-bind ((module-import-pre
                         (lambda (c)
-                          ;; skip initializing module (?)
                           (check-type module-globals hash-table)
-                          (macrolet ((run () `(setf result (funcall (mip.run-tlv-func c) module-globals))))
+                          (flet ((run ()
+                                   (funcall (mip.init-func c) module-globals) ;; always set __name__, __debug__
+                                   (setf result (funcall (mip.run-tlv-func c) module-globals))))
                             (if time
                                 (time (run))
                               (run)))
