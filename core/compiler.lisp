@@ -318,6 +318,10 @@ an assigment statement. This changes at least the returned 'store' form.")
 		  ,right
 		.left)))))
 
+(defmacro [bracketed-expr] (expr)
+  ;; Brackets are only used to force parsing precedence.
+  expr)
+  
 (defmacro [break-stmt] (&environment e)
   (if (get-pydecl :inside-loop-p e)
       `(go .break)
@@ -686,23 +690,21 @@ an assigment statement. This changes at least the returned 'store' form.")
     (labels ((apply-brackets (form)
 			     (if (not ([comparison-expr-p] form))
 				 (push form args)
-			       (with-matching (form ([comparison-expr] ?cmp ?left ?right ?brackets))
-					      (if (and (not (eq form whole)) ?brackets)
-						  (push form args)
-						(progn (apply-brackets ?left)
-						       (push ?cmp cmps)
-						       (apply-brackets ?right)))))))
+			       (with-matching (form ([comparison-expr] ?cmp ?left ?right))
+                                 (progn (apply-brackets ?left)
+                                        (push ?cmp cmps)
+                                        (apply-brackets ?right))))))
       (apply-brackets whole)
       (values (nreverse args) (mapcar #'get-binary-comparison-func-name (nreverse cmps))))))
 
-(defmacro [comparison-expr] (&whole whole cmp left right brackets)
+(defmacro [comparison-expr] (&whole whole cmp left right)
   ;; "Formally, if a, b, c, ..., y, z are expressions and
   ;; op1, op2, ..., opN are comparison operators, then
   ;; a op1 b op2 c ... y opN z is equivalent to
   ;; a op1 b and b op2 c and ... y opN z,
   ;; except that each expression is evaluated at most once."
   ;; http://python.org/doc/current/reference/expressions.html
-  (declare (ignore cmp left right brackets))
+  (declare (ignore cmp left right))
   (multiple-value-bind (args cmp-func-names)
       (apply-comparison-brackets whole)
     (with-gensyms (x y cmp-res comparison-expr)

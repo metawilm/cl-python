@@ -204,6 +204,7 @@ CLASSDEF, FUNCDEF or LAMBDA."
 (def-ast-node [binary-expr]      (op (left +normal-value+) (right +normal-value+)))
 (def-ast-node [binary-lazy-expr] (op (left +normal-value+) (right +normal-value+)))
 (def-ast-node [break-stmt] ())
+(def-ast-node [bracketed-expr] ((item +normal-value+)))
 
 (def-ast-node [call-expr] ((primary +normal-value+) (&rest pos-arg +normal-value+)
                                                     (&rest kv &key second +normal-value+)

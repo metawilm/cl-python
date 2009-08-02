@@ -24,16 +24,10 @@
                                        (:file "utils" :depends-on ("package"))
                                        (:file "readtable" :depends-on ("package"))
                                        (:file "aupprint" :depends-on ("package"))))))
-(asdf:defsystem :clpython.depend
-    :description "External libraries included with minor modifications, until the changes ~
-are accepted in those libraries."
-    :components ((:module "depend"
-                          :components ((:module "cl-yacc"
-                                                :components ((:file "yacc")))))))
 
 (asdf:defsystem :clpython.parser
     :description "Python parser, code walker, and pretty printer"
-    :depends-on (:clpython.package :clpython.depend)
+    :depends-on (:clpython.package :yacc)
     :components ((:module "parser"
 			  :components ((:file "psetup"  )
 				       (:file "grammar"  :depends-on ("psetup"))

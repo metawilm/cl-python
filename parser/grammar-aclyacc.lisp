@@ -24,9 +24,8 @@
 
 #.`(progn ,@(loop for name being each hash-key in *python-prods*
                 using (hash-value rules)
-                nconc (loop for (terms outcome options) in rules
-                          collect `(excl.yacc:defproduction (,name python-grammar) ,terms (,outcome)
-                                                            ,@(when options (list options))))))
+                nconc (loop for (terms outcome) in rules
+                          collect `(excl.yacc:defproduction (,name python-grammar) ,terms (,outcome)))))
 
 (excl.yacc:build-grammar python-grammar nil nil)
 (mop:finalize-inheritance (find-class 'python-grammar))

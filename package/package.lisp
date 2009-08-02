@@ -75,7 +75,7 @@
 	   "try-except-stmt" "try-finally-stmt" "while-stmt" "with-stmt" "yield-stmt"
 	   
 	   "attributeref-expr" "backticks-expr" "binary-expr" "binary-lazy-expr"
-	   "call-expr" "comparison-expr" "dict-expr" "generator-expr"
+           "bracketed-expr" "call-expr" "comparison-expr" "dict-expr" "generator-expr"
 	   "identifier-expr" "if-expr" "lambda-expr" "listcompr-expr" "list-expr"
            "slice-expr" "subscription-expr" "tuple-expr" "unary-expr" "yield-expr"
 	   
@@ -94,7 +94,7 @@
 	   "try-except-p-stmt" "try-finally-p-stmt" "while-stmt-p" "yield-stmt-p"
            
            "attributeref-expr-p" "backticks-expr-p" "binary-expr-p" "binary-lazy-p-expr"
-	   "call-expr-p" "comparison-expr-p" "dict-expr-p" "generator-expr-p"
+	   "bracketed-expr-p" "call-expr-p" "comparison-expr-p" "dict-expr-p" "generator-expr-p"
 	   "identifier-expr-p" "lambda-expr-p" "listcompr-expr-p" "list-expr-p" "slice-expr-p"
 	   "subscription-expr-p" "tuple-expr-p" "unary-expr-p"
            ))

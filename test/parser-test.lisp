@@ -116,9 +116,9 @@
     
     ;; function decorators
     (test-equal '([funcdef-stmt]
-		  ;; list of decorators: first foo(bar)
+                  ;; list of decorators: first foo(bar)
 		  (([call-expr] ([identifier-expr] {foo}) (([identifier-expr] {bar})) nil nil nil)
-		   ;; second deco: zut
+                   ;; second deco: zut
 		   ([identifier-expr] {zut}))
 		  ([identifier-expr] {f})
 		  (nil nil nil nil)
@@ -128,18 +128,57 @@
 @zut
 def f(): pass" nil))
 
-    ;; Precedence of unary operators
+    ;; Precedence of unary operators and exponentiation
     (test-equal '([binary-expr] [*] 
                   ([unary-expr] [-] 1)
                   2)
                 (ps "-1 * 2" nil)
-                :fail-info "unary plus-min takes precedence over multiplication")
-    
+                :fail-info "-1 * 2 == (-1) * 2")
+    (test-equal '([binary-expr] [*] 
+                  ([unary-expr] [+] 1)
+                  2)
+                (ps "+1 * 2" nil)
+                :fail-info "+1 * 2 == (+1) * 2")
+    (test-equal '([unary-expr] [-] ([binary-expr] [**] 1 2))
+                (ps "-1 ** 2" nil)
+                :fail-info "-1 ** 2 == - (1 ** 2)")
+    (test-equal '([unary-expr] [+] ([binary-expr] [**] 1 2))
+                (ps "+1 ** 2" nil)
+                :fail-info "+1 ** 2 == + (1 ** 2)")
     (test-equal '([binary-expr] [-]
                   1
                   ([binary-expr] [*] 2 3))
-                (ps "1 - 2 * 3" nil))
-    
+                (ps "1 - 2 * 3" nil)
+                :fail-info "1 - 2 * 3 == 1 - (2 * 3)")
+    (test-equal '([binary-expr] [/]
+                  ([unary-expr] [~] 1)
+                  2)
+                (ps "~1 / 2" nil)
+                :fail-info "~1 / 2 == (~1) / 2")
+    (test-equal '([unary-expr] [~]
+                  ([binary-expr] [**] 1 2))
+                (ps "~1 ** 2" nil)
+                :fail-info "~1 ** 2 == ~ (1 ** 2)")
+    (test-equal '([binary-expr] [*]
+                  ([unary-expr] [-] 1)
+                  ([binary-expr] [*]
+                   ([unary-expr] [+] 2)
+                   ([binary-expr] [*]
+                    ([unary-expr] [-] 3)
+                    ([unary-expr] [+] 4))))
+                (ps "-1 * +2 * -3 * +4" nil))
+    (test-equal '([binary-expr] [*]
+                  1
+                  ([unary-expr] [-]
+                   ([bracketed-expr]
+                    ([binary-expr] [*]
+                     ([bracketed-expr]
+                      ([binary-expr] [*] 
+                                     ([unary-expr] [-] 2)
+                                     3))
+                     4))))
+                (ps "1 * -((-2 * 3) * 4)" nil))
+        
     ;; Empty string is parsed as module without body
     #+(or)(test-equal '([module-stmt] ([suite-stmt] () ))
                       (values (parse "")))
@@ -257,6 +296,8 @@ else:
       (p "(3 + 4) * 5")
       (p "1 * (2 + 3) << 0")
       (p "1 + 2 - 3 * 4 // 5 / 6 % 7 << 8 >> 9 & 10 | 11 ^ 12 ** 13")
+      (p "-1 * -2 * -(3 * 4)")
+      (p "1 < 2 < (3 < 4) < 5 < (6 < (7 < 8))")
       (p "x + 3 in foo")
       (p "y not in foo")
       (p "x is y")

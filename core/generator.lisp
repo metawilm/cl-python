@@ -305,6 +305,9 @@ former requires that this form is executed within RECEIVE-YIELDED-VALUE."
                                               `(%cps-convert ,right ,binary-lazy-k)
                                             `(funcall ,binary-lazy-k ,left))))))))
 
+(def-cps-macro [bracketed-expr] (expr)
+  `(%cps-convert ,expr ,%current-continuation))
+
 (def-cps-macro [break-stmt] ()
   `(%break-cont))
 
@@ -341,9 +344,9 @@ former requires that this form is executed within RECEIVE-YIELDED-VALUE."
         `(let ((,classdef-k ,%current-continuation))
            ,res))))
 
-(def-cps-macro [comparison-expr] (cmp left right brackets)
+(def-cps-macro [comparison-expr] (cmp left right)
   (multiple-value-bind (args cmp-func-names)
-      (apply-comparison-brackets `([comparison-expr] ,cmp ,left ,right ,brackets))
+      (apply-comparison-brackets `([comparison-expr] ,cmp ,left ,right))
     (with-gensyms (comparison-k e-left e-right cmp-res)
         (%call-continuation
          `(let ((,comparison-k ,%current-continuation))

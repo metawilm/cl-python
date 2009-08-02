@@ -140,6 +140,9 @@ output to a string does not start with a newline."
 (defvar *tuple-must-have-brackets* nil)
 (defvar *one-item-tuple-gets-comma* t)
 
+(defvar *in-comparison-expr* nil)
+(defvar *in-bracketed-expr* nil)
+
 (defmethod py-pprint-1 (stream (x list))
   (case (car x)
 
@@ -158,6 +161,9 @@ output to a string does not start with a newline."
          (let ((*precedence-level* lev))
            (format stream "~@[(~*~]~A ~A ~A~@[)~*~]" brackets? left op right brackets?)))))
     
+    ([bracketed-expr] (let ((*in-bracketed-expr* t))
+                        ;; Ignore superfluous brackets.
+                        (format stream "~A" (second x))))
     ([break-stmt] (format stream "break"))
     
     ([call-expr] (destructuring-bind (primary pos key *a **a) (cdr x)
@@ -175,7 +181,12 @@ output to a string does not start with a newline."
                              (format stream "~A" supers)))
                          (format stream ":~A" suite))))
     
-    ([comparison-expr] (format stream "~A ~A ~A" (third x) (second x) (fourth x)))
+    ([comparison-expr] (when (and *in-comparison-expr* *in-bracketed-expr*) ;; needed for "1 < (2 < 3)"
+                         (write-char #\( stream))
+                       (let ((*in-comparison-expr* t))
+                         (format stream "~A ~A ~A" (third x) (second x) (fourth x)))
+                       (when (and *in-comparison-expr* *in-bracketed-expr*)
+                         (write-char #\) stream)))
     ([continue-stmt]   (format stream "continue"))
     ([del-stmt]        (format stream "del ~A" (second x)))
     

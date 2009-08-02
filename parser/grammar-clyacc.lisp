@@ -19,7 +19,7 @@
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (asdf:operate 'asdf:load-op :yacc))
 
-#.`(yacc-clpython:define-parser *cl-yacc-python-parser*
+#.`(yacc:define-parser *cl-yacc-python-parser*
        (:terminals ,*terminals*)
      (:precedence ,(nreverse (get-precedence-and-associativity :left :right :nonassoc)))
      (:start-symbol clpython.parser::python-grammar)
@@ -45,18 +45,18 @@
 ;; Handling parse errors
 
 (defmethod parse-form-with-yacc ((yacc-version (eql :cl-yacc)) lexer)
-  (yacc-clpython:parse-with-lexer lexer *cl-yacc-python-parser*))
+  (yacc:parse-with-lexer lexer *cl-yacc-python-parser*))
 
 (defmethod handle-parser-condition ((yacc-version (eql :cl-yacc)) c lexer)
-  (cond ((typep c 'yacc-clpython:yacc-parse-error)
+  (cond ((typep c 'yacc:yacc-parse-error)
          (let* ((pos (funcall lexer :report-location))
                 (line (second (assoc :line-no pos)))
                 (eof-seen (second (assoc :eof-seen pos)))
-                (token (yacc-clpython:yacc-parse-error-terminal c))
-                (value (maybe-unwrap-literal-value (yacc-clpython:yacc-parse-error-value c)))
-                (expected-tokens (yacc-clpython:yacc-parse-error-expected-terminals c)))
+                (token (yacc:yacc-parse-error-terminal c))
+                (value (maybe-unwrap-literal-value (yacc:yacc-parse-error-value c)))
+                (expected-tokens (yacc:yacc-parse-error-expected-terminals c)))
            
-           (cond ((or eof-seen (eq token 'yacc-clpython:yacc-eof-symbol))
+           (cond ((or eof-seen (eq token 'yacc:yacc-eof-symbol))
                   (raise-unexpected-eof))
                  (t
                   (raise-syntax-error

@@ -28,10 +28,11 @@
       ([backticks-expr] item)
       ([binary-expr] op left right)
       ([binary-lazy-expr] op left right)
+      ([bracketed-expr] expr)
       ([break-stmt])
       ([call-expr] primary pos key *a **a)
       ([classdef-stmt] name inheritance suite)
-      ([comparison-expr] cmp left right brackets)
+      ([comparison-expr] cmp left right)
       ([continue-stmt])
       ([del-stmt] item)
       ([dict-expr] alist)
@@ -81,27 +82,30 @@
 
 (defparameter *precedence-and-associativity*
     '((left [or])
-      (left [and] )
-      (left [not] )
+      (left [and])
+      (left [not])
       (left [in] [not in])
       (left [is] [is not])
-      (left [<] [<=] [>] [>=] [!=] [==] )
-      (left [\|]  )
-      (left [^]   )
-      (left [&]   )
-      (left [<<] [>>] )
-      (left [+] [-] )
-      (left [*] [/] [%] [//] )
-      (left unary-plusmin )
-      (left [~]   )
-      (right [**] ))
+      (left [<] [<=] [>] [>=] [!=] [==])
+      (left [\|])
+      (left [^])
+      (left [&])
+      (left [<<] [>>])
+      (left [+] [-]) ;; binary [+] [-]
+      (left [*] [/] [//] [%])
+      ;; unary [+] [-] goes here
+      (left [~])
+      (right [**]))
   "Precedence and associativity rules, ordered by increasing precedence.")
+
+(defparameter *operators-with-precedence-between-binary-and-unary-plusmin* '([*] [/] [//] [%])
+  "Operators that introduce AST errors due to unary +/- differing in precedence from binary +/-.")
 
 (defun get-precedence-and-associativity (left-token right-token no-assoc-token)
   (let ((list (copy-tree *precedence-and-associativity*)))
     (loop for (old new) in `((left ,left-token) 
-                                 (right ,right-token)
-                                 (nonassoc ,no-assoc-token))
+                             (right ,right-token)
+                             (nonassoc ,no-assoc-token))
         do (setf list (nsubst new old list)))
     list))
 
@@ -124,15 +128,18 @@
 
 (defmacro p (name &rest rules)
   (when (eq (car rules) :or)
-    (return-from p `(progn ,@(loop for rule in (cdr rules) collect `(p ,name ,@rule)))))
-  (destructuring-bind (terms outcome &optional options) rules
+    (return-from p `(progn ,@(loop for rule in (cdr rules)
+                                 do (check-type rule list)
+                                 collect `(p ,name ,@rule)))))
+  (destructuring-bind (terms outcome #| &optional options |#) rules
+    (check-type terms list)
     (flet ((token-suffix (x)
              (whereas ((sn (and (symbolp x)
                                 (not (eq (symbol-package x) #.(find-package :clpython.ast.operator))) ;; skip "**" etc
                                 (symbol-name x))))
                (aref sn (1- (length sn))))))
       (unless (some (lambda (x) (member (token-suffix x) '(#\? #\*))) terms)
-        (return-from p `(add-rule ',name ',terms ',outcome ,@options)))
+        (return-from p `(add-rule ',name ',terms ',outcome #| ,@options |# )))
       (labels ((remove-token-suffix (x)
                  (check-type x symbol)
                  (let ((sn (symbol-name x)))
@@ -162,8 +169,8 @@
                        (#\? (remove-token-suffix term))
                        (#\* (change-token-suffix term #\+))))
                    (return-from p
-                     `(progn (p ,name ,with ,outcome ,@options)
-                             (p ,name ,without ,(shift-outcome (1+ term-ix)) ,@options))))))))))
+                     `(progn (p ,name ,with ,outcome #| ,@options |# )
+                             (p ,name ,without ,(shift-outcome (1+ term-ix)) #| ,@options |# ))))))))))
 
 ;;; Source location recording
 
@@ -501,12 +508,12 @@ Value should be a (weak) EQ hash table: (make-weak-key-hash-table :test 'eq).")
    ((binop-expr [and] binop-expr) `([binary-lazy-expr] ,$2 ,$1 ,$3))
    ((binop-expr [or]  binop-expr) `([binary-lazy-expr] ,$2 ,$1 ,$3))
    (([not] binop-expr)            `([unary-expr]           ,$1 ,$2))
-   ((binop-expr [<]  binop-expr)  `([comparison-expr]  ,$2 ,$1 ,$3 nil))
-   ((binop-expr [<=] binop-expr)  `([comparison-expr]  ,$2 ,$1 ,$3 nil))
-   ((binop-expr [>]  binop-expr)  `([comparison-expr]  ,$2 ,$1 ,$3 nil))
-   ((binop-expr [>=] binop-expr)  `([comparison-expr]  ,$2 ,$1 ,$3 nil))
-   ((binop-expr [!=] binop-expr)  `([comparison-expr]  ,$2 ,$1 ,$3 nil))
-   ((binop-expr [==] binop-expr)  `([comparison-expr]  ,$2 ,$1 ,$3 nil))
+   ((binop-expr [<]  binop-expr)  `([comparison-expr]  ,$2 ,$1 ,$3))
+   ((binop-expr [<=] binop-expr)  `([comparison-expr]  ,$2 ,$1 ,$3))
+   ((binop-expr [>]  binop-expr)  `([comparison-expr]  ,$2 ,$1 ,$3))
+   ((binop-expr [>=] binop-expr)  `([comparison-expr]  ,$2 ,$1 ,$3))
+   ((binop-expr [!=] binop-expr)  `([comparison-expr]  ,$2 ,$1 ,$3))
+   ((binop-expr [==] binop-expr)  `([comparison-expr]  ,$2 ,$1 ,$3))
    ((binop-expr [in] binop-expr)  `([binary-expr]      ,$2 ,$1 ,$3))
    ((binop-expr [is] binop-expr)  `([binary-expr]      ,$2 ,$1 ,$3))
    ((binop-expr [not in] binop-expr) `([binary-expr] [not in] ,$1 ,$3))
@@ -531,8 +538,8 @@ Value should be a (weak) EQ hash table: (make-weak-key-hash-table :test 'eq).")
    ((            [~]  binop2-expr) `([unary-expr]      ,$1 ,$2))
    ((binop2-expr [%]  binop2-expr) `([binary-expr] ,$2 ,$1 ,$3)))
 
-(p binop2-expr ([+] binop2-expr) `([unary-expr] ,$1 ,$2) (:precedence 'unary-plusmin))
-(p binop2-expr ([-] binop2-expr) `([unary-expr] ,$1 ,$2) (:precedence 'unary-plusmin))
+(p binop2-expr ([+] binop2-expr) (maybe-fix-unary-expr `([unary-expr] ,$1 ,$2)))
+(p binop2-expr ([-] binop2-expr) (maybe-fix-unary-expr `([unary-expr] ,$1 ,$2)))
 
 (p atom :or
    (( [(] yield-expr    [)]  )  $2                       )
@@ -572,10 +579,8 @@ Value should be a (weak) EQ hash table: (make-weak-key-hash-table :test 'eq).")
 (p testlist-gexp (test gen-for) `([generator-expr] ,$1 ,$2))
 (p testlist-gexp (test comma--test* comma?) (if (or $2 $3)
                                                 `([tuple-expr] (,$1 . ,$2))
-                                              (progn (when ([comparison-expr-p] $1)
-                                                       (setf $1 (copy-list $1)
-                                                             (fifth $1) t)) ;; brackets
-                                                     $1)))
+                                              ;; Brackets are needed to fix unary expressions.
+                                              `([bracketed-expr] ,$1)))
 
 (p lambdef ([lambda] [:] test)                    `([lambda-expr] (nil nil nil nil) ,$3))
 (p lambdef ([lambda] parameters [:] test)         `([lambda-expr] ,$2 ,$4))
@@ -716,6 +721,21 @@ Value should be a (weak) EQ hash table: (make-weak-key-hash-table :test 'eq).")
       ;; Don't modify first cons: might be a constant.
       (setf item `(,head ,item ,@(cdr tr))))))
 
+(defun maybe-fix-unary-expr (unary-expr)
+  "Fix AST so that unary +/- has higher precedence than *,/,//,%.
+For example: - (1 * 2) => (-1) * 2"
+  ;; Should be fixable in the grammar too.
+  (assert ([unary-expr-p] unary-expr))
+  (destructuring-bind (unary-op unary-val) (cdr unary-expr)
+    (when ([binary-expr-p] unary-val)
+      (destructuring-bind (binary-op bin-left bin-right) (cdr unary-val)
+        (when (member binary-op *operators-with-precedence-between-binary-and-unary-plusmin*)
+          ;; - (1 * 2 * 3) => (-1) * 2 * 3
+          ;; ([unary-expr] [-] ([binary-expr] [*] 1 2)) => ([binary-expr] ([unary-expr] [-] 1) 2)
+          (setf unary-expr
+            `([binary-expr] ,binary-op ,(maybe-fix-unary-expr `([unary-expr] ,unary-op ,bin-left)) ,bin-right))))))
+  unary-expr)
+  
 (defun dotted-name-to-attribute-ref (dotted-name)
   (assert dotted-name)
   (let ((res `([identifier-expr] ,(pop dotted-name))))
@@ -753,3 +773,4 @@ Value should be a (weak) EQ hash table: (make-weak-key-hash-table :test 'eq).")
     (maphash (lambda (k v) (format t "~30A: ~2@A .. ~2@A ~A~%"
                                    (clpython.parser::py-pprint k) (getf v :start) (getf v :end) (if (listp k) (car k) k)))
              ht)))
+
