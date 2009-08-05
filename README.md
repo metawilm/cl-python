@@ -16,11 +16,12 @@ CLPython runs successfully on each of the following platforms:
 * [Allegro CL 8.1](http://franz.com/products/allegrocl/)
 * [Clozure CL 1.3](http://clozure.com/clozurecl.html)
 * [CMUCL 19E (2009-01)](http://www.cons.org/cmucl/)
-* [LispWorks 5.0](http://www.lispworks.com/)
-* [SBCL 1.0.16](http://sbcl.sourceforge.net/)
+* [LispWorks 5.1](http://www.lispworks.com/)
+* [SBCL 1.0.29](http://sbcl.sourceforge.net/)
 
 There are dependencies on:
 
+* [CL-Yacc](http://www.pps.jussieu.fr/~jch/software/cl-yacc/)
 * [Closer to MOP](http://common-lisp.net/project/closer/closer-mop.html)
 * [ptester](http://www.cliki.net/ptester)
 
