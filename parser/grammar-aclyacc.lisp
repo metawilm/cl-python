@@ -68,7 +68,7 @@
                      (format nil "Parse error at line ~A~@[, at token `~S'~].~%[Internal error: ~A~_(caught due to ~S)]"
                              line token encl-error '*catch-yacc-conditions*)))
                    
-                   ((or (eq token 'excl.yacc:eof) eof-seen)
+                   ((or eof-seen (eq token (lexer-eof-token yacc-version)))
                     (raise-unexpected-eof))
                    
                    (t (raise-syntax-error

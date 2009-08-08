@@ -56,7 +56,7 @@
                 (value (maybe-unwrap-literal-value (yacc:yacc-parse-error-value c)))
                 (expected-tokens (yacc:yacc-parse-error-expected-terminals c)))
            
-           (cond ((or eof-seen (eq token 'yacc:yacc-eof-symbol))
+           (cond ((or eof-seen (eq token (lexer-eof-token yacc-version)))
                   (raise-unexpected-eof))
                  (t
                   (raise-syntax-error
