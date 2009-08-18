@@ -31,19 +31,23 @@
   (make-pathname :type type :name name :host host :device device
                  :directory directory :version version :case :common))
 
+(defun %get-py-file-name (kind modname filepath type)
+  (ecase kind
+    (:module (derive-pathname filepath
+                              :name (pathname-name modname :case :common)
+                              :type type))
+    (:package (merge-pathnames
+               (make-pathname :directory `(:relative ,(pathname-name modname :case :common))
+                              :case :common)
+               (derive-pathname filepath
+                                :type type
+                                :name *package-indicator-filename*)))))
+  
 (defun source-file-names (kind modname filepath)
   (check-type modname string)
-  (loop for file-type in *py-source-file-types*
-      collect (ecase kind
-                (:module (derive-pathname
-                          filepath
-                          :name (pathname-name modname :case :common) :type file-type))
-                (:package (merge-pathnames
-                           (make-pathname :directory `(:relative ,(pathname-name modname :case :common))
-                                          :case :common)
-                           (derive-pathname filepath
-                                            :type file-type
-                                            :name *package-indicator-filename*))))))
+  (mapcar (lambda (type)
+            (%get-py-file-name kind modname filepath type))
+          *py-source-file-types*))
 
 (defparameter *use-asdf-binary-locations* t
   "Whether to store fasl files in directory determined by asdf-binary-locations.")
@@ -66,16 +70,8 @@
                       (setf new-path (ensure-directories-exist new-path)))))))
              (or bin-path-2 bin-path)))
   
-  (:method ((kind (eql :module)) modname filepath)
-           (derive-pathname filepath
-                            :name (pathname-name modname :case :common)
-                            :type *py-compiled-file-type* ))
-  
-  (:method ((kind (eql :package)) modname filepath)
-           (derive-pathname filepath
-                            :directory `(:relative ,(pathname-name modname :case :common))
-                            :type *py-compiled-file-type* 
-                            :name *package-indicator-filename*)))
+  (:method (kind modname filepath)
+           (%get-py-file-name kind modname filepath *py-compiled-file-type*)))
 
 (defun lisp-package-as-py-module (modname)
   "Return Lisp package with given name.
@@ -94,28 +90,34 @@ As for case: both MODNAME's own name its upper-case variant are tried."
 Returns values KIND SRC-PATH BIN-PATH FIND-PATH, or NIL if not found,
 with KIND one of :module, :package
       SRC-PATH, BIN-PATH the truenames of the existing files."
-  (let ((probe-src-func #'probe-file)
-        (probe-fasl-func (lambda (f) (whereas ((path (probe-file f)))
-                                       #+allegro (unless (excl::check-fasl-magic path nil)
-                                                   (setf path nil))
-                                       path))))
-    ;; Intention of PROBE-FASL-FUNC is that it also checks the fasl version
+  (flet ((probe-src (fname) 
+           (cached-probe-file fname))
+         (probe-bin (fname)
+           (whereas ((path (cached-probe-file fname)))
+             (and #+allegro (excl::check-fasl-magic path nil)
+                  path))))
+    ;; Ignore non-existent directories
+    (setf search-paths (remove-if-not #'cached-probe-file search-paths))
+
+    ;; Add missing directory slashes at the end
+    (map-into search-paths #'ensure-path-is-directory search-paths)
+    
     (loop for path in search-paths
-        for src-path = (find-if probe-src-func (source-file-names :module name path))
-        for bin-path = (find-if probe-fasl-func (list (compiled-file-name :module name path)))
-        for pkg-src-path = (find-if probe-src-func (source-file-names :package name path))
-        for pkg-bin-path = (find-if probe-fasl-func (list (compiled-file-name :package name path)))
+        for src-path = (find-if #'probe-src (source-file-names :module name path))
+        for bin-path = (find-if #'probe-bin (list (compiled-file-name :module name path)))
+        for pkg-src-path = (find-if #'probe-src (source-file-names :package name path))
+        for pkg-bin-path = (find-if #'probe-bin (list (compiled-file-name :package name path)))
 			 
         if (and (not must-be-package)
                 (or src-path bin-path))
         return (values :module
-                       (when src-path (probe-file src-path))
-                       (when bin-path (probe-file bin-path))
+                       (when src-path (probe-src src-path))
+                       (when bin-path (probe-bin bin-path))
                        path)
         else if (or pkg-src-path pkg-bin-path)
         return (values :package
-                       (when pkg-src-path (funcall probe-src-func pkg-src-path))
-                       (when pkg-bin-path (funcall probe-fasl-func pkg-bin-path))
+                       (when pkg-src-path (probe-src pkg-src-path))
+                       (when pkg-bin-path (probe-bin pkg-bin-path))
                        path))))
 
 (defparameter *import-force-recompile* nil)
@@ -172,7 +174,7 @@ with KIND one of :module, :package
   "Compile Python source file into FASL. Source file must exist.
 Caller is responsible for deciding if recompiling is really necessary."
   (check-type filename pathname)
-  (assert (probe-file filename) (filename)
+  (assert (cached-probe-file filename) (filename)
     "Python source file ~A does not exist" filename)
   (let ((*current-module-path* filename) ;; used by compiler
         (*current-module-name* mod-name))
@@ -200,7 +202,7 @@ Returns the (updated) loaded module, or NIL on error."
   (check-type bin-filename pathname)
   (check-type mod-name (or symbol string))
   (check-type context-mod-name (or symbol string))
-  (assert (probe-file bin-filename))
+  (assert (cached-probe-file bin-filename t))
   
   (let (module new-module-p success)
     (unwind-protect
@@ -284,6 +286,21 @@ it being set before CLPython is loaded, e.g. in a Lisp configuration file.)")))
   "The fasl files created by the current (parent) import action.
 Used to avoid infinite recompilation/reloading loops.")
 
+(defvar *import-probe-file-cache* nil
+  "Cache for probe-file results, to avoid repeating the fairly expensive PROBE-FILE
+operation on the same path again and again during one import action.")
+
+(defun cached-probe-file (name &optional update-cache)
+  (unless *import-probe-file-cache*
+    (return-from cached-probe-file (probe-file name)))
+  (when (and *import-probe-file-cache* (not update-cache))
+    (multiple-value-bind (value found-p)
+        (gethash name *import-probe-file-cache*)
+      (when found-p
+        (return-from cached-probe-file value))))
+  (setf (gethash name *import-probe-file-cache*)
+    (probe-file name)))
+
 (defun py-import (mod-name-as-list 
 		  &rest options
 		  &key must-be-package
@@ -296,7 +313,9 @@ Used to avoid infinite recompilation/reloading loops.")
                        (%outer-mod-name-as-list mod-name-as-list)
                        (*import-recompiled-files* (or *import-recompiled-files*
                                                       (make-hash-table :test 'equal)))
-                       (if-not-found-value :not-found if-not-found-p))
+                       (if-not-found-value :not-found if-not-found-p)
+                  &aux (*import-probe-file-cache* (or *import-probe-file-cache*
+                                                      (make-hash-table :test 'equal))))
   "Returns the (sub)module, which may have been freshly imported.
 If module could not be found and IF-NOT-FOUND is specified, that value is returned.
 Otherwise raises ImportError."
@@ -350,11 +369,12 @@ Otherwise raises ImportError."
             "Package ~A should have filepath pointing to the ~A file, but ~
              it is pointing somewhere else: ~A." parent *package-indicator-filename* parent-path)
           (setf search-paths
-            (list (derive-pathname parent-path))))))
+            (list (derive-pathname parent-path :type nil :name nil :version nil))))))
     
     (let ((find-paths search-paths))
       (when within-mod-path
-        (push (truename within-mod-path) find-paths))
+        (let ((parent-directory (derive-pathname within-mod-path :type nil :name nil :version nil)))
+          (push (truename parent-directory) find-paths)))
       (setf find-paths (remove-duplicates find-paths :test 'equal))
       
       ;; Find the source or fasl file somewhere in the collection of search paths
@@ -391,7 +411,7 @@ Otherwise raises ImportError."
           (setf bin-file (compiled-file-name kind just-mod-name src-file))
           (unless (gethash bin-file *import-recompiled-files*)
             (when (or force-recompile
-                      (not (probe-file bin-file))
+                      (not (cached-probe-file bin-file))
                       (< (file-write-date bin-file)
                          (file-write-date src-file)))
               ;; This would be a good place for a "try recompiling" restart,
@@ -400,7 +420,7 @@ Otherwise raises ImportError."
               (setf (gethash bin-file *import-recompiled-files*) t))))
         
         ;; Now we have an up-to-date fasl file.
-        (assert (and bin-file (probe-file bin-file)))
+        (assert (and bin-file (cached-probe-file bin-file t)))
         (when src-file (assert (>= (file-write-date bin-file) (file-write-date src-file))))
         
         ;; If current fasl file was already imported, then return its module.
@@ -425,8 +445,8 @@ Otherwise raises ImportError."
                             (declare (ignore c))
                             (and src-file 
                                  bin-file
-                                 (probe-file src-file)
-                                 (probe-file bin-file)))
+                                 (cached-probe-file src-file t)
+                                 (cached-probe-file bin-file t)))
                     :report (lambda (s) (format s "Recompile and re-import module `~A' ~
                                                    from file ~A" dotted-name src-file))
                   (setf new-module 'recompiling-fasl)
@@ -459,19 +479,14 @@ Otherwise raises ImportError."
   (check-type module symbol)
   (check-type attr string)
   (symbol-value (find-symbol attr (find-package (concatenate 'string (package-name :clpython.module) "." (symbol-name module))))))
-  
-(defun directory-p (pathname)
-  (check-type pathname pathname)
-  #+allegro (excl:file-directory-p pathname)
-  #+lispworks (lispworks:file-directory-p pathname)
-  #+(or cmu sbcl) (null (pathname-type pathname))
-  #-(or allegro cmu lispworks sbcl) (error "TODO: No DIRECTORY-P for this implementation."))
 
-(defun path-kind (path)
-  "The file kind, which is either :FILE, :DIRECTORY or NIL"
-  (check-type path string)
-  (whereas ((pathname (probe-file path)))
-    (if (directory-p pathname) :directory :file)))
+(defun ensure-path-is-directory (path)
+  (let* ((truename (truename path))
+         (true-string (namestring truename)))
+    (if (member (aref true-string (1- (length true-string))) '(#\\ #\/))
+        true-string
+      (progn (warn "~A (~A) not dir" truename true-string)
+             (concatenate 'string true-string "/")))))
 
 (defun %reset-import-state ()
   ;; ugly hack

@@ -666,7 +666,7 @@ assert sys" :fail-info "Should work in both ANSI and Modern mode.")
            nil)
   (let ((prefix (concatenate 'string "
 import sys
-sys.path.append('" #.(namestring (clpython::derive-pathname *compile-file-truename* :type nil :name nil)) "/data/')
+sys.path.append('" #.(directory-namestring (clpython::derive-pathname *compile-file-truename* :type nil :name nil)) "data/')
 ")))
     (format t "prefix: ~S~%" prefix)
     (clpython::%reset-import-state)
