@@ -334,7 +334,7 @@ Otherwise raises ImportError."
           (unless parent
             ;; PY-IMPORT did not import successfully, and we are unwinding.
             ;; No need for an additional ImportError.
-            (warn "Could not import module `~A' as importing package `~A' failed.~@[~:@_Import attempted by: ~A~]"
+            (warn "Could not import module `~A' as importing package `~A' failed.~@[ ~:@_Import attempted by: ~A~]"
                   dotted-name (module-dotted-name (butlast mod-name-as-list))
                   within-mod-path)))
         (unless (module-package-p parent)
@@ -372,7 +372,7 @@ Otherwise raises ImportError."
           
           (maybe-warn-set-search-paths t)
           (py-raise '{ImportError}
-                    "Could not find ~A `~A'.~:@_Search paths tried: ~{~S~^, ~_~}~@[~:@_Import ~
+                    "Could not find ~A `~A'. ~:@_Search paths tried: ~{~S~^, ~_~}~@[ ~:@_Import ~
                      of `~A' attempted by: ~A~]"
                     (if must-be-package "package" "module/package")
                     just-mod-name search-paths
