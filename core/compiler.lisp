@@ -1102,24 +1102,26 @@ LOCALS shares share tail structure with input arg locals."
   ;;   2. name "x" is bound to the first module object, <module x>
   ;; One import statement can contain multiple submodules to import (the items).
   ;; Returns the imported (sub)modules as multiple values: <module x.y.z>, <module a.b>.
-  `(values ,@(loop for (mod-name-as-list bind-name) in items
-                 for top-name = (car mod-name-as-list)
-                 collect `(let* ((args (list :within-mod-path ',(careful-derive-pathname *compile-file-truename* nil)
-                                             :within-mod-name ',*current-module-name*))
-                                 (top-module (apply #'py-import '(,top-name)
-                                                    :must-be-package ,(not (null (cdr mod-name-as-list)))
-                                                    args))
-                                 (deep-module ,(if (cdr mod-name-as-list)
-                                                   `(apply #'py-import ',mod-name-as-list args)
-                                                 `top-module)))
-                            ([assign-stmt] top-module
-                                           (([identifier-expr] ,(or bind-name top-name))))
-                            deep-module))))
+  `(let ((*module-namespace* nil)) ;; hack
+     (values ,@(loop for (mod-name-as-list bind-name) in items
+                   for top-name = (car mod-name-as-list)
+                   collect `(let* ((args (list :within-mod-path ',(careful-derive-pathname *compile-file-truename* nil)
+                                               :within-mod-name ',*current-module-name*))
+                                   (top-module (apply #'py-import '(,top-name)
+                                                      :must-be-package ,(not (null (cdr mod-name-as-list)))
+                                                      args))
+                                   (deep-module ,(if (cdr mod-name-as-list)
+                                                     `(apply #'py-import ',mod-name-as-list args)
+                                                   `top-module)))
+                              ([assign-stmt] top-module
+                                             (([identifier-expr] ,(or bind-name top-name))))
+                              deep-module)))))
 
 (defvar *inside-import-from-stmt* nil)
 
 (defmacro [import-from-stmt] (mod-name-as-list items &environment e)
-  `(let* ((args (list :within-mod-path ',(careful-derive-pathname *compile-file-truename* nil)
+  `(let* ((*module-namespace* nil) ;; hack
+          (args (list :within-mod-path ',(careful-derive-pathname *compile-file-truename* nil)
                       :within-mod-name ',*current-module-name*))
           (m (apply #'py-import '(,(car mod-name-as-list)) args)))
      (declare (ignorable m)) ;; Ensure topleve module is imported relative to current mod
