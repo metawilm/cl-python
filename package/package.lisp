@@ -218,6 +218,10 @@
 	   #:+normal-value+ #:+augassign-value+ #:+no-value+
 
 	   #:py-pprint #:*py-pprint-dispatch* ;; pretty printer
+           
+           #:enter-mixed-lisp-python-syntax ;; lisp/python mixed readtable mode
+           #:exit-mixed-lisp-python-syntax
+           #:with-mixed-lisp-python-syntax
 	   ))
 
 ;;; CLPYTHON.MODULE - Modules
