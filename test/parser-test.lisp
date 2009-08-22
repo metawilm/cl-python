@@ -491,16 +491,15 @@ finally:
       (p "(yield x, y)")
       )))
 
-#||
-(run-no-error "
-(defparameter *foo* 42)
-
-assert 42 == #~(or *foo*)")
-
-"
-(in-package :cl-user)
-(in-syntax *python-lisp-readtable*)
-
-(clpython:in-module :src-pathname #p\"foo.py\")
-"
-||#
+(defun run-lispy-test ()
+  (let ((tests '(("()" (clpython.parser::handle-lisp nil))
+                 ("(,)" :error)
+                 ("(f)" (clpython.parser::handle-lisp (f)))
+                 ("(1,2)" (clpython.parser::handle-python ([module-stmt] ([suite-stmt] (([tuple-expr] (1 2))))))))))
+    (loop for (test expected) in tests
+        do (multiple-value-bind (val error)
+               (ignore-errors (car (let ((*package* #.*package*))
+                                     (clpython.parser::read-lispy-toplevel-forms test))))
+             (cond (val (test-equal val expected))
+                   (error (test-equal :error expected))
+                   (t (break "unexpected: ~A ~A" val error)))))))
