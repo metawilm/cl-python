@@ -485,8 +485,7 @@ Otherwise raises ImportError."
          (true-string (namestring truename)))
     (if (member (aref true-string (1- (length true-string))) '(#\\ #\/))
         true-string
-      (progn (warn "~A (~A) not dir" truename true-string)
-             (concatenate 'string true-string "/")))))
+      (concatenate 'string true-string "/"))))
 
 (defun %reset-import-state ()
   ;; ugly hack
