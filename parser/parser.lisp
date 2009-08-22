@@ -62,6 +62,7 @@ Most important options:
 (defun parse-module-with-yacc (yacc-version lexer &key incl-module (record-source-location *python-form->source-location*))
   "Collect all parsed top-level forms. If RECORD-SOURCE-LOCATION, the (new or existing)
 source location hash-table is returned as second value."
+  
   (let ((*python-form->source-location*
          (case record-source-location
            ((nil))

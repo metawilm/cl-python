@@ -12,6 +12,15 @@
 
 ;;;; Abstract Syntax Tree Utilities
 
+(defun python-ast-p (form)
+  "Whether FORM is a list represeting a Python AST. (Includes parsed literal numbers and strings.)"
+  (and (listp form)
+       (symbolp (car form))
+       (eq (symbol-package (car form)) #.(find-package :clpython.ast.node))))
+
+(defun abbreviated-python-code (ast)
+  (clpython.package::abbreviate-to-one-line (py-pprint ast)))
+
 (defun symbol-ends-with-p (symbol suffix)
   (check-type symbol symbol)
   (let* ((name (symbol-name symbol))

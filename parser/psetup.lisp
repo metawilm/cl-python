@@ -48,9 +48,8 @@
   (require :yacc))
 
 
-(defparameter *source-level-debugging* nil
-  ;; #+#1=(and allegro-version>= (version>= 8 2)) t
-  ;; #-#1# nil
-  )
+(defparameter *source-level-debugging*
+  #+ #1=(and allegro allegro-version>= (version>= 8 2)) t
+  #- #1# nil)
 
 (register-feature :clpython-source-level-debugging *source-level-debugging*)

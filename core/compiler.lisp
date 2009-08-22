@@ -1213,6 +1213,7 @@ LOCALS shares share tail structure with input arg locals."
   ((module :initarg :module :accessor mip.module)
    (module-new-p :initarg :module-new-p :accessor mip.module-new-p)
    (source :initarg :source :accessor mip.source)
+   (source-func :initarg :source-func :accessor mip.source-func)
    (init-func :initarg :init-func :accessor mip.init-func)
    (run-tlv-func :initarg :run-tlv-func :accessor mip.run-tlv-func)
    (muffled :initform nil :accessor mip.muffled)))
@@ -1270,7 +1271,7 @@ LOCALS shares share tail structure with input arg locals."
                                 `((sb-ext:muffle-conditions sb-ext:compiler-note))))
      ,@body))
 
-(defun module-init (&key src-pathname bin-pathname current-module-name defun-wrappers source)
+(defun module-init (&key src-pathname bin-pathname current-module-name defun-wrappers source source-func)
   (multiple-value-bind (module module-new-p)
       (ensure-module :src-pathname src-pathname :bin-pathname bin-pathname :name current-module-name)
     (let ((%module-globals (module-ht module)))
@@ -1292,6 +1293,7 @@ LOCALS shares share tail structure with input arg locals."
                            :module module
                            :module-new-p module-new-p
                            :source source
+                           :source-func source-func
                            :init-func #'init-module
                            :run-tlv-func #'run-top-level-forms)
                    ;; If not overruled, take the normal loading steps:
@@ -1311,16 +1313,16 @@ LOCALS shares share tail structure with input arg locals."
             nil))))))
     
 (defmacro [module-stmt] (suite &environment e)
+  "If *MODULE-NAMESPACE* is bound, it is used."
   (declare (ignorable e))
   (assert ([suite-stmt-p] suite))
-  "If *MODULE-NAMESPACE* is bound, it is used."
-  (flet ((wrap-in-funcs ()
+  (flet ((wrap-in-funcs (suite-hash)
            "Reason for wrapping top-level forms in functions, is that Allegro's upcoming
             source-level debugging probably only works for code inside defuns."
            (loop for stmt in (with-matching (suite ([suite-stmt] ?stmts))
                                ?stmts)
                for i from 0
-               for func-name = (make-symbol (format nil "stmt-~A" i))
+               for func-name = (intern (format nil "stmt-~A.~A" i suite-hash))
                collect (list `(defun ,func-name (%module-globals)
                                 (declare (optimize debug))
                                 (declare (ignorable %module-globals)) ;; when using a package-ns for module globals
@@ -1329,25 +1331,34 @@ LOCALS shares share tail structure with input arg locals."
                                     (with-stmt-decl ()
                                       ,stmt))))
                              func-name))))
-    (let ((module-function-name (make-symbol (format nil "~A.__module_init__" *current-module-name*)))
-          (defun-wrappers (wrap-in-funcs)))
+    ;; Because using uninterned symbols gives some problems with Allegro's source form recording, give 
+    ;; the functions a practically unique name based on the suite.
+    (let* ((suite-hash (sxhash suite))
+           (module-function-name #+(or)(make-symbol (format nil "~A.__module_init__" *current-module-name*))
+                                (intern (format nil "~A.__module_init__.~A" *current-module-name* suite-hash)
+                                        #.*package*))
+          (defun-wrappers (wrap-in-funcs suite-hash)))
       `(progn
          ,@(mapcar #'first defun-wrappers) ;; One function for each top-level form
          
          (defun ,module-function-name ()
            (declare (optimize debug))
+           
            #+clpython-source-level-debugging
-           (declare (pydecl (:python-source-info ,(module-suite-source-info suite))))
+           ,(create-python-source-location-table-pydecl suite)
            
            (module-init :src-pathname ,(careful-derive-pathname *compile-file-truename* nil)
                         :bin-pathname (load-time-value (careful-derive-pathname *load-truename* #P"__main__"))
                         :current-module-name ,*current-module-name*
                         :defun-wrappers ',(mapcar #'second defun-wrappers)
                         :source ,(when *compile-file-truename*
-                                   (slurp-file (derive-pathname *compile-file-truename*)))))
+                                   (slurp-file (derive-pathname *compile-file-truename*)))
+                        :source-func ',module-function-name
+                        #+(or)(cons (symbol-function ',module-function-name)
+                                    (mapcar #'symbol-function ',(mapcar #'first defun-wrappers)))))
          
-         #+lispworks (funcall (symbol-function ',module-function-name)) ;; suppress warning about #:|__main__.__module_init__| being undefined
-         #-lispworks (funcall ',module-function-name)))))
+         ;; suppress spurious warning about undefined function, by going via symbol-function
+         (funcall (symbol-function ',module-function-name))))))
 
 (defmacro [pass-stmt] ()
   nil)
@@ -2276,7 +2287,10 @@ be bound."
     
     (without-redefinition-warnings
      (dolist (s syms)
-       (excl:record-source-file s :type kind)))))
+       ;; XXX is a macro!
+       ;; (excl:record-source-file s :type kind)
+       #+(or)(eval `(excl:record-source-file ',s :type ',kind))
+       ))))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;

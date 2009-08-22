@@ -179,9 +179,6 @@
   "EQ hashtable, mapping AST subforms to source position. Used during file compilation.
 Value should be a (weak) EQ hash table: (make-weak-key-hash-table :test 'eq).")
 
-(defparameter *module->source-positions* (make-hash-table :test 'equal)
-  "EQ hashtable, mapping from pathname to source data. Filled during loading.")
-
 (defun record-source-location (outcome start end)
   "Records location in *python-form->source-location*"
   (check-type outcome list)

@@ -67,7 +67,7 @@
                                        (:file "run"          )
                                        (:file "executable"   )
                                        
-                                       #+(or) ;;(and allegro-version>= (version>= 8 2))
+                                       #+(and allegro allegro-version>= (version>= 8 2))
                                        (:file "source"       )))))
 
 (asdf:defsystem :clpython.lib
