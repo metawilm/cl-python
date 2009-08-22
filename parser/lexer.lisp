@@ -535,14 +535,16 @@ C must be either a character or NIL."
                           (when ch3 (lex-unread-char ch3))
                           (return-from read-kind ""))
                          
-                         ((and (char= ch1 ch3) ;; "x"
+                         ((and ch3 ;; "x"
+                               (char= ch1 ch3)
                                (char/= ch2 #\\))
                           (return-from read-kind (lex-substring (1- %lex-last-read-char-ix%) 
                                                                   (1- %lex-last-read-char-ix%))))
                          
                          (t (let* ((start (- %lex-last-read-char-ix% 1))
                                    (end   (loop with x = (lex-read-char)
-                                              for prev-bs = (and (char= ch3 #\\)
+                                              for prev-bs = (and ch3
+                                                                 (char= ch3 #\\)
                                                                  (not (char= ch2 #\\)))
                                               then (and (char= #\\ (shiftf x (lex-read-char)))
                                                         (not prev-bs))
