@@ -274,6 +274,11 @@ See function ALIST-VS-HT.")
   #+(or cmu sbcl) (null (pathname-type pathname))
   #-(or allegro cmu lispworks sbcl) (error "TODO: No DIRECTORY-P for this implementation."))
 
+(defmacro with-line-prefixed-output ((prefix) &body body)
+  (check-type prefix string)
+  `(pprint-logical-block (nil nil :per-line-prefix ,prefix)
+     ,@body))
+
 (defmacro with-sane-debugging ((error-prefix &rest args) &body body)
   "Reset the readtable and other i/o variables uncaught errors occur."
   (check-type error-prefix string)
@@ -282,8 +287,8 @@ See function ALIST-VS-HT.")
          ((error (lambda (,c)
                    (signal ,c)
                    (with-standard-io-syntax
-                     (format t "~&; ")
-                     (format t ',error-prefix ,@args)
-                     (format t "~%")
+                     (with-line-prefixed-output (";; ")
+                       (format t ',error-prefix ,@args)
+                       (format t "~&Input/output variables (*readtable* etc) have been reset to enable debugging."))
                      (error ,c)))))
        ,@body)))
