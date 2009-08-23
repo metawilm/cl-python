@@ -55,8 +55,6 @@
 ;;; Conversion into Continuation Passing Style
 ;;; PEP 342
 
-(defvar *generator-debug* nil)
-
 (defun generator-input-value (g value)
   (generator-state-input-value (generator-state g) value))
 
@@ -73,9 +71,7 @@
   (cond ((and x (listp x) (eq (car x) :exception))
          (apply #'raise-stmt-1 (cdr x)))
         ((and initial (not (none-p x)))
-         (if *generator-debug*
-             (break "Generator must have `None' as initial input value (got: ~A)." x)
-           (py-raise '{ValueError} "Generator must have `None' as initial input value (got: ~A)." x)))
+         (py-raise '{ValueError} "Generator must have `None' as initial input value (got: ~A)." x))
         (t x)))
 
 
@@ -141,32 +137,6 @@
 (defun generator-state-function (gs)
   (car gs))
 
-(defvar *compile-generator-continuations* t)
-
-(defmacro make-generator-state (suite &key sub-generator)
-  `(let ((%stored-k-cons (cons nil nil)))
-     ,(%store-continuation `(lambda (&optional x)
-                              (parse-generator-input x :initial t)
-                              (with-pydecl ((:context :function)
-                                            (:in-sub-generator ,sub-generator)
-                                            (:inside-function-p t))
-                                ,(with-matching (suite ([suite-stmt] ?stmts))
-                                   #+(or)(setf suite
-                                     `([suite-stmt] ,(append ?stmts (list `(:do-not-cps-convert ,(%mark-generator-finished))))))
-                                   `(%cps-convert ,suite (lambda (val) (declare (ignore val)) ,(%mark-generator-finished)))) ;; value gets thrown away
-                                #+(or)
-                                ,(if sub-generator
-                                     `(yield-value :implicit-return)
-                                   (%mark-generator-finished)))))
-     %stored-k-cons))
-
-(defmacro make-generator (suite &key sub-generator)
-  "Returns a generator for given SUITE. SUB-GENERATOR means that execution of SUITE ends
-with an implicit or explicit return.
-K either YIELD-VALUE or raises an exception (like StopIteration upon exhaustion). The
-former requires that this form is executed within RECEIVE-YIELDED-VALUE."
-  `(make-instance 'generator :state (make-generator-state ,suite :sub-generator ,sub-generator)))
-
 
 (defvar *cps-macro-functions* (make-hash-table :test 'eq)
   "Mapping from node to CPS macro function, e.g. [ASSERT-STMT] -> #'cps-convert-assert-stmt")
@@ -202,15 +172,16 @@ former requires that this form is executed within RECEIVE-YIELDED-VALUE."
         ((null ast)
          `(funcall ,k ,ast))
         ((listp ast)
-         (cond ((eq (car ast) :do-not-cps-convert)
-                `(progn ,@(cdr ast)
-                        (funcall ,k 'do-not-cps-convert-term)))
-               (t (let ((f (or (gethash (car ast) *cps-macro-functions*)
+         (let ((f (or (gethash (car ast) *cps-macro-functions*)
                                (error "CPS-conversion of ~A not defined (form: ~A)." (car ast) ast))))
-                    `(,f ,k ,@(cdr ast))))))
+                    `(,f ,k ,@(cdr ast))))
         (t
          #+(or)(optimize-funcall `(funcall ,k ,ast))
-         `(progn (funcall ,k ,ast) (error "fallthrough (cps convert)")))))
+         `(progn (funcall ,k ,ast) 
+                 (error "fallthrough (cps convert)")))))
+
+(defmacro with-cps-conversion ((ast value &key nil-allowed) &body body)
+  `(%cps-convert ,ast (lambda (,value) ,@body) :nil-allowed ,nil-allowed))
 
 (defun optimize-funcall (form)
   "Replace (FUNCALL (LAMBDA (X) ..) VAL) by: (LET ((X VAL)) ..)"
@@ -225,22 +196,42 @@ former requires that this form is executed within RECEIVE-YIELDED-VALUE."
              ,@(cddr lm))))))
   form)
 
+(defmacro make-generator-state (suite &key sub-generator)
+  `(let ((%stored-k-cons (cons nil nil)))
+     ,(%store-continuation `(lambda (&optional x)
+                              (parse-generator-input x :initial t)
+                              (with-pydecl ((:context :function)
+                                            (:in-sub-generator ,sub-generator)
+                                            (:inside-function-p t))
+                                ,(with-matching (suite ([suite-stmt] ?stmts))
+                                   `(with-cps-conversion (,suite val)
+                                      (declare (ignore val))
+                                      ,(if sub-generator
+                                           `(yield-value :implicit-return)
+                                         (%mark-generator-finished)))))))
+     %stored-k-cons))
+
+(defmacro make-generator (suite &key sub-generator)
+  "Returns a generator for given SUITE. SUB-GENERATOR means that execution of SUITE ends
+with an implicit or explicit return.
+K either YIELD-VALUE or raises an exception (like StopIteration upon exhaustion). The
+former requires that this form is executed within RECEIVE-YIELDED-VALUE."
+  `(make-instance 'generator :state (make-generator-state ,suite :sub-generator ,sub-generator)))
+
+;;; AST CPS macros
 
 (def-cps-macro [assert-stmt] (test raise-arg)
   (with-gensyms (assert-k)
-      `(let ((,assert-k ,%current-continuation))
+    `(progn
+       (let ((,assert-k ,%current-continuation))
          (when *__debug__*
-           (%cps-convert ,test
-               (lambda (.test-val)
-                 (unless (py-val->lisp-bool .test-val)
-                   ,(if raise-arg
-                        `(%cps-convert ,raise-arg
-                             (lambda (.raise-arg)
-                               (assert-stmt-1 .test-val ',test .raise-arg)
-                               (funcall ,assert-k nil)))
-                      `(progn (assert-stmt-1 .test-val ',test ,raise-arg)
-                              (funcall ,assert-k nil))))
-                 ,(%call-continuation)))))))
+           (with-cps-conversion (,test .test-val)
+             (if (py-val->lisp-bool .test-val)
+                 #1=(funcall ,assert-k nil)
+                 (with-cps-conversion (,raise-arg .raise-arg :nil-allowed t)
+                   (assert-stmt-1 .test-val ',test .raise-arg)
+                   #1#))))
+         #1#))))
 
 (def-cps-macro [assign-stmt] (value targets &environment e)
   (let ((res '(values)))
@@ -253,14 +244,15 @@ former requires that this form is executed within RECEIVE-YIELDED-VALUE."
                      ,store-form
                      ,res))
         (loop for var in (reverse temps) for val in (reverse values)
-              do (setf res `(%cps-convert ,val (lambda (,var) ,res))))))
-    `(%cps-convert ,value
-         (lambda (.assign-value) ,res ,(%call-continuation)))))
+            do (setf res `(with-cps-conversion (,val ,var) ,res)))))
+    `(with-cps-conversion (,value .assign-value)
+       ,res
+       ,(%call-continuation))))
 
 (def-cps-macro [attributeref-expr] (item attr)
   (with-gensyms (e-item)
-    `(%cps-convert ,item (lambda (,e-item)
-                           ,(%call-continuation `(attr ,e-item ',(second attr)))))))
+    `(with-cps-conversion (,item ,e-item)
+       ,(%call-continuation `(attr ,e-item ',(second attr))))))
 
 (def-cps-macro [augassign-stmt] (op place val &environment e)
   (let ((py-@= (get-binary-iop-func-name op))
@@ -269,41 +261,39 @@ former requires that this form is executed within RECEIVE-YIELDED-VALUE."
         (get-setf-expansion place e)
       (assert (null (cdr stores)))
       (with-gensyms (place-val-now op-val)
-          (let ((res `(%cps-convert ,val
-                          (lambda (,op-val)
-                            (let ((,place-val-now ,reader))
-                              (or (,py-@= ,place-val-now ,op-val)
-                                  (let ((,(car stores) (,py-@ ,place-val-now ,op-val)))
-                                    ,writer)))
-                            ,(%call-continuation)))))
-            (loop for var in (reverse vars)
-                  for val in (reverse vals)
-                  do (setf res `(%cps-convert ,val (lambda (,var) ,res))))
-            res)))))
+        (let ((res `(with-cps-conversion (,val ,op-val)
+                      (let ((,place-val-now ,reader))
+                        (or (,py-@= ,place-val-now ,op-val)
+                            (let ((,(car stores) (,py-@ ,place-val-now ,op-val)))
+                              ,writer)))
+                      ,(%call-continuation))))
+          (loop for var in (reverse vars)
+              for val in (reverse vals)
+              do (setf res `(with-cps-conversion (,val ,var) ,res)))
+          res)))))
 
 (def-cps-macro [backticks-expr] (item)
   (with-gensyms (e-item)
-    `(%cps-convert ,item (lambda (,e-item)
-                           ,(%call-continuation `(py-repr ,e-item))))))
+    `(with-cps-conversion (,item ,e-item)
+       ,(%call-continuation `(py-repr ,e-item)))))
 
 (def-cps-macro [binary-expr] (op x y)
   (with-gensyms (e-x e-y)
-    `(%cps-convert ,x (lambda (,e-x)
-                        (%cps-convert ,y
-                                      (lambda (,e-y)
-                                        ,(%call-continuation `(,(get-binary-op-func-name op) ,e-x ,e-y))))))))
+    `(with-cps-conversion (,x ,e-x)
+       (with-cps-conversion (,y ,e-y)
+         ,(%call-continuation `(,(get-binary-op-func-name op) ,e-x ,e-y))))))
 
 (def-cps-macro [binary-lazy-expr] (op left right)
   (with-gensyms (binary-lazy-k e-left)
     `(let ((,binary-lazy-k ,%current-continuation))
-       (%cps-convert ,left
-                     (lambda (,e-left) (if (py-val->lisp-bool ,e-left)
-                                           ,(if (eq op '[or])
-                                                `(funcall ,binary-lazy-k ,e-left)
-                                              `(%cps-convert ,right ,binary-lazy-k))
-                                         ,(if (eq op '[or])
-                                              `(%cps-convert ,right ,binary-lazy-k)
-                                            `(funcall ,binary-lazy-k ,left))))))))
+       (with-cps-conversion (,left ,e-left)
+         (if (py-val->lisp-bool ,e-left)
+             ,(if (eq op '[or])
+                  `(funcall ,binary-lazy-k ,e-left)
+                `(%cps-convert ,right ,binary-lazy-k))
+           ,(if (eq op '[or])
+                `(%cps-convert ,right ,binary-lazy-k)
+              `(funcall ,binary-lazy-k ,left)))))))
 
 (def-cps-macro [bracketed-expr] (expr)
   `(%cps-convert ,expr ,%current-continuation))
@@ -313,60 +303,52 @@ former requires that this form is executed within RECEIVE-YIELDED-VALUE."
 
 (def-cps-macro [call-expr] (primary pos-args kwd-args *-arg **-arg)
   (with-gensyms (call-k)
-      (let* ((primary-gensym (gensym "primary"))
-             (pos-arg-gensyms (loop repeat (length pos-args) collect (gensym "parg")))
-             (kwd-arg-gensyms (loop repeat (length kwd-args) collect (gensym "kwarg")))
-             (new-kwd-args (loop for gensym in kwd-arg-gensyms and (name nil) in kwd-args
-                                 collect (list name gensym)))
-             (*-arg-gensym (when *-arg (gensym "*-arg")))
-             (**-arg-gensym (when **-arg (gensym "**-arg")))
-             (res `(funcall ,call-k
-                            (call-expr-1 ,primary-gensym ,pos-arg-gensyms ,new-kwd-args ,*-arg-gensym ,**-arg-gensym))))
-        (when **-arg (setf res `(%cps-convert ,**-arg (lambda (,**-arg-gensym) ,res))))
-        (when *-arg (setf res `(%cps-convert ,*-arg (lambda (,*-arg-gensym)  ,res))))
-        (loop for (nil val) in (reverse kwd-args) for gensym in (reverse kwd-arg-gensyms)
-              do (setf res `(%cps-convert ,val (lambda (,gensym) ,res))))
-        (loop for p in (reverse pos-args) for gensym in (reverse pos-arg-gensyms)
-              do (setf res `(%cps-convert ,p (lambda (,gensym) ,res))))
-        (setf res `(%cps-convert ,primary (lambda (,primary-gensym) ,res)))
-        `(let ((,call-k ,%current-continuation))
-           ,res))))
+    (let* ((primary-gensym (gensym "primary"))
+           (pos-arg-gensyms (loop repeat (length pos-args) collect (gensym "parg")))
+           (kwd-arg-gensyms (loop repeat (length kwd-args) collect (gensym "kwarg")))
+           (new-kwd-args (loop for gensym in kwd-arg-gensyms and (name nil) in kwd-args
+                             collect (list name gensym)))
+           (*-arg-gensym (when *-arg (gensym "*-arg")))
+           (**-arg-gensym (when **-arg (gensym "**-arg")))
+           (res `(funcall ,call-k
+                          (call-expr-1 ,primary-gensym ,pos-arg-gensyms ,new-kwd-args ,*-arg-gensym ,**-arg-gensym))))
+      (when **-arg (setf res `(with-cps-conversion (,**-arg ,**-arg-gensym) ,res)))
+      (when *-arg (setf res `(with-cps-conversion (,*-arg ,*-arg-gensym) ,res)))
+      (loop for (nil val) in (reverse kwd-args) for gensym in (reverse kwd-arg-gensyms)
+          do (setf res `(with-cps-conversion (,val ,gensym) ,res)))
+      (loop for p in (reverse pos-args) for gensym in (reverse pos-arg-gensyms)
+          do (setf res `(with-cps-conversion (,p ,gensym) ,res)))
+      `(let ((,call-k ,%current-continuation))
+         (with-cps-conversion (,primary ,primary-gensym) ,res)))))
 
 (def-cps-macro [classdef-stmt] (name inheritance suite)
   (assert ([tuple-expr-p] inheritance))
   (with-gensyms (classdef-k)
-      (let* ((inheritance-gensyms (loop for i from 1 repeat (length (second inheritance)) collect
-                                        (gensym (format nil "superclass-~A-" i))))
-             (res `(progn (classdef-stmt-1 ,name ([tuple-expr] ,inheritance-gensyms) ,suite)
-                          (funcall ,classdef-k nil))))
-        (loop for sup in (reverse (second inheritance)) for gensym in (reverse inheritance-gensyms)
-              do (setf res `(%cps-convert ,sup (lambda (,gensym) ,res))))
-        `(let ((,classdef-k ,%current-continuation))
-           ,res))))
+    (let* ((inheritance-gensyms (loop for i from 1 repeat (length (second inheritance)) collect
+                                      (gensym (format nil "superclass-~A-" i))))
+           (res `(progn (classdef-stmt-1 ,name ([tuple-expr] ,inheritance-gensyms) ,suite)
+                        (funcall ,classdef-k nil))))
+      (loop for sup in (reverse (second inheritance)) for gensym in (reverse inheritance-gensyms)
+          do (setf res `(with-cps-conversion (,sup ,gensym) ,res)))
+      `(let ((,classdef-k ,%current-continuation))
+         ,res))))
 
+(defun cps-comparison-expr-eval (left right comp-func comparison-k last-p)
+  (let ((cmp-res (funcall comp-func left right)))
+    (when (or last-p (not (py-val->lisp-bool cmp-res)))
+      (funcall comparison-k cmp-res))))
+         
 (def-cps-macro [comparison-expr] (cmp left right)
   (multiple-value-bind (args cmp-func-names)
       (apply-comparison-brackets `([comparison-expr] ,cmp ,left ,right))
-    (with-gensyms (comparison-k e-left e-right cmp-res)
-        (%call-continuation
-         `(let ((,comparison-k ,%current-continuation))
-            (%cps-convert ,(pop args)
-                (lambda (,e-left)
-                  (%cps-convert ,(pop args)
-                      (lambda (,e-right)
-                        (let (,cmp-res)
-                          (flet ((cmp-right (.cmp-func ,e-right &optional last)
-                                            (setf ,cmp-res (funcall .cmp-func ,e-left ,e-right))
-                                            (if (or last (not (py-val->lisp-bool ,cmp-res)))
-                                                (funcall ,comparison-k ,cmp-res)
-                                              (setf ,e-left ,e-right))))
-                            (cmp-right ',(pop cmp-func-names) ,e-right ',(null cmp-func-names))
-                            ,@(loop while cmp-func-names
-                                    collect `(%cps-convert ,(pop args)
-                                                 (lambda (,e-right)
-                                                   (cmp-right ',(pop cmp-func-names)
-                                                              ,e-right
-                                                              ',(null cmp-func-names))))))))))))))))
+    (with-gensyms (comparison-k e-left e-right)
+      `(let ((,comparison-k ,%current-continuation))
+         (with-cps-conversion (,(pop args) ,e-left)
+           ,@(loop while cmp-func-names
+                 collect `(with-cps-conversion (,(pop args) ,e-right)
+                            (cps-comparison-expr-eval ,e-left ,e-right ',(pop cmp-func-names) ,comparison-k ,(null cmp-func-names))
+                            ,@(unless (null cmp-func-names)
+                                `((setf ,e-left ,e-right))))))))))
 
 (def-cps-macro [continue-stmt] ()
   `(%continue-cont))
@@ -383,15 +365,16 @@ former requires that this form is executed within RECEIVE-YIELDED-VALUE."
     (let ((res `(progn ,del-form ,(%call-continuation))))
       (loop for v in (reverse values)
           for tmp in (reverse temps)
-          do (setf res `(%cps-convert ,v (lambda (,tmp) ,res))))
+          do (setf res `(with-cps-conversion (,v ,tmp) ,res)))
       res)))
 
 (def-cps-macro [dict-expr] (vk-list)
   (let ((res (%call-continuation '.dict)))
     (with-gensyms (val)
       (loop for (k v) on (reverse vk-list) by #'cddr
-          do (setf res `(%cps-convert ,v
-                                      (lambda (,val) (setf (gethash ,k .dict) ,val) ,res)))))
+          do (setf res `(with-cps-conversion (,v ,val)
+                          (setf (gethash ,k .dict) ,val)
+                          ,res))))
     `(let ((.dict (make-py-hash-table)))
        ,res)))
 
@@ -401,37 +384,34 @@ former requires that this form is executed within RECEIVE-YIELDED-VALUE."
           ,(%call-continuation)))
 
 (def-cps-macro [for-in-stmt] (target source suite else-suite)
-  (with-gensyms (e-source it-fun for-cont for-break-cont else-cont)
-    `(let ((stmt-k ,%current-continuation))
-       (declare (ignorable stmt-k))
-       (%cps-convert ,source
-                     (lambda (,e-source)
-                       (let* ((,it-fun (get-py-iterate-fun ,e-source)))
-                         (labels (,@(when (contains-continue-stmt-p suite)
-                                      `((%continue-cont () (,for-cont))))
-                                    ,@(when (contains-break-stmt-p suite)
-                                        `((%break-cont () (,for-break-cont))))
-                                    (,for-break-cont ()
-                                      (funcall stmt-k nil))
-                                    (,else-cont (val)
-                                      (declare (ignore val))
-                                      ,(if else-suite
-                                           `(%cps-convert ,else-suite (lambda (val)
-                                                                        (declare (ignore val))
-                                                                        (,for-break-cont)))
-                                         `(,for-break-cont)))
-                                    (,for-cont ()
-                                      ,(with-gensyms (x)
-                                         `(let ((,x (funcall ,it-fun)))
-                                            (if ,x
-                                                (%cps-convert ([assign-stmt] ,x (,target))
-                                                              (lambda (val)
-                                                                (declare (ignore val))
-                                                                (%cps-convert ,suite (lambda (arg)
-                                                                                       (declare (ignore arg))
-                                                                                       (,for-cont)))))
-                                              (,else-cont nil))))))
-                           (,for-cont))))))))
+  (with-gensyms (e-source it-fun for-cont for-break-cont else-cont ignore stmt-k)
+    `(let ((,stmt-k ,%current-continuation)) 
+       (with-cps-conversion (,source ,e-source)
+         (let* ((,it-fun (get-py-iterate-fun ,e-source)))
+           (labels (,@(when (contains-continue-stmt-p suite)
+                        `((%continue-cont () (,for-cont))))
+                      ,@(when (contains-break-stmt-p suite)
+                          `((%break-cont () (,for-break-cont))))
+                      (,for-break-cont ()
+                        (funcall ,stmt-k nil))
+                      (,else-cont (val)
+                        (declare (ignore val))
+                        ,(if else-suite
+                             `(with-cps-conversion (,else-suite val)
+                                (declare (ignore val))
+                                (,for-break-cont))
+                           `(,for-break-cont)))
+                      (,for-cont ()
+                        ,(with-gensyms (x)
+                           `(let ((,x (funcall ,it-fun)))
+                              (if ,x
+                                  (with-cps-conversion (([assign-stmt] ,x (,target)) ,ignore)
+                                    (declare (ignore ,ignore))
+                                    (with-cps-conversion (,suite ,ignore)
+                                      (declare (ignore ,ignore))
+                                      (,for-cont)))
+                                (,else-cont nil))))))
+             (,for-cont)))))))
 
 (def-cps-macro [funcdef-stmt] (decorators
                                fname (pos-args key-args *-arg **-arg)
@@ -446,12 +426,15 @@ former requires that this form is executed within RECEIVE-YIELDED-VALUE."
                         (funcdef-stmt-1 ,decorator-gensyms ,fname (,pos-args ,new-key-args ,*-arg ,**-arg) ,suite))
                       ,(%call-continuation))))
     (loop for (nil val) in (reverse key-args) for gensym in (reverse kwd-val-gensyms)
-        do (setf res `(%cps-convert ,val (lambda (,gensym) ,res))))
+        do (setf res `(with-cps-conversion (,val ,gensym) ,res)))
     (loop for d in (reverse decorators) for gensym in (reverse decorator-gensyms)
-        do (setf res `(%cps-convert ,d (lambda (,gensym) ,res))))
+        do (setf res `(with-cps-conversion (,d ,gensym) ,res)))
     res))
 
-;; [global-stmt] : keep
+(def-cps-macro [global-stmt] (names &environment e)
+  (assert (get-pydecl :inside-function-p e))
+  (or names) ;; suppress warning
+  (%call-continuation))
 
 (def-cps-macro [identifier-expr] (name)
   (check-type name symbol)
@@ -460,10 +443,10 @@ former requires that this form is executed within RECEIVE-YIELDED-VALUE."
 
 (def-cps-macro [if-expr] (condition then else)
   (with-gensyms (c)
-    `(%cps-convert ,condition
-                   (lambda (,c) (if (py-val->lisp-bool ,c)
-                                    (%cps-convert ,then ,%current-continuation)
-                                  (%cps-convert ,else ,%current-continuation))))))
+    `(with-cps-conversion (,condition ,c)
+       (if (py-val->lisp-bool ,c)
+           (%cps-convert ,then ,%current-continuation)
+         (%cps-convert ,else ,%current-continuation)))))
 
 (def-cps-macro [if-stmt] (if-clauses else-clause)
   (with-gensyms (if-stmt-k e-cond)
@@ -472,11 +455,10 @@ former requires that this form is executed within RECEIVE-YIELDED-VALUE."
                        `(%cps-convert ,else-clause ,if-stmt-k)
                      `(funcall ,if-stmt-k nil))))
           (loop for (cond body) in (reverse if-clauses)
-              do (setf res `(%cps-convert ,cond
-                                          (lambda (,e-cond)
-                                            (if (py-val->lisp-bool ,e-cond)
-                                                (%cps-convert ,body ,if-stmt-k)
-                                              ,res)))))
+              do (setf res `(with-cps-conversion (,cond ,e-cond)
+                              (if (py-val->lisp-bool ,e-cond)
+                                  (%cps-convert ,body ,if-stmt-k)
+                                ,res))))
           res))))
 
 (def-cps-macro [import-stmt] (&rest args)
@@ -494,10 +476,10 @@ former requires that this form is executed within RECEIVE-YIELDED-VALUE."
                          ([lambda-expr] ,@args))))
 
 (def-cps-macro [listcompr-expr] (item for-in/if-clauses)
-  (with-gensyms (result-list)
+  (with-gensyms (result-list ignore)
     `(let ((,result-list (make-py-list-from-list ())))
        ,(loop with builder = `([call-expr] ([attributeref-expr] ,result-list ([identifier-expr] {append}))
-                                             (,item) nil nil nil)
+                                           (,item) nil nil nil)
             for clause in (reverse for-in/if-clauses)
             do (setf builder
                  (ecase (car clause)
@@ -505,17 +487,15 @@ former requires that this form is executed within RECEIVE-YIELDED-VALUE."
                                       `([for-in-stmt] ,target ,source ,builder nil)))
                    ([if-clause] (let ((test (second clause)))
                                   `([if-stmt] ((,test ,builder)) nil)))))
-            finally (return `(%cps-convert ,builder 
-                                           (lambda (x2) 
-                                             (declare (ignore x2))
-                                             ,(%call-continuation result-list))))))))
+            finally (return `(with-cps-conversion (,builder ,ignore)
+                               (declare (ignore ,ignore))
+                               ,(%call-continuation result-list)))))))
 
 (def-cps-macro [list-expr] (items)
   ;; Relies on tuples being Lisp lists.
   (with-gensyms (e-tuple)
-    `(%cps-convert ([tuple-expr] ,items)
-                   (lambda (,e-tuple)
-                     ,(%call-continuation `(make-py-list-from-tuple ,e-tuple))))))
+    `(with-cps-conversion (([tuple-expr] ,items) ,e-tuple)
+       ,(%call-continuation `(make-py-list-from-tuple ,e-tuple)))))
 
 (def-cps-macro [module-stmt] (&rest args)
   #+(or)(declare (ignore args))  ;; ends up in the wrong place
@@ -531,24 +511,18 @@ former requires that this form is executed within RECEIVE-YIELDED-VALUE."
          (res `(progn (py-print ,dest-gensym (list ,@item-gensyms) ,comma?)
                       ,(%call-continuation))))
     (loop for it in (reverse items) and gensym in (reverse item-gensyms)
-        do (setf res `(%cps-convert ,it (lambda (,gensym) ,res))))
+        do (setf res `(with-cps-conversion (,it ,gensym) ,res)))
     (setf res (if dest 
-                  `(%cps-convert ,dest (lambda (,dest-gensym) ,res))
+                  `(with-cps-conversion (,dest ,dest-gensym) ,res)
                 `(let ((,dest-gensym ,dest))
                    ,res)))
     res))
 
 (def-cps-macro [raise-stmt] (exc var tb)
-  `(progn
-     (or ,%current-continuation) ;; suppress warning that it's unused
-     ,(with-gensyms (e-exc e-tb)
-        (if exc
-            `(%cps-convert ,exc (lambda (,e-exc)
-                                  ,(if tb
-                                       `(%cps-convert ,tb
-                                                      (lambda (,e-tb) (raise-stmt-1 ,e-exc ,var ,e-tb)))
-                                     `(raise-stmt-1 ,e-exc ,var ,tb))))
-          `(raise-stmt-1 ,exc ,var ,tb)))))
+  (with-gensyms (e-exc e-tb)
+    `(with-cps-conversion (,exc ,e-exc :nil-allowed t)
+       (with-cps-conversion (,tb ,e-tb :nil-allowed t)
+         (raise-stmt-1 ,e-exc ,var ,e-tb)))))
   
 (def-cps-macro [return-stmt] (&optional value &environment e)
   ;; VALUE can be given, if this is inside a generator.
@@ -561,31 +535,24 @@ former requires that this form is executed within RECEIVE-YIELDED-VALUE."
 
 (def-cps-macro [slice-expr] (start stop step)
   (with-gensyms (e-start e-stop e-step)
-    `(%cps-convert ,start
-                   (lambda (,e-start)
-                     (%cps-convert ,stop
-                                   (lambda (,e-stop)
-                                     (%cps-convert ,step
-                                                   (lambda (,e-step)
-                                                     ,(%call-continuation
-                                                       `(with-pydecl ((:ignore-cps-hook t))
-                                                          ([slice-expr] ,e-start ,e-stop ,e-step))))
-                                                   :nil-allowed t))
-                                   :nil-allowed t))
-                   :nil-allowed t)))
-
+    `(with-cps-conversion (,start ,e-start :nil-allowed t)
+       (with-cps-conversion (,stop ,e-stop :nil-allowed t)
+         (with-cps-conversion (,step ,e-step :nil-allowed t)
+           ,(%call-continuation
+             `(with-pydecl ((:ignore-cps-hook t))
+                ([slice-expr] ,e-start ,e-stop ,e-step))))))))
+    
 (def-cps-macro [subscription-expr] (item subs)
   (with-gensyms (e-subs e-item)
-    `(%cps-convert ,item (lambda (,e-item)
-                        (%cps-convert ,subs
-                            (lambda (,e-subs) ,(%call-continuation `(py-subs ,e-item ,e-subs))))))))
+    `(with-cps-conversion (,item ,e-item)
+       (with-cps-conversion (,subs ,e-subs)
+         ,(%call-continuation `(py-subs ,e-item ,e-subs))))))
 
 (def-cps-macro [suite-stmt] (stmts)
   (cond ((null stmts)
          (error "Empty SUITE: should be disallowed by grammar."))
         ((null (cadr stmts))
          `(%cps-convert ,(car stmts) ,%current-continuation))
-                        ;; (lambda (x) (declare (ignore x)) ,(%mark-generator-finished))))
         (t
          `(%cps-convert ,(car stmts)
                         ,(let ((flet-name (intern (format nil "suite \"~A; ...\"" (clpython.parser:py-pprint (cadr stmts)))
@@ -603,16 +570,15 @@ former requires that this form is executed within RECEIVE-YIELDED-VALUE."
               ,(loop with res = `(error .c)
                    for (exc var handler-suite) in (reverse except-clauses)
                    if exc
-                   do (setf res `(%cps-convert ,exc
-                                               (lambda (,e-exc)
-                                                 (let ((applicable (typecase ,e-exc 
-                                                                     ;; exception class, or typle of exception classes
-                                                                     (list (some (lambda (x) (typep .c x)) ,e-exc))
-                                                                     (t    (typep .c ,e-exc)))))
-                                                   (if applicable
-                                                       (progn ,@(when var `(([assign-stmt] .c (,var))))
-                                                              (%cps-convert ,handler-suite ,%current-continuation))
-                                                     ,res)))))
+                   do (setf res `(with-cps-conversion (,exc ,e-exc)
+                                   (let ((applicable (typecase ,e-exc 
+                                                       ;; exception class, or typle of exception classes
+                                                       (list (some (lambda (x) (typep .c x)) ,e-exc))
+                                                       (t    (typep .c ,e-exc)))))
+                                     (if applicable
+                                         (progn ,@(when var `(([assign-stmt] .c (,var))))
+                                                (%cps-convert ,handler-suite ,%current-continuation))
+                                       ,res))))
                    else ;; blank "except:" catches all
                    do (setf res `(progn ,@(when var `(([assign-stmt] .c (,var))))
                                         (%cps-convert ,handler-suite ,%current-continuation)))
@@ -636,20 +602,21 @@ former requires that this form is executed within RECEIVE-YIELDED-VALUE."
            (next-try-value *the-none*))))))
 
 (def-cps-macro [try-finally-stmt] (try-suite finally-suite)
-  (with-gensyms (finalization-scheduled)
+  (with-gensyms (finalization-scheduled ignore)
     `(let ((stmt-k ,%current-continuation))
        (block try-finally-block
          (let ((gen-state (make-generator-state ,try-suite :sub-generator t))
                (,finalization-scheduled nil))
            (labels ((run-finally (generator-finished-p)
-                      (%cps-convert ,finally-suite
-                                    (lambda (val)
-                                      (declare (ignore val))
-                                      ;; Whole finally-body executed -> remove finalization
-                                      (when ,finalization-scheduled
-                                        (unschedule-finalization ,finalization-scheduled))
-                                      (when generator-finished-p
-                                        ,(%mark-generator-finished)))))
+                      (format t "run finally ~A" generator-finished-p)
+                      (with-cps-conversion (,finally-suite ,ignore)
+                        (declare (ignore ,ignore))
+                        ;; Whole finally-body executed -> remove finalization
+                        (when ,finalization-scheduled
+                          (unschedule-finalization ,finalization-scheduled))
+                        (if generator-finished-p
+                            ,(%mark-generator-finished)
+                          (funcall stmt-k nil))))
                     (next-val (val-for-generator)
                       ;; Get new val from TRY:
                       ;;  - if this results in an error, run the FINALLY (which may raise another
@@ -679,20 +646,19 @@ former requires that this form is executed within RECEIVE-YIELDED-VALUE."
 
 (def-cps-macro [tuple-expr] (items)
   (with-gensyms (tuple-k)
-      `(let ((,tuple-k ,%current-continuation))
-         ,(loop
-           with item-gensyms = (loop for i from 0 repeat (length items) collect (gensym (format nil "item-~A-" i)))
-           with res = `(funcall ,tuple-k (make-tuple-unevaled-list ,item-gensyms))
-           for x in (reverse items) and gensym in (reverse item-gensyms)
-           do (setf res `(%cps-convert ,x (lambda (,gensym) ,res)))
-           finally (return res)))))
+    `(let ((,tuple-k ,%current-continuation))
+       ,(loop
+            with item-gensyms = (loop for i from 0 repeat (length items) collect (gensym (format nil "item-~A-" i)))
+            with res = `(funcall ,tuple-k (make-tuple-unevaled-list ,item-gensyms))
+            for x in (reverse items) and gensym in (reverse item-gensyms)
+            do (setf res `(with-cps-conversion (,x ,gensym) ,res))
+            finally (return res)))))
 
 (def-cps-macro [unary-expr] (op val)
   (with-gensyms (e-val)
     (let ((py-op-func (get-unary-op-func-name op)))
-      `(%cps-convert ,val
-                     (lambda (,e-val)
-                       ,(%call-continuation `(funcall (function ,py-op-func) ,e-val)))))))
+      `(with-cps-conversion (,val ,e-val)
+         ,(%call-continuation `(funcall (function ,py-op-func) ,e-val))))))
 
 (defun contains-break-stmt-p (suite)
   "Whether SUITE contains BREAK stmt (not within inner loop)."
@@ -716,20 +682,20 @@ former requires that this form is executed within RECEIVE-YIELDED-VALUE."
 
 (def-cps-macro [while-stmt] (test suite else-suite)
   (let ((stmt-k %current-continuation))
-    (with-gensyms (while-cont)
+    (with-gensyms (while-cont val ignore)
       `(labels (,@(when (contains-break-stmt-p suite)
                     `((%break-cont () (funcall ,stmt-k nil))))
                   ,@(when (contains-continue-stmt-p suite)
                       `((%continue-cont () (,while-cont))))
                   (,while-cont ()
-                    (%cps-convert ,test
-                                  (lambda (val)
-                                    (if (py-val->lisp-bool val)
-                                        (%cps-convert ,suite
-                                                      (lambda (v) (declare (ignore v)) (,while-cont)))
-                                      ,(if else-suite
-                                           `(%cps-convert ,else-suite ,stmt-k)
-                                         `(funcall ,stmt-k nil)))))))
+                    (with-cps-conversion (,test ,val)
+                      (if (py-val->lisp-bool ,val)
+                          (with-cps-conversion (,suite ,ignore)
+                            (declare (ignore ,ignore))
+                            (,while-cont))
+                        ,(if else-suite
+                             `(%cps-convert ,else-suite ,stmt-k)
+                           `(funcall ,stmt-k nil))))))
          (,while-cont)))))
 
 ;; [with-stmt]: keep?
@@ -737,10 +703,9 @@ former requires that this form is executed within RECEIVE-YIELDED-VALUE."
 (def-cps-macro [yield-expr] (val)
   (with-gensyms (yield-cont e-val)
     `(let ((,yield-cont ,%current-continuation))
-       (%cps-convert ,val
-                     (lambda (,e-val)
-                       ,(%store-continuation `(lambda (x) (funcall ,yield-cont (parse-generator-input x))))
-                       (yield-value ,e-val))))))
+       (with-cps-conversion (,val ,e-val)
+         ,(%store-continuation `(lambda (x) (funcall ,yield-cont (parse-generator-input x))))
+         (yield-value ,e-val)))))
     
 (def-cps-macro [yield-stmt] (&optional value)
   ;; A yield statement is a yield expression whose value is not used.
@@ -754,7 +719,9 @@ former requires that this form is executed within RECEIVE-YIELDED-VALUE."
   (format t "Code: ~A~%" string)
   (let ((ast (parse string :one-expr t)))
     (format t "AST: ~A~%" ast)
-   (eval `(macrolet ((m (&environment e)
-                        (let ((me (excl::compiler-macroexpand '(%cps-convert ,ast 'k) e)))
-                          (format t "CPS: ~S~%" me))))
-            (with-dummy-namespace (m))))))
+    (let ((*debug-dummy-outer-namespace* t))
+      (declare (special *debug-dummy-outer-namespace*))
+      (eval `(macrolet ((m (&environment e)
+                          (let ((me (excl::compiler-macroexpand '(%cps-convert ,ast 'k) e)))
+                            (format t "CPS: ~S~%" me))))
+               (m))))))

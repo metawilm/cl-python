@@ -1011,10 +1011,39 @@ try:
     pass
 except SyntaxError:
   yield 2
-" (1 2))))
+" (1 2))
+      ("
+try:
+  yield 1
+  yield 2
+except:
+  yield 'except'
+else:
+  yield 'else'" (1 2 "else"))
+      ("
+try:
+  yield 1
+  yield 2
+finally:
+  yield 'finally'" (1 2 "finally"))
+      ("
+try:
+  try:
+    yield 1
+    1/0
+    yield 2
+  except:
+    yield 'except inner'
+  finally:
+    yield 'finally inner'
+except:
+  yield 'except outer'
+finally:
+  yield 'finally outer'" (1 "except inner" "finally inner" "finally outer"))))
 
 (defmacro with-dummy-namespace (&body body)
   `(let ((%dummy-cps-namespace (make-hash-table :test 'eq)))
+     (declare (ignorable %dummy-cps-namespace))
      (clpython::with-namespace (,(clpython::make-hash-table-ns
                                    :dict-form '%dummy-cps-namespace
                                    :parent (clpython::make-hash-table-ns
