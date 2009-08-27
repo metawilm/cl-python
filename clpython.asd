@@ -17,6 +17,10 @@
 
 ;;; Core systems: parser, compiler, runtime
 
+;; Here several ASDF systems are defined. The main system :clpython depends on all of them and has no
+;; components of its own. This makes it possible to load a specific part of CLPython, in particular the
+;; parser (system :clpython.parser).
+
 (asdf:defsystem :clpython.package
     :description "CLPython package and readtables"
     :components ((:module "package"
@@ -119,30 +123,30 @@
     :depends-on (:clpython.package :clpython.parser :clpython.core :clpython.lib clpython.app)
     :in-order-to ((asdf:test-op (asdf:load-op :clpython-test))))
 
-;; Check for presence of CL-Yacc and Allegro CL Yacc.
+
+;; In Allegro, which provides its own Yacc, CL-Yacc can optionally be used.
+;; In other implementations, Allegro Yacc can't be used.
 
 (let* ((parser-mod (let ((sys (asdf:find-system :clpython.parser)))
                      (car (asdf:module-components sys)))))
   
-  #+(or) ;; Disabled while modified CL-Yacc is included in CLPython/depend
+  #+allegro
   (let ((cl-yacc-grammar (asdf:find-component parser-mod "grammar-clyacc")))
+    
     (defmethod asdf:perform :around ((op asdf:load-op) (c (eql cl-yacc-grammar)))
       (when (asdf:find-system :yacc nil)
-        (call-next-method)
-        (format t "Note: The asdf system CL-Yacc was found. ~
-                   To use CL-Yacc as parser for CLPython, bind ~S to ~S.~%"
-                (find-symbol (string '#:*default-yacc-version*)
-                             (find-package '#:clpython.parser)) :cl-yacc)))
+        (call-next-method)))
+    
     (defmethod asdf:perform :around ((op asdf:compile-op) (c (eql cl-yacc-grammar)))
       (when (asdf:find-system :yacc nil)
         (call-next-method))))
   
-  ;; Skip loading Allegro yacc in non-Allegro environment
+  #-allegro
   (let ((allegro-yacc-grammar (asdf:find-component parser-mod "grammar-aclyacc")))
     (defmethod asdf:perform :around ((op asdf:load-op) (c (eql allegro-yacc-grammar)))
-      #+allegro (call-next-method))
+      nil)
     (defmethod asdf:perform :around ((op asdf:compile-op) (c (eql allegro-yacc-grammar)))
-      #+allegro (call-next-method))))
+      nil)))
 
 ;;; Show usage
 
