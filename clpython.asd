@@ -105,16 +105,9 @@
 			  :components ((:module "repl"
 						:components ((:file "repl")))))))
 
-(asdf:defsystem :clpython.app.profiler
-    :description "CLPython call count profiler"
-    :depends-on (:clpython.core)
-    :components ((:module "app"
-			  :components ((:module "profiler"
-						:components ((:file "profiler")))))))
-
 (asdf:defsystem :clpython.app
     :description "CLPython applications"
-    :depends-on (:clpython.app.repl :clpython.app.profiler))
+    :depends-on (:clpython.app.repl))
 
 ;;; The main system
 
