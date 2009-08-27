@@ -1100,6 +1100,10 @@ LOCALS shares share tail structure with input arg locals."
   ;; The effects of "import x.y.z" are:
   ;;   1. modules "x", "x.y" and "x.y.z" are loaded (if they were not already)
   ;;   2. name "x" is bound to the first module object, <module x>
+  ;; But, if a bindname is given, the effect of "import x.y.z as foo":
+  ;;   1. imports modules, x, x.y, x.y.z
+  ;;   2. binds x.y.z to "foo"; does not bind "x"
+  ;;  
   ;; One import statement can contain multiple submodules to import (the items).
   ;; Returns the imported (sub)modules as multiple values: <module x.y.z>, <module a.b>.
   `(let ((*module-namespace* nil)) ;; hack
@@ -1107,17 +1111,16 @@ LOCALS shares share tail structure with input arg locals."
                    for top-name = (car mod-name-as-list)
                    collect `(let* ((args (list :within-mod-path ',(careful-derive-pathname *compile-file-truename* nil)
                                                :within-mod-name ',*current-module-name*))
-                                   (top-module (apply #'py-import '(,top-name)
-                                                      :must-be-package ,(not (null (cdr mod-name-as-list)))
-                                                      args))
+                                   (top-module (apply #'py-import '(,top-name) args))
                                    (deep-module ,(if (cdr mod-name-as-list)
                                                      `(apply #'py-import ',mod-name-as-list args)
                                                    `top-module)))
-                              ([assign-stmt] top-module
-                                             (([identifier-expr] ,(or bind-name top-name))))
+                              ,(if bind-name
+                                   `([assign-stmt] deep-module (([identifier-expr] ,bind-name)))
+                                 `([assign-stmt] top-module (([identifier-expr] ,top-name))))
                               deep-module)))))
 
-(defvar *inside-import-from-stmt* nil)
+(defvar *inside-import-from-stmt* nil) ;; hack
 
 (defmacro [import-from-stmt] (mod-name-as-list items &environment e)
   `(let* ((*module-namespace* nil) ;; hack

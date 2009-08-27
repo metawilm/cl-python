@@ -85,7 +85,7 @@ As for case: both MODNAME's own name its upper-case variant are tried."
                                      (string (package-name :clpython.module)) "." v))))
         (return-from lisp-package-as-py-module pkg)))))
 
-(defun find-py-file (name search-paths &key must-be-package)
+(defun find-py-file (name search-paths)
   "Finds for source or fasl file in SEARCH-PATHS, returning earliest match.
 Returns values KIND SRC-PATH BIN-PATH FIND-PATH, or NIL if not found,
 with KIND one of :module, :package
@@ -108,8 +108,7 @@ with KIND one of :module, :package
         for pkg-src-path = (find-if #'probe-src (source-file-names :package name path))
         for pkg-bin-path = (find-if #'probe-bin (list (compiled-file-name :package name path)))
 			 
-        if (and (not must-be-package)
-                (or src-path bin-path))
+        if (or src-path bin-path)
         return (values :module
                        (when src-path (probe-src src-path))
                        (when bin-path (probe-bin bin-path))
@@ -185,7 +184,8 @@ Caller is responsible for deciding if recompiling is really necessary."
                    (lambda ()
                      (compile-file filename
                                    :output-file output-file
-                                   :verbose *import-compile-verbose*)))))))))
+                                   :verbose *import-compile-verbose*)
+                     (cached-probe-file output-file t)))))))))
 
 (defun %load-compiled-python-file (bin-filename
                                    &key (mod-name (error ":mod-name required"))
@@ -298,8 +298,7 @@ operation on the same path again and again during one import action.")
 
 (defun py-import (mod-name-as-list 
 		  &rest options
-		  &key must-be-package
-                       (habitat (or *habitat* (error "PY-IMPORT called without habitat")))
+		  &key (habitat (or *habitat* (error "PY-IMPORT called without habitat")))
                        (force-reload *import-force-reload*)
                        (force-recompile *import-force-recompile*)
                        within-mod-path
@@ -342,7 +341,6 @@ Otherwise raises ImportError."
       (let (parent)
         (unwind-protect
             (setf parent (apply #'py-import (butlast mod-name-as-list)
-                                :must-be-package t
                                 :%outer-mod-name-as-list %outer-mod-name-as-list
                                 options))
           (unless parent
@@ -374,7 +372,7 @@ Otherwise raises ImportError."
       
       ;; Find the source or fasl file somewhere in the collection of search paths
       (multiple-value-bind (kind src-file bin-file find-path)
-          (find-py-file just-mod-name find-paths :must-be-package must-be-package)
+          (find-py-file just-mod-name find-paths)
         (unless kind
           (when if-not-found-p
             (return-from py-import (values if-not-found-value :not-found-value)))
@@ -387,9 +385,8 @@ Otherwise raises ImportError."
           
           (maybe-warn-set-search-paths t)
           (py-raise '{ImportError}
-                    "Could not find ~A `~A'. ~:@_Search paths tried: ~{~S~^, ~_~}~@[ ~:@_Import ~
+                    "Could not find module `~A'. ~:@_Search paths tried: ~{~S~^, ~_~}~@[ ~:@_Import ~
                      of `~A' attempted by: ~A~]"
-                    (if must-be-package "package" "module/package")
                     just-mod-name search-paths
                     (when within-mod-path (module-dotted-name %outer-mod-name-as-list))
                     within-mod-path))
@@ -451,6 +448,7 @@ Otherwise raises ImportError."
                                                    from file ~A" dotted-name src-file))
                   (setf new-module 'recompiling-fasl)
                   (delete-file bin-file)
+                  (cached-probe-file bin-file t)
                   (return-from py-import ;; Restart the py-import call
                     (apply #'py-import mod-name-as-list options))))
             

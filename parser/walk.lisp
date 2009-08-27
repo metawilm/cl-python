@@ -321,8 +321,32 @@ CLASSDEF, FUNCDEF or LAMBDA."
                                                 (funcall f suite)))
                              ,(when else-suite (funcall f else-suite)))))
     
-    (([import-stmt] [import-from-stmt])
-     ;; IMPORT statements are not walked into; name handling is a bit tricky.
+    ([import-stmt]
+     ;; A bit tricky: this statement binds names, but does not contain identifier-expr. (Maybe it should contain.)
+     ;;   "import ... as foo" binds "foo"
+     ;;   "import x.y.z" binds "x"
+     (loop with items = (second ast)
+         for (mod-name-as-list bind-name) in items
+         for id-sym = (or bind-name (car mod-name-as-list))
+         for id-expr = (progn (check-type id-sym symbol)
+                              `([identifier-expr] ,id-sym))
+         do (funcall f id-expr :target +normal-target+))
+     (values ast t)) ;; No possibility to modify AST: original is returned.
+    
+    ([import-from-stmt]
+     ;; A bit tricky: the module from which items are imported is not a variable reference.
+     ;; Also, "from foo import *" imports all items of foo that exist at runtime... which we don't know now.
+     (destructuring-bind (mod-name-as-list items) (cdr ast)
+       (declare (ignore mod-name-as-list))
+       (cond ((eq items '[*])
+              ;; Some unknown identifiers will be set... can't do much with F here.
+              )
+             (t (loop for (item bindname) in items
+                    for id-sym = (or bindname item)
+                                       for id-expr = (progn (check-type id-sym symbol)
+                                                            `([identifier-expr] ,id-sym))
+                    do (funcall f id-expr :target +normal-target+)))))
+     ;; No possibility to modify AST: original is returned.
      (values ast t))
     
     ([lambda-expr]
