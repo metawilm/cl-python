@@ -31,7 +31,9 @@
 
 (asdf:defsystem :clpython.parser
     :description "Python parser, code walker, and pretty printer"
-    :depends-on (:clpython.package :yacc)
+    :depends-on
+    #-allegro (:clpython.package :yacc)
+    #+allegro #.`(:clpython.package ,@(when (asdf:find-system :yacc nil) `(:yacc)))
     :components ((:module "parser"
 			  :components ((:file "psetup"  )
 				       (:file "grammar"  :depends-on ("psetup"))

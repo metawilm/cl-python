@@ -15,10 +15,6 @@
   #+sbcl (terpri)
   (format t ";;; Compiling Python grammar for CL-Yacc: this may take a while...~%"))
             
-#+(or) ;; Disabled while modified CL-Yacc is included in CLPython/depend
-(eval-when (:compile-toplevel :load-toplevel :execute)
-  (asdf:operate 'asdf:load-op :yacc))
-
 #.`(yacc:define-parser *cl-yacc-python-parser*
        (:terminals ,*terminals*)
      (:precedence ,(nreverse (get-precedence-and-associativity :left :right :nonassoc)))
