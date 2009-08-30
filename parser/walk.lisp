@@ -229,7 +229,7 @@ CLASSDEF, FUNCDEF or LAMBDA."
 
 ;; [generator-expr] item for-in/if-clauses
 
-(def-ast-node [global-stmt] ((&rest names +global-decl-target+)))
+(def-ast-node [global-stmt] ((names +global-decl-target+)))
 (def-ast-node [identifier-expr] (name) (:targetable t))
 (def-ast-node [if-expr] ((condition +normal-value+) (then +normal-value+) (else +normal-value+)))
 
