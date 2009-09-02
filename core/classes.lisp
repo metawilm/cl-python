@@ -3412,6 +3412,8 @@ finished; F will then not be called again."
 
 ;;; Subscription of items (sequences, mappings)
 
+(defparameter *most-positive-slice-index* most-positive-fixnum)
+
 (defun normalize-slice-for-get/set (x slice methname)
   (check-type slice py-slice)
   (check-type methname symbol)
@@ -3421,19 +3423,21 @@ finished; F will then not be called again."
          (try-@etslice (or (none-p step) (equal step 1))))
     (when try-@etslice
       (whereas ((m (x.class-attr-no-magic.bind x methname)))
-        (when (or (none-p start)
-                  (and (numberp start) (minusp start))
-                  (none-p stop)
-                  (and (numberp stop) (minusp stop)))
-          (let ((len (py-len x)))
-            (cond ((none-p start)
-                   (setf start 0))
-                  ((and (numberp start) (minusp start))
-                   (incf start len)))
-            (cond ((none-p stop)
-                   (setf stop (1- len)))
-                  ((and (numberp stop) (minusp stop))
-                   (incf stop len)))))
+        ;; __getslice__ can be called on objects that don't implement __len__
+        ;; as long as the indices are not negative.
+        ;; None start defaults to 0
+        ;; None end defaults to most-positive-index, which is 0x7fffffff in CPython.
+        (let (len) ;; lazy
+          (cond ((none-p start)
+                 (setf start 0))
+                ((and (numberp start) (minusp start))
+                 (setf len (py-len x))
+                 (incf start len)))
+          (cond ((none-p stop)
+                 (setf stop *most-positive-slice-index*))
+                ((and (numberp stop) (minusp stop))
+                 (or len (setf len (py-len x)))
+                 (incf stop len))))
         (return-from normalize-slice-for-get/set (values m start stop))))))
 
 (defgeneric py-subs (x item))
