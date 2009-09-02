@@ -1566,7 +1566,7 @@ but the latter two classes are not in CPython.")
                    :within-mod-name (module-name x)
                    :within-mod-path (module-src-pathname x)
                    :if-not-found-value nil)
-        (py-raise '{AttributeError} "Module ~A has no attribute `~A'." x attr))))
+        (py-raise '{AttributeError} "Module ~A~_ has no attribute `~A'." x attr))))
 
 (def-py-method module.__setattr__ (x^ attr val)
   (when (slot-value x 'builtinp)
