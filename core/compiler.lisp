@@ -1266,7 +1266,7 @@ LOCALS shares share tail structure with input arg locals."
 
 (defun module-init (&key src-pathname bin-pathname current-module-name defun-wrappers source)
   (multiple-value-bind (module module-new-p)
-      (ensure-module :src-pathname src-pathname :bin-pathname bin-pathname)
+      (ensure-module :src-pathname src-pathname :bin-pathname bin-pathname :name current-module-name)
     (let ((%module-globals (module-ht module)))
       (check-type %module-globals hash-table)
       (flet ((init-module (&optional (module-globals %module-globals))

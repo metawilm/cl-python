@@ -411,7 +411,12 @@ Otherwise raises ImportError."
                          (file-write-date src-file)))
               ;; This would be a good place for a "try recompiling" restart,
               ;; but implementations tend to provide that already.
-              (%compile-py-file src-file :mod-name dotted-name :output-file bin-file)
+              (%compile-py-file src-file
+                                :mod-name (if (and within-mod-name
+                                                   (not (string= within-mod-name "__main__")))
+                                              (concatenate 'string within-mod-name "." dotted-name)
+                                            dotted-name)
+                                :output-file bin-file)
               (setf (gethash bin-file *import-recompiled-files*) t))))
         
         ;; Now we have an up-to-date fasl file.

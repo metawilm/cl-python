@@ -1443,7 +1443,7 @@ but the latter two classes are not in CPython.")
   ((namespace-ht   :initarg :namespace-ht :accessor module-ht :initform (make-eq-hash-table "module"))
    (name           :initarg :name           
 		   :type string
-		   :initform "__main__" 
+		   :initform (error "module name required")
 		   :accessor module-name
 		   :documentation "The (dotted) module name")
    (builtinp       :initarg :builtin   :initform nil :accessor module-builtin-p)
