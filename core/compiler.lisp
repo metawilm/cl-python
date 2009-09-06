@@ -945,7 +945,7 @@ LOCALS shares share tail structure with input arg locals."
 	
 	(let* ((new-context-stack (cons fname (get-pydecl :context-stack e))) ;; fname can be :lambda
 	       (context-fname     (ensure-user-symbol
-				   (format nil "~{~A~^.~}" (reverse new-context-stack))))
+				   (format nil "~A/~{~A~^.~}" *current-module-name* (reverse new-context-stack))))
 	       (body-decls       `((:lexically-declared-globals ,func-cumul-declared-globals)
                                    (:declared-globals-current-scope ,func-cumul-declared-globals)
 				   (:context :function)
