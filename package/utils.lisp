@@ -18,7 +18,7 @@
                                     &body body)
   "Automatically recompile on ANSI/Modern conflicts."
   (declare (ignorable restart-name))
-  (assert (atom verbose))
+  (assert (member verbose '(t nil)))
   `(handler-bind
        (#+allegro
         ((or excl::file-incompatible-fasl-error
