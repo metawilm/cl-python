@@ -453,7 +453,7 @@ Otherwise raises ImportError."
                     (apply #'py-import mod-name-as-list options))))
             
             (flet ((log-abort (error-p)
-                     (let ((args (list "Loading of module `~A' was aborted.~
+                     (let ((args (list "Loading of module `~A' was aborted. ~
                                         ~@[~:@_Source: ~A~]~@[~:@_Binary: ~A~]~@[~:@_Imported by: ~A~]"
                                        new-mod-dotted-name src-file bin-file within-mod-path)))
                        (if error-p

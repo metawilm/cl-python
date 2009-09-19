@@ -13,12 +13,12 @@
   "Raise a Python exception with given format string"
   (error exc-type :args (cons string format-args)))
 
-(defmacro with-auto-mode-recompile ((&key verbose
-                                          (restart-name #+allegro 'excl::recompile-due-to-incompatible-fasl #-allegro nil))
-                                    &body body)
+(defmacro with-auto-mode-recompile
+    ((&key verbose
+           (restart-name #+allegro 'excl::recompile-due-to-incompatible-fasl #-allegro nil))
+     &body body)
   "Automatically recompile on ANSI/Modern conflicts."
-  (declare (ignorable restart-name))
-  (assert (member verbose '(t nil)))
+  (declare (ignorable restart-name verbose))
   `(handler-bind
        (#+allegro
         ((or excl::file-incompatible-fasl-error

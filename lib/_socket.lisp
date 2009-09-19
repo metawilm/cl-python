@@ -86,7 +86,6 @@
 (defparameter *all-sockets* ())
 
 (def-py-method |socket.listen| (x backlog)
-  (declare (ignore backlog))
   (let ((address (socket.address x)))
     (assert (and (listp address)
                  (= (length address) 2)
