@@ -9,12 +9,16 @@
 
 ;;;; CLPython test harness setup
 
+#+allegro
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (require :tester))
+
 (defpackage :clpython.test
   (:use :common-lisp :clpython)
   (:import-from :clpython #:in-syntax)
   (:import-from :clpython.parser #:parse)
-  (:import-from :ptester #:*announce-test* #:with-tests
-                #:test #:test-warning)
+  (:import-from #+allegro :util.test #-allegro :ptester
+		#:*announce-test* #:with-tests #:test #:test-warning)
   (:export #:run))
 
 (in-package :clpython.test)
@@ -29,10 +33,12 @@
      ,form))
 
 (defmacro test-no-error (form &rest args)
-  `(ptester:test-no-error ,(form-without-compiler-warnings form) ,@args))
+  `(#+allegro util.test:test-no-error #-allegro ptester:test-no-error
+	      ,(form-without-compiler-warnings form) ,@args))
 
 (defmacro test-error (form &rest args)
-  `(ptester:test-error ,(form-without-compiler-warnings form) ,@args))
+  `(#+allegro util.test:test-error #-allegro ptester:test-error
+    ,(form-without-compiler-warnings form) ,@args))
     
 (defmacro test-true (val &rest options)
   "Only tests first value returned"

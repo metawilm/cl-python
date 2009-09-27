@@ -664,10 +664,10 @@ assert sys" :fail-info "Should work in both ANSI and Modern mode.")
              (error "Compile file lang-test.lisp using compile-file (or asdf), not using temp file, ~
                        otherwise import paths are incorrect: ~A." *compile-file-truename*))
            nil)
-  (let ((prefix (concatenate 'string "
+  (let* ((new-dir #.(directory-namestring (clpython::derive-pathname *compile-file-truename* :type nil :name nil)))
+         (prefix (concatenate 'string "
 import sys
-sys.path.append('" #.(directory-namestring (clpython::derive-pathname *compile-file-truename* :type nil :name nil)) "data/')
-")))
+sys.path.append('" (coerce (loop for c across new-dir if (char= c #\\) collect #\\ and collect #\\ else collect c) 'string) "data')" (string #\Newline))))
     (format t "prefix: ~S~%" prefix)
     (clpython::%reset-import-state)
     ;; run compilation outside run-no-error, to prevent allegro style warning from failing the test
