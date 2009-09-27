@@ -14,7 +14,7 @@
 
 (asdf:defsystem :clpython-test
     :description "CLPython tests"
-    :depends-on (:clpython :ptester)
+    :depends-on (:clpython #-allegro :ptester)
     ;; PTester: see <http://www.cliki.net/ptester> for download location.
     :components ((:module "test"
                           :serial t

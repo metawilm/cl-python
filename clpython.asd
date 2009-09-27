@@ -14,7 +14,6 @@
 (eval-when (:compile-toplevel)
   (error "This ASDF file should be run interpreted."))
 
-
 ;;; Core systems: parser, compiler, runtime
 
 ;; Here several ASDF systems are defined. The main system :clpython depends on all of them and has no
@@ -35,8 +34,8 @@
     #-allegro (:clpython.package :yacc)
     #+allegro #.`(:clpython.package ,@(when (asdf:find-system :yacc nil) `(:yacc)))
     :components ((:module "parser"
-			  :components ((:file "psetup"  )
-				       (:file "grammar"  :depends-on ("psetup"))
+                          :components ((:file "psetup"  )
+                                       (:file "grammar"  :depends-on ("psetup"))
                                        (:file "lexer"    :depends-on ("grammar"))
                                        (:file "parser"   :depends-on ("grammar" "lexer"))
                                        (:file "grammar-aclyacc" :depends-on ("grammar" "lexer" "parser"))
@@ -44,7 +43,7 @@
                                        (:file "ast-match" :depends-on ("grammar"))
                                        (:file "ast-util" :depends-on ("ast-match" "grammar"))
                                        (:file "walk"     :depends-on ("psetup"))
-				       (:file "pprint"   :depends-on ("psetup"))
+                                       (:file "pprint"   :depends-on ("psetup"))
                                        (:file "lispy"    :depends-on ("psetup" "parser" "ast-match"))))))
 
 (asdf:defsystem :clpython.core
@@ -94,7 +93,7 @@
                                        (:file "_socket" :depends-on ("lsetup"))
                                        (:file "sys" :depends-on ("lsetup"))
                                        (:file "string" :depends-on ("lsetup"))
-				       (:file "symbol" :depends-on ("lsetup"))
+                                       (:file "symbol" :depends-on ("lsetup"))
                                        (:file "thread" :depends-on ("lsetup"))
                                        (:file "time" :depends-on ("lsetup"))))))
 
@@ -104,8 +103,8 @@
     :description "CLPython read-eval-print loop"
     :depends-on (:clpython.core)
     :components ((:module "app"
-			  :components ((:module "repl"
-						:components ((:file "repl")))))))
+                          :components ((:module "repl"
+                                                :components ((:file "repl")))))))
 
 (asdf:defsystem :clpython.app
     :description "CLPython applications"
@@ -143,6 +142,35 @@
     (defmethod asdf:perform :around ((op asdf:compile-op) (c (eql allegro-yacc-grammar)))
       nil)))
 
+;; Give a nice error message when a required lib is not found.
+
+;; Closer-mop
+
+(defmacro with-missing-dep-help ((library warning-test) &body body)
+  `(handler-bind ((asdf:missing-dependency
+                   (lambda (c) (when (eq (asdf::missing-requires c) ,library)
+                                 (warn ,warning-test)))))
+     ,@body))
+
+(let ((clpython (asdf:find-system :clpython)))
+  
+  (defmethod asdf::traverse :around ((op asdf:compile-op) (system (eql clpython)))
+    (with-missing-dep-help (:closer-mop
+                            "CL-Python requires library \"Closer to MOP\". ~
+                             Please check it out from the darcs repo: ~
+                             \"darcs get http://common-lisp.net/project/closer/repos/closer-mop\" ~
+                             or download the latest release from: ~
+                             http://common-lisp.net/project/closer/ftp/closer-mop_latest.tar.gz")
+      (call-next-method)))
+  
+  #-allegro
+  (defmethod asdf::traverse :around ((op asdf:test-op) (system (eql clpython)))
+    (with-missing-dep-help (:ptester
+                            "CL-Python requires library \"ptester\". ~
+                             Please download the latest release from: ~
+                             http://files.b9.com/ptester/ptester-latest.tar.gz")
+      (call-next-method))))
+
 ;;; Show usage
 
 (defun show-clpython-quick-start ()
@@ -162,6 +190,6 @@
   (funcall (find-symbol (string '#:run-tests) :clpython.test)))
 
 (defmethod asdf:operation-done-p ((o asdf:test-op)
-				  (c (eql (asdf:find-system :clpython))))
+                                  (c (eql (asdf:find-system :clpython))))
   "Testing is never finished."
   nil)
