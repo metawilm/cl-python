@@ -113,8 +113,6 @@
 (defvar *exception-classes* ())
 
 (defun def-python-exceptions-1 (parent child-tree)
-  (declare (optimize (debug 3))
-	   (notinline def-python-exceptions))
   (flet ((def-sub-exc (super exc-name)
 	     (push (define-exception-subclass exc-name super) *exception-classes*)))
     (if (symbolp child-tree)
