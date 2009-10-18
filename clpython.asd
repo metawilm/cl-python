@@ -144,8 +144,6 @@
 
 ;; Give a nice error message when a required lib is not found.
 
-;; Closer-mop
-
 (defmacro with-missing-dep-help ((library warning-test) &body body)
   `(handler-bind ((asdf:missing-dependency
                    (lambda (c) (when (eq (asdf::missing-requires c) ,library)
@@ -161,6 +159,16 @@
                              \"darcs get http://common-lisp.net/project/closer/repos/closer-mop\" ~
                              or download the latest release from: ~
                              http://common-lisp.net/project/closer/ftp/closer-mop_latest.tar.gz")
+      (call-next-method)))
+
+  #-allegro
+  (defmethod asdf::traverse :around ((op asdf:compile-op) (system (eql clpython)))
+    (with-missing-dep-help (:yacc
+                            "CL-Python requires library \"CL-Yacc\". ~
+                             Please check it out from the darcs repo: ~
+                             \"darcs get http://www.pps.jussieu.fr/~~jch/software/repos/cl-yacc\" ~
+                             or download the latest release from: ~
+                             http://www.pps.jussieu.fr/~~jch/software/files/")
       (call-next-method)))
   
   #-allegro
