@@ -1122,7 +1122,7 @@ LOCALS shares share tail structure with input arg locals."
 
 (defvar *inside-import-from-stmt* nil) ;; hack
 
-(defmacro [import-from-stmt] (mod-name-as-list items &environment e)
+(defmacro [import-from-stmt] (mod-name-as-list items)
   `(let* ((*module-namespace* nil) ;; hack
           (args (list :within-mod-path ',(careful-derive-pathname *compile-file-truename* nil)
                       :within-mod-name ',*current-module-name*))
