@@ -10,10 +10,11 @@
 (in-package :clpython.test)
 
 (defun run-mod-string-test ()
-  (run-no-error "
+  (with-subtest (:name "module String")
+    (run-no-error "
 import string
 t = string.maketrans('ab', 'xy')
 string.translate('abcdxyz', t, 'd') == 'xycxyz'")
   
-  (run-no-error "
-assert '%% %s' % (1,) == '% 1'"))
+    (run-no-error "
+assert '%% %s' % (1,) == '% 1'")))
