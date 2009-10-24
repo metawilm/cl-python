@@ -139,7 +139,7 @@
                                 (symbol-name x))))
                (aref sn (1- (length sn))))))
       (unless (some (lambda (x) (member (token-suffix x) '(#\? #\*))) terms)
-        (return-from p `(add-rule ',name ',terms ',outcome #| ,@options |# )))
+        (return-from p `(add-rule ',name ',terms ',outcome)))
       (labels ((remove-token-suffix (x)
                  (check-type x symbol)
                  (let ((sn (symbol-name x)))
@@ -224,10 +224,10 @@ Value should be a (weak) EQ hash table: (make-weak-key-hash-table :test 'eq).")
                     (when .min (record-source-location .outcome .min .max))
                     .outcome)))))))
 
-(defun add-rule (name terms outcome &rest options)        
+(defun add-rule (name terms outcome)        
   ;; Enable reduction trackin, for source form location recording purposes
   (let ((out (instrument-outcome terms outcome)))
-    (pushnew (list terms out options) (gethash name *python-prods*) :test 'equal)))
+    (pushnew (list terms out) (gethash name *python-prods*) :test 'equal)))
 
 (defmacro gp (name)
   "Generate a production rule:
