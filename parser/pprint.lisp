@@ -50,79 +50,6 @@ output to a string does not start with a newline."
   (with-standard-io-syntax
     (format stream "~A" object)))
 
-(defmethod py-pprint-1 (stream (x integer))
-  (with-standard-io-syntax
-    (format stream "~D" x)))
-
-(defmethod py-pprint-1 (stream (x float))
-  (with-standard-io-syntax
-    (format stream "~G" x)))
-
-(defmethod py-pprint-1 (stream (x complex))
-  (assert (= 0 (realpart x)))
-    (with-standard-io-syntax
-      (format stream "~Gj" (imagpart x))))
-
-(defmethod py-pprint-1 (stream (x string))  
-  (multiple-value-bind (delim-quote other-quote unicode?)
-      (loop for ch of-type character across x
-	  counting (char= ch #\') into single-qs
-	  counting (char= ch #\") into double-qs
-	  counting (> (char-code ch) 255) into unicode
-	  finally (let* ((delim-quote (if (<= single-qs double-qs) #\' #\"))
-			 (other-quote (if (char= delim-quote #\') #\" #\'))
-			 (unicode? (> unicode 0)))
-		    (return (values delim-quote other-quote unicode?))))
-    
-    (with-standard-io-syntax ;; no recursion please
-      
-      (when unicode? ;; unicode prefix 'u'
-	(write-char #\u stream))
-      
-      (write-char delim-quote stream) ;; starting quote
-      
-      (loop for ch of-type character across (the string x)
-	  do (cond ((char= ch delim-quote)  (write-char #\\ stream)
-					    (write-char ch stream))
-		   
-		   ((char= ch other-quote)  (write-char ch stream))
-		   
-		   ((char= ch #\\)  (write-char #\\ stream)
-				    (write-char #\\ stream))
-		   
-		   ;; printable ASCII character
-		   ((and (<= (char-code ch) 127) 
-			 (graphic-char-p ch))     (write-char ch stream))
-		   
-		   ((> (char-code ch) 255)
-		    (format stream "\\u~v,vX"
-			    (if (> (char-code ch) #xFFFF) 8 4)
-			    #\0 (char-code ch)))
-		   
-		   ((alphanumericp ch)  (write-char ch stream))
-		   
-		   (t (loop for ch across
-                            ;; Cross-reference: #'(read-kind (string) ..) does the inverse.
-			    (case ch
-			      (#\Bell      "\\a") 
-			      (#\Backspace "\\b")
-			      (#\Page      "\\p")
-			      (#\Newline   "\\n")
-			      (#\Return    "\\r")
-			      (#\Tab       "\\t")
-			      (#.(code-char 11) "\\v") ;; #\VT or #\PageUp
-			      (#\Space     " " )
-			      
-			      ;; Maybe there are more cases to catch before
-			      ;; we encode the character in octal code?
-			      
-			      (t (format nil "\\0~3,vO" #\0 (char-code ch))))
-			    
-			  do (write-char ch stream)))))
-      
-      (write-char delim-quote stream)))) ;; closing quote
-
-
 (defvar *precedence-level* -1)
 
 ;; XXX check prec levels
@@ -277,6 +204,9 @@ output to a string does not start with a newline."
                                ([if-clause]     (format stream " if ~A" (second clause)))))
                       (format stream "]"))
     
+    ([literal-expr] (destructuring-bind (kind value) (cdr x)
+                      (py-pprint-literal stream kind value)))
+    
     ([module-stmt]  (let ((suite (cadr x)))
 		    (assert (eq (first suite) '[suite-stmt]))
 		    (format stream "~{~A~%~}" (second suite))))
@@ -367,7 +297,6 @@ output to a string does not start with a newline."
     ([yield-stmt] (format stream "yield~@[ ~A~]" (second x)))
     
     (t (format stream "(~{~S~^ ~})" x))))
-
   
 (defun print-arg-list (stream pos-args key-args *-arg **-arg)
   (let ((*precedence-level* -1)
@@ -381,6 +310,82 @@ output to a string does not start with a newline."
     
     (format stream "~@[*~A~:[~;, ~]~]" *-arg **-arg)
     (format stream "~@[**~A~]"         **-arg)))
+
+
+
+(defgeneric py-pprint-literal (stream kind value))
+
+(defmethod py-pprint-literal (stream (kind (eql :number)) (x integer))
+  (with-standard-io-syntax
+    (format stream "~D" x)))
+
+(defmethod py-pprint-literal (stream (kind (eql :number)) (x complex))
+  (assert (= 0 (realpart x)))
+    (with-standard-io-syntax
+      (format stream "~Gj" (imagpart x))))
+
+(defmethod py-pprint-literal (stream (kind (eql :string)) (x string))
+  (multiple-value-bind (delim-quote other-quote unicode?)
+      (loop for ch of-type character across x
+	  counting (char= ch #\') into single-qs
+	  counting (char= ch #\") into double-qs
+	  counting (> (char-code ch) 255) into unicode
+	  finally (let* ((delim-quote (if (<= single-qs double-qs) #\' #\"))
+			 (other-quote (if (char= delim-quote #\') #\" #\'))
+			 (unicode? (> unicode 0)))
+		    (return (values delim-quote other-quote unicode?))))
+    
+    (with-standard-io-syntax ;; no recursion please
+      
+      (when unicode? ;; unicode prefix 'u'
+	(write-char #\u stream))
+      
+      (write-char delim-quote stream) ;; starting quote
+      
+      (loop for ch of-type character across (the string x)
+	  do (cond ((char= ch delim-quote)  (write-char #\\ stream)
+					    (write-char ch stream))
+		   
+		   ((char= ch other-quote)  (write-char ch stream))
+		   
+		   ((char= ch #\\)  (write-char #\\ stream)
+				    (write-char #\\ stream))
+		   
+		   ;; printable ASCII character
+		   ((and (<= (char-code ch) 127) 
+			 (graphic-char-p ch))     (write-char ch stream))
+		   
+		   ((> (char-code ch) 255)
+		    (format stream "\\u~v,vX"
+			    (if (> (char-code ch) #xFFFF) 8 4)
+			    #\0 (char-code ch)))
+		   
+		   ((alphanumericp ch)  (write-char ch stream))
+		   
+		   (t (loop for ch across
+                            ;; Cross-reference: #'(read-kind (string) ..) does the inverse.
+			    (case ch
+			      (#\Bell      "\\a") 
+			      (#\Backspace "\\b")
+			      (#\Page      "\\p")
+			      (#\Newline   "\\n")
+			      (#\Return    "\\r")
+			      (#\Tab       "\\t")
+			      (#.(code-char 11) "\\v") ;; #\VT or #\PageUp
+			      (#\Space     " " )
+			      
+			      ;; Maybe there are more cases to catch before
+			      ;; we encode the character in octal code?
+			      
+			      (t (format nil "\\0~3,vO" #\0 (char-code ch))))
+			    
+			  do (write-char ch stream)))))
+      
+      (write-char delim-quote stream)))) ;; closing quote
+
+(defmethod py-pprint-literal (stream (kind (eql :number)) (x float))
+  (with-standard-io-syntax
+    (format stream "~G" x)))
 
 
 ;; Utils

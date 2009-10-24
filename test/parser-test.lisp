@@ -47,19 +47,20 @@
     (test-true (find-symbol "foo" :clpython.user)) ;; created by previous test
     (test-true (eq '{abs} '{abs} ))
 
-    ;; atoms
-    (test-equal '([module-stmt] ([suite-stmt] (42))) (ps "42"))
-    (test-equal '([module-stmt] ([suite-stmt] ("x"))) (ps "'x'"))
+    ;; literals
+    (test-equal '([module-stmt] ([suite-stmt] (([literal-expr] :number 42)))) (ps "42"))
+    (test-equal '([module-stmt] ([suite-stmt] (([literal-expr] :string "x")))) (ps "'x'"))
+    (test-equal '([module-stmt] ([suite-stmt] (([literal-expr] :bytes "x")))) (ps "b'x'"))
       
     ;; variables
-    (test-equal '([assign-stmt] 3 (([identifier-expr] {y} ))) (ps "y = 3" nil))
-    (test-equal '([assign-stmt] 3 (([identifier-expr] {len}))) (ps "len = 3" nil))
+    (test-equal '([assign-stmt] ([literal-expr] :number 3) (([identifier-expr] {y} ))) (ps "y = 3" nil))
+    (test-equal '([assign-stmt] ([literal-expr] :number 3) (([identifier-expr] {len}))) (ps "len = 3" nil))
 
     ;; floating point (complex) numbers
-    (test-equal 0.5d0 (ps "0.5" nil))
-    (test-equal 0.5d0 (ps ".5" nil))
-    (test-equal #C(0.0 0.5d0) (ps "0.5j" nil))
-    (test-equal #C(0.0 0.5d0) (ps ".5j" nil))
+    (test-equal '([literal-expr] :number 0.5d0) (ps "0.5" nil))
+    (test-equal '([literal-expr] :number 0.5d0) (ps ".5" nil))
+    (test-equal '([literal-expr] :number #C(0.0 0.5d0)) (ps "0.5j" nil))
+    (test-equal '([literal-expr] :number #C(0.0 0.5d0)) (ps ".5j" nil))
 
     (assert (not (eq clpython.parser::*normal-float-representation-type*
                      clpython.parser::*enormous-float-representation-type*))
@@ -68,7 +69,7 @@
         (clpython.parser::number-range clpython.parser::*normal-float-representation-type*)
       (assert (< min-f 0))
       (assert (< (expt 10 3) max-f) () "Really small float range in this Lisp implementation?!")
-      (test-equal 1D3 (ps "1e3" nil)) ;; 1e3 is small enough to be a regular ..-FLOAT
+      (test-equal '([literal-expr] :number 1D3) (ps "1e3" nil)) ;; 1e3 is small enough to be a regular ..-FLOAT
       (let* ((n-expt (1+ (floor (log max-f 10))))
              (s (format nil "1E~A" n-expt)))
         (test-error (ps s nil) :condition-type '{SyntaxError}) ;; "too large to represent as ..-FLOAT"
@@ -77,30 +78,31 @@
                                                     (test-true (find-restart 'continue))
                                                     (invoke-restart (find-restart 'continue)))))
                       (ps s nil))
-                    (expt 10 n-expt))))
+                    `([literal-expr] :number ,(expt 10 n-expt)))))
     
     ;; suffix operations
     (test-equal '([attributeref-expr]
 		  ([call-expr]
-		   ([subscription-expr] ([identifier-expr] {x}) 1)
-		   (2) nil nil nil)
+		   ([subscription-expr] ([identifier-expr] {x}) ([literal-expr] :number 1))
+		   (([literal-expr] :number 2)) nil nil nil)
 		  ([identifier-expr] {a3}))
 		(ps "x[1](2).a3" nil))
       
     ;; call arguments
     (test-equal '([attributeref-expr]
 		  ([call-expr] ([subscription-expr] ([identifier-expr] {x})
-				1)
-		   nil ((([identifier-expr] {len}) 2)) nil nil)
+				([literal-expr] :number 1))
+		   nil ((([identifier-expr] {len}) ([literal-expr] :number 2))) nil nil)
 		  ([identifier-expr] {a3}))
 		(ps "x[1](len=2).a3" nil))
       
     (test-equal '([call-expr] 
 		  ([identifier-expr] {f})
-		  (1 2) ((([identifier-expr] {y}) 3))
+		  (([literal-expr] :number 1) ([literal-expr] :number 2))
+                  ((([identifier-expr] {y}) ([literal-expr] :number 3)))
                   ([identifier-expr] {args})
                   ([identifier-expr] {kw}))
-		(ps "f(1,2, y=3, *args, **kw)" nil))
+		(ps "f(1, 2, y=3, *args, **kw)" nil))
 
     ;; order of args: pos, key, *, **
     (test-error (ps "f(a=1,b)" nil)
@@ -130,53 +132,61 @@ def f(): pass" nil))
 
     ;; Precedence of unary operators and exponentiation
     (test-equal '([binary-expr] [*] 
-                  ([unary-expr] [-] 1)
-                  2)
+                  ([unary-expr] [-] ([literal-expr] :number 1))
+                  ([literal-expr] :number 2))
                 (ps "-1 * 2" nil)
                 :fail-info "-1 * 2 == (-1) * 2")
     (test-equal '([binary-expr] [*] 
-                  ([unary-expr] [+] 1)
-                  2)
+                  ([unary-expr] [+] ([literal-expr] :number 1))
+                  ([literal-expr] :number 2))
                 (ps "+1 * 2" nil)
                 :fail-info "+1 * 2 == (+1) * 2")
-    (test-equal '([unary-expr] [-] ([binary-expr] [**] 1 2))
+    (test-equal '([unary-expr] [-] ([binary-expr] [**]
+                                    ([literal-expr] :number 1)
+                                    ([literal-expr] :number 2)))
                 (ps "-1 ** 2" nil)
                 :fail-info "-1 ** 2 == - (1 ** 2)")
-    (test-equal '([unary-expr] [+] ([binary-expr] [**] 1 2))
+    (test-equal '([unary-expr] [+] ([binary-expr] [**]
+                                    ([literal-expr] :number 1)
+                                    ([literal-expr] :number 2)))
                 (ps "+1 ** 2" nil)
                 :fail-info "+1 ** 2 == + (1 ** 2)")
     (test-equal '([binary-expr] [-]
-                  1
-                  ([binary-expr] [*] 2 3))
+                  ([literal-expr] :number 1)
+                  ([binary-expr] [*]
+                   ([literal-expr] :number 2)
+                   ([literal-expr] :number 3)))
                 (ps "1 - 2 * 3" nil)
                 :fail-info "1 - 2 * 3 == 1 - (2 * 3)")
     (test-equal '([binary-expr] [/]
-                  ([unary-expr] [~] 1)
-                  2)
+                  ([unary-expr] [~] ([literal-expr] :number 1))
+                  ([literal-expr] :number 2))
                 (ps "~1 / 2" nil)
                 :fail-info "~1 / 2 == (~1) / 2")
     (test-equal '([unary-expr] [~]
-                  ([binary-expr] [**] 1 2))
+                  ([binary-expr] [**]
+                   ([literal-expr] :number 1)
+                   ([literal-expr] :number 2)))
                 (ps "~1 ** 2" nil)
                 :fail-info "~1 ** 2 == ~ (1 ** 2)")
     (test-equal '([binary-expr] [*]
-                  ([unary-expr] [-] 1)
+                  ([unary-expr] [-] ([literal-expr] :number 1))
                   ([binary-expr] [*]
-                   ([unary-expr] [+] 2)
+                   ([unary-expr] [+] ([literal-expr] :number 2))
                    ([binary-expr] [*]
-                    ([unary-expr] [-] 3)
-                    ([unary-expr] [+] 4))))
+                    ([unary-expr] [-] ([literal-expr] :number 3))
+                    ([unary-expr] [+] ([literal-expr] :number 4)))))
                 (ps "-1 * +2 * -3 * +4" nil))
     (test-equal '([binary-expr] [*]
-                  1
+                  ([literal-expr] :number 1)
                   ([unary-expr] [-]
                    ([bracketed-expr]
                     ([binary-expr] [*]
                      ([bracketed-expr]
                       ([binary-expr] [*] 
-                                     ([unary-expr] [-] 2)
-                                     3))
-                     4))))
+                                     ([unary-expr] [-] ([literal-expr] :number 2))
+                                     ([literal-expr] :number 3)))
+                     ([literal-expr] :number 4)))))
                 (ps "1 * -((-2 * 3) * 4)" nil))
         
     ;; Empty string is parsed as module without body
@@ -190,7 +200,7 @@ def f(): pass" nil))
     #+(and allegro unix) ;; no WITH-OPEN-TEMP-FILE on windows
     (let ((fname (excl.osi:with-open-temp-file (s (format nil "_clpython-ast-test-~A" (gensym)))
 		   (format s "print 42"))))
-      (test-equal '([print-stmt] nil (42) nil)
+      (test-equal '([print-stmt] nil (([literal-expr] :number 42)) nil)
 		  (values (clpython.parser:parse (pathname fname) :one-expr t)))
       (test t (excl.osi:unlink fname)))
     
@@ -207,16 +217,17 @@ def f(): pass" nil))
       (test :unexp-eof-error (try-parse "def f():") :fail-info "(EOF in grammar)")
       (test :syntax-error    (try-parse "def def") :fail-info "(Incorrect grammar)")
       (test :syntax-error    (try-parse " 42") :fail-info "(Leading whitespace)"))
-    (test-equal 42 (handler-bind (({SyntaxError} (lambda (c) (declare (ignore c))
-                                                         (continue))))
-                     (values (parse " 42" :one-expr t))))
+    (test-equal '([literal-expr] :number 42)
+                (handler-bind (({SyntaxError} (lambda (c) (declare (ignore c))
+                                                      (continue))))
+                  (values (parse " 42" :one-expr t))))
     ;; strings with quotes
     (let ((s (apply #'concatenate 'string (mapcar 'string '(#\' #\" #\\ #\' #\')))))
-      (test-equal (values (parse s :one-expr t)) "\"'"))
+      (test-equal (values (parse s :one-expr t)) '([literal-expr] :string "\"'")))
     (let ((s (apply #'concatenate 'string (mapcar 'string '(#\' #\\ #\\ #\')))))
-      (test-equal (ignore-errors (values (parse s :one-expr t))) "\\"))
+      (test-equal (ignore-errors (values (parse s :one-expr t))) '([literal-expr] :string "\\")))
     (let ((s (apply #'concatenate 'string (mapcar 'string '(#\' #\\ #\\ #\' #\Space)))))
-      (test-equal (ignore-errors (values (parse s :one-expr t))) "\\"))
+      (test-equal (ignore-errors (values (parse s :one-expr t))) '([literal-expr] :string "\\")))
     ;; trailing comma
     (test-no-error (parse "def f(a=3,): pass"))
     ;; backslash at end of whitespace line
@@ -495,7 +506,10 @@ finally:
   (let ((tests '(("()" (clpython.parser::handle-lisp nil))
                  ("(,)" :error)
                  ("(f)" (clpython.parser::handle-lisp (f)))
-                 ("(1,2)" (clpython.parser::handle-python ([module-stmt] ([suite-stmt] (([tuple-expr] (1 2))))))))))
+                 ("(1,2)" (clpython.parser::handle-python
+                           ([module-stmt] ([suite-stmt]
+                                           (([tuple-expr] (([literal-expr] :number 1)
+                                                           ([literal-expr] :number 2)))))))))))
     (loop for (test expected) in tests
         do (multiple-value-bind (val error)
                (ignore-errors (car (let ((*package* #.*package*))

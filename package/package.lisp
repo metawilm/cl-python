@@ -63,7 +63,7 @@
 
 (defpackage :clpython.ast.token
   (:use )
-  (:export "newline" "indent" "dedent" "identifier" "number" "string"))
+  (:export "newline" "indent" "dedent" "identifier" "literal-expr"))
 
 (defpackage :clpython.ast.node
   (:documentation "Statement and expression nodes")

@@ -1163,6 +1163,15 @@ LOCALS shares share tail structure with input arg locals."
 (define-setf-expander [list-expr] (items &environment e)
   (get-setf-expansion `(list/tuple-expr ,items) e))
 
+(defmacro [literal-expr] (kind value)
+  (ecase kind
+    (:string (check-type value string)
+             value)
+    (:bytes  (check-type value string)
+             `(TODO-make-bytes ,value)) ;; XXX TODO
+    (:number (check-type value number)
+             value)))
+
 (defvar *habitat* nil)
 (defvar *module-preload-hook*)
 
