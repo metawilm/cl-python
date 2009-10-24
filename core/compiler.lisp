@@ -1132,10 +1132,7 @@ LOCALS shares share tail structure with input arg locals."
                              'm
                            `(apply #'py-import ',mod-name-as-list args))))
        ,(case items
-          ([*] (assert (typep (get-pydecl :namespace e) 'hash-table-ns)
-                   () "Can't do `from .. import *' in this namespace: ~A."
-                   (get-pydecl :namespace e))
-               `(loop for (k . v) in (dir-items mod-obj)
+          ([*] `(loop for (k . v) in (dir-items mod-obj)
                     do (namespace-set-runtime (ensure-user-symbol k) v)))
           (t `(progn
                 ,@(loop for (item bind-name) in items

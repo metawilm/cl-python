@@ -356,10 +356,11 @@
 (defmethod ns.attributes append ((x package-ns))
   (list :package (ns.package x) :incl-builtins (ns.incl-builtins x)))
 
-(defun package-ns-intern (ns s)
-  (check-type ns package-ns)
-  (check-type s symbol)
-  (intern (symbol-name s) (ns.package ns)))
+(defgeneric package-ns-intern (ns s)
+  (:method ((ns package-ns) (s symbol))
+           (package-ns-intern (ns.package ns) s))
+  (:method ((package package) (s symbol))
+           (intern (symbol-name s) package)))
 
 (defmethod ns.read-form ((ns package-ns) (s symbol))
   (let ((ps (package-ns-intern ns s)))
@@ -370,6 +371,11 @@
 (defmethod ns.write-form ((ns package-ns) (s symbol) val-form)
   (let ((ps (package-ns-intern ns s)))
     `(setf (symbol-value ',ps) ,val-form)))
+
+(defmethod ns.write-runtime-form ((ns package-ns) name-form val-form)
+  `(let ((.ps (package-ns-intern ,(ns.package ns) ,name-form)))
+     (warn "Setting ~A to ~S" .ps ,val-form)
+     (setf (symbol-value .ps) ,val-form)))
 
 (defmethod ns.del-form ((ns package-ns) (s symbol))
   (let ((ps (package-ns-intern ns s)))
