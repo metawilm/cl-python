@@ -652,7 +652,7 @@ otherwise work well.")
 (defgeneric function-name (f)
   (:method ((f function))
            (let ((data (gethash f *simple-function-data*))
-                 (related-lisp-symbol #+allegro (string (excl::func_name f))
+                 (related-lisp-symbol #+allegro (excl::func_name f)
                                       #-allegro nil))
              (values (if data
                          (string (sfd-name data))
