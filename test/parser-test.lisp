@@ -276,6 +276,8 @@ else:
       ;; string
       (pe "'x'")
       (p "'\"'")
+      ;; bytes
+      (p "b'\\x41\\x42\\x03'")
       ;; assert
       (p "assert (1, 2, 3)")
       (p "assert x > 0, 'error'")
@@ -500,6 +502,7 @@ finally:
       (p "(yield)")
       (p "(yield x)")
       (p "(yield x, y)")
+      (p "()")
       )))
 
 (defun run-lispy-test ()

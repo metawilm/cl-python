@@ -315,14 +315,29 @@ output to a string does not start with a newline."
 
 (defgeneric py-pprint-literal (stream kind value))
 
-(defmethod py-pprint-literal (stream (kind (eql :number)) (x integer))
+(defmethod py-pprint-literal :around (stream kind value)
+  (declare (ignore stream kind value))
   (with-standard-io-syntax
-    (format stream "~D" x)))
+    (call-next-method)))
+
+(defmethod py-pprint-literal (stream (kind (eql :number)) (x integer))
+  (format stream "~D" x))
 
 (defmethod py-pprint-literal (stream (kind (eql :number)) (x complex))
   (assert (= 0 (realpart x)))
-    (with-standard-io-syntax
-      (format stream "~Gj" (imagpart x))))
+  (format stream "~Gj" (imagpart x)))
+
+(defmethod py-pprint-literal (stream (kind (eql :number)) (x float))
+  (format stream "~G" x))
+
+(defmethod py-pprint-literal (stream (kind (eql :bytes)) (x vector))
+  (write-string "b'" stream)
+  (loop for item across x
+      do (when (characterp item)
+           (setf item (char-code item)))
+         (check-type item (unsigned-byte 8))
+         (format stream "\\x~2,'0x" item))
+  (write-string "'" stream))
 
 (defmethod py-pprint-literal (stream (kind (eql :string)) (x string))
   (multiple-value-bind (delim-quote other-quote unicode?)
@@ -334,59 +349,39 @@ output to a string does not start with a newline."
 			 (other-quote (if (char= delim-quote #\') #\" #\'))
 			 (unicode? (> unicode 0)))
 		    (return (values delim-quote other-quote unicode?))))
-    
-    (with-standard-io-syntax ;; no recursion please
-      
-      (when unicode? ;; unicode prefix 'u'
-	(write-char #\u stream))
-      
-      (write-char delim-quote stream) ;; starting quote
-      
-      (loop for ch of-type character across (the string x)
-	  do (cond ((char= ch delim-quote)  (write-char #\\ stream)
-					    (write-char ch stream))
-		   
-		   ((char= ch other-quote)  (write-char ch stream))
-		   
-		   ((char= ch #\\)  (write-char #\\ stream)
-				    (write-char #\\ stream))
-		   
-		   ;; printable ASCII character
-		   ((and (<= (char-code ch) 127) 
-			 (graphic-char-p ch))     (write-char ch stream))
-		   
-		   ((> (char-code ch) 255)
-		    (format stream "\\u~v,vX"
-			    (if (> (char-code ch) #xFFFF) 8 4)
-			    #\0 (char-code ch)))
-		   
-		   ((alphanumericp ch)  (write-char ch stream))
-		   
-		   (t (loop for ch across
-                            ;; Cross-reference: #'(read-kind (string) ..) does the inverse.
-			    (case ch
-			      (#\Bell      "\\a") 
-			      (#\Backspace "\\b")
-			      (#\Page      "\\p")
-			      (#\Newline   "\\n")
-			      (#\Return    "\\r")
-			      (#\Tab       "\\t")
-			      (#.(code-char 11) "\\v") ;; #\VT or #\PageUp
-			      (#\Space     " " )
-			      
-			      ;; Maybe there are more cases to catch before
-			      ;; we encode the character in octal code?
-			      
-			      (t (format nil "\\0~3,vO" #\0 (char-code ch))))
-			    
-			  do (write-char ch stream)))))
-      
-      (write-char delim-quote stream)))) ;; closing quote
-
-(defmethod py-pprint-literal (stream (kind (eql :number)) (x float))
-  (with-standard-io-syntax
-    (format stream "~G" x)))
-
+    (when unicode? ;; unicode prefix 'u'
+      (write-char #\u stream))
+    (write-char delim-quote stream) ;; starting quote
+    (loop for ch of-type character across (the string x)
+        do (cond ((char= ch delim-quote)  (write-char #\\ stream)
+                                          (write-char ch stream))
+                 ((char= ch other-quote)  (write-char ch stream))
+                 ((char= ch #\\)  (write-char #\\ stream)
+                                  (write-char #\\ stream))
+                 ;; printable ASCII character
+                 ((and (<= (char-code ch) 127) 
+                       (graphic-char-p ch))     (write-char ch stream))
+		 ((> (char-code ch) 255)
+                  (format stream "\\u~v,vX"
+                          (if (> (char-code ch) #xFFFF) 8 4)
+                          #\0 (char-code ch)))
+		 ((alphanumericp ch)  (write-char ch stream))
+		 (t (loop for ch across
+                          ;; Cross-reference: #'(read-kind (string) ..) does the inverse.
+                          (case ch
+                            (#\Bell      "\\a") 
+                            (#\Backspace "\\b")
+                            (#\Page      "\\p")
+                            (#\Newline   "\\n")
+                            (#\Return    "\\r")
+                            (#\Tab       "\\t")
+                            (#.(code-char 11) "\\v") ;; #\VT or #\PageUp
+                            (#\Space     " " )
+                            ;; Maybe there are more cases to catch before
+                            ;; we encode the character in octal code?
+                            (t (format nil "\\0~3,vO" #\0 (char-code ch))))
+                        do (write-char ch stream)))))
+    (write-char delim-quote stream))) ;; closing quote
 
 ;; Utils
 
