@@ -383,14 +383,14 @@ former requires that this form is executed within RECEIVE-YIELDED-VALUE."
             ([exec-stmt] ,@args))
           ,(%call-continuation)))
 
-(def-cps-macro [for-in-stmt] (target source suite else-suite)
+(def-cps-macro [for-in-stmt] (target source suite else-suite &environment e)
   (with-gensyms (e-source it-fun for-cont for-break-cont else-cont ignore stmt-k)
     `(let ((,stmt-k ,%current-continuation)) 
        (with-cps-conversion (,source ,e-source)
          (let* ((,it-fun (get-py-iterate-fun ,e-source)))
-           (labels (,@(when (contains-continue-stmt-p suite)
+           (labels (,@(when (contains-continue-stmt-p suite e)
                         `((%continue-cont () (,for-cont))))
-                      ,@(when (contains-break-stmt-p suite)
+                      ,@(when (contains-break-stmt-p suite e)
                           `((%break-cont () (,for-break-cont))))
                       (,for-break-cont ()
                         (funcall ,stmt-k nil))
@@ -478,24 +478,29 @@ former requires that this form is executed within RECEIVE-YIELDED-VALUE."
 (def-cps-macro [listcompr-expr] (item for-in/if-clauses)
   (with-gensyms (result-list ignore)
     `(let ((,result-list (make-py-list-from-list ())))
+       (with-pydecl ((:inside-cps-list-comprehension t))
        ,(loop with builder = `([call-expr] ([attributeref-expr] ,result-list ([identifier-expr] {append}))
                                            (,item) nil nil nil)
             for clause in (reverse for-in/if-clauses)
-            do (setf builder
-                 (ecase (car clause)
-                   ([for-in-clause] (destructuring-bind (target source) (cdr clause)
-                                      `([for-in-stmt] ,target ,source ,builder nil)))
-                   ([if-clause] (let ((test (second clause)))
-                                  `([if-stmt] ((,test ,builder)) nil)))))
-            finally (return `(with-cps-conversion (,builder ,ignore)
-                               (declare (ignore ,ignore))
-                               ,(%call-continuation result-list)))))))
+              do (setf builder
+                   (ecase (car clause)
+                     ([for-in-clause] (destructuring-bind (target source) (cdr clause)
+                                        `([for-in-stmt] ,target ,source ,builder nil)))
+                     ([if-clause] (let ((test (second clause)))
+                                    `([if-stmt] ((,test ,builder)) nil)))))
+              finally (return `(with-cps-conversion (,builder ,ignore)
+                                 (declare (ignore ,ignore))
+                                 ,(%call-continuation result-list))))))))
 
 (def-cps-macro [list-expr] (items)
   ;; Relies on tuples being Lisp lists.
   (with-gensyms (e-tuple)
     `(with-cps-conversion (([tuple-expr] ,items) ,e-tuple)
        ,(%call-continuation `(make-py-list-from-tuple ,e-tuple)))))
+
+(def-cps-macro [literal-expr] (kind value)
+  (%call-continuation `(with-pydecl ((:ignore-cps-hook t))
+                         ([literal-expr] ,kind ,value))))
 
 (def-cps-macro [module-stmt] (&rest args)
   #+(or)(declare (ignore args))  ;; ends up in the wrong place
@@ -660,8 +665,11 @@ former requires that this form is executed within RECEIVE-YIELDED-VALUE."
       `(with-cps-conversion (,val ,e-val)
          ,(%call-continuation `(funcall (function ,py-op-func) ,e-val))))))
 
-(defun contains-break-stmt-p (suite)
+(defun contains-break-stmt-p (suite env)
   "Whether SUITE contains BREAK stmt (not within inner loop)."
+  (when (get-pydecl :inside-cps-list-comprehension env)
+    ;; List comprehension expansion is unwalkable; this is a hack to make the walker not crash.
+    (return-from contains-break-stmt-p nil))
   (with-py-ast (form suite)
     (case (car form)
       (([for-in-stmt] [while-stmt]) (values nil t))
@@ -670,8 +678,11 @@ former requires that this form is executed within RECEIVE-YIELDED-VALUE."
       (t form)))
   nil)
 
-(defun contains-continue-stmt-p (suite)
+(defun contains-continue-stmt-p (suite env)
   "Whether SUITE contains BREAK stmt (not within inner loop)."
+  (when (get-pydecl :inside-cps-list-comprehension env)
+    ;; List comprehension expansion is unwalkable; this is a hack to make the walker not crash.
+    (return-from contains-continue-stmt-p nil))
   (with-py-ast (form suite)
     (case (car form)
       (([for-in-stmt] [while-stmt]) (values nil t))
@@ -680,12 +691,12 @@ former requires that this form is executed within RECEIVE-YIELDED-VALUE."
       (t form)))
   nil)
 
-(def-cps-macro [while-stmt] (test suite else-suite)
+(def-cps-macro [while-stmt] (test suite else-suite &environment e)
   (let ((stmt-k %current-continuation))
     (with-gensyms (while-cont val ignore)
-      `(labels (,@(when (contains-break-stmt-p suite)
+      `(labels (,@(when (contains-break-stmt-p suite e)
                     `((%break-cont () (funcall ,stmt-k nil))))
-                  ,@(when (contains-continue-stmt-p suite)
+                  ,@(when (contains-continue-stmt-p suite e)
                       `((%continue-cont () (,while-cont))))
                   (,while-cont ()
                     (with-cps-conversion (,test ,val)

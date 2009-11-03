@@ -49,6 +49,7 @@
       ([lambda-expr] args expr)
       ([listcompr-expr] item for-in/if-clauses)
       ([list-expr] items)
+      ([literal-expr] value)
       ([module-stmt] suite)
       ([pass-stmt] )
       ([print-stmt] dest items comma?)
@@ -139,7 +140,7 @@
                                 (symbol-name x))))
                (aref sn (1- (length sn))))))
       (unless (some (lambda (x) (member (token-suffix x) '(#\? #\*))) terms)
-        (return-from p `(add-rule ',name ',terms ',outcome #| ,@options |# )))
+        (return-from p `(add-rule ',name ',terms ',outcome)))
       (labels ((remove-token-suffix (x)
                  (check-type x symbol)
                  (let ((sn (symbol-name x)))
@@ -181,17 +182,9 @@ Value should be a (weak) EQ hash table: (make-weak-key-hash-table :test 'eq).")
 (defparameter *module->source-positions* (make-hash-table :test 'equal)
   "EQ hashtable, mapping from pathname to source data. Filled during loading.")
 
-(defstruct (literal (:constructor make-literal (value)))
-  value)
-
-(defun maybe-unwrap-literal-value (x)
-  (if (literal-p x)
-      (literal-value x)
-    x))
-    
 (defun record-source-location (outcome start end)
   "Records location in *python-form->source-location*"
-  (check-type outcome (or list literal number string symbol)) ;; XXX reduce number of possibilities
+  (check-type outcome list)
   (when *python-form->source-location*
     (let ((existing (gethash outcome *python-form->source-location*))
           (loc (list :start start :end end)))
@@ -224,10 +217,10 @@ Value should be a (weak) EQ hash table: (make-weak-key-hash-table :test 'eq).")
                     (when .min (record-source-location .outcome .min .max))
                     .outcome)))))))
 
-(defun add-rule (name terms outcome &rest options)        
+(defun add-rule (name terms outcome)        
   ;; Enable reduction trackin, for source form location recording purposes
   (let ((out (instrument-outcome terms outcome)))
-    (pushnew (list terms out options) (gethash name *python-prods*) :test 'equal)))
+    (pushnew (list terms out) (gethash name *python-prods*) :test 'equal)))
 
 (defmacro gp (name)
   "Generate a production rule:
@@ -551,27 +544,39 @@ Value should be a (weak) EQ hash table: (make-weak-key-hash-table :test 'eq).")
    (( [{] dictmaker     [}]  )  `([dict-expr] ,$2)       )
    (( [`] testlist1     [`]  )  `([backticks-expr] ,$2)  )
    (( [identifier]           )  `([identifier-expr] ,$1) )
-   (( [number]               )  $1                       )
-   (( [.] [number]           ) (let (($2val (literal-value $2))
-                                     (suffix (float-suffix *normal-float-representation-type*)))
-                                 ;; A float value starting with a dot, like ".5"
-                                 ;; As NUMBER is a fraction between 0 and 1, it always falls in the range
-                                 ;; of the float representation type.
-                                 (make-literal
-                                  (typecase $2val
-                                    (integer (let ((str (format nil "0.~A~A0" $2val suffix)))
-                                               (with-standard-io-syntax (read-from-string str))))
-                                    (complex (assert (zerop (realpart $2val)))
-                                             (assert (typep (imagpart $2val) 'integer))
-                                             (let ((str (format nil "0.~A~A0" (imagpart $2val) suffix)))
-                                               (complex 0 (with-standard-io-syntax (read-from-string str)))))
-                                    (t (raise-syntax-error
-                                        "Invalid format for number starting with dot: .~G" $2val))))))
-   (( string+ )
-    ;; consecutive string literals are joined: "ab" "c" => "abc"
-    (make-literal (apply #'concatenate 'string (mapcar #'literal-value $1)))))
+   (( [.] [literal-expr]     ) (destructuring-bind (kind value) (cdr $2)
+                                 (unless (eq kind :number)
+                                   (raise-syntax-error "Invalid literal number: .~A" (third $2)))
+                                 (let ((suffix (float-suffix *normal-float-representation-type*)))
+                                   ;; A float value starting with a dot, like ".5"
+                                   ;; As NUMBER is a fraction between 0 and 1, it always falls in the range
+                                   ;; of the float representation type.
+                                   `([literal-expr]
+                                     :number
+                                     ,(typecase value
+                                        (integer (let ((str (format nil "0.~A~A0" value suffix)))
+                                                   (with-standard-io-syntax (read-from-string str))))
+                                        (complex (assert (zerop (realpart value)))
+                                                 (assert (typep (imagpart value) 'integer))
+                                                 (let ((str (format nil "0.~A~A0" (imagpart value) suffix)))
+                                                   (complex 0 (with-standard-io-syntax (read-from-string str)))))
+                                        (t (raise-syntax-error
+                                            "Invalid format for number starting with dot: .~G" value)))))))
+   (( literal+ )
+    ;; Consecutive string literals are joined: "ab" "c" => "abc".
+    ;; Same with byte literals: b'1' b'2' -> b'12'.
+    ;; But not mixed string/byte.
+    (if (> (length $1) 1)
+        (let ((types (remove-duplicates (mapcar #'second $1))))
+          (if (and (= (length types) 1)
+                   (member (car types) '(:string :bytes)))
+              (let ((first-literal (car $1)))
+                (list (first first-literal) (second first-literal) (apply #'concatenate 'string (mapcar #'third $1))))
+            (raise-syntax-error "Invalid sequence of literals: ~:{~S ~S~:^, ~}." (mapcar #'cdr $1))))
+      (car $1))))
 
-(gp string+)
+(gp literal+)
+(p literal ([literal-expr]) $1)
 
 (p listmaker (test list-for) `([listcompr-expr] ,$1 ,$2))
 (p listmaker (test comma--test* comma?) `([list-expr] ,(cons $1 $2)))
@@ -743,20 +748,8 @@ For example: - (1 * 2) => (-1) * 2"
       (setf res `([attributeref-expr] ,res ([identifier-expr] ,x))))))
 
 (defun finish-ast (ast)
-  (prog1 (unwrap-literals ast)
+  (prog1 ast
     (clean-source-locations)))
-
-(defun unwrap-literals (x)
-  (etypecase x
-    ((or symbol number) x)
-    (literal (literal-value x))
-    (list (let ((res (mapcar #'unwrap-literals x)))
-            (when *python-form->source-location*
-              (let ((loc (gethash x *python-form->source-location*)))
-                (when loc
-                  (setf (gethash res *python-form->source-location*) loc)
-                  (remhash x *python-form->source-location*))))
-            res))))
 
 (defun clean-source-locations ()
   (declare (special *expr-stmt-nodes*))
@@ -774,3 +767,7 @@ For example: - (1 * 2) => (-1) * 2"
                                    (clpython.parser::py-pprint k) (getf v :start) (getf v :end) (if (listp k) (car k) k)))
              ht)))
 
+(defun maybe-unwrap-literal-value (x)
+  (if (and (listp x) (eq (car x) '[literal-expr]))
+      (third x)
+    x))

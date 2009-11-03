@@ -10,5 +10,6 @@
 (in-package :clpython.test)
 
 (defun run-mod-math-test ()
-  (run-no-error "import math; assert 3.14 < math.pi < 3.15")
-  (run-no-error "import math; assert 2.71 < math.e < 2.72"))
+  (with-subtest (:name "module Math")
+    (run-no-error "import math; assert 3.14 < math.pi < 3.15")
+    (run-no-error "import math; assert 2.71 < math.e < 2.72")))

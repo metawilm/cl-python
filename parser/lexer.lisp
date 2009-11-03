@@ -105,7 +105,7 @@
       (multiple-value-bind (token value source-loc)
           (funcall lexer op)
         ;; Assuming eof-token is a symbol, which is true for acl/cl yacc:
-        (check-type value (or list literal symbol))
+        (check-type value (or list symbol))
         (when (and source-loc *python-form->source-location*)
           (setf (gethash value *python-form->source-location*) source-loc))
         (values token value)))))
@@ -187,7 +187,7 @@ On EOF returns: eof-token, eof-token."
                           ((digit-char-p c 10)
                            (multiple-value-bind (val source-loc)
                                (read-kind :number c)
-                             (lex-return '[number] (make-literal val) source-loc)))
+                             (lex-return '[literal-expr] (list '[literal-expr] :number val) source-loc)))
                             
                           ((identifier-char1-p c)
                            (multiple-value-bind (token source-loc)
@@ -199,16 +199,26 @@ On EOF returns: eof-token, eof-token."
                              ;; ur"asdf"  : `ur' stands for `raw unicode string'
                              ;; ur + a    : `ur' is identifier
                              ;; `u' must appear before `r' if both are string prefix
+                             ;; Bytes (introduced in CPython 2.6):
+                             ;;  b"sdf"   : bytes
+                             ;;  b'sdf'   : bytes
+                             ;;  br"sdf"  : raw bytes
+                             ;;  br'sdf'  : raw bytes
                              (when (and (<= (length (symbol-name token)) 2)
-                                        (member (symbol-name token) '("u" "r" "ur") :test 'string-equal))
+                                        (member (sort (copy-seq (symbol-name token)) #'char-lessp)
+                                                '("r" "u" "ru" "b" "br") 
+                                                :test 'string-equal))
                                (let ((ch (lex-read-char :eof-error nil)))
                                  (if (and ch (char-member ch '(#\' #\")))
                                      (let* ((sn      (symbol-name token))
                                             (unicode (position #\u sn :test 'char-equal))
-                                            (raw     (position #\r sn :test 'char-equal)))
+                                            (raw     (position #\r sn :test 'char-equal))
+                                            (bytes   (position #\b sn :test 'char-equal)))
                                        (multiple-value-bind (val source-loc)
                                            (read-kind :string ch :raw raw :unicode unicode)
-                                         (lex-return '[string] (make-literal val) source-loc)))
+                                         (lex-return '[literal-expr] 
+                                                     (list '[literal-expr] (if bytes :bytes :string) val)
+                                                     source-loc)))
                                    (when ch (lex-unread-char ch)))))
                              (when (and open-deco (eq token '[def]))
                                ;; All outstanding decorators are associated with this function
@@ -221,7 +231,7 @@ On EOF returns: eof-token, eof-token."
                           ((char-member c '(#\' #\"))
                            (multiple-value-bind (val source-loc)
                                (read-kind :string c)
-                             (lex-return '[string] (make-literal val) source-loc)))
+                             (lex-return '[literal-expr] (list '[literal-expr] :string val) source-loc)))
 
                           ((or (punct-char1-p c)
                                (punct-char-not-punct-char1-p c))

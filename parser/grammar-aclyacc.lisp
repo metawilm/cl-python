@@ -72,5 +72,5 @@
                     (raise-unexpected-eof))
                    
                    (t (raise-syntax-error
-                       (format nil "At line ~A, parser got unexpected token: `~A'."
+                       (format nil "At line ~A, parser got unexpected token: ~S"
                                line token)))))))))

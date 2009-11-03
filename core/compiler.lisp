@@ -1122,7 +1122,7 @@ LOCALS shares share tail structure with input arg locals."
 
 (defvar *inside-import-from-stmt* nil) ;; hack
 
-(defmacro [import-from-stmt] (mod-name-as-list items &environment e)
+(defmacro [import-from-stmt] (mod-name-as-list items)
   `(let* ((*module-namespace* nil) ;; hack
           (args (list :within-mod-path ',(careful-derive-pathname *compile-file-truename* nil)
                       :within-mod-name ',*current-module-name*))
@@ -1132,10 +1132,7 @@ LOCALS shares share tail structure with input arg locals."
                              'm
                            `(apply #'py-import ',mod-name-as-list args))))
        ,(case items
-          ([*] (assert (typep (get-pydecl :namespace e) 'hash-table-ns)
-                   () "Can't do `from .. import *' in this namespace: ~A."
-                   (get-pydecl :namespace e))
-               `(loop for (k . v) in (dir-items mod-obj)
+          ([*] `(loop for (k . v) in (dir-items mod-obj)
                     do (namespace-set-runtime (ensure-user-symbol k) v)))
           (t `(progn
                 ,@(loop for (item bind-name) in items
@@ -1165,6 +1162,15 @@ LOCALS shares share tail structure with input arg locals."
 
 (define-setf-expander [list-expr] (items &environment e)
   (get-setf-expansion `(list/tuple-expr ,items) e))
+
+(defmacro [literal-expr] (kind value)
+  (ecase kind
+    (:string (check-type value string)
+             value)
+    (:bytes  (check-type value string)
+             `(TODO-make-bytes ,value)) ;; XXX TODO
+    (:number (check-type value number)
+             value)))
 
 (defvar *habitat* nil)
 (defvar *module-preload-hook*)

@@ -12,7 +12,6 @@
 (in-package :clpython.parser)
 (in-syntax *ast-readtable*)
 
-(defvar *walk-lists-only*)
 (defvar *walk-build-result*)
 (defvar *walk-into-nested-namespaces*)
 (defvar *walk-warn-unknown-form* t)
@@ -37,8 +36,7 @@
 
 (defun walk-py-ast (ast f &key (value +no-value+)
 			       (target +no-target+)
-			       (lists-only t) 
-			       (build-result nil)
+                               (build-result nil)
 			       (into-nested-namespaces nil)
 			       (warn-unknown-form *walk-warn-unknown-form*))
   (declare (optimize (debug 3)))
@@ -62,8 +60,6 @@ value, the second value must be true.)
 The initial form AST is considered an expression used for its value iff 
 VALUE is true; it is considered an assignment target iff TARGET is true.
 
-When LISTS-ONLY is false, F will also be called on numbers and strings.
-
 When build-result is false, no new AST will be returned, so F is only
 called for side effects.
 
@@ -74,9 +70,6 @@ CLASSDEF, FUNCDEF or LAMBDA."
   ;; module, is evaluated in a non-value non-target context, that
   ;; context seems a reasonable default for the keyword arguments.
 
-  (when (and lists-only (not (listp ast)))
-    (return-from walk-py-ast ast))
-	     
   (labels ((walk-py-ast-1 (ast &key value target)
 	     (declare (optimize (debug 3)))
              
@@ -85,34 +78,29 @@ CLASSDEF, FUNCDEF or LAMBDA."
              (unless ast
                (break "Attempt to WALK-PY-AST into an AST that is NIL"))
              
-             (when (and lists-only (not (consp ast))) ;; Don't call user function on AST
-               (return-from walk-py-ast-1 ast))
-	     
-	     ;; Call user function on whole form. The returned values
+             ;; Call user function on whole form. The returned values
 	     ;; control how we proceed.
              (multiple-value-bind (ret-ast final-p) 
 		 (funcall f ast :value value :target target)
                
                (when final-p
 		 (return-from walk-py-ast-1 ret-ast))
-	       
-	       (assert ret-ast ()
+               
+               (assert ret-ast ()
 		 "User AST func returned NIL (for AST: ~S); that is only allowed ~
                 when second value (final-p) is True, but second value was: ~S" ast final-p)
 	       
-	       (when (or (consp ret-ast) (not lists-only))
-		 (return-from walk-py-ast-1
-		   (ast-recurse-fun (lambda (ast &key value target)
-				      (walk-py-ast-1 ast :value value :target target))
-				    ret-ast
-				    :value value
-				    :target target)))
+               (return-from walk-py-ast-1
+                 (ast-recurse-fun (lambda (ast &key value target)
+                                    (walk-py-ast-1 ast :value value :target target))
+                                  ret-ast
+                                  :value value
+                                  :target target))
 	       
-	       (break "Walking AST: invalid return value ~S (AST: ~S, F: ~S)"
+               (break "Walking AST: invalid return value ~S (AST: ~S, F: ~S)"
 		      ret-ast ast f))))
     
-    (let ((*walk-lists-only*   lists-only)
-	  (*walk-build-result* build-result)
+    (let ((*walk-build-result* build-result)
 	  (*walk-into-nested-namespaces* into-nested-namespaces)
 	  (*walk-warn-unknown-form* warn-unknown-form))
       
@@ -240,6 +228,9 @@ CLASSDEF, FUNCDEF or LAMBDA."
 
 (def-ast-node [list-expr]  ((&rest names +normal-value+)) (:targetable t) (:subtargetable t))
 
+;; Literal value itself (number, string) is not walked into.
+(def-ast-node [literal-expr]  (kind value))
+
 ;; listcompr-expr : hairy
 
 (def-ast-node [tuple-expr] ((&rest names +normal-value+)) (:targetable t) (:subtargetable t))
@@ -259,7 +250,7 @@ CLASSDEF, FUNCDEF or LAMBDA."
 
 (def-ast-node [try-finally-stmt] ((try-suite +suite+) (finally-suite +suite+)))
 
-(def-ast-node [unary-expr] ((val +normal-value+)))
+(def-ast-node [unary-expr] (op (val +normal-value+)))
 (def-ast-node [while-stmt] ((test +normal-value+) (suite +suite+) (&optional else-suite +suite+)))
 (def-ast-node [with-stmt]  ((test +normal-value+) (&optional var +normal-target+) (suite +suite+)))
 (def-ast-node [yield-expr] ((val +normal-value+)))
@@ -446,7 +437,7 @@ CLASSDEF, FUNCDEF or LAMBDA."
 ;; Handy functions for dealing with ASTs
 
 (defmacro with-py-ast ((subform ast &rest options)
-					  ;; key value target walk-lists-only 
+					  ;; key value target 
 					  ;; into-nested-namespaces
 		       &body body)
   ;; (with-sub-ast ((form &key value target) ast)
@@ -463,18 +454,16 @@ CLASSDEF, FUNCDEF or LAMBDA."
 		    (lambda ,subform
 		      (declare (optimize (debug 3))
 			       ,@(when context `((ignore ,context))))
-		      ,@body))
+                      ,@body))
 		  ;; user-supplied options take precedence...
 		  ,@options
 		  ;; but these are the defaults
-		  :build-result nil
-		  :lists-only t)))
+		  :build-result nil)))
 
 ;;; Printing walker, for debugging
 
 (defgeneric walk-print (ast &rest walk-options)
   (:method ((ast list) &rest walk-options)
-           (setf walk-options (append walk-options '(:lists-only nil))) 
            (prog1 (apply #'walk-py-ast
                          ast
                          (lambda (ast &key value target)
