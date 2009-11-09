@@ -12,7 +12,7 @@
 (in-package :clpython.parser)
 (in-syntax *ast-user-readtable*)
 
-(defvar *warn-indent* t "Warn if suspicious indentation")
+(defvar *lex-warn-indent* t "Warn if suspicious indentation")
 (defvar *lex-debug* nil "Print the tokens returned by the lexer")
 (defvar *tab-width-spaces* 8
   "One tab is equivalent to this many spaces, when it comes to indentation levels.")
@@ -22,36 +22,13 @@
 ;; Internal
 
 (defgeneric make-lexer (yacc-version string &rest options)
-  (:documentation "Create lexer function that when called will either return three values
-\(TOKEN-CODE, TOKEN-VALUE, SOURCE-POSITION) or the grammar-specific EOF indication."))
+  (:documentation "Create lexer function that when called will either return two values
+\(TOKEN-CODE, TOKEN-VALUE) or the grammar-specific EOF indication."))
 
 (defmethod make-lexer (yacc-version (string string) &rest options)
-  "Default lexer"
+  "Default lexer, which returns TOKEN-KIND, TOKEN-VALUE
+where TOKEN-KIND is a symbol like '[identifier]"
   (apply #'make-lexer-1 string :yacc-version yacc-version options))
-
-(defmethod make-lexer ((yacc-version (eql :allegro-yacc)) (string string) &rest options)
-  (declare (ignore options))
-  #-allegro 
-  (error "Make-lexer :allegro-yacc not supported in this Lisp.")
-  #+allegro
-  (let ((f (call-next-method))
-        (grammar-class (find-class 'python-grammar)))
-    (lambda (grammar &optional op)
-      (declare (ignore grammar))
-      (flet ((token-code (token)
-               ;; Cache token codes in the symbol
-               (or (get token 'python-grammar-token-code)
-                   (setf (get token 'python-grammar-token-code)
-                     (excl.yacc:tcode-1 grammar-class token)))))
-        (declare (dynamic-extent #'token-code))
-        (multiple-value-bind (token val) (funcall f op)
-          (if (symbolp token)
-              (values (token-code token) val)
-            (values token val)))))))
-
-(defmethod make-lexer ((yacc-version (eql :cl-yacc)) (string string) &rest options)
-  (declare (ignore options))
-  (call-next-method))
 
 (defgeneric lexer-eof-token (yacc-version)
   (:documentation "Value returned by lexer to signal eof."))
@@ -65,31 +42,6 @@
 
 (define-condition next-eof-fake-after-toplevel-form (toplevel-form-finished-condition) ())
 (define-condition next-eof-real (toplevel-form-finished-condition) ())
-
-;; Lexer state
-
-(defvar *lex-state*)
-
-(defclass lexer-state ()
-  ((string        :initarg :string        :accessor ls-string                                     :type string)
-   (tab-width     :initarg :tab-width     :accessor ls-tab-width     :initform *tab-width-spaces* :type fixnum) 
-   (yacc-version  :initarg :yacc-version  :accessor ls-yacc-version  :initform nil)
-   (last-read-char-ix :accessor ls-last-read-char-ix :initform -1  :type fixnum)
-   (curr-line-no  :accessor ls-curr-line-no  :initform 1  :type fixnum)
-   (tokens-todo   :accessor ls-tokens-todo   :initform () :type list)
-   (indent-stack  :accessor ls-indent-stack  :initform (list 0) :type list)
-   (bracket-level :accessor ls-bracket-level :initform 0  :type fixnum)
-   (open-deco                                :initform nil)
-   (debug         :accessor ls-debug         :initform *lex-debug* :initarg :debug)
-   (warn-indent   :accessor ls-warn-indent   :initform *warn-indent*)
-   (return-count                             :initform 0)))
-
-(define-symbol-macro %lex-last-read-char-ix%   (ls-last-read-char-ix *lex-state*))
-(define-symbol-macro %lex-next-unread-char-ix% (1+ (ls-last-read-char-ix *lex-state*)))
-(define-symbol-macro %lex-curr-line-no%        (ls-curr-line-no *lex-state*))
-(define-symbol-macro %lex-string%              (ls-string *lex-state*))
-(define-symbol-macro %lex-tab-width%           (ls-tab-width *lex-state*))
-(define-symbol-macro %lex-warn-indent%         (ls-warn-indent *lex-state*))
 
 (defun char-member (ch list)
   (and ch (member ch list :test #'char=)))
@@ -135,165 +87,206 @@
                         (values x y z)))))
             (t (values x y z))))))))
 
-(defun make-lexer-3 (string &rest options)
+;; Lexer state
+
+(defclass lexer (standard-generic-function)
+  ((string        :initarg :string        :accessor ls-string                                     :type string)
+   (tab-width     :initarg :tab-width     :accessor ls-tab-width     :initform *tab-width-spaces* :type fixnum) 
+   (yacc-version  :initarg :yacc-version  :accessor ls-yacc-version  :initform nil)
+   (last-read-char-ix :accessor ls-last-read-char-ix :initform -1  :type fixnum)
+   (curr-line-no  :accessor ls-curr-line-no  :initform 1  :type fixnum)
+   (tokens-todo   :accessor ls-tokens-todo   :initform () :type list)
+   (indent-stack  :accessor ls-indent-stack  :initform (list 0) :type list)
+   (bracket-level :accessor ls-bracket-level :initform 0  :type fixnum)
+   (open-deco                                :initform nil)
+   (debug         :accessor ls-debug         :initform *lex-debug* :initarg :debug)
+   (return-count                             :initform 0))
+  (:metaclass closer-mop:funcallable-standard-class))
+
+(defmethod print-object ((lexer lexer) stream)
+  (print-unreadable-object (lexer stream :type t :identity t)
+    (with-slots (yacc-version string last-read-char-ix) lexer
+      (format stream "for \"~A\" at ~A using ~S"
+              (clpython.package::abbreviate-string string 25) 
+              (let ((next-unread (1+ last-read-char-ix)))
+                (cond ((zerop next-unread)
+                       "initial state")
+                      ((< next-unread (length string))
+                       (format nil "character ~A: \"~A\"" next-unread
+                               (clpython.package::abbreviate-string (subseq string next-unread) 10)))
+                      (t "end state")))
+              yacc-version))))
+
+(defvar *lex-state*)
+
+(define-symbol-macro %lex-last-read-char-ix%   (ls-last-read-char-ix *lex-state*))
+(define-symbol-macro %lex-next-unread-char-ix% (1+ (ls-last-read-char-ix *lex-state*)))
+(define-symbol-macro %lex-curr-line-no%        (ls-curr-line-no *lex-state*))
+(define-symbol-macro %lex-string%              (ls-string *lex-state*))
+(define-symbol-macro %lex-tab-width%           (ls-tab-width *lex-state*))
+
+(defgeneric call-lexer (yacc-version lexer op)
+  (:documentation "Returns either the eof-token, or two values: TOKEN-KIND, TOKEN-VALUE"))
+
+(defun make-lexer-3 (string &rest options &key yacc-version)
   "Return a lexer for the given string of Python code.
 Will return two value each time: TYPE, VALUE.
 On EOF returns: eof-token, eof-token."
   (check-type string string)
-  (let* ((lex-state (apply #'make-instance 'lexer-state :string string options)))
-    (named-function lexer
-      (lambda (op)
-        (let ((*lex-state* lex-state))
-          (block lexer
-            (with-slots (last-read-char-ix curr-line-no yacc-version
-                         tokens-todo indent-stack bracket-level open-deco debug return-count) lex-state
-              (when (eq op :report-location) ;; used when GRAMMAR-PARSE-ERROR occurs (Allegro CL Yacc)
-                (return-from lexer
-                  `((:line-no ,curr-line-no)
-                    (:eof-seen ,(not (null (member (lexer-eof-token yacc-version) tokens-todo :key #'second)))))))
-              (when (= last-read-char-ix -1)
-                ;; Check leading whitespace. This will go unnoticed by the lexer otherwise.
-                (destructuring-bind (newline-p new-indent eof-p)
-                    (read-kind :whitespace (lex-read-char :eof-error nil))
-                  (declare (ignore newline-p))
-                  (when (and (not eof-p) (plusp new-indent))
-                    (restart-case
-                        (raise-syntax-error "Leading whitespace on first non-blank line.")
-                      (cl-user::continue () :report "Continue parsing, ignoring the leading whitespace.")))))
-              (flet ((lex-return (token value source-loc &optional msg)
-                       (when debug (format t "Lexer returns: ~S ~S ~S~@[ ~A~]~%" token value source-loc msg))
-                       (incf return-count)
-                       (return-from lexer (values token value source-loc)))
-                     (lex-todo (token value)
-                       (when debug (format t "Lexer todo: ~S ~S~%" token value))
-                       (push (list token value) tokens-todo)))
-                (when tokens-todo
-                  (destructuring-bind (token value) (pop tokens-todo)
-                    (lex-return token value nil "(from todo)"))) ;; loc not important
-                (loop 
-                  (let ((c (lex-read-char :eof-error nil)))
-                    (cond ((not c)
-                           (when (zerop return-count) ;; grammar does not like empty files, so dummy content
-                             (lex-return '[identifier] '{None} nil))
-                           (when *lex-fake-eof-after-toplevel-form*
-                             (with-simple-restart (muffle "Muffle")
-                               (when debug (format t "Lexer signals: next-eof-real~%"))
-                               (signal 'next-eof-real :char-ix %lex-next-unread-char-ix%)))
-                           (lex-todo (lexer-eof-token yacc-version) (lexer-eof-token yacc-version))
-                           (loop while (plusp (pop indent-stack))
-                               do (lex-todo '[dedent] '[dedent]))
-                           (lex-return '[newline] '[newline] nil))
-                            
-                          ((digit-char-p c 10)
-                           (multiple-value-bind (val source-loc)
-                               (read-kind :number c)
-                             (lex-return '[literal-expr] (list '[literal-expr] :number val) source-loc)))
-                            
-                          ((identifier-char1-p c)
-                           (multiple-value-bind (token source-loc)
-                               (read-kind :identifier c)
-                             ;; u"abc"    : `u' stands for `Unicode string'
-                             ;; u + b     : `u' is an identifier
-                             ;; r"s/f\af" : `r' stands for `raw string'
-                             ;; r + b     : `r' is an identifier
-                             ;; ur"asdf"  : `ur' stands for `raw unicode string'
-                             ;; ur + a    : `ur' is identifier
-                             ;; `u' must appear before `r' if both are string prefix
-                             ;; Bytes (introduced in CPython 2.6):
-                             ;;  b"sdf"   : bytes
-                             ;;  b'sdf'   : bytes
-                             ;;  br"sdf"  : raw bytes
-                             ;;  br'sdf'  : raw bytes
-                             (when (and (<= (length (symbol-name token)) 2)
-                                        (member (sort (copy-seq (symbol-name token)) #'char-lessp)
-                                                '("r" "u" "ru" "b" "br") 
-                                                :test 'string-equal))
-                               (let ((ch (lex-read-char :eof-error nil)))
-                                 (if (and ch (char-member ch '(#\' #\")))
-                                     (let* ((sn      (symbol-name token))
-                                            (unicode (position #\u sn :test 'char-equal))
-                                            (raw     (position #\r sn :test 'char-equal))
-                                            (bytes   (position #\b sn :test 'char-equal)))
-                                       (multiple-value-bind (val source-loc)
-                                           (read-kind :string ch :raw raw :unicode unicode)
-                                         (lex-return '[literal-expr] 
-                                                     (list '[literal-expr] (if bytes :bytes :string) val)
-                                                     source-loc)))
-                                   (when ch (lex-unread-char ch)))))
-                             (when (and open-deco (eq token '[def]))
-                               ;; All outstanding decorators are associated with this function
-                               (setf open-deco nil))
-                             (let ((type (if (eq (symbol-package token) #.(find-package :clpython.ast.reserved))
-                                             token
-                                           '[identifier])))
-                               (lex-return type token source-loc))))
+  (let ((lexer (apply #'make-instance 'lexer :string string options)))
+    (flet ((call-lexer-forwarder (&optional op)
+             (let ((*lex-state* lexer))
+               (call-lexer yacc-version lexer op))))
+      (closer-mop:set-funcallable-instance-function lexer #'call-lexer-forwarder)
+      lexer)))
 
-                          ((char-member c '(#\' #\"))
-                           (multiple-value-bind (val source-loc)
-                               (read-kind :string c)
-                             (lex-return '[literal-expr] (list '[literal-expr] :string val) source-loc)))
+(defmethod call-lexer (yacc-version (lexer lexer) (op (eql nil)))
+  (declare (ignorable yacc-version op))
+  (with-slots (last-read-char-ix curr-line-no yacc-version
+               tokens-todo indent-stack bracket-level open-deco debug return-count) lexer
+    (when (= last-read-char-ix -1)
+      ;; Check leading whitespace. This will go unnoticed by the lexer otherwise.
+      (destructuring-bind (newline-p new-indent eof-p)
+          (read-kind :whitespace (lex-read-char :eof-error nil))
+        (declare (ignore newline-p))
+        (when (and (not eof-p) (plusp new-indent))
+          (restart-case
+              (raise-syntax-error "Leading whitespace on first non-blank line.")
+            (cl-user::continue () :report "Continue parsing, ignoring the leading whitespace.")))))
+    (flet ((lex-return (token value source-loc &optional msg)
+             (when debug (format t "Lexer returns: ~S ~S ~S~@[ ~A~]~%" token value source-loc msg))
+             (incf return-count)
+             (return-from call-lexer (values token value source-loc)))
+           (lex-todo (token value)
+             (when debug (format t "Lexer todo: ~S ~S~%" token value))
+             (push (list token value) tokens-todo)))
+      (when tokens-todo
+        (destructuring-bind (token value) (pop tokens-todo)
+          (lex-return token value nil "(from todo)"))) ;; loc not important
+      (loop 
+        (let ((c (lex-read-char :eof-error nil)))
+          (cond ((not c)
+                 (when (zerop return-count) ;; grammar does not like empty files, so dummy content
+                   (lex-return '[identifier] '{None} nil))
+                 (when *lex-fake-eof-after-toplevel-form*
+                   (with-simple-restart (muffle "Muffle")
+                     (when debug (format t "Lexer signals: next-eof-real~%"))
+                     (signal 'next-eof-real :char-ix %lex-next-unread-char-ix%)))
+                 (lex-todo (lexer-eof-token yacc-version) (lexer-eof-token yacc-version))
+                 (loop while (plusp (pop indent-stack))
+                     do (lex-todo '[dedent] '[dedent]))
+                 (lex-return '[newline] '[newline] nil))
+                
+                ((digit-char-p c 10)
+                 (multiple-value-bind (val source-loc)
+                     (read-kind :number c)
+                   (lex-return '[literal-expr] (list '[literal-expr] :number val) source-loc)))
+                
+                ((identifier-char1-p c)
+                 (multiple-value-bind (token source-loc)
+                     (read-kind :identifier c)
+                   ;; u"abc"    : `u' stands for `Unicode string'
+                   ;; u + b     : `u' is an identifier
+                   ;; r"s/f\af" : `r' stands for `raw string'
+                   ;; r + b     : `r' is an identifier
+                   ;; ur"asdf"  : `ur' stands for `raw unicode string'
+                   ;; ur + a    : `ur' is identifier
+                   ;; `u' must appear before `r' if both are string prefix
+                   ;; Bytes (introduced in CPython 2.6):
+                   ;;  b"sdf"   : bytes
+                   ;;  b'sdf'   : bytes
+                   ;;  br"sdf"  : raw bytes
+                   ;;  br'sdf'  : raw bytes
+                   (when (and (<= (length (symbol-name token)) 2)
+                              (member (sort (copy-seq (symbol-name token)) #'char-lessp)
+                                      '("r" "u" "ru" "b" "br") 
+                                      :test 'string-equal))
+                     (let ((ch (lex-read-char :eof-error nil)))
+                       (if (and ch (char-member ch '(#\' #\")))
+                           (let* ((sn      (symbol-name token))
+                                  (unicode (position #\u sn :test 'char-equal))
+                                  (raw     (position #\r sn :test 'char-equal))
+                                  (bytes   (position #\b sn :test 'char-equal)))
+                             (multiple-value-bind (val source-loc)
+                                 (read-kind :string ch :raw raw :unicode unicode)
+                               (lex-return '[literal-expr] 
+                                           (list '[literal-expr] (if bytes :bytes :string) val)
+                                           source-loc)))
+                         (when ch (lex-unread-char ch)))))
+                   (when (and open-deco (eq token '[def]))
+                     ;; All outstanding decorators are associated with this function
+                     (setf open-deco nil))
+                   (let ((type (if (eq (symbol-package token) #.(find-package :clpython.ast.reserved))
+                                   token
+                                 '[identifier])))
+                     (lex-return type token source-loc))))
 
-                          ((or (punct-char1-p c)
-                               (punct-char-not-punct-char1-p c))
-                           (multiple-value-bind (token source-loc)
-                               (read-kind :punctuation c)
-                             ;; Keep track of whether we are in a bracketed expression
-                             ;; (list, tuple or dict), because in that case newlines are ignored.
-                             ;; (Check on matching brackets is in grammar.)
-                             (case token
-                               (( [[]  [{] [\(] ) (incf bracket-level))
-                               (( [\]] [}] [\)] ) (decf bracket-level))
-                               ([@]               (setf open-deco t)))
-                             (lex-return token token source-loc)))
+                ((char-member c '(#\' #\"))
+                 (multiple-value-bind (val source-loc)
+                     (read-kind :string c)
+                   (lex-return '[literal-expr] (list '[literal-expr] :string val) source-loc)))
 
-                          ((char-member c +whitespace+)
-                           (lex-unread-char c)
-                           (destructuring-bind (newline-p new-indent eof-p)
-                               (read-kind :whitespace c)
-                             (declare (ignore eof-p))
-                             (when (and newline-p (zerop bracket-level))
-                               ;; Queue eof before dedents as todo.
-                               (when (and (zerop new-indent)
-                                          *lex-fake-eof-after-toplevel-form*
-                                          (not open-deco)
-                                          (not (or (lex-looking-at-token "elif")
-                                                   (lex-looking-at-token "else")
-                                                   (lex-looking-at-token "except")
-                                                   (lex-looking-at-token "finally"))))
-                                 (with-simple-restart (muffle "Muffle")
-                                   (when debug (format t "Lexer signals: next-eof-fake-after-toplevel-form~%"))
-                                   (signal 'next-eof-fake-after-toplevel-form :char-ix %lex-next-unread-char-ix%))
-                                 (lex-todo (lexer-eof-token yacc-version) (lexer-eof-token yacc-version)))
-                               (cond ((< (car indent-stack) new-indent) ; one indent
-                                      (push new-indent indent-stack)
-                                      (lex-todo '[indent] '[indent]))
-                                     ((> (car indent-stack) new-indent) ; dedent(s)
-                                      (loop while (> (car indent-stack) new-indent)
-                                          do (pop indent-stack)
-                                             (lex-todo '[dedent] '[dedent]))
-                                      (unless (= (car indent-stack) new-indent)
-                                        (raise-syntax-error 
-                                         "Dedent did not arrive at a previous indentation level (line ~A)."
-                                         curr-line-no))))
-                               (lex-return '[newline] '[newline] nil))))
-                          
-                          ((char= c #\#)
-                           (read-kind :comment-line c))
-                          
-                          ((char= c #\\) ;; next line is continuation of this one
-                           (let ((c2 (lex-read-char)))
-                             (case c2
-                               (#\Newline)
-                               (#\Return (let ((c3 (lex-read-char)))
-                                           (unless (char= c3 #\Newline) ;; Windows: \r\n
-                                             (lex-unread-char c3))))
-                               (t (raise-syntax-error
-                                   "Continuation character '\\' must be followed by Newline, ~
+                ((or (punct-char1-p c)
+                     (punct-char-not-punct-char1-p c))
+                 (multiple-value-bind (token source-loc)
+                     (read-kind :punctuation c)
+                   ;; Keep track of whether we are in a bracketed expression
+                   ;; (list, tuple or dict), because in that case newlines are ignored.
+                   ;; (Check on matching brackets is in grammar.)
+                   (case token
+                     (( [[]  [{] [\(] ) (incf bracket-level))
+                     (( [\]] [}] [\)] ) (decf bracket-level))
+                     ([@]               (setf open-deco t)))
+                   (lex-return token token source-loc)))
+
+                ((char-member c +whitespace+)
+                 (lex-unread-char c)
+                 (destructuring-bind (newline-p new-indent eof-p)
+                     (read-kind :whitespace c)
+                   (declare (ignore eof-p))
+                   (when (and newline-p (zerop bracket-level))
+                     ;; Queue eof before dedents as todo.
+                     (when (and (zerop new-indent)
+                                *lex-fake-eof-after-toplevel-form*
+                                (not open-deco)
+                                (not (or (lex-looking-at-token "elif")
+                                         (lex-looking-at-token "else")
+                                         (lex-looking-at-token "except")
+                                         (lex-looking-at-token "finally"))))
+                       (with-simple-restart (muffle "Muffle")
+                         (when debug (format t "Lexer signals: next-eof-fake-after-toplevel-form~%"))
+                         (signal 'next-eof-fake-after-toplevel-form :char-ix %lex-next-unread-char-ix%))
+                       (lex-todo (lexer-eof-token yacc-version) (lexer-eof-token yacc-version)))
+                     (cond ((< (car indent-stack) new-indent) ; one indent
+                            (push new-indent indent-stack)
+                            (lex-todo '[indent] '[indent]))
+                           ((> (car indent-stack) new-indent) ; dedent(s)
+                            (loop while (> (car indent-stack) new-indent)
+                                do (pop indent-stack)
+                                   (lex-todo '[dedent] '[dedent]))
+                            (unless (= (car indent-stack) new-indent)
+                              (raise-syntax-error 
+                               "Dedent did not arrive at a previous indentation level (line ~A)."
+                               curr-line-no))))
+                     (lex-return '[newline] '[newline] nil))))
+                
+                ((char= c #\#)
+                 (read-kind :comment-line c))
+                
+                ((char= c #\\) ;; next line is continuation of this one
+                 (let ((c2 (lex-read-char)))
+                   (case c2
+                     (#\Newline)
+                     (#\Return (let ((c3 (lex-read-char)))
+                                 (unless (char= c3 #\Newline) ;; Windows: \r\n
+                                   (lex-unread-char c3))))
+                     (t (raise-syntax-error
+                         "Continuation character '\\' must be followed by Newline, ~
                                     but got: '~A' (~S) (line ~A)." c2 c2 curr-line-no))))
-                           (incf curr-line-no))
-                            
-                          (t (raise-syntax-error "Nobody expected this character: `~A' (line ~A)."
-                                                 c curr-line-no)))))))))))))
+                 (incf curr-line-no))
+                
+                (t (raise-syntax-error "Nobody expected this character: `~A' (line ~A)."
+                                       c curr-line-no))))))))
 
 (defgeneric read-kind (kind c1 &rest args)
   (:method :around (kind c1 &rest args)
@@ -866,7 +859,7 @@ Returns NEWLINE-P, NEW-INDENT, EOF-P."
                                               n-tabs 0)))
            (t                    (lex-unread-char c)
                                  (when (and newline-p (plusp n-tabs) (plusp n-spaces)
-                                            %lex-warn-indent%)
+                                            *lex-warn-indent*)
                                    (warn "Irregular indentation: both spaces and tabs (line ~A)."
                                          %lex-curr-line-no%))
 				 (return-from read-kind

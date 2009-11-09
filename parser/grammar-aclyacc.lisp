@@ -7,10 +7,13 @@
 ;; (http://opensource.franz.com/preamble.html),
 ;; known as the LLGPL.
 
-;;; Python grammar for the Allegro Yacc
+;;;; Python grammar for the Allegro Yacc
 
 (in-package :clpython.parser)
 (in-syntax *user-readtable*)
+
+
+;;; Grammar
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (require :yacc))
@@ -30,12 +33,41 @@
 (excl.yacc:build-grammar python-grammar nil nil)
 (mop:finalize-inheritance (find-class 'python-grammar))
 
-;; For lexer
+
+;;; Lexer
+
+(defmethod make-lexer ((yacc-version (eql :allegro-yacc)) (string string) &rest options)
+  "Allegro grammar expects lexer to return two values: TOKEN-CODE (as integer), TOKEN.
+Therefore need to convert TOKEN-KIND to the corresponding TOKEN-CODE before passing it on."
+  (declare (ignore options))
+  (let ((f (call-next-method))
+        (grammar-class (find-class 'python-grammar)))
+    (lambda (grammar &optional op)
+      (declare (ignore grammar))
+      (flet ((token-code (token)
+               ;; Cache token codes in the symbol
+               (or (get token 'python-grammar-token-code)
+                   (setf (get token 'python-grammar-token-code)
+                     (excl.yacc:tcode-1 grammar-class token)))))
+        (declare (dynamic-extent #'token-code))
+        (multiple-value-bind (token val) (funcall f op)
+          (etypecase token
+            (symbol (values (token-code token) val))
+            (list   (progn (assert (eq op :report-location))
+                           (values token val)))))))))
 
 (defmethod lexer-eof-token ((yacc-version (eql :allegro-yacc)))
   'excl.yacc:eof)
 
-;; Handling parse errors
+(defmethod call-lexer ((yacc-version (eql :allegro-yacc)) (lexer lexer) (op (eql :report-location)))
+  "Called when Allegro CL Yacc is about to signal a GRAMMAR-PARSE-ERROR.
+ Result is stored in the condition, in slot named EXCL.YACC:GRAMMAR-PARSE-ERROR-POSITION"
+  (with-slots (curr-line-no tokens-todo) lexer
+    `((:line-no ,curr-line-no)
+      (:eof-seen ,(not (null (member (lexer-eof-token yacc-version) tokens-todo :key #'second)))))))
+    
+
+;;; Parser
 
 (defmethod parse-form-with-yacc ((yacc-version (eql :allegro-yacc)) lexer)
   (let ((grammar (make-instance 'python-grammar :lexer lexer)))

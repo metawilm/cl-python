@@ -255,6 +255,13 @@ See function ALIST-VS-HT.")
     (setf string (concatenate 'string (subseq string 0 ix) "...")))
   string)
 
+(defun abbreviate-string (string max-length)
+  (check-type string string)
+  (check-type max-length (integer 1))
+  (if (> (length string) max-length)
+      (concatenate 'string (subseq string 0 max-length) "...")
+    string))
+
 (defun register-feature (feature present-p)
   (check-type feature keyword)
   (if present-p

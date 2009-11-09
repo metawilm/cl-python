@@ -7,9 +7,12 @@
 ;; (http://opensource.franz.com/preamble.html),
 ;; known as the LLGPL.
 
-;;; Python grammar for CL-Yacc
+;;;; Python grammar for CL-Yacc
 
 (in-package :clpython.parser)
+
+
+;;; Grammar
 
 (eval-when (:compile-toplevel)
   #+sbcl (terpri)
@@ -30,13 +33,21 @@
                                                ,outcome)
                                  collect `(,@(or terms `(())) ;; splice term or insert () 
                                              ,func)))))
+
+;;; Lexer
 
-;; For lexer
+(defmethod make-lexer ((yacc-version (eql :cl-yacc)) (string string) &rest options)
+  "Pro forma definition: nothing special."
+  (declare (ignorable yacc-version string options))
+  (call-next-method))
 
 (defmethod lexer-eof-token ((yacc-version (eql :cl-yacc)))
   nil)
 
-;; Handling parse errors
+;; No need to specialize #'CALL-LEXER
+
+
+;;; Parser
 
 (defmethod parse-form-with-yacc ((yacc-version (eql :cl-yacc)) lexer)
   (yacc:parse-with-lexer lexer *cl-yacc-python-parser*))
