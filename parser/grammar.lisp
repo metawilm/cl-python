@@ -473,6 +473,8 @@ Value should be a (weak) EQ hash table: (make-weak-key-hash-table :test 'eq).")
 (p except--suite ([except]               [:] suite) `(nil nil ,$3))
 (p except--suite ([except] test          [:] suite) `(,$2 nil ,$4))
 (p except--suite ([except] test [,] test [:] suite) `(,$2 ,$4 ,$6))
+;; Python 2.6: "except <type> as <name>"
+(p except--suite ([except] test [as] test [:] suite) `(,$2 ,$4 ,$6))
 
 (gp except--suite+)
 
