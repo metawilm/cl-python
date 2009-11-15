@@ -449,16 +449,18 @@ former requires that this form is executed within RECEIVE-YIELDED-VALUE."
          (%cps-convert ,else ,%current-continuation)))))
 
 (def-cps-macro [if-stmt] (if-clauses else-clause)
-  (with-gensyms (if-stmt-k e-cond)
+  (with-gensyms (if-stmt-k)
     `(let ((,if-stmt-k ,%current-continuation))
+       (declare (ignorable ,if-stmt-k))
        ,(let ((res (if else-clause 
                        `(%cps-convert ,else-clause ,if-stmt-k)
                      `(funcall ,if-stmt-k nil))))
           (loop for (cond body) in (reverse if-clauses)
-              do (setf res `(with-cps-conversion (,cond ,e-cond)
-                              (if (py-val->lisp-bool ,e-cond)
-                                  (%cps-convert ,body ,if-stmt-k)
-                                ,res))))
+              do (setf res (with-gensyms (e-cond)
+                             `(with-cps-conversion (,cond ,e-cond)
+                                (if (py-val->lisp-bool ,e-cond)
+                                    (%cps-convert ,body ,if-stmt-k)
+                                  ,res)))))
           res))))
 
 (def-cps-macro [import-stmt] (&rest args)
