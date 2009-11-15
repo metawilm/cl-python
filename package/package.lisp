@@ -210,7 +210,7 @@
   (:use :common-lisp :clpython.package)
   (:export #:parse #:ast-complete-p ;; parser
            #:*python-form->source-location* #:*module->source-positions*
-                      
+           #:string-literal-p
            #:match-p #:with-matching #:with-perhaps-matching ;; AST pattern matcher
            
            #:walk-py-ast #:with-py-ast ;; code walker

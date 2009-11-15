@@ -49,7 +49,7 @@
       ([lambda-expr] args expr)
       ([listcompr-expr] item for-in/if-clauses)
       ([list-expr] items)
-      ([literal-expr] value)
+      ([literal-expr] kind value)
       ([module-stmt] suite)
       ([pass-stmt] )
       ([print-stmt] dest items comma?)
@@ -773,3 +773,9 @@ For example: - (1 * 2) => (-1) * 2"
   (if (and (listp x) (eq (car x) '[literal-expr]))
       (third x)
     x))
+
+(defun string-literal-p (x)
+  (and (listp x)
+       (eq (first x) '[literal-expr])
+       (eq (second x) :string)
+       (third x)))

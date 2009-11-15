@@ -37,7 +37,6 @@
 (defmacro with-namespace ((ns &key (define-%locals (not *debug-no-locals-dict*))
                                    (define-%globals nil))
                           &body body &environment e)
-  ;; XXX not always %locals needed (e.g. when no call expr in body)
   (let ((new-body `(locally ,@body)))
     (when define-%globals
       (assert define-%locals () "define-%globals implies define-%locals")
@@ -227,7 +226,14 @@
 
 (defmethod ns.expand-with ((ns let-ns) body-form environment)
   (declare (ignore environment))
+  (loop for subnames on (ns.names ns)
+      when (member (car subnames) (cdr subnames))
+      collect (car subnames) into dups
+      finally (when dups 
+                (break "Namespace ~A contains duplicate names: ~A" ns dups)))
   `(let ,(ns.names ns)
+     ;; Python has no way to declare variables unused, so suppress those warnings.
+     (declare (ignorable ,@(ns.names ns)))
      ,body-form))
 
 (defmethod ns.locals-form ((ns let-ns))
@@ -242,34 +248,36 @@
       do (setf (gethash name ht) val)
       finally (return ht)))
 
+(defmethod ns.attributes append ((namespace let-ns))
+  (list :names (ns.names namespace)))
+
 #+clpython-namespaces-are-classes
 (progn
   (defclass let-w/locals-ns (let-ns)
-    ((locals-names :accessor ns.locals-names :initarg :locals-names :initform :missing-initform) ;; hack
-     (let-names :accessor ns.let-names :initarg :let-names :initform :missing-initform)))
+    ((let-names :accessor ns.let-names :initarg :let-names :initform :missing-initform))) ;; hack
   
   (defun make-let-w/locals-ns (&rest args)
     (apply #'make-instance 'let-w/locals-ns args)))
 
 #-clpython-namespaces-are-classes
 (defstruct (let-w/locals-ns (:include let-ns) (:conc-name ns.))
-  locals-names let-names)
+  let-names)
 
 (defmethod make-load-form ((ns let-w/locals-ns) &optional environment)
   (declare (ignore environment))
   (my-make-load-form ns))
 
 (defmethod ns.attributes append ((x let-w/locals-ns))
-  (list :locals-names (mapcar #'symbol-name (ns.locals-names x)) :let-names (ns.let-names x)))
+  (list :let-names (ns.let-names x)))
 
 (defmethod ns.expand-with ((ns let-w/locals-ns) body-form environment)
   (declare (ignore environment))
+  (whereas ((non-local-lets (set-difference (ns.let-names ns) (ns.names ns))))
+    (break "Namespace ~A violates: ns.let-names <= ns.names: ~A." ns non-local-lets))
   `(let ,(ns.let-names ns)
+     ;; Python has no way to declare variables unused, so suppress those warnings.
+     (declare (ignorable ,@(ns.let-names ns)))
      ,body-form))
-
-(defmethod ns.locals-form ((ns let-w/locals-ns))
-  `(make-locals-dict ',(ns.locals-names ns) (list ,@(loop for name in (ns.names ns)
-                                                       collect (ns.read-form ns name)))))
 
 #+clpython-namespaces-are-classes
 (progn

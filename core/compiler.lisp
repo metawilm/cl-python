@@ -51,9 +51,6 @@ or not to include the assertion code.")
 
 ;;; Compiler warnings
 
-(defvar *warn-unused-function-vars* t
-  "Controls insertion of IGNORABLE declaration around function variables.")
-
 (defvar *warn-bogus-global-declarations* t
   "Signal warnings for bogus `global' declarations at toplevel.")
 
@@ -372,37 +369,37 @@ an assigment statement. This changes at least the returned 'store' form.")
     (unless (eq globals locals)
       (check-is-namespace-dict locals))))
 
-(defun exec-stmt-string (code-string globals-handler locals-handler allowed-stmts)
+(defun exec-stmt-string (code-string globals locals allowed-stmts)
   (check-type code-string string)
   (let ((ast (parse code-string)))
     (exec-stmt-check-ast code-string ast allowed-stmts)
-    (exec-stmt-ast ast globals-handler locals-handler)))
+    (exec-stmt-ast ast globals locals)))
 
-#+(or)
-(define-compiler-macro exec-stmt-string (&whole whole code-string globals-handler locals-handler allowed-stmts)
+(define-compiler-macro exec-stmt-string (&whole whole code-string globals locals allowed-stmts)
   (assert (and (listp allowed-stmts)
                (eq (car allowed-stmts) 'quote)))
   ;; Move compilation of string to compile-time. Warn if string contains errors.
   ;; (Actually the whole string could be inlined without any runtime exec call,
   ;; maybe should even do that.)
-  (labels ((warn-static-error (error)
-             (let ((nice-code (if (> (length code-string) 40)
-                                  (concatenate 'string (subseq code-string 0 40) "...")
-                                code-string)))
+  (labels ((warn-static-error (s error)
+             (let ((nice-code (if (> (length s) 40)
+                                  (concatenate 'string (subseq s 0 40) "...")
+                                s)))
                (warn "The statement `exec ~S' will raise [~A]." nice-code error))))
-    (when (and *exec-early-parse-constant-string*
-               (stringp code-string))
-      (multiple-value-bind (ast error)
-          (ignore-errors (parse code-string))
-        (if error
-            (warn-static-error error)
-          (multiple-value-bind (ok error)
-              (ignore-errors (exec-stmt-check-ast code-string ast (second allowed-stmts)))
-            (declare (ignore ok))
-            (if error
-                (warn-static-error error)
-              (return-from exec-stmt-string
-                `(exec-stmt-ast ',ast ,global-handler ,locals-handler)))))))
+    (when *exec-early-parse-constant-string*
+      (whereas ((s (string-literal-p code-string)))
+        (multiple-value-bind (ast error)
+            (ignore-errors (with-compiler-generated-syntax-errors ()
+                             (parse s)))
+          (if error
+              (warn-static-error s error)
+            (multiple-value-bind (ok error)
+                (ignore-errors (exec-stmt-check-ast code-string ast (second allowed-stmts)))
+              (declare (ignore ok))
+              (if error
+                  (warn-static-error error)
+                (return-from exec-stmt-string
+                  `(exec-stmt-ast ',ast ,globals ,locals))))))))
     whole))
 
 (defun exec-stmt-check-ast (string ast allowed-stmts)
@@ -933,16 +930,22 @@ LOCALS shares share tail structure with input arg locals."
       (setf fname ?name)))
   
   (multiple-value-bind (lambda-pos-args lambda-key-args tuples-destruct-form
-                        normal-pos-key-args destruct-nested-vars)
+                        normal-pos-key-args destructed-pos-key-args)
       (lambda-args-and-destruct-form pos-args key-args)
-    
-    (let ((nontuple-arg-names (nconc normal-pos-key-args destruct-nested-vars)))
+    ;; Example:  def f((x,y), z, (m,n)=4): ...
+    ;;  => lambda-pos-args: |(x,y)|, z
+    ;;     lambda-key-args: |(m,n)|, p
+    ;;     tuples-destruct-form: (progn ([assign-stmt] |(x,y)| (([tuple-expr] .. x .. y)))
+    ;;                                  ([assign-stmt] |(m,n)| (([tuple-expr] .. m .. n))))
+    ;;     normal-pos-key-args: z, p
+    ;;     destructed-pos-key-args: x, y, m, n
+    (let ((nontuple-arg-names (nconc normal-pos-key-args destructed-pos-key-args)))
       (when *-arg (push (second *-arg) nontuple-arg-names))
       (when **-arg (push (second **-arg) nontuple-arg-names))
 
       (multiple-value-bind (all-nontuple-func-locals new-locals func-cumul-declared-globals)
 	  (suite-globals-locals suite nontuple-arg-names (get-pydecl :lexically-declared-globals e))
-	
+	(assert (null (intersection destructed-pos-key-args new-locals)))
 	(let* ((new-context-stack (cons fname (get-pydecl :context-stack e))) ;; fname can be :lambda
 	       (context-fname     (ensure-user-symbol
 				   (format nil "~A/~{~A~^.~}" *current-module-name* (reverse new-context-stack))))
@@ -952,8 +955,9 @@ LOCALS shares share tail structure with input arg locals."
 				   (:context-stack ,new-context-stack)
 				   (:inside-function-p t)
 				   (:lexically-visible-vars
-                                    ,(let ((sum (append all-nontuple-func-locals
-                                                        (get-pydecl :lexically-visible-vars e))))
+                                    ,(let ((sum (remove-duplicates
+                                                 (append all-nontuple-func-locals
+                                                         (get-pydecl :lexically-visible-vars e)))))
                                        ;; def f(x):
                                        ;;   def g(y):
                                        ;;     <Here G is locally visibe because it is a /local variable/
@@ -981,18 +985,11 @@ LOCALS shares share tail structure with input arg locals."
 		   ,(when **-arg (second **-arg)))
                   (with-namespace (,(make-let-w/locals-ns
                                       :parent (get-pydecl :namespace e)
-                                      :names (append all-nontuple-func-locals
-                                                     destruct-nested-vars
-                                                     new-locals)
-                                      :let-names (remove-duplicates (append destruct-nested-vars new-locals))
-                                      :locals-names all-nontuple-func-locals
+                                      :names all-nontuple-func-locals
+                                      :let-names (append destructed-pos-key-args new-locals)
                                       :scope :function)
                                       :define-%locals ,(funcdef-should-save-locals-p suite))
-                    ;; XXX this IGNORABLE declaration ends up at the wrong place, w.r.t. function args.
-                    ,@(unless *warn-unused-function-vars*
-			`((declare (ignorable ,@nontuple-arg-names ,@new-locals))))
-		    
-		    (block function-body
+                    (block function-body
 		      (with-pydecl ,body-decls
                         ,tuples-destruct-form
                         ,(if (generator-ast-p suite)
@@ -1462,8 +1459,8 @@ LOCALS shares share tail structure with input arg locals."
 	     (py-raise '{ValueError} "There is not exception to re-raise (got bare `raise')."))))))
 
 (defmacro [raise-stmt] (exc var tb)
-  (when (stringp exc)
-    (warn "Raising string exceptions not supported (got: 'raise ~S')" exc))
+  (whereas ((s (string-literal-p exc)))
+    (warn "Raising string exceptions not supported (got: 'raise ~S')" s))
   `(raise-stmt-1 ,exc ,var ,tb))
 
 (defparameter *try-except-currently-handled-exception* *the-none*
@@ -1886,39 +1883,44 @@ Non-negative integer denoting the number of args otherwise."
           `(flet ((,fname (&rest %args)
                     (declare #+(or)(dynamic-extent %args)
                              #.+optimize-std+)
-                    (let (,@pos-key-arg-names ,@(when *-arg `(,*-arg)) ,@(when **-arg `(,**-arg))
-                          ,@(when (and some-args-p (not *-arg) (not **-arg))
-                              `((only-pos-args (only-pos-args %args)))))
-                      ;; There are two ways to parse the argument list:
-                      ;; - The pop way, which quickly assigns the variables a local name (only usable
-                      ;;   when there are a correct number of positional arguments).
-                      ;; - The array way, where a temporary array is created and a arg-parse function
-                      ;;   is called (used everywhere else).
-                      ,(let ((the-array-way
-                              `(let ((arg-val-vec (make-array ,(+ num-pos-key-args
-                                                                  (if (or *-arg **-arg) 1 0)
-                                                                  (if **-arg 1 0)) :initial-element nil)))
-                                 (declare (dynamic-extent arg-val-vec))
-                                 (parse-py-func-args %args arg-val-vec fa)
-                                 ,@(loop for p in pos-key-arg-names and i from 0
-                                       collect `(setf ,p (svref arg-val-vec ,i)))
-                                 ,@(when  *-arg
-                                     `((setf ,*-arg (svref arg-val-vec ,num-pos-key-args))))
-                                 ,@(when **-arg
-                                     `((setf ,**-arg (svref arg-val-vec ,(1+ num-pos-key-args)))))))
-                             (the-pop-way
-                              `(progn ,@(loop for p in pos-key-arg-names collect `(setf ,p (pop %args))))))
-                         
-                         (cond ((or *-arg **-arg)  the-array-way)
-                               (some-args-p        `(if (and only-pos-args
-                                                             (= (the fixnum only-pos-args) ,num-pos-key-args))
-                                                        ,the-pop-way
-                                                      ,the-array-way))
-                               (t `(when %args (raise-wrong-args-error)))))
-                      
-                      (locally #+(or)(declare (optimize (safety 3) (debug 3)))
-                               ,@body))))
-                  #',fname)))))
+                    ,(let ((let-variables (append pos-key-arg-names
+                                                  (when *-arg (list *-arg))
+                                                  (when **-arg (list **-arg))))
+                           (maybe-only-pos-args-case (and some-args-p (not *-arg) (not **-arg))))
+                       `(let (,@let-variables
+                              ,@(when maybe-only-pos-args-case
+                                  `((only-pos-args (only-pos-args %args)))))
+                          (declare (ignorable ,@let-variables))
+                          ;; There are two ways to parse the argument list:
+                          ;; - The pop way, which quickly assigns the variables a local name (only usable
+                          ;;   when there are a correct number of positional arguments).
+                          ;; - The array way, where a temporary array is created and a arg-parse function
+                          ;;   is called (used everywhere else).
+                          ,(let ((the-array-way
+                                  `(let ((arg-val-vec (make-array ,(+ num-pos-key-args
+                                                                      (if (or *-arg **-arg) 1 0)
+                                                                      (if **-arg 1 0)) :initial-element nil)))
+                                     (declare (dynamic-extent arg-val-vec))
+                                     (parse-py-func-args %args arg-val-vec fa)
+                                     ,@(loop for p in pos-key-arg-names and i from 0
+                                           collect `(setf ,p (svref arg-val-vec ,i)))
+                                     ,@(when  *-arg
+                                         `((setf ,*-arg (svref arg-val-vec ,num-pos-key-args))))
+                                     ,@(when **-arg
+                                         `((setf ,**-arg (svref arg-val-vec ,(1+ num-pos-key-args)))))))
+                                 (the-pop-way
+                                  `(progn ,@(loop for p in pos-key-arg-names collect `(setf ,p (pop %args))))))
+                             
+                             (cond ((or *-arg **-arg)  the-array-way)
+                                   (some-args-p        `(if (and only-pos-args
+                                                                 (= (the fixnum only-pos-args) ,num-pos-key-args))
+                                                            ,the-pop-way
+                                                          ,the-array-way))
+                                   (t `(when %args (raise-wrong-args-error)))))
+                          
+                          (locally #+(or)(declare (optimize (safety 3) (debug 3)))
+                                   ,@body)))))
+             #',fname)))))
 
 #+allegro
 (progn
