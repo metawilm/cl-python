@@ -20,8 +20,7 @@
 
 (defmethod test-builtin :around (kind)
   (with-subtest (:name (format nil "CLPython-Builtin-~A" kind))
-    (let ((*warn-unused-function-vars* nil))
-      (call-next-method))))
+    (call-next-method)))
 
 (defmethod test-builtin ((x (eql :globals)))
   (run-no-error "

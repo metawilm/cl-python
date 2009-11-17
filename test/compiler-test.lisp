@@ -56,8 +56,7 @@
 
 (defmethod test-comp-decl :around (kind)
   (with-subtest (:name (format nil "CLPython-Compiler-Decl-~S" kind))
-    (let ((*warn-unused-function-vars* nil))
-      (call-next-method))))
+    (call-next-method)))
 
 (defmethod test-comp-decl ((kind (eql :context)))
   (run-code-test "TEST"               (test :module #1=(pydecl :context)))

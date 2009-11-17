@@ -58,7 +58,7 @@ Possible values: :time :ptime :space :pspace nil")
 (defvar *ignore-copied-prompts* t
   "Whether to remove initial `>>>' and `...' on the input line.
 If true, previous input can be copy-pasted as new input easily.")
-                                
+
 (defparameter *doc* (concatenate 'string
                            "CLPython - an implementation of Python in Common Lisp
 http://common-lisp.net/project/clpython
@@ -438,19 +438,3 @@ Useful when re-parsing copied interpreter input."
                           (replace new new :start1 (1+ ix) :start2 (+ ix (length prompt)))
                           (setf new (subseq new 0 (1+ (- (length new) (length prompt)))))))))
     (values new changed)))
-
-;; Displaying stacktrace, todo
-#+(or) 
-(defun print-traceback ()
-  (let ((frames (loop for f = (debug:newest-break-frame) then (next-frame f)
-                    while f
-                    when (debugger:frame-visible-p f)
-                    collect f)))
-    (dolist (f frames)
-      (format t "tb> ~A ~S~%" (debugger:frame-type f) (debugger:frame-function f)))))
-
-#+(or)
-(defmacro with-stack-trace-restart (&body body)
-  `(restart-bind ((:stacktrace 'print-traceback))
-     ,@body))
-

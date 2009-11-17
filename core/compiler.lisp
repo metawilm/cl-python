@@ -376,8 +376,9 @@ an assigment statement. This changes at least the returned 'store' form.")
     (exec-stmt-ast ast globals locals)))
 
 (define-compiler-macro exec-stmt-string (&whole whole code-string globals locals allowed-stmts)
-  (assert (and (listp allowed-stmts)
-               (eq (car allowed-stmts) 'quote)))
+  (assert (or (eq allowed-stmts t)
+              (and (listp allowed-stmts)
+                   (eq (car allowed-stmts) 'quote))))
   ;; Move compilation of string to compile-time. Warn if string contains errors.
   ;; (Actually the whole string could be inlined without any runtime exec call,
   ;; maybe should even do that.)
@@ -394,7 +395,9 @@ an assigment statement. This changes at least the returned 'store' form.")
           (if error
               (warn-static-error s error)
             (multiple-value-bind (ok error)
-                (ignore-errors (exec-stmt-check-ast code-string ast (second allowed-stmts)))
+                (if (eq allowed-stmts t)
+                    (values t nil)
+                  (ignore-errors (exec-stmt-check-ast code-string ast (second allowed-stmts))))
               (declare (ignore ok))
               (if error
                   (warn-static-error s error)
@@ -2279,7 +2282,7 @@ be bound."
   ;; the :clpython package. That eases the use.
   (declare (ignorable kind))
   (check-type context-name symbol)
-  #+allegro
+  #+(or)
   (let ((syms (list context-name 
                     (ensure-user-symbol (string-upcase context-name))
                     (intern (string context-name) (load-time-value (find-package :clpython)))
@@ -2287,8 +2290,6 @@ be bound."
     
     (without-redefinition-warnings
      (dolist (s syms)
-       ;; XXX is a macro!
-       ;; (excl:record-source-file s :type kind)
        #+(or)(eval `(excl:record-source-file ',s :type ',kind))
        ))))
 

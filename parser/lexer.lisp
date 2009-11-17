@@ -288,6 +288,14 @@ On EOF returns: eof-token, eof-token."
                 (t (raise-syntax-error "Nobody expected this character: `~A' (line ~A)."
                                        c curr-line-no))))))))
 
+(defmethod call-lexer (yacc-version (lexer lexer) (op (eql :report-location)))
+  "Called when Allegro CL Yacc is about to signal a GRAMMAR-PARSE-ERROR.
+Also called by CLPython in case of CL-YACC.
+In Allegro, result ends up being stored in the condition slot EXCL.YACC:GRAMMAR-PARSE-ERROR-POSITION"
+  (with-slots (curr-line-no tokens-todo) lexer
+    `((:line-no ,curr-line-no)
+      (:eof-seen ,(not (null (member (lexer-eof-token yacc-version) tokens-todo :key #'second)))))))
+
 (defgeneric read-kind (kind c1 &rest args)
   (:method :around (kind c1 &rest args)
            "Return source code location as second value."
@@ -405,18 +413,18 @@ C must be either a character or NIL."
              (check-type num-hex-digits (member 4 8))
              (check-type uch (member #\u #\U))
              (unless (<= (+ s.ix num-hex-digits) (length s))
-               (raise-syntax-error "Incomplete unicode escape character at end of string (line ~A)."
+               (raise-syntax-error "Unfinished unicode escape character in string literal (line ~A)."
                                    %lex-curr-line-no%))
              (loop for i below num-hex-digits
                  for ch = (aref s (+ s.ix i))
                  for shift downfrom (* 4 (1- num-hex-digits)) by 4
                  for ch.code = (or (digit-char-p ch 16) 
-                                   (raise-syntax-error "Invalid unicode escape: `\\~A' should be ~
+                                   (raise-syntax-error "Invalid Unicode escape: `\\~A' should be ~
                                                         followed by ~A hex digits, but got non-hex ~
                                                         character `~A' (line ~A)."
                                                        uch num-hex-digits ch %lex-curr-line-no%))
                  sum (ash ch.code shift) into unichar-code
-                 finally (return (code-char unichar-code))))
+                 finally (return (careful-code-char unichar-code))))
 
            (replace-unicode-hex-escapes (s)
              (unless (loop for i fixnum from 0 below (1- (length s))
@@ -461,7 +469,7 @@ C must be either a character or NIL."
                       (return-from replace-non-unicode-escapes res))
                     ;; Read one escaped char
                     (assert (char= #\\ (aref s s.ix)))
-                    (assert (<= s.ix (- (length s) 2))
+                    (assert (<= s.ix (- s.len 2))
                         () "Error parsing escapes (last char cannot be backslash): s=~S s.ix=~A" s s.ix)
                     (let ((c (aref s (incf s.ix))))
                       (multiple-value-bind (ch.a ch.b)
@@ -476,26 +484,31 @@ C must be either a character or NIL."
                             (#\t   #\Tab)
                             (#\v   #.(code-char 11)) ;; #\VT or #\PageUp
                             (#\N (if unicode ;; unicode char by name: u"\N{latin capital letter l with stroke}"
-                                     (progn (let ((c.next (aref s (incf s.ix))))
-                                              (unless (char= c.next #\{)
-                                                (raise-syntax-error "Unicode escape `\N' must be followed by `{' ~
-                                                                       (line ~A)." %lex-curr-line-no%)))
+                                     (progn (incf s.ix)
+                                            (let ((c.next (when (< s.ix s.len)
+                                                            (aref s s.ix))))
+                                              (unless (and c.next (char= c.next #\{))
+                                                (raise-syntax-error "Unicode escape `\\N' must be followed by `{' ~
+                                                                     (line ~A)." %lex-curr-line-no%)))
                                             (let* ((start (incf s.ix))
                                                    (end (or (position #\} s :start s.ix)
                                                             (raise-syntax-error
-                                                             "Unicode escape \N{...} misses closing `}' (line ~A)."
+                                                             "Unicode escape \\N{...} misses closing `}' (line ~A)."
                                                              %lex-curr-line-no%))))
                                               (let ((name (nsubstitute #\_ #\Space (subseq s start end))))
                                                 (setf s.ix end)
-                                                (name-char name))))
-                                   (progn (warn "Unicode escape `\N' found in non-unicode string (line ~A)."
+                                                (or (when (plusp (length name))
+                                                      (name-char name))
+                                                    (raise-syntax-error "No Unicode character with name ~S defined."
+                                                                        name)))))
+                                   (progn (warn "Unicode escape `\\N' found in non-unicode string (line ~A)."
                                                 %lex-curr-line-no%)
                                           (values #\\ c))))
                             ((#\u #\U) (if unicode ;; \uf7d6 \U1a3b5678
                                            (let ((n (if (char= c #\u) 4 8)))
                                              (read-unicode-char c s s.ix n)
                                              (incf s.ix n))
-                                         (progn (warn "Unicode escape `\~A' found in non-unicode string (line ~A)."
+                                         (progn (warn "Unicode escape `\\~A' found in non-unicode string (line ~A)."
                                                       c %lex-curr-line-no%)
                                                 (values #\\ c))))
                             ((#\0 #\1 #\2 #\3 #\4 #\5 #\6 #\7) ;; char code: up to three octal digits
@@ -507,7 +520,7 @@ C must be either a character or NIL."
                                  do (setf code (+ (* code 8) x.octal))
                                  finally (unless x.octal
                                            (decf s.ix))
-                                         (return (code-char code))))
+                                         (return (careful-code-char code))))
                             
                             (#\x (let* ((a (aref s (incf s.ix))) ;; char code: up to two hex digits
                                         (b (when (< (incf s.ix) s.len)
@@ -517,14 +530,19 @@ C must be either a character or NIL."
                                         (b.hex (and b (digit-char-p b 16))))
                                    (unless a.hex (raise-syntax-error "Non-hex digit `~A' found after `\x' (line ~A)."
                                                                      a %lex-curr-line-no%))
+                                   (warn "a=~S b=~S a.hex=~S" a b a.hex)
                                    (if b.hex
-                                       (code-char (+ (* 16 a.hex) b.hex))
-                                     (prog1 a.hex
+                                       (careful-code-char (+ (* 16 a.hex) b.hex))
+                                     (prog1 (careful-code-char a.hex)
                                        (decf s.ix)))))
                             
                             (t (values #\\ c))) ;; Backslash not used for escaping.
-                        (when ch.a (vector-push-extend ch.a res))
-                        (when ch.b (vector-push-extend ch.b res))
+                        (when ch.a
+                          (check-type ch.a character)
+                          (vector-push-extend ch.a res))
+                        (when ch.b
+                          (check-type ch.b character)
+                          (vector-push-extend ch.b res))
                         (incf s.ix)))
                     finally (return res))))
     
@@ -559,10 +577,18 @@ C must be either a character or NIL."
                                               until (and (char= x ch1) (not prev-bs))
                                               finally (return (1- %lex-last-read-char-ix%)))))
                               (lex-substring start end))))))
-      (setf string (replace-unicode-hex-escapes string))
+      (when unicode
+        (setf string (replace-unicode-hex-escapes string)))
       (unless raw
         (setf string (replace-non-unicode-escapes string)))
       string)))
+
+(defun careful-code-char (code)
+  (when (typep code '(integer 0 (#.char-code-limit)))
+    (whereas ((char (code-char code)))
+      (return-from careful-code-char char)))
+  (raise-syntax-error "No character with code ~A (0x~X) defined (line ~A)." 
+                      code code %lex-curr-line-no%))
 
 ;; Number
 

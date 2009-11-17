@@ -53,9 +53,8 @@
 
 (defmethod test-lang :around (kind)
   (with-subtest (:name (format nil "CLPython-Lang-~A" kind))
-    (let ((*warn-unused-function-vars* nil))
-      (assert (next-method-p))
-      (call-next-method))))
+    (assert (next-method-p))
+    (call-next-method)))
 
 (defmethod test-lang ((kind (eql :assert-stmt)))
   (run-error        "assert 0" {AssertionError})

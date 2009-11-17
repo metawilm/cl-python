@@ -59,13 +59,6 @@ Therefore need to convert TOKEN-KIND to the corresponding TOKEN-CODE before pass
 (defmethod lexer-eof-token ((yacc-version (eql :allegro-yacc)))
   'excl.yacc:eof)
 
-(defmethod call-lexer ((yacc-version (eql :allegro-yacc)) (lexer lexer) (op (eql :report-location)))
-  "Called when Allegro CL Yacc is about to signal a GRAMMAR-PARSE-ERROR.
- Result is stored in the condition, in slot named EXCL.YACC:GRAMMAR-PARSE-ERROR-POSITION"
-  (with-slots (curr-line-no tokens-todo) lexer
-    `((:line-no ,curr-line-no)
-      (:eof-seen ,(not (null (member (lexer-eof-token yacc-version) tokens-todo :key #'second)))))))
-    
 
 ;;; Parser
 

@@ -18,6 +18,14 @@
       (values (parse s :incl-module t))
     (values (parse s :one-expr t :incl-module nil))))
 
+(defmacro test-signals-warning (&body body)
+  `(test-true (block .test
+                (handler-bind ((warning (lambda (c)
+                                          (declare (ignore c))
+                                          (return-from .test t))))
+                  ,@body)
+                nil)))
+
 (defun run-parser-test ()
   (with-subtest (:name "CLPython-Parser")
     
@@ -239,7 +247,84 @@ else:
   b" nil)
                 '([if-stmt] ((([identifier-expr] {a})
                               ([suite-stmt] (([identifier-expr] {foo})))))
-                  ([suite-stmt] (([identifier-expr] {b})))))))
+                  ([suite-stmt] (([identifier-expr] {b})))))
+    ;; dedent did not arrive at previous indent level
+    (test-error (ps "
+if 1:
+  if 2:
+    pass
+ else:
+  pass" nil) :condition-type '{SyntaxError})
+    ;; unexpected character
+    (test-error (ps "
+a
+$" nil) :condition-type '{SyntaxError})
+    ;; empty file = None
+    (test-equal (ps "" nil) '([identifier-expr] {None}))
+    ;; comments
+    (test-equal (ps "
+None
+##" nil) '([identifier-expr] {None}))
+    (test-equal (ps "
+##
+a" nil) '([identifier-expr] {a}))
+    ;; end-of-line continuation
+    (test-equal (ps "
+if 1 > \\
+ 2:
+  pass
+" nil) '([if-stmt] ((([comparison-expr] [>] ([literal-expr] :number 1) ([literal-expr] :number 2))
+                     ([suite-stmt] (([pass-stmt])))))
+         nil))
+    (test-error (ps "\\1" nil) :condition-type '{SyntaxError})
+    ;; unicode
+    
+    (test-equal (ps "u'\\N{latin capital letter l with stroke}'" nil)
+                `([literal-expr] :string
+                                 ,(coerce (list (name-char "latin_capital_letter_l_with_stroke")) 'string)))
+    (test-equal (ps "u'\\u0141 \\U00000141'" nil)
+                `([literal-expr] :string
+                                 ,(coerce (list (code-char #x0141)
+                                                #\Space
+                                                (code-char #x0141))
+                                          'string)))
+    (test-error (ps "u'\\N'" nil)  :condition-type '{SyntaxError})
+    (test-error (ps "u'\\N{foo'" nil)  :condition-type '{SyntaxError})
+    (test-error (ps "u'\\N{foo}'" nil)  :condition-type '{SyntaxError})
+    (test-equal (ps "u'\\r'" nil) `([literal-expr] :string ,(coerce (list #\Return) 'string)))
+    ;; warning then using unicode escape
+    (test-signals-warning (ps "'\\N{foo}'"))
+    (test-signals-warning (ps "'\\u0123'"))
+    (test-signals-warning (ps "'\\U0123'"))
+    (test-error (ps "u'\\xG'" nil) :condition-type '{SyntaxError})
+    (test-error (ps "u'\\uG000'" nil) :condition-type '{SyntaxError})
+    (test-error (ps "u'\\u'" nil) :condition-type '{SyntaxError})
+    (test-error (ps "u'\\U0000000G'" nil) :condition-type '{SyntaxError})
+    (test-error (ps "u'\\UFFFFFFFF'" nil) :condition-type '{SyntaxError} :fail-info "No such char")
+        
+    ;; valid, invalid hex code
+    (test-equal (ps "'\\x12'" nil) `([literal-expr] :string ,(coerce (list (code-char #x12)) 'string)))
+    (test-equal (ps "'\\xF'" nil) `([literal-expr] :string ,(coerce (list (code-char #xF)) 'string)))
+    (test-error (ps "'\\xG'" nil) :condition-type '{SyntaxError})
+    
+    ;; octal code, non-escaping backslash
+    (test-equal (ps "'\\5019\\z'" nil)
+                `([literal-expr] :string ,(coerce (list (code-char #x0141) #\9 #\\ #\z)
+                                                  'string)))
+    ;; ..
+    (test-error (ps "[1, .., 3]") :condition-type '{SyntaxError})
+    ;; !
+    (test-error (ps "[1, !1, 3]") :condition-type '{SyntaxError})
+    ;; irregular indentation
+    (test-signals-warning (ps (format nil "
+if 1:
+~Afoo
+~A~Abar"
+                                      (coerce (loop repeat (1+ clpython.parser::*tab-width-spaces*)
+                                                  collect #\Space)
+                                              'string)
+                                      #\Tab #\Space)))
+    ))
 
 (defun run-code-walker-test ()
   (with-subtest (:name "CLPython-Codewalker")
@@ -273,6 +358,7 @@ else:
       (pe "42")
       (pe "1.")
       (pe "1.2")
+      (pe "3j" :known-failure t :fail-info "spaces between number and j")
       ;; string
       (pe "'x'")
       (p "'\"'")
@@ -503,6 +589,12 @@ finally:
       (p "(yield x)")
       (p "(yield x, y)")
       (p "()")
+      ;; some strings
+      (p "'asdf'")
+      (p "'asdf\"'")
+      (p "\"'\"")
+      (p "abc
+defg")
       )))
 
 (defun run-lispy-test ()
