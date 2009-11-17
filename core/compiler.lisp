@@ -397,7 +397,7 @@ an assigment statement. This changes at least the returned 'store' form.")
                 (ignore-errors (exec-stmt-check-ast code-string ast (second allowed-stmts)))
               (declare (ignore ok))
               (if error
-                  (warn-static-error error)
+                  (warn-static-error s error)
                 (return-from exec-stmt-string
                   `(exec-stmt-ast ',ast ,globals ,locals))))))))
     whole))
