@@ -651,13 +651,9 @@ otherwise work well.")
 
 (defgeneric function-name (f)
   (:method ((f function))
-           (let ((data (gethash f *simple-function-data*))
-                 (related-lisp-symbol #+allegro (excl::func_name f)
-                                      #-allegro nil))
-             (values (if data
-                         (string (sfd-name data))
-                       (or (and #1=related-lisp-symbol (symbol-name #1#)) "[a function]"))
-                     related-lisp-symbol)))
+           (let ((data (gethash f *simple-function-data*)))
+             (when data
+               (string (sfd-name data)))))
   (:method ((f py-function)) (string (py-function-name f))))
 
 (defun make-py-function (&key name context-name lambda)
@@ -679,13 +675,7 @@ otherwise work well.")
   (with-output-to-string (s)
     (if (typep func 'py-function)
         (print-object func s)
-      (print-unreadable-object (func s)
-        (multiple-value-bind (fname symbol)
-            (function-name func)
-          (format s "function `~A'" fname)
-          (when symbol
-            (let ((*package* #.(find-package :common-lisp)))
-              (format s " (~S)" symbol))))))))
+      (format s "~A" (or (function-name func) func)))))
 
 (defmethod print-object ((x py-function) stream)
   (print-unreadable-object (x stream :identity t)
@@ -4108,40 +4098,38 @@ the ~/.../ directive: ~/clpython:repr-fmt/"
 next value gotten by iterating over X. Returns NIL, NIL upon exhaustion.")
   (:method ((x t))
            (let* ((x.cls       (py-class-of x))
-		  (__iter__    (class.attr-no-magic x.cls '{__iter__}))
-		  (__getitem__-unb (unless __iter__
-				     (class.attr-no-magic x.cls '{__getitem__})))
-		  (__getitem__ (when __getitem__-unb
-				 (bind-val __getitem__-unb x x.cls))))
-
-	     ;; TODO: binding __getitem__ using __get__ is not done at
-	     ;; all yet.
-	     
-	     #+(or)(warn "GET-PY-ITERATE-FUN ~A (a ~A)~% -> __iter__ = ~A; __getitem = ~A"
-			 x x.cls __iter__ __getitem__)
-	     
-	     (cond (__iter__ ;; Preferable, use __iter__ to retrieve x's iterator
-		    (let* ((iterator     (py-call (bind-val __iter__ x x.cls)))
-			   (iterator.cls (py-class-of iterator))
-			   
-			   (next-meth-unbound
-			    (or (class.attr-no-magic iterator.cls '{next})
-				(py-raise
-				 '{TypeError} "The value returned by ~A's `__iter__' method ~
+                  (__iter__    (class.attr-no-magic x.cls '{__iter__}))
+                  (__getitem__-unb (unless __iter__
+                                     (class.attr-no-magic x.cls '{__getitem__})))
+                  (__getitem__ (when __getitem__-unb
+                                 (bind-val __getitem__-unb x x.cls))))
+             
+             ;; TODO: binding __getitem__ using __get__ is not done at all yet.
+             
+             #+(or)(warn "GET-PY-ITERATE-FUN ~A (a ~A)~% -> __iter__ = ~A; __getitem = ~A"
+                         x x.cls __iter__ __getitem__)
+             
+             (cond (__iter__ ;; Preferable, use __iter__ to retrieve x's iterator
+                    (let* ((iterator     (py-call (bind-val __iter__ x x.cls)))
+                           (iterator.cls (py-class-of iterator))
+                           (next-meth-unbound
+                            (or (class.attr-no-magic iterator.cls '{next})
+                                (py-raise
+                                 '{TypeError} "The value returned by ~A's `__iter__' method ~
                                  	       is ~A, which is not an iterator (no `next' method)"
-				 x iterator)))
-			   
-			   (next-meth-bound 
-			    ;; Efficiency optimization: skip creation of bound methods
-			    (unless (functionp next-meth-unbound)
-			      (bind-val next-meth-unbound iterator iterator.cls))))
-		      
-		      ;; Note that we just looked up the `next' method before the first
-		      ;; value is demanded. This is semantically incorrect (in an
-		      ;; ignorable way) as the method should be looked up on the
-		      ;; request of every new value. For efficiency that's not done.
-		      
-		      ;; (excl:named-function (:py-iterate-fun using __iter__)
+                                 x iterator)))
+                           
+                           (next-meth-bound 
+                            ;; Efficiency optimization: skip creation of bound methods
+                            (unless (functionp next-meth-unbound)
+                              (bind-val next-meth-unbound iterator iterator.cls))))
+                      
+                      ;; Note that we just looked up the `next' method before the first
+                      ;; value is demanded. This is semantically incorrect (in an
+                      ;; ignorable way) as the method should be looked up on the
+                      ;; request of every new value. For efficiency that's not done.
+                      
+                      ;; (excl:named-function (:py-iterate-fun using __iter__)
                       (flet ((using-__iter__ ()
                                (handler-case (values (if next-meth-bound
                                                          (py-call next-meth-bound)
@@ -4149,9 +4137,9 @@ next value gotten by iterating over X. Returns NIL, NIL upon exhaustion.")
                                  ({StopIteration} () (values nil nil))
                                  (:no-error (val)  (values val t)))))
                         #'using-__iter__)))
-		   
+                   
                    (__getitem__ ;; Fall-back: call __getitem__ with successive integers
-		    (let ((index 0))
+                    (let ((index 0))
                       ;; (excl:named-function (:py-iterate-fun using __getitem__)
                       (flet ((using-__getitem__ ()
                                (handler-case (values (py-call __getitem__ index))
@@ -4163,7 +4151,7 @@ next value gotten by iterating over X. Returns NIL, NIL upon exhaustion.")
                                    (values val t)))))
                         #'using-__getitem__)))
                    (t
-		    (py-raise '{TypeError} "Iteration over non-sequence: ~A." x))))))
+                    (py-raise '{TypeError} "Iteration over non-sequence: ~A." x))))))
 
 (defgeneric map-over-object (func object)
   (:documentation 

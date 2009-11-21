@@ -863,7 +863,7 @@ LOCALS shares share tail structure with input arg locals."
 	 (multiple-value-bind (name kind)
 	     (ecase (pop form)
 	       ([classdef-stmt]
-                (with-matching (form (([identifier-expr] ?cname) ?inhericante ?csuite))
+                (with-matching (form (([identifier-expr] ?cname) ?inheritance ?csuite))
                   (values ?cname "class")))
 	       ([funcdef-stmt]
                 (with-matching (form (?decorators ([identifier-expr] ?fname) ?fargs ?fsuite))
@@ -918,6 +918,7 @@ LOCALS shares share tail structure with input arg locals."
 (defmacro funcdef-stmt-1 (decorators
                           fname (pos-args key-args *-arg **-arg)
                           suite
+                          &key (return-default-none t)
                           &environment e)
   ;; The resulting function is returned.
   ;; 
@@ -999,9 +1000,10 @@ LOCALS shares share tail structure with input arg locals."
                              `([return-stmt] ,(rewrite-generator-funcdef-suite
                                                context-fname suite))
                            `(progn ,suite
-                                   (load-time-value *the-none*)))))))))
+                                   ,@(when return-default-none
+                                       `((load-time-value *the-none*)))))))))))
 	  
-	  (when (keywordp fname)
+          (when (keywordp fname)
 	    (return-from funcdef-stmt-1 func-lambda))
 	  
           (let ((art-deco '.undecorated-func))
@@ -1143,7 +1145,8 @@ LOCALS shares share tail structure with input arg locals."
 (defmacro [lambda-expr] (args expr)
   ;; XXX Treating lambda as a funcdef-stmt results in way more
   ;; code than necessary for the just one expression it contains.
-  `([funcdef-stmt] nil :lambda ,args ([suite-stmt] (([return-stmt] ,expr)))))
+  `([funcdef-stmt] nil :lambda ,args ([suite-stmt] (,expr))
+                   :return-default-none nil))
   
 (defmacro [listcompr-expr] (item for-in/if-clauses)
   (with-gensyms (list)
@@ -1627,14 +1630,27 @@ finally:
        (when exc
          (py-call exit *the-none* *the-none* *the-none*)))))
 
-(defmacro [yield-expr] (val)
-  (declare (ignore val))
-  (raise-syntax-error "Expression `yield' was found outside function."))
 
-(defmacro [yield-stmt] (val)
-  (declare (ignore val))
-  (raise-syntax-error "Statement `yield' was found outside function."))
+;; We should not come here during normal macroexpansion, as generators
+;; are handled by the CPS convertor. However, some implementations
+;; (Allegro) check CONSTANTP of the KEY form in (gethash KEY ..), and
+;; KEY might be ([YIELD-EXPR] ..).  To handle those situation, macro
+;; WITH-CPS-CONVERSION sets a pydecl, and we return a dummy
+;; non-constant form.
 
+(defvar *dummy-nonconstant-form* '(random 2))
+
+(defmacro [yield-expr] (val &environment e)
+  (declare (ignore val))
+  (if (get-pydecl :inside-cps-conversion e)
+      *dummy-nonconstant-form*
+    (raise-syntax-error "Expression `yield' was found outside function.")))
+
+(defmacro [yield-stmt] (val &environment e)
+  (declare (ignore val))
+  (if (get-pydecl :inside-cps-conversion e)
+      *dummy-nonconstant-form*
+    (raise-syntax-error "Statement `yield' was found outside function.")))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
@@ -1749,7 +1765,6 @@ finally:
 				   "The ** arg in call must be mapping, ~
                                    supporting 'items' (got: ~S)" **-arg)))
 	 (items-list (py-iterate->lisp-list (py-call items-meth))))
-    
     (loop with res = ()
 	for k-v in items-list
 	do (let ((k-and-v (py-iterate->lisp-list k-v)))
@@ -1796,7 +1811,7 @@ finally:
 
 	(([classdef-stmt]) 
 	 ;; name of this class, but don't recurse
-         (with-matching ((cdr form) (([identifier-expr] ?cname) ?inhericance ?csuite))
+         (with-matching ((cdr form) (([identifier-expr] ?cname) ?inheritance ?csuite))
 	   (pushnew ?cname globals))
 	 (values :dummmy-classdef t))
 
@@ -2225,15 +2240,41 @@ Non-negative integer denoting the number of args otherwise."
 (defun generator-ast-p (ast)
   "Is AST a function definition for a generator? Returns set of ([yield-expr] [yield-stmt]) of nodes found."
   ;; Note that LAMBDA-EXPR can't contain (yield) statements
-  (assert (not (match-p ast '([module-stmt] ?_))) ()
-    "GENERATOR-AST-P called with a MODULE ast.")
+  (assert (not ([module-stmt-p] ast)) () "GENERATOR-AST-P on MODULE-STMT: does not make sense.")
   (let (res)
     (with-py-ast (form ast)
       (case (car form)
-        (([yield-expr] [yield-stmt]) (progn (pushnew (car form) res)
-                                            form))
-        (([classdef-stmt] [funcdef-stmt]) (values nil t))
-        (t                                form)))
+        
+        (([yield-expr] [yield-stmt])
+         (progn (pushnew (car form) res)
+                form))
+        
+        ([classdef-stmt]
+         ;; Don't enter the namespace, but do check the superclasses
+         ;; which might be yield expressions (don't ask :)
+         (with-matching (form ([classdef-stmt] ([identifier-expr] ?cname) ?inheritance ?csuite))
+           (with-matching (?inheritance ([tuple-expr] ?supers))
+             (dolist (node (mapcan #'generator-ast-p ?supers))
+               (pushnew node res))))
+         (values nil t))
+        
+        ([funcdef-stmt]
+          ;; Don't enter the namespace, but do check the keyword default
+          ;; values which might be yield expressions (don't ask :)
+          (with-matching (form ([funcdef-stmt] ?decorators ?fname (?pos-args ?key-args ?*-arg ?**-arg) ?suite))
+            (loop for (nil key-default-arg) in ?key-args
+                do (dolist (node (generator-ast-p key-default-arg))
+                     (pushnew node res))))
+          (values nil t))
+        
+        ([lambda-expr]
+         (with-matching (form ([lambda-expr] (?pos-args ?key-args ?*-arg ?**-arg) ?expr))
+           (loop for (nil key-default-arg) in ?key-args
+               do (dolist (node (generator-ast-p key-default-arg))
+                    (pushnew node res))))
+         (values nil t))
+        
+        (t form)))
     res))
 
 (defun ast-deleted-variables (ast)

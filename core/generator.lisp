@@ -108,10 +108,7 @@
   (generator-state-function (generator-state g)))
 
 (def-py-method generator.__iter__ (g)
-  (make-iterator-from-function
-   :name :yield-expr-generator
-   :func (lambda () (handler-case (values (generator.next g))
-                                  ({StopIteration} () nil)))))
+  g)
 
 (defun generator-state-close (gs)
   (handler-case (generator-state-input-value gs (list :exception (find-class '{GeneratorExit}))) ;; XXX no traceback yet
@@ -181,7 +178,8 @@
                  (error "fallthrough (cps convert)")))))
 
 (defmacro with-cps-conversion ((ast value &key nil-allowed) &body body)
-  `(%cps-convert ,ast (lambda (,value) ,@body) :nil-allowed ,nil-allowed))
+  `(with-pydecl ((:inside-cps-conversion t)) ;; for non-cps macros for YIELD-{EXPR,STMT}
+     (%cps-convert ,ast (lambda (,value) ,@body) :nil-allowed ,nil-allowed)))
 
 (defun optimize-funcall (form)
   "Replace (FUNCALL (LAMBDA (X) ..) VAL) by: (LET ((X VAL)) ..)"
@@ -359,10 +357,12 @@ former requires that this form is executed within RECEIVE-YIELDED-VALUE."
   ;;   del (yield 2).a
   ;; but can be together with other items, like:
   ;;   del [a, b[(yield 2), c.a]
-  (multiple-value-bind (temps values stores store-form read-form del-form)
-      (get-setf-expansion item e)
-    (declare (ignore stores store-form read-form))
-    (let ((res `(progn ,del-form ,(%call-continuation))))
+  (multiple-value-bind (temps values stores del-form read-form)
+      (let ((*want-DEL-setf-expansion* t))
+        (get-setf-expansion item e))
+    (declare (ignore stores read-form))
+    (let ((res `(progn ,del-form
+                       ,(%call-continuation))))
       (loop for v in (reverse values)
           for tmp in (reverse temps)
           do (setf res `(with-cps-conversion (,v ,tmp) ,res)))
@@ -370,11 +370,13 @@ former requires that this form is executed within RECEIVE-YIELDED-VALUE."
 
 (def-cps-macro [dict-expr] (vk-list)
   (let ((res (%call-continuation '.dict)))
-    (with-gensyms (val)
-      (loop for (k v) on (reverse vk-list) by #'cddr
-          do (setf res `(with-cps-conversion (,v ,val)
-                          (setf (gethash ,k .dict) ,val)
-                          ,res))))
+    (loop for (k v) on (reverse vk-list) by #'cddr
+        do (setf res (with-gensyms (key val)
+                       ;; First 1st val is evaluated, then 1st key, then 2nd, etc.
+                       `(with-cps-conversion (,v ,val)
+                          (with-cps-conversion (,k ,key)
+                            (setf (gethash ,key .dict) ,val)
+                            ,res)))))
     `(let ((.dict (make-py-hash-table)))
        ,res)))
 
@@ -473,9 +475,15 @@ former requires that this form is executed within RECEIVE-YIELDED-VALUE."
             ([import-from-stmt] ,@args))
           ,(%call-continuation)))
 
-(def-cps-macro [lambda-expr] (&rest args)
-  (%call-continuation `(with-pydecl ((:ignore-cps-hook t))
-                         ([lambda-expr] ,@args))))
+(def-cps-macro [lambda-expr] ((pos-args key-args *-arg **-arg) expr)
+  (let* ((kwd-val-gensyms (loop repeat (length key-args) collect (gensym "kwarg-default")))
+         (new-key-args (loop for (name nil) in key-args and gensym in kwd-val-gensyms
+                           collect (list name gensym)))
+         (res (%call-continuation `(with-pydecl ((:ignore-cps-hook t))
+                                     ([lambda-expr] (,pos-args ,new-key-args ,*-arg ,**-arg) ,expr)))))
+    (loop for (nil val) in (reverse key-args) for gensym in (reverse kwd-val-gensyms)
+        do (setf res `(with-cps-conversion (,val ,gensym) ,res)))
+    res))
 
 (def-cps-macro [listcompr-expr] (item for-in/if-clauses)
   (with-gensyms (result-list ignore)
@@ -505,8 +513,7 @@ former requires that this form is executed within RECEIVE-YIELDED-VALUE."
                          ([literal-expr] ,kind ,value))))
 
 (def-cps-macro [module-stmt] (&rest args)
-  #+(or)(declare (ignore args))  ;; ends up in the wrong place
-  args ;; so it's used
+  (progn args) ;; suppress unused warning
   (error "Should not happen: module is not a generator."))
 
 (def-cps-macro [pass-stmt] ()
@@ -534,7 +541,9 @@ former requires that this form is executed within RECEIVE-YIELDED-VALUE."
 (def-cps-macro [return-stmt] (&optional value &environment e)
   ;; VALUE can be given, if this is inside a generator.
   (cond (value
-         (py-raise '{ValueError} "Generator may not `return' with a value."))
+         (format t "!!! return + val")
+         (raise-syntax-error "Generator ~A may not `return' with a value."
+                             (format nil "~{~A~^.~}" (reverse (get-pydecl :context-stack e)))))
         ((get-pydecl :in-sub-generator e)
          `(yield-value :explicit-return))
         (t 
@@ -556,9 +565,8 @@ former requires that this form is executed within RECEIVE-YIELDED-VALUE."
          ,(%call-continuation `(py-subs ,e-item ,e-subs))))))
 
 (def-cps-macro [suite-stmt] (stmts)
-  (cond ((null stmts)
-         (error "Empty SUITE: should be disallowed by grammar."))
-        ((null (cadr stmts))
+  (assert stmts () "Empty SUITE: should be disallowed by grammar.")
+  (cond ((null (cadr stmts))
          `(%cps-convert ,(car stmts) ,%current-continuation))
         (t
          `(%cps-convert ,(car stmts)
@@ -615,7 +623,6 @@ former requires that this form is executed within RECEIVE-YIELDED-VALUE."
          (let ((gen-state (make-generator-state ,try-suite :sub-generator t))
                (,finalization-scheduled nil))
            (labels ((run-finally (generator-finished-p)
-                      (format t "run finally ~A" generator-finished-p)
                       (with-cps-conversion (,finally-suite ,ignore)
                         (declare (ignore ,ignore))
                         ;; Whole finally-body executed -> remove finalization

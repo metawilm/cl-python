@@ -257,20 +257,21 @@ CLS is a class or tuple (list) of classes."
     (class-tuple-tester x cls #'issubclass-test)))
 
 (defun {iter} (x &optional y)
-  ;; Return iterator for iterable X
-  ;; 
-  ;; When Y supplied: make generator that calls and returns iterator
-  ;; of X until the value returned is equal to Y.
-
-  (make-iterator-from-function
-   :func (if y
-	     (let ((iterf (get-py-iterate-fun x)))
-	       (lambda () 
-		 (let ((val (funcall iterf)))
-		   (if (py-== val y)
-		       nil
-		     val))))
-	   (get-py-iterate-fun x))))
+  "Return iterator for iterable X
+When Y supplied: make generator that calls and returns iterator of X
+until the value returned is equal to Y."
+  ;; A generator is its own iterator
+  (if (and (not y) (typep x 'generator))
+      x
+    (make-iterator-from-function
+     :func (if y
+               (let ((iterf (get-py-iterate-fun x)))
+                 (lambda () 
+                   (let ((val (funcall iterf)))
+                     (if (py-== val y)
+                         nil
+                       val))))
+             (get-py-iterate-fun x)))))
 
 (defun {len} (x)
   (py-len x))
