@@ -104,7 +104,7 @@
   (generator-raise-exception g value traceback))
 
 (def-py-method generator._k :attribute (g)
-  "The current continuation of the generator."
+  "The current continuation of the generator, for debugging."
   (generator-state-function (generator-state g)))
 
 (def-py-method generator.__iter__ (g)
@@ -163,6 +163,26 @@
 (defun raise-stop-iteration () 
   (py-raise '{StopIteration} "Generator is finished."))
 
+#+(or) ;; Should be done by implementations already.
+(progn (defun optimize-funcall (form)
+         "Replace (FUNCALL (LAMBDA (X) ..) VAL) by: (LET ((X VAL)) ..)"
+         (when (and (listp form)
+                    (= 3 (length form)))
+           (destructuring-bind (fc lm val)
+               form
+             (when (and (eq fc 'funcall)
+                        (listp lm)
+                        (eq (car lm) 'lambda)
+                        (= (length (second lm)) 1))
+               #+(or)(format t "Optimizing ~A~%" form)
+               (return-from optimize-funcall
+                 `(let ((,(car (second lm)) ,val))
+                    ,@(cddr lm))))))
+         form)
+
+       (defmacro my-funcall (func &rest args)
+         (optimize-funcall `(funcall ,func ,@args))))
+
 (defmacro %cps-convert (ast k &key nil-allowed)
   (cond ((and (null ast) (not nil-allowed))
          (break "%CPS-CONVERT of NIL (k=~S)" k))
@@ -173,26 +193,12 @@
                                (error "CPS-conversion of ~A not defined (form: ~A)." (car ast) ast))))
                     `(,f ,k ,@(cdr ast))))
         (t
-         #+(or)(optimize-funcall `(funcall ,k ,ast))
-         `(progn (funcall ,k ,ast) 
+         `(progn (funcall ,k ,ast)
                  (error "fallthrough (cps convert)")))))
 
 (defmacro with-cps-conversion ((ast value &key nil-allowed) &body body)
   `(with-pydecl ((:inside-cps-conversion t)) ;; for non-cps macros for YIELD-{EXPR,STMT}
      (%cps-convert ,ast (lambda (,value) ,@body) :nil-allowed ,nil-allowed)))
-
-(defun optimize-funcall (form)
-  "Replace (FUNCALL (LAMBDA (X) ..) VAL) by: (LET ((X VAL)) ..)"
-  (when (= 3 (length form))
-    (destructuring-bind (fc lm val)
-        form
-      (when (and (eq fc 'funcall)
-                 (eq (car lm) 'lambda)
-                 (= (length (second lm)) 1))
-        (return-from optimize-funcall
-          `(let ((,(car (second lm)) ,val))
-             ,@(cddr lm))))))
-  form)
 
 (defmacro make-generator-state (suite &key sub-generator)
   `(let ((%stored-k-cons (cons nil nil)))
@@ -386,8 +392,8 @@ former requires that this form is executed within RECEIVE-YIELDED-VALUE."
           ,(%call-continuation)))
 
 (def-cps-macro [for-in-stmt] (target source suite else-suite &environment e)
-  (with-gensyms (e-source it-fun for-cont for-break-cont else-cont ignore stmt-k)
-    `(let ((,stmt-k ,%current-continuation)) 
+  (with-gensyms (e-source it-fun for-cont for-break-cont else-cont ignore for-in-stmt-k)
+    `(let ((,for-in-stmt-k ,%current-continuation)) 
        (with-cps-conversion (,source ,e-source)
          (let* ((,it-fun (get-py-iterate-fun ,e-source)))
            (labels (,@(when (contains-continue-stmt-p suite e)
@@ -395,7 +401,7 @@ former requires that this form is executed within RECEIVE-YIELDED-VALUE."
                       ,@(when (contains-break-stmt-p suite e)
                           `((%break-cont () (,for-break-cont))))
                       (,for-break-cont ()
-                        (funcall ,stmt-k nil))
+                        (funcall ,for-in-stmt-k nil))
                       (,else-cont (val)
                         (declare (ignore val))
                         ,(if else-suite
@@ -721,10 +727,10 @@ former requires that this form is executed within RECEIVE-YIELDED-VALUE."
 ;; [with-stmt]: keep?
 
 (def-cps-macro [yield-expr] (val)
-  (with-gensyms (yield-cont e-val)
-    `(let ((,yield-cont ,%current-continuation))
+  (with-gensyms (after-yield-k e-val)
+    `(let ((,after-yield-k ,%current-continuation))
        (with-cps-conversion (,val ,e-val)
-         ,(%store-continuation `(lambda (x) (funcall ,yield-cont (parse-generator-input x))))
+         ,(%store-continuation `(lambda (x) (funcall ,after-yield-k (parse-generator-input x))))
          (yield-value ,e-val)))))
     
 (def-cps-macro [yield-stmt] (&optional value)
