@@ -661,7 +661,7 @@ if f(): pass" :fail-info "Functions inherit __nonzero__ from object."))
 assert sys" :fail-info "Should work in both ANSI and Modern mode.")
   #.(progn (unless (string= (pathname-name *compile-file-truename*) "lang-test")
              (error "Compile file lang-test.lisp using compile-file (or asdf), not using temp file, ~
-                       otherwise import paths are incorrect: ~A." *compile-file-truename*))
+                     otherwise import paths are incorrect: ~A." *compile-file-truename*))
            nil)
   (let* ((new-dir #.(directory-namestring (clpython::derive-pathname *compile-file-truename* :type nil :name nil)))
          (prefix (concatenate 'string "
@@ -679,25 +679,25 @@ reload(bar)
 print 'del bar.i'
 del bar.i"))
     (clpython::%reset-import-state)
-    (macrolet ((test-stmt-runs-fine (&body body)
-                 ;; When importing a module, the conditions of type clpython::module-import-pre
-                 ;; make run-no-error fail. Therefore rely on statements returning nil (?!) by using test-false.
-                 `(test-false (run ,@body))))
-      (test-stmt-runs-fine (concatenate 'string prefix "
+    ;; When importing a module, the conditions of type clpython::module-import-pre
+    ;; make run-no-error fail. Therefore rely on statements returning nil (?!) by using test-false.
+    (test-true (prog1 t
+                 (run `,(concatenate 'string prefix "
 import bar
 for i in xrange(3):
   print 'bar.i=', bar.i, 'i=', i
   assert bar.i == i+1
-  reload(bar)"))
-      (clpython::%reset-import-state)
-      ;; run outside run-no-error
-      (clpython:run (concatenate 'string prefix "
+  reload(bar)"))))
+    (clpython::%reset-import-state)
+    ;; run outside run-no-error
+    (clpython:run (concatenate 'string prefix "
 import zut.bla"))
-      (clpython::%reset-import-state)
-      (test-stmt-runs-fine (concatenate 'string prefix "
+    (clpython::%reset-import-state)
+    (test-true (prog1 t
+                 (run `,(concatenate 'string prefix "
 for i in xrange(3):
   import zut.bla
-  assert zut.bla.x")))))
+  assert zut.bla.x"))))))
 
 (defmethod test-lang ((kind (eql :import-from-stmt)))
   (run-no-error "from sys import path; path.append('/foo'); del path[-1]"))

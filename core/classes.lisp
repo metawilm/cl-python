@@ -833,7 +833,7 @@ otherwise work well.")
         (documentation (documentation func 'function)))
     (with-output-to-string (s)
       (when fname (write-string fname s))
-      (when arglist (format s "~A" arglist))
+      (format s "~A" (or arglist "(unknown args)"))
       (when (and documentation (or fname arglist))
         (terpri s))
       (when documentation (write-string documentation s)))))
@@ -2216,7 +2216,7 @@ But if RELATIVE-TO package name is given, result may contains dots."
    (loop for k being each hash-key in x using (hash-value v)
        collect (make-tuple-from-list (list k v)))))
 
-(defconstant-once +hash-table-iterator-indefinite-extent+
+(defparameter *hash-table-iterator-indefinite-extent*
     #+allegro t
     #+lispworks nil
     #+sbcl t
@@ -2225,10 +2225,10 @@ But if RELATIVE-TO package name is given, result may contains dots."
 ANSI states for WITH-HASH-TABLE-ITERATOR:  \"It is unspecified what happens if any
 of the implicit interior state of an iteration is returned outside the dynamic extent
 of the with-hash-table-iterator form such as by returning some closure over the
-invocation form.")
+invocation form.\"")
 
 (defun make-dict-iterator (hash-table func)
-  (if +hash-table-iterator-indefinite-extent+
+  (if *hash-table-iterator-indefinite-extent*
       (with-hash-table-iterator (next-fn hash-table)
         (make-iterator-from-function
          :func (lambda () (multiple-value-bind (ok key val) (next-fn)

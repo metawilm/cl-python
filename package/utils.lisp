@@ -299,3 +299,15 @@ See function ALIST-VS-HT.")
                        (format t "~&Input/output variables (*readtable* etc) have been reset to enable debugging."))
                      (error ,c)))))
        ,@body)))
+
+(defun class-initargs-p (class &rest initargs)
+  (check-type class (or symbol class))
+  (when (symbolp class)
+    (setf class (find-class class)))
+  #+allegro
+  (unless (closer-mop:class-finalized-p class)
+    (closer-mop:finalize-inheritance class))
+  (loop for initarg in initargs
+      do (check-type initarg keyword)
+      always (loop for slot in (closer-mop:class-slots class)
+                 thereis (member initarg (closer-mop:slot-definition-initargs slot)))))

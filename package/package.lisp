@@ -151,7 +151,7 @@
 
 (defpackage :clpython.user.builtin
   (:use :clpython.user.builtin.function :clpython.user.builtin.type
-	:clpython.user.builtin.value ))
+	:clpython.user.builtin.value))
 
 (defpackage :clpython.user
   (:documentation "Identifiers")
@@ -201,7 +201,8 @@
            #:with-stack-list #:without-redefinition-warnings #:defconstant-once
            #:+max-char-code+ #:char-code-type #:ltv-find-class #:make-weak-key-hash-table
            #:schedule-finalization #:unschedule-finalization
-           #:register-feature #:with-gensyms #:with-sane-debugging #:with-line-prefixed-output))
+           #:register-feature #:with-gensyms #:with-sane-debugging #:with-line-prefixed-output
+           #:class-initarg-p))
 
 ;;; CLPYTHON.PARSER - Parser and Lexer
 
@@ -257,7 +258,7 @@
 	   ;; module status
 	   #:impl-status #:set-impl-status
 	   
-	   ;; utils
+           ;; utils
 	   ))
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
@@ -281,5 +282,3 @@
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (import 'clpython.app.repl:repl :clpython)
   (export (cons 'clpython.app.repl:repl (get-external-symbols :clpython)) :clpython))
-
-  

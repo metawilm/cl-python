@@ -95,10 +95,7 @@ CLASSDEF, FUNCDEF or LAMBDA."
                                     (walk-py-ast-1 ast :value value :target target))
                                   ret-ast
                                   :value value
-                                  :target target))
-	       
-               (break "Walking AST: invalid return value ~S (AST: ~S, F: ~S)"
-		      ret-ast ast f))))
+                                  :target target)))))
     
     (let ((*walk-build-result* build-result)
 	  (*walk-into-nested-namespaces* into-nested-namespaces)

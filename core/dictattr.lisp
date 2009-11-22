@@ -231,24 +231,24 @@ for this implementation"))
 
 ;;; Attribute lookup
 
-(defun class.attr-no-magic (class attr)
-  "Retrieve class.attr skipping magic hooks. Returns VALUE, FOUND-IN-CLS."
-  (let ((ca (get-ca class attr)))
-    (values (or (ca.class-val-dd ca)
-                (ca.class-val-non-dd ca))
-            (ca.class-val-class ca))))
+(progn
+  (defun class.attr-no-magic (class attr)
+    "Retrieve class.attr skipping magic hooks. Returns VALUE, FOUND-IN-CLS."
+    (let ((ca (get-ca class attr)))
+      #1=(values (or (ca.class-val-dd ca)
+                     (ca.class-val-non-dd ca))
+                 (ca.class-val-class ca))))
+
+  (define-compiler-macro class.attr-no-magic (class attr)
+    ;; Optimize the function calling and structure access.
+    `(locally (declare (optimize (speed 3) (safety 0) (debug 0)))
+       (let ((ca (get-ca ,class ,attr)))
+         #1#))))
 
 (defun x.class-attr-no-magic.bind (x attr)
   (let ((x.cls (py-class-of x)))
     (whereas ((m (class.attr-no-magic x.cls attr)))
       (bind-val m x x.cls)))) 
-  
-(define-compiler-macro class.attr-no-magic (class attr)
-  ;; Optimize the function calling and structure access.
-  `(locally (declare (optimize (speed 3) (safety 0) (debug 0)))
-     (let ((ca (get-ca ,class ,attr)))
-       (or (ca.class-val-dd ca)
-           (ca.class-val-non-dd ca)))))
 
 (defun instance.attr-no-magic (inst attr)
   (funky-dict-get (dict inst) attr))
@@ -361,10 +361,10 @@ Returns NIL if not found."
                        (return-from attr))
           ({__class__} (setf (py-class-of x) val)
                        (return-from attr))
-          ({__name__}  (when (and (find-class 'py-function)
-                                  (typep x 'py-function))
-                         (clpython.user::py-function.__name__-writer x val)
-                         (return-from attr))))
+          ({__name__}  (whereas ((function-class (ltv-find-class 'py-function)))
+                         (when (typep x function-class)
+                           (clpython.user::py-function.__name__-writer x val)
+                           (return-from attr)))))
         ;; 4. Dict
         (when (my-classp-1 x)
           (class.raw-attr-set x attr val)

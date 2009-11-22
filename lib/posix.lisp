@@ -64,10 +64,11 @@
 
 (defun |stat| (path)
   (declare (ignorable path))
-  (let ((stat #+allegro (handler-case (excl.osi:stat path)
-                          (excl.osi:syscall-error (c)
-                            (py-raise '{OSError} (format nil "~A" c))))
-              #-allegro (error "TODO")))
+  #-allegro (error "TODO")
+  #+allegro 
+  (let ((stat (handler-case (excl.osi:stat path)
+                (excl.osi:syscall-error (c)
+                  (py-raise '{OSError} (format nil "~A" c))))))
     (make-instance 'stat-result :stat stat)))
 
 (def-py-method stat-result.st_mode :attribute (x)

@@ -226,7 +226,7 @@ LOAD failed and was aborted by the user)."
               (return-from %load-compiled-python-file)))
           
           #+clpython-source-level-debugging
-          (progn 
+          (progn
             ;; Allegro looks for the .fasl file right next to the source file. When using e.g.
             ;; asdf-binary-locations this assumption does not hold, and Allegro fails to load
             ;; the source information. By explicitly loading the info from the fasl now,
@@ -408,7 +408,7 @@ Otherwise raises ImportError."
               (warn "Requested recompilation of ~A can not be performed: no source file available."
                     bin-file))
             (when src-file
-              (setf bin-file (compiled-file-name kind just-mod-name src-file))
+              (setf bin-file (compiled-file-name kind just-mod-name find-path))
               (unless (gethash bin-file *import-recompiled-files*)
                 (when (or force-recompile
                           (not (cached-probe-file bin-file))

@@ -22,6 +22,7 @@
 
 (asdf:defsystem :clpython.package
     :description "CLPython package and readtables"
+    :depends-on (:closer-mop)
     :components ((:module "package"
                           :components ((:file "package")
                                        (:file "utils" :depends-on ("package"))
@@ -180,6 +181,18 @@
                              Please download the latest release from: ~
                              http://files.b9.com/ptester/ptester-latest.tar.gz")
       (call-next-method))))
+
+
+#+sbcl
+(let* ((package-mod (let ((sys (asdf:find-system :clpython.package)))
+                      (car (asdf:module-components sys))))
+       (package-file (asdf:find-component package-mod "package")))
+  
+  (defmethod asdf:perform :around ((op asdf:load-op) (c (eql package-file)))
+    (handler-bind ((sb-int:package-at-variance #'muffle-warning))
+      (call-next-method))))
+    
+
 
 ;;; Show usage
 

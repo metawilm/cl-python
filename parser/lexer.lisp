@@ -543,8 +543,7 @@ C must be either a character or NIL."
                         (when ch.b
                           (check-type ch.b character)
                           (vector-push-extend ch.b res))
-                        (incf s.ix)))
-                    finally (return res))))
+                        (incf s.ix))))))
     
     (let* ((ch2 (lex-read-char))
            (ch3 (lex-read-char :eof-error nil))

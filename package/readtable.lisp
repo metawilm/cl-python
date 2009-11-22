@@ -30,12 +30,8 @@
   `(eval-when (:compile-toplevel :load-toplevel :execute)
      (setq *readtable* ,readtable-expression)))
 
-(defconstant +reader-error-has-format+
-    #+allegro t
-    #+cmu t
-    #+lispworks nil
-    #+sbcl nil
-    #-(or allegro cmu lispworks sbcl) nil)
+(defparameter *reader-error-has-format*
+    (class-initargs-p 'reader-error :format-arguments :format-control))
 
 (defun read-package-symbol-func (package start-char end-char &key intern)
   "Create a reader function that reads from start-char until endchar,
@@ -59,7 +55,7 @@ it will be interned if INTERN, otherwise an error is raised."
                               (when intern
                                 (intern name package))
                               (apply #'error 'reader-error :stream stream
-                                     (when +reader-error-has-format+
+                                     (when *reader-error-has-format*
                                        (list :format-control
                                              "No symbol named ~S in package ~S"
                                              :format-arguments
