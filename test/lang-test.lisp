@@ -863,7 +863,63 @@ class C:
 
 with C() as y:
   x.append(y)
-assert x == ['enter', 42, 'exit']"))
+assert x == ['enter', 42, 'exit']")
+  (run-error "
+x = []
+class C:
+  def __enter__(self):
+    x.append('enter')
+    return 42
+  def __exit__(self, _x,_y,_z):
+    x.append('exit')
+
+with C() as y:
+  x.append(y)
+  1/0
+" {ZeroDivisionError})
+  (run-no-error "
+def f():
+ yield 1
+ try:
+  yield 2
+  raise NameError
+ finally:
+  yield 3
+g = f()
+assert g.next() == 1
+assert g.next() == 2
+assert g.next() == 3
+try:
+  g.next()
+  assert False
+except NameError:
+  pass
+")
+  (run-no-error "
+x = None
+def f():
+ yield 1
+ try:
+  yield 2
+ finally:
+  global x
+  x = 3
+g = f()
+assert list(f()) == [1,2]
+assert x == 3")
+  (run-error "
+x = []
+class C:
+  def __enter__(self):
+    x.append('enter')
+    return 42
+  def __exit__(self, _x,_y,_z):
+    x.append('exit')
+def f():
+ with C() as y:
+  x.append(y)
+  yield 1/0
+list(f())" {ZeroDivisionError}))
 
 (defparameter *cps-tests*
     `(("pass" ())
@@ -913,22 +969,6 @@ except C, e:
 except:
   yield 3
   yield 4" (1 2 3 4))
-      ("
-try:
-  print 'start try'
-  yield 1
-  yield 2
-  1/0
-  yield 3
-  print 'end try'
-finally:
-  print 'start finally'
-  yield 40
-  yield 41
-  print 'end finally'
-print 'after try/finally'
-yield 5
-print 'still after try/finally'" (1 2 40 41))
       ("
 y = (yield 3)
 yield y" ,(list 3 *the-none*))

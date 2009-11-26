@@ -312,7 +312,6 @@ output to a string does not start with a newline."
     (format stream "~@[**~A~]"         **-arg)))
 
 
-
 (defgeneric py-pprint-literal (stream kind value))
 
 (defmethod py-pprint-literal :around (stream kind value)
@@ -382,6 +381,10 @@ output to a string does not start with a newline."
                             (t (format nil "\\0~3,vO" #\0 (char-code ch))))
                         do (write-char ch stream)))))
     (write-char delim-quote stream))) ;; closing quote
+
+(defmethod py-pprint-literal (stream (kind (eql :lisp)) x)
+  42)
+
 
 ;; Utils
 

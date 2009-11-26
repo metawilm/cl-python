@@ -13,7 +13,7 @@
 ;;;; Running Python code
 
 
-(defvar *compile-python-ast-before-running* t
+(defparameter *compile-python-ast-before-running* nil
   "Whether to compile an AST before running it.")
 
 (defun run (thing &rest args)

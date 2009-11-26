@@ -33,11 +33,11 @@
 ;;  tracebacklimit, warnoptions
 
 (defun |exc_info| ()
-  (declare (special *try-except-currently-handled-exception*))
+  (declare (special *last-raised-exception*))
   (clpython::make-tuple-from-list 
-   (if *try-except-currently-handled-exception*
-       (list (clpython::py-class-of *try-except-currently-handled-exception*)
-	     *try-except-currently-handled-exception*
+   (if *last-raised-exception*
+       (list (clpython::py-class-of *last-raised-exception*)
+	     *last-raised-exception*
 	     *the-none*) ;; traceback object
      (list *the-none* *the-none* *the-none*))))
 (set-impl-status '|exc_info| :incomplete "No traceback objects (yet).")

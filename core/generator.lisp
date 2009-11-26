@@ -387,8 +387,7 @@ former requires that this form is executed within RECEIVE-YIELDED-VALUE."
        ,res)))
 
 (def-cps-macro [exec-stmt] (&rest args)
-  `(progn (with-pydecl ((:ignore-cps-hook t))
-            ([exec-stmt] ,@args))
+  `(progn ([exec-stmt] ,@args) ;; No CPS
           ,(%call-continuation)))
 
 (def-cps-macro [for-in-stmt] (target source suite else-suite &environment e)
@@ -446,8 +445,7 @@ former requires that this form is executed within RECEIVE-YIELDED-VALUE."
 
 (def-cps-macro [identifier-expr] (name)
   (check-type name symbol)
-  (%call-continuation `(with-pydecl ((:ignore-cps-hook t))
-                         ([identifier-expr] ,name))))
+  (%call-continuation `([identifier-expr] ,name))) ;; No CPS
 
 (def-cps-macro [if-expr] (condition then else)
   (with-gensyms (c)
@@ -472,21 +470,19 @@ former requires that this form is executed within RECEIVE-YIELDED-VALUE."
           res))))
 
 (def-cps-macro [import-stmt] (&rest args)
-  `(progn (with-pydecl ((:ignore-cps-hook t))
-            ([import-stmt] ,@args))
+  `(progn ([import-stmt] ,@args) ;; No CPS
           ,(%call-continuation)))
 
 (def-cps-macro [import-from-stmt] (&rest args)
-  `(progn (with-pydecl ((:ignore-cps-hook t))
-            ([import-from-stmt] ,@args))
+  `(progn ([import-from-stmt] ,@args) ;; No CPS
           ,(%call-continuation)))
 
 (def-cps-macro [lambda-expr] ((pos-args key-args *-arg **-arg) expr)
   (let* ((kwd-val-gensyms (loop repeat (length key-args) collect (gensym "kwarg-default")))
          (new-key-args (loop for (name nil) in key-args and gensym in kwd-val-gensyms
                            collect (list name gensym)))
-         (res (%call-continuation `(with-pydecl ((:ignore-cps-hook t))
-                                     ([lambda-expr] (,pos-args ,new-key-args ,*-arg ,**-arg) ,expr)))))
+         (res (%call-continuation `([lambda-expr] ;; No CPS
+                                    (,pos-args ,new-key-args ,*-arg ,**-arg) ,expr))))
     (loop for (nil val) in (reverse key-args) for gensym in (reverse kwd-val-gensyms)
         do (setf res `(with-cps-conversion (,val ,gensym) ,res)))
     res))
@@ -515,8 +511,7 @@ former requires that this form is executed within RECEIVE-YIELDED-VALUE."
        ,(%call-continuation `(make-py-list-from-tuple ,e-tuple)))))
 
 (def-cps-macro [literal-expr] (kind value)
-  (%call-continuation `(with-pydecl ((:ignore-cps-hook t))
-                         ([literal-expr] ,kind ,value))))
+  (%call-continuation `([literal-expr] ,kind ,value))) ;; No CPS
 
 (def-cps-macro [module-stmt] (&rest args)
   (progn args) ;; suppress unused warning
@@ -561,8 +556,7 @@ former requires that this form is executed within RECEIVE-YIELDED-VALUE."
        (with-cps-conversion (,stop ,e-stop :nil-allowed t)
          (with-cps-conversion (,step ,e-step :nil-allowed t)
            ,(%call-continuation
-             `(with-pydecl ((:ignore-cps-hook t))
-                ([slice-expr] ,e-start ,e-stop ,e-step))))))))
+             `([slice-expr] ,e-start ,e-stop ,e-step))))))) ;; No CPS
     
 (def-cps-macro [subscription-expr] (item subs)
   (with-gensyms (e-subs e-item)
@@ -590,19 +584,17 @@ former requires that this form is executed within RECEIVE-YIELDED-VALUE."
               (declare (ignorable .c))
               ,(loop with res = `(error .c)
                    for (exc var handler-suite) in (reverse except-clauses)
-                   if exc
-                   do (setf res `(with-cps-conversion (,exc ,e-exc)
+                   do (setf res `(with-cps-conversion (,exc ,e-exc :nil-allowed t)
                                    (let ((applicable (typecase ,e-exc 
                                                        ;; exception class, or typle of exception classes
-                                                       (list (some (lambda (x) (typep .c x)) ,e-exc))
+                                                       (null t) ;; blank "except:" catches all
+                                                       (list (loop for x in ,e-exc thereis (typep .c x)))
                                                        (t    (typep .c ,e-exc)))))
                                      (if applicable
                                          (progn ,@(when var `(([assign-stmt] .c (,var))))
-                                                (%cps-convert ,handler-suite ,%current-continuation))
+                                                (with-last-raised-exception (.c)
+                                                  (%cps-convert ,handler-suite ,%current-continuation)))
                                        ,res))))
-                   else ;; blank "except:" catches all
-                   do (setf res `(progn ,@(when var `(([assign-stmt] .c (,var))))
-                                        (%cps-convert ,handler-suite ,%current-continuation)))
                    finally (return res)))
             (.do-else ()
               ,(if else-suite
@@ -623,37 +615,36 @@ former requires that this form is executed within RECEIVE-YIELDED-VALUE."
            (next-try-value *the-none*))))))
 
 (def-cps-macro [try-finally-stmt] (try-suite finally-suite)
-  (with-gensyms (finalization-scheduled ignore)
-    `(let ((stmt-k ,%current-continuation))
+  (with-gensyms (try-finally-stmt-k finalization-scheduled ignore)
+    `(let ((,try-finally-stmt-k ,%current-continuation))
        (block try-finally-block
          (let ((gen-state (make-generator-state ,try-suite :sub-generator t))
                (,finalization-scheduled nil))
-           (labels ((run-finally (generator-finished-p)
+           (labels ((run-finally (k)
                       (with-cps-conversion (,finally-suite ,ignore)
                         (declare (ignore ,ignore))
                         ;; Whole finally-body executed -> remove finalization
                         (when ,finalization-scheduled
                           (unschedule-finalization ,finalization-scheduled))
-                        (if generator-finished-p
-                            ,(%mark-generator-finished)
-                          (funcall stmt-k nil))))
+                        (funcall k)))
                     (next-val (val-for-generator)
                       ;; Get new val from TRY:
                       ;;  - if this results in an error, run the FINALLY (which may raise another
                       ;;    exception itself) and raise the error again;
                       ;;  - if this does not result in an error, then FINALLY is not yet run.
-                      (handler-case (receive-yielded-value (with-py-errors ()
-                                                             (generator-state-input-value gen-state val-for-generator)))
+                      (handler-case (receive-yielded-value
+                                     (with-py-errors ()
+                                       (generator-state-input-value gen-state val-for-generator)))
                         ({Exception} (c)
-                          (run-finally t)
-                          (error c))
+                          (run-finally (lambda () (error c))))
                         (:no-error (val)
                           (case val
                             ((:implicit-return :explicit-return)
                              ;; :implicit = normal end of TRY block.
                              ;; :explicit = TRY block did a RETURN, which means generator is finished.
-                             (run-finally (eq val :explicit-return))
-                             (funcall stmt-k nil))
+                             (run-finally (if (eq val :explicit-return)
+                                              (lambda () (%mark-generator-finished))
+                                            (lambda () (funcall ,try-finally-stmt-k nil)))))
                             (t
                              ;; The TRY block yields a value. Maybe the generator will never be run
                              ;; further. To ensure the FINALLY block is run some time, schedule
@@ -724,8 +715,43 @@ former requires that this form is executed within RECEIVE-YIELDED-VALUE."
                            `(funcall ,stmt-k nil))))))
          (,while-cont)))))
 
-;; [with-stmt]: keep?
+(def-cps-macro [with-stmt] (expr var block &environment e)
+  ;; Dissect the normal expansion, apply conversion to the Python part within.
+  (multiple-value-bind (expansion exp-p)
+      (macroexpand-1 `([with-stmt] ,expr ,var ,block) e)
+    (assert exp-p)
+    (destructuring-bind (with-namespace namespace suite)
+        expansion
+      (assert (eq with-namespace 'with-namespace))
+      `(,with-namespace ,namespace
+         (%cps-convert ,suite ,%current-continuation)))))
 
+#||  
+  (with-gensyms (mgr exit value no-exc exc-details c)
+    `(with-cps-conversion (,expr ,mgr)
+       (let* ((,exit (attr ,mgr '{__exit__}))
+              (,value (py-call (attr ,mgr '{__enter__})))
+              (,no-exc t))
+         (declare (ignorable ,value))
+         ;; VAR is a identifier-expr, so no CPS conversion.
+         ,@(when var `((setf ,var ,value)))
+         (let ((gen-state (make-generator-state ,suite :sub-generator t)))
+           (labels ((next-suite-value (val-for-gener)
+                      (handler-case
+                          (receive-yielded-value (with-py-errors ()
+                                                   (generator-state-input-value gen-state val-for-gener)))
+                        (error (c)
+                          (setf ,no-exc nil)
+                          ...)
+                        (:no-error (val)
+                        (case val
+                          (:implicit-return (.do-else))
+                          (:explicit-return ,(%mark-generator-finished))
+                          (t ,(%store-continuation `(lambda (val-for-gener) (next-try-value val-for-gener)))
+                             (yield-value val)))))))
+           (next-suite-value *the-none*)))
+||#
+         
 (def-cps-macro [yield-expr] (val)
   (with-gensyms (after-yield-k e-val)
     `(let ((,after-yield-k ,%current-continuation))

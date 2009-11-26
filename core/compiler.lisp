@@ -1173,7 +1173,8 @@ LOCALS shares share tail structure with input arg locals."
     (:bytes  (check-type value string)
              `(TODO-make-bytes ,value)) ;; XXX TODO
     (:number (check-type value number)
-             value)))
+             value)
+    (:lisp   value)))
 
 (defvar *habitat* nil)
 (defvar *module-preload-hook*)
@@ -1446,59 +1447,54 @@ LOCALS shares share tail structure with input arg locals."
 
 (defvar *last-raised-exception* nil)
 
+(defmacro with-last-raised-exception ((exc) &body body)
+  `(progn (setf *last-raised-exception* ,exc)
+          (unwind-protect (progn ,@body)
+            (setf *last-raised-exception* nil))))
+
 (defun raise-stmt-1 (exc &optional var tb)
   (when tb (warn "Traceback arg to RAISE ignored"))
   
   ;; ERROR does not support _classes_ as first condition argument; it
   ;; must be an _instance_ or condition type _name_.
-  (flet ((do-error (e)
-	   (setf *last-raised-exception* e)
-	   (error e)))
-    
-    (cond ((stringp (deproxy exc))
-	   (break "String exceptions are not supported (got: ~S)" (deproxy exc))
-	   (py-raise '{TypeError}
-		     "String exceptions are not supported (got: ~S)" (deproxy exc)))
-	    
-	  ((and exc var)
-	   (etypecase exc
-	     (class  (do-error (make-instance exc :args (list var))))
-	     (error  (progn (warn "RAISE: ignored arg, as exc was already an instance, not a class")
-			    (do-error exc)))))
-	  (exc
-	   (etypecase exc
-	     (class    (do-error (make-instance exc)))
-	     (error    (do-error exc))))
-	  
-	  (t
-	   (if *last-raised-exception*
-	       (error *last-raised-exception*)
-	     (py-raise '{ValueError} "There is not exception to re-raise (got bare `raise')."))))))
+  (cond ((stringp (deproxy exc))
+         (break "String exceptions are not supported (got: ~S)" (deproxy exc))
+         (py-raise '{TypeError}
+                   "String exceptions are not supported (got: ~S)" (deproxy exc)))
+        
+        ((and exc var)
+         (etypecase exc
+           (class  (error (make-instance exc :args (list var))))
+           (error  (progn (warn "RAISE: ignored arg, as exc was already an instance, not a class")
+                          (error exc)))))
+        (exc
+         (etypecase exc
+           (class    (error (make-instance exc)))
+           (error    (error exc))))
+        
+        (t
+         ;; "raise" only allowed in the dynamic scope of an except block
+         (if *last-raised-exception*
+             (error *last-raised-exception*)
+           (py-raise '{ValueError} "There is no outstanding exception to re-raise by bare `raise'.")))))
 
 (defmacro [raise-stmt] (exc var tb)
   (whereas ((s (string-literal-p exc)))
     (warn "Raising string exceptions not supported (got: 'raise ~S')" s))
   `(raise-stmt-1 ,exc ,var ,tb))
 
-(defparameter *try-except-currently-handled-exception* *the-none*
-  "Information about the currently handled exception. This is only not-None
-inside an `except' clause.")
-
 (defmacro [try-except-stmt] (suite except-clauses else-suite)
   ;; The Exception class in a clause is evaluated only after an
   ;; exception is thrown.
   (with-gensyms (the-exc)
     (flet ((handler->cond-clause (except-clause)
-	
-	     (destructuring-bind (exc var handler-suite) except-clause
-
-	       ;; Every handler should store the exception, so it can be returned
-	       ;; in sys.exc_info().
-	       (setq handler-suite
-		 `(progn (let ((*try-except-currently-handled-exception* ,the-exc))
-                           ,handler-suite)))
-	       
-	       (cond ((null exc)
+	     (destructuring-bind (exc var handler-suite) 
+                 except-clause
+               ;; Every handler should store the exception, so it can be returned
+               ;; in sys.exc_info().
+	       (setq handler-suite `(with-last-raised-exception (,the-exc)
+                                      ,handler-suite))
+               (cond ((null exc)
 		      `(t (progn ,handler-suite
 				 (return-from try-except-stmt nil))))
 		   
@@ -1508,17 +1504,17 @@ inside an `except' clause.")
                       ;; class, not possible to use `(typep ,the-exc (or ,@names))
 		      `((or ,@(loop for cls in (second exc)
                                   collect `(typep ,the-exc ,cls)))
-			(progn ,@(when var `(([assign-stmt] ,the-exc (,var))))
-			       ,handler-suite
-			       (return-from try-except-stmt nil))))
-				
-		     (t
+                        ,@(when var `(([assign-stmt] ,the-exc (,var))))
+                        ,handler-suite
+                        (return-from try-except-stmt nil)))
+               
+                     (t
 		      `((progn (try-except-ensure-valid-exception-class ,exc)
 			       (typep ,the-exc ,exc))
-			(progn ,@(when var `(([assign-stmt] ,the-exc (,var))))
-			       ,handler-suite
-			       (return-from try-except-stmt nil))))))))
-    
+                        ,@(when var `(([assign-stmt] ,the-exc (,var))))
+                        ,handler-suite
+                        (return-from try-except-stmt nil)))))))
+      
       (let ((handler-form `(lambda (,the-exc)
 			     (declare (ignorable ,the-exc))
 			     (cond ,@(mapcar #'handler->cond-clause except-clauses)))))
@@ -1593,43 +1589,48 @@ inside an `except' clause.")
     .break
      ))
 
-(defmacro [with-stmt] (expr var block)
-  "
-mgr = (EXPR)
-exit = mgr.__exit__  # Not calling it yet
-value = mgr.__enter__()
-exc = True
+(defmacro [with-stmt] (expr var block &environment e)
+  ;; When this expansion changes from the form:
+  ;;  (WITH-NAMESPACE (...) normal-python-ast)
+  ;; then the cps macro needs to be updated.
+  (with-gensyms (mgr exit value exc)
+    `(with-namespace (,(make-let-ns :names (list mgr exit value exc)
+                                    :scope :with-stmt
+                                    :parent (get-pydecl :namespace e))
+                      :define-%locals nil
+                      :define-%globals nil)
+       ,(let ((clpython.parser::*extra-identifier-char2-p* (list #\$)))
+          `([suite-stmt]
+            ,(clpython.parser::parse-with-replacements
+              "mgr$ = EXPR$
+exit$ = mgr$.__exit__  # Not calling it yet
+value$ = mgr$.__enter__()
+exc$ = True
 try:
   try:
-    VAR = value ## Only if 'as VAR' is present
-    BLOCK
+    VAR$ = value$ ## Only if 'as VAR' is present
+    BLOCK$
   except:
     # The exceptional case is handled here
-    exc = False
-    if not exit(*__clpy_sys.exc_info()):
+    exc$ = False
+    if not exit$(*exc_info$()):
       raise
     # The exception is swallowed if exit() returns true
 finally:
   # The normal and non-local-goto cases are handled here
-  if exc:
-    exit(None, None, None)
-"
-  `(let* ((mgr ,expr)
-          (exit (attr mgr '{__exit__}))
-          (value (py-call (attr mgr '{__enter__})))
-          (exc t))
-     (declare (ignorable value))
-     (unwind-protect
-         (handler-case (progn ,@(when var `((setf ,var value)))
-                              ,block)
-           ({Exception} (c)
-             (setf exc nil)
-             (unless (py-val->lisp-bool
-                      (py-apply exit (py-call (find-symbol '|exc_info| :clpython.module.sys))))
-               (error c))))
-       (when exc
-         (py-call exit *the-none* *the-none* *the-none*)))))
-
+  if exc$:
+    exit$(None, None, None)"
+              `((([identifier-expr] {EXPR$})  . ,expr)
+                (([identifier-expr] {VAR$})   . ,var)
+                (([identifier-expr] {BLOCK$}) . ,block)
+                ({mgr$}   . ,mgr)
+                ({exit$}  . ,exit)
+                ({value$} . ,value)
+                ({exc$}   . ,exc)
+                (([identifier-expr] {exc_info$})
+                 . ([literal-expr] :lisp (symbol-function
+                                       (find-symbol "exc_info" :clpython.module.sys)))))
+              :parse-options '(:incl-module nil)))))))
 
 ;; We should not come here during normal macroexpansion, as generators
 ;; are handled by the CPS convertor. However, some implementations
@@ -2230,7 +2231,6 @@ Non-negative integer denoting the number of args otherwise."
          #+(or)
          (error (lambda (c)
                   (warn "with-py-handlers passed on error: ~A" c))))
-      
       (funcall f))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;

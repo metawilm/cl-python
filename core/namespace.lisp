@@ -202,8 +202,12 @@
   (my-make-load-form ns))
 
 #+clpython-namespaces-are-classes
-(defclass let-ns (namespace)
-  ((names :accessor ns.names :initarg :names :initform :missing-initform))) ;; hack
+(progn 
+  (defclass let-ns (namespace)
+    ((names :accessor ns.names :initarg :names :initform :missing-initform)))
+  
+  (defun make-let-ns (&rest args)
+    (apply #'make-instance 'let-ns args)))
 
 #-clpython-namespaces-are-classes
 (defstruct (let-ns (:include namespace) (:conc-name ns.))

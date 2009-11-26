@@ -31,8 +31,7 @@
 
 (defpackage :clpython.module.gc
   (:use :clpython :common-lisp)
-  (:export #:|disable| )
-  (:import-from :clpython #:*try-except-currently-handled-exception*))
+  (:export #:|disable| ))
 
 (defpackage :clpython.module.imp
   (:use :clpython :common-lisp)
@@ -138,7 +137,7 @@
 	   #:|__stdin__| #:|__stdout__| #:|__stderr__|
 	   #:|api_version| #:|version_info| #:|version|
            #:|warnoptions|)
-  (:import-from :clpython #:*try-except-currently-handled-exception*))
+  (:import-from :clpython #:*last-raised-exception*))
 
 (defpackage :clpython.module.thread
   (:use :clpython :common-lisp)
