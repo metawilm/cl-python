@@ -332,6 +332,10 @@ C must be either a character or NIL."
           (<= #.(char-code #\A) code #.(char-code #\Z))
           (= code #.(char-code #\_))
           (<= #.(char-code #\0) code #.(char-code #\9))))))
+
+(defparameter *extra-identifier-char2-p* ()
+  "Characters allowed in identifiers, besides the standard ones.
+Used by compiler to generate 'forbidden' identfiers.")
         
 (defun lookup-external-symbol (sym pkg)
   (check-type sym string)
@@ -397,7 +401,8 @@ C must be either a character or NIL."
   (assert (null args))
   (let* ((start %lex-last-read-char-ix%)
          (end   (loop for c = (lex-read-char :eof-error nil)
-                    while (identifier-char2-p c)
+                    while (or (identifier-char2-p c)
+                              (member c *extra-identifier-char2-p*))
                     finally (when c (lex-unread-char))
                             (return %lex-last-read-char-ix%)))
          (str   (lex-substring start end)))
