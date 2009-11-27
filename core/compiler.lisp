@@ -1323,24 +1323,29 @@ LOCALS shares share tail structure with input arg locals."
   "If *MODULE-NAMESPACE* is bound, it is used."
   (declare (ignorable e))
   (assert ([suite-stmt-p] suite))
-  (flet ((wrap-in-funcs (suite-hash)
-           "Reason for wrapping top-level forms in functions, is that Allegro's upcoming
+  (labels ((stmt-func-name (i stmt suite-hash)
+             (ensure-user-symbol
+              (format nil "{~A[~A] \"~A\" #~A}"
+                      *current-module-name* i
+                      (clpython.package::abbreviate-to-one-line (py-pprint stmt))
+                      suite-hash)))
+           (wrap-in-funcs (suite-hash)
+             "Reason for wrapping top-level forms in functions, is that Allegro's upcoming
             source-level debugging probably only works for code inside defuns."
-           (loop for stmt in (with-matching (suite ([suite-stmt] ?stmts))
-                               ?stmts)
-               for i from 0
-               for func-name = (intern (format nil "stmt-~A.~A" i suite-hash))
-               collect (list `(defun ,func-name (%module-globals)
-                                (declare (optimize debug))
-                                (declare (ignorable %module-globals)) ;; when using a package-ns for module globals
-                                (with-module-toplevel-context ()
-                                  (with-py-errors (:name ,(intern (format nil "python-module ~A" *current-module-name*) #.*package*))
-                                    (with-stmt-decl ()
-                                      ,stmt))))
-                             func-name))))
+             (loop for stmt in (with-matching (suite ([suite-stmt] ?stmts)) ?stmts)
+                 for i from 0
+                 for func-name = (stmt-func-name i stmt suite-hash)
+                 collect (list `(defun ,func-name (%module-globals)
+                                  (declare (optimize debug))
+                                  (declare (ignorable %module-globals)) ;; when using a package-ns for module globals
+                                  (with-module-toplevel-context ()
+                                    (with-py-errors (:name ,(intern (format nil "python-module ~A" *current-module-name*) #.*package*))
+                                      (with-stmt-decl ()
+                                        ,stmt))))
+                               func-name))))
     ;; Because using uninterned symbols gives some problems with Allegro's source form recording, give 
     ;; the functions a practically unique name based on the suite.
-    (let* ((suite-hash (sxhash suite))
+    (let* ((suite-hash (sxhash (format nil "~A" suite)))
            (module-function-name #+(or)(make-symbol (format nil "~A.__module_init__" *current-module-name*))
                                 (intern (format nil "~A.__module_init__.~A" *current-module-name* suite-hash)
                                         #.*package*))

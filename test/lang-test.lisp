@@ -656,18 +656,24 @@ assert b(-2) == -1")
 if f(): pass" :fail-info "Functions inherit __nonzero__ from object."))
 
 (defmethod test-lang ((kind (eql :import-stmt)))
-  (clpython::%reset-import-state)
-  (run-no-error "import sys
-assert sys" :fail-info "Should work in both ANSI and Modern mode.")
-  #.(progn (unless (string= (pathname-name *compile-file-truename*) "lang-test")
+  #.(progn (unless (string= (pathname-name (or *compile-file-truename*
+                                               *load-truename*))
+                            "lang-test")
              (error "Compile file lang-test.lisp using compile-file (or asdf), not using temp file, ~
                      otherwise import paths are incorrect: ~A." *compile-file-truename*))
            nil)
-  (let* ((new-dir #.(directory-namestring (clpython::derive-pathname *compile-file-truename* :type nil :name nil)))
+  (let* ((new-dir #.(directory-namestring (clpython::derive-pathname
+                                           (or *compile-file-truename* *load-truename*)
+                                           :type nil :name nil)))
          (prefix (concatenate 'string "
 import sys
 sys.path.append('" (coerce (loop for c across new-dir if (char= c #\\) collect #\\ and collect #\\ else collect c) 'string) "data')" (string #\Newline))))
     (format t "prefix: ~S~%" prefix)
+    
+    (clpython::%reset-import-state)
+    (run-no-error "import sys
+assert sys" :fail-info "Should work in both ANSI and Modern mode.")
+    
     (clpython::%reset-import-state)
     ;; run compilation outside run-no-error, to prevent allegro style warning from failing the test
     (clpython:run (concatenate 'string prefix "
@@ -678,6 +684,7 @@ print 'reload'
 reload(bar)
 print 'del bar.i'
 del bar.i"))
+    
     (clpython::%reset-import-state)
     ;; When importing a module, the conditions of type clpython::module-import-pre
     ;; make run-no-error fail. Therefore rely on statements returning nil (?!) by using test-false.
@@ -688,16 +695,22 @@ for i in xrange(3):
   print 'bar.i=', bar.i, 'i=', i
   assert bar.i == i+1
   reload(bar)"))))
+    
     (clpython::%reset-import-state)
     ;; run outside run-no-error
     (clpython:run (concatenate 'string prefix "
-import zut.bla"))
+print '4a'
+import zut.bla
+print '4b'"))
+  
     (clpython::%reset-import-state)
     (test-true (prog1 t
                  (run `,(concatenate 'string prefix "
+print '5a'
 for i in xrange(3):
   import zut.bla
-  assert zut.bla.x"))))))
+  assert zut.bla.x
+  print '5b'"))))))
 
 (defmethod test-lang ((kind (eql :import-from-stmt)))
   (run-no-error "from sys import path; path.append('/foo'); del path[-1]"))

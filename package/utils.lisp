@@ -251,8 +251,13 @@ See function ALIST-VS-HT.")
   (error "QUIT not-implemented in this implementation"))
 
 (defun abbreviate-to-one-line (string)
+  (loop for i from 0
+      for ch across string
+      while (char= ch #\Newline)
+      finally (when (plusp i)
+                (setf string (subseq string i))))
   (whereas ((ix (position #\Newline string)))
-    (setf string (concatenate 'string (subseq string 0 ix) "...")))
+    (setf string (concatenate 'string (subseq string 0 ix) " ...")))
   string)
 
 (defun abbreviate-string (string max-length)
