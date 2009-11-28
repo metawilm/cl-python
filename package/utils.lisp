@@ -105,7 +105,7 @@ If the stream length can not be determined (e.g. for standard input), all availa
                            (let* ((vec (make-array (file-length stream) :element-type array-element-type))
                                   (num-read (read-sequence vec stream)))
                              (adjust-array vec num-read))
-                         (prog1 (coerce (loop for ch = (read-char-no-hang stream) while ch collect ch)
+                         (prog1 (coerce (loop for ch = (read-char-no-hang stream nil nil) while ch collect ch)
                                         'string)
                            (setf array-element-type 'character)))))
              (cond ((equal array-element-type 'character)

@@ -47,12 +47,7 @@ Most important options:
            (apply #'parse (slurp-file x) options))
 
   (:method ((x stream) &rest options)
-           (let* ((length (or (file-length x)
-                              (error "Parsing failed: cannot determine length of stream ~A." x)))
-                  (seq (make-string length))
-                  (n (read-sequence seq x)))
-             (setf seq (adjust-array seq n))
-             (apply #'parse seq options))))
+             (apply #'parse (slurp-file x) options)))
 
 (defmacro with-source-locations (&body body)
   `(let (#+clpython-source-level-debugging
