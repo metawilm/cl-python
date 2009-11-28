@@ -1265,6 +1265,22 @@ LOCALS shares share tail structure with input arg locals."
   (print-unreadable-object (x stream :type t)
     (format stream ":module ~A" (mip.module x))))
 
+(defun describe-py-fasl (fasl)
+  (check-type fasl pathname)
+  (handler-case (progn (load fasl) (values))
+    (module-import-pre (mip)
+      (format t "~&Python fasl file~% ~A~%" fasl)
+      (let ((m (mip.module mip)))
+        (format t "  Python module: `~A'~%" (module-name m))
+        (format t "  original source: ~A~%" (module-src-pathname m))
+        (format t "  original fasl: ~A~%" (module-src-pathname m))
+        (format t "  CLPython compiler version id: ~A~@[~A~]~%"
+                (mip.compiler-id mip)
+                (unless (fasl-matches-compiler-p (mip.compiler-id mip))
+                  " (incompatible with current CLPython version)"))))
+    (:no-error ()
+      (error "~A is not a Python fasl file." fasl))))
+
 (defvar *load-file->module* (make-hash-table :test 'equal)
   "Mapping from loading file name to Python module")
 
