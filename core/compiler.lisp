@@ -10,19 +10,54 @@
 (in-package :clpython)
 (in-syntax *ast-user-readtable*)
 
-;;; Python compiler
+;;;; Python compiler
 
-;; Translates a Python module AST into a Lisp function.
-;; 
-;; Each node in the s-expression returned by the
-;; parse-python-{file,string} corresponds to a macro defined below
-;; that generates the corresponding Lisp code.
-;; 
-;; Each such AST node has a name ending in "-expr" or "-stmt", they are
-;; in the :clpython.ast.node package.
-;; 
-;; In the macro expansions, lexical variables that keep context state
-;; have a name like +NAME+.
+
+;;; Python source files are compiled to fasl files. A way is needed to mark
+;;; the compiler version used to produce the fasl, so outdated fasls can be
+;;; automatically recompiled if the corresponding source file is available.
+;;;
+;;; As the "compiler version" is mostly determined by the macros below, it
+;;; seems sound to take the hash of _this_ source file as compiler id.
+
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (defparameter *clpython-compiler-version-id* 
+      #.(let* ((old-id (when (boundp '*clpython-compiler-version-id*)
+                         (symbol-value '*clpython-compiler-version-id*)))
+               (new-id (cond (*compile-file-truename* (sxhash (slurp-file *compile-file-truename*)))
+                             (*load-truename* (sxhash (slurp-file *load-truename*)))
+                             (t (warn "Can't calculate CLPython compiler version id.")
+                                -1))))
+          (when (and old-id (/= old-id new-id))
+            (format t "~&;; CLPython compiler version id has changed, from ~A to ~A." old-id new-id))
+          new-id)
+      "CLPython compiler version, stored in Python fasl files and checked at load time."))
+
+(eval-when (:load-toplevel)
+  #+(or)(format t "~&;; CLPython compiler version id: ~A.~%" *clpython-compiler-version-id*))
+
+(defun fasl-matches-compiler-p (fasl-compiler-version-id)
+  (= fasl-compiler-version-id *clpython-compiler-version-id*))
+
+(defun fasl-mismatch-cerror (fasl-name)
+  (cerror "Continue anyway with outdated fasl file ~A"
+          "Python fasl file ~A was created by another version of the CLPython compiler. ~
+           The fasl code may not work with the current CLPython runtime. ~
+           It is best to recompile the Python source, then load the new fasl."
+          fasl-name))
+  
+
+;;; Translates a Python module AST into a Lisp function.
+;;; 
+;;; Each node in the s-expression returned by the
+;;; parse-python-{file,string} corresponds to a macro defined below
+;;; that generates the corresponding Lisp code.
+;;; 
+;;; Each such AST node has a name ending in "-expr" or "-stmt", they are
+;;; in the :clpython.ast.node package.
+;;; 
+;;; In the macro expansions, lexical variables that keep context state
+;;; have a name like +NAME+.
 
 ;;; Language Semantics
 
@@ -1217,7 +1252,8 @@ LOCALS shares share tail structure with input arg locals."
 
 
 (define-condition module-import-pre ()
-  ((module :initarg :module :accessor mip.module)
+  ((compiler-id :initarg :compiler-id :accessor mip.compiler-id)
+   (module :initarg :module :accessor mip.module)
    (module-new-p :initarg :module-new-p :accessor mip.module-new-p)
    (source :initarg :source :accessor mip.source)
    (source-func :initarg :source-func :accessor mip.source-func)
@@ -1278,7 +1314,9 @@ LOCALS shares share tail structure with input arg locals."
                                 `((sb-ext:muffle-conditions sb-ext:compiler-note))))
      ,@body))
 
-(defun module-init (&key src-pathname bin-pathname current-module-name defun-wrappers source source-func)
+(defun module-init (&key src-pathname bin-pathname current-module-name
+                         defun-wrappers source source-func
+                         (compiler-id (error "compiler-id is required")))
   (multiple-value-bind (module module-new-p)
       (ensure-module :src-pathname src-pathname :bin-pathname bin-pathname :name current-module-name)
     (let ((%module-globals (module-ht module)))
@@ -1297,6 +1335,7 @@ LOCALS shares share tail structure with input arg locals."
         ;; Give outer function a chance to influence module loading actions:
         (restart-case
             (progn (signal 'module-import-pre
+                           :compiler-id compiler-id
                            :module module
                            :module-new-p module-new-p
                            :source source
@@ -1304,6 +1343,8 @@ LOCALS shares share tail structure with input arg locals."
                            :init-func #'init-module
                            :run-tlv-func #'run-top-level-forms)
                    ;; If not overruled, take the normal loading steps:
+                   (unless (fasl-matches-compiler-p compiler-id)
+                     (fasl-mismatch-cerror bin-pathname))
                    (invoke-restart 'continue-loading
                                    :init module-new-p
                                    :run-tlv t
@@ -1366,8 +1407,7 @@ LOCALS shares share tail structure with input arg locals."
                         :source ,(when *compile-file-truename*
                                    (slurp-file (derive-pathname *compile-file-truename*)))
                         :source-func ',module-function-name
-                        #+(or)(cons (symbol-function ',module-function-name)
-                                    (mapcar #'symbol-function ',(mapcar #'first defun-wrappers)))))
+                        :compiler-id ,*clpython-compiler-version-id*)) 
          
          ;; suppress spurious warning about undefined function, by going via symbol-function
          (funcall (symbol-function ',module-function-name))))))

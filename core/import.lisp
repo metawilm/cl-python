@@ -267,6 +267,13 @@ LOAD failed and was aborted by the user)."
                             ;; Need to register module before it is fully loaded,
                             ;; otherwise infinite recursion if two modules import
                             ;; each other.
+                            
+                            (unless (fasl-matches-compiler-p (mip.compiler-id c))
+                              (whereas ((r (find-restart 'delete-fasl-try-again)))
+                                (format t "~&;; Recompiling obsolete Python fasl file.~%")
+                                (invoke-restart r))
+                              (fasl-mismatch-cerror bin-filename))
+                            
                             (add-loaded-module (mip.module c) habitat)
                             (when (mip.module-new-p c)
                               (setf new-module-p t))
