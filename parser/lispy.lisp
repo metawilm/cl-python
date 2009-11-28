@@ -28,8 +28,10 @@ The alternative empty tuple notatation '(,)' is currently treated the same as '(
 as the invalid Lisp form (,) that leads to a syntax error (comma not inside backquote).
 The comma does makes this input unambiguously Pythonic, but that fact gets lost during parsing."))
   
-(defun limited-parse (&rest args)
-  (let ((result (apply #'parse args)))
+(defun limited-parse (object &rest args)
+  "Try to parse STRING as Python source code, but if it denotes an ambiguous
+expression that should be interpreted as Lisp code, signals AMBIGUOUS-INPUT-IS-LISP-CONDITION."
+  (let ((result (apply #'parse object args)))
     (with-perhaps-matching (result
                             ([module-stmt] ([suite-stmt] (([bracketed-expr] ([identifier-expr] ?name))))))
       (error 'ambiguous-input-is-lisp-condition))
@@ -53,31 +55,58 @@ The comma does makes this input unambiguously Pythonic, but that fact gets lost 
   ;; It's pretty tricky to make this work fine in the REPLs of the different implementations,
   ;; due to differences in at what moments the REPL passes a line to the readtable function
   ;; (after a char, a line) and whether newline is included.
-  (flet ((normalize-all (str)
-           (if (or (string= str #.(coerce '(#\Newline) 'string)) ;; Allegro, SBCL
-                   (string= str #.(coerce '(#\Null) 'string))) ;; Allegro: empty input
-               ""
-             str)))
-    (loop with all = (normalize-all (clpython.package::slurp-file stream))
-        with last-char = (and (> (length all) 1) ;; prevent infinite recursion reading-unreading #\Newline (SBCL)
-                              (char= (aref all (1- (length all))) #\Newline)
-                              #\Newline)
-        until (progn #+(or)(warn "last-char: ~S all: ~S" last-char (loop for x across all collect x))
-                     (and (position #\Newline all)
-                          ;; SBCL: check for remaining chars, for the case: "def f(x):^J  return x"
-                          ;; otherwise only first line upto ':' would be parsed.
-                          (not (let ((ch (read-char-no-hang stream))) 
-                                 (prog1 ch
-                                   (when ch (unread-char ch stream)))))
-                          (not (eq :incomplete (read-lispy-toplevel-forms all :lisp-readtable lisp-readtable :interactive-p interactive-p)))))
-              
-        do (setf all (normalize-all (concatenate 'string all (string (setf last-char (read-char stream))))))
-        finally (when (eql last-char #\Newline)
-                  (unread-char last-char stream)) ;; Letting implementation handle #\Newline seems to trigger printing of result
-                (return (read-lispy-toplevel-forms all :lisp-readtable lisp-readtable :interactive-p interactive-p)))))
+  (labels ((normalize-input (str)
+             (if (and (= 1 (length str))
+                      (member (aref str 0) '(#\Newline ;; Allegro, SBCL
+                                             #\Return ;; ?
+                                             #\Null))) ;; Allegro: empty input
+                 ""
+               str))
+           (string-has-enter-p (all)
+             (check-type all string)
+             (or (position #\Newline all) (position #\Return all)))
+           (input-pending-p (stream)
+             (check-type stream stream)
+             (let ((ch (read-char-no-hang stream nil nil t))) 
+               (prog1 ch
+                 (when ch (unread-char ch stream)))))
+           (parse-string-toplevel-forms (string)
+             (check-type string string)
+             (let ((res (read-lispy-toplevel-forms string
+                                                   :lisp-readtable lisp-readtable
+                                                   :interactive-p interactive-p)))
+               (format t "~&[parse-string-toplevel-forms ~S~& -> ~S]~&" string res)
+               res))
+           (input-semantically-finished-p (string)
+             (check-type string string)
+             (not (eq :incomplete (parse-string-toplevel-forms string)))))
+    
+    (loop with all = (normalize-input (clpython.package::slurp-file stream))
+        for dummy = (format t "~&[iter all: ~S]~&" (coerce all 'list))
+        until (and (string-has-enter-p all)
+                   (not (input-pending-p stream))
+                   (input-semantically-finished-p all))
+        do (or dummy)
+           (let ((next-char (read-char stream t))) ;; really expect more chars, so error if not
+             (check-type next-char character)
+             (setf all (normalize-input (concatenate 'string all (string next-char)))))
+        finally (let ((unread-newline #+allegro nil
+                                      #+ccl nil
+                                      #+sbcl t
+                                      #-(or allegro ccl sbcl) nil))
+                  ;; In some implementations, leaving the #\Newline triggers printing new prompt.
+                  (when (and unread-newline
+                             (plusp (length all))
+                             (eql (aref all (1- (length all))) #\Newline))
+                    (unread-char #\Newline stream)))
+                (format t "[finish all: ~S]" (coerce all 'list))
+                (when (zerop (length all))
+                  (break "zero all"))
+                (return (parse-string-toplevel-forms all)))))
 
 (defmethod read-lispy-toplevel-forms ((string string) &key lisp-readtable interactive-p)
-  "Returns a list of Python and Lisp source elements, like: ((handle-python <python-ast>) (handle-lisp <sexpr>) ..)
+  "Returns a list of Python and Lisp source elements, like:
+\((handle-python <python-ast>) (handle-lisp <sexpr>) ..)
 or (in case of INTERACTIVE-P) the error status :INCOMPLETE"
   ;; XXX introduce Lisp package parameter?
   (labels ((print-error-with-source (message source)
@@ -96,7 +125,7 @@ or (in case of INTERACTIVE-P) the error status :INCOMPLETE"
     (macrolet ((with-errors-handled ((source error-prefix-string &rest formatargs) &body body)
                  (check-type error-prefix-string string)
                  `(handler-bind
-                      ((error (lambda (c) (handle-error c ,source ,@formatargs))))
+                      ((error (lambda (c) (handle-error c ,source ,error-prefix-string ,@formatargs))))
                     ,@body)))
       
       (loop with start-ix = 0
@@ -106,7 +135,7 @@ or (in case of INTERACTIVE-P) the error status :INCOMPLETE"
           do (setf last-python-incomplete-p nil)
              (let ((rest-string (subseq string start-ix))
                    (next-start-ix nil))
-               (multiple-value-bind (ast error)
+               (multiple-value-bind (python-ast error)
                    (handler-case
                        (handler-bind ((toplevel-form-finished-condition
                                        ;; Catching this is a hack to get to know the character position
@@ -118,9 +147,10 @@ or (in case of INTERACTIVE-P) the error status :INCOMPLETE"
                                                      (+ start-ix next-start-ix)
                                                      (subseq string (+ start-ix next-start-ix))))))
                          (values (let ((*signal-toplevel-form-finished-conditions* t))
-                                   (limited-parse rest-string #| :incl-module nil |#))))
+                                   (limited-parse rest-string))))
                      (ambiguous-input-is-lisp-condition (c)
-                       (assert next-start-ix) ;; parsing went fine, but should be treated as Lisp code instead.
+                       ;; Parsing went fine, but REST-STRING should be treated as Lisp code instead.
+                       (assert next-start-ix)
                        (setf next-start-ix nil)
                        (values nil c))
                      ({SyntaxError} (c) ;; includes subclass {UnexpectedEofError}
@@ -128,14 +158,14 @@ or (in case of INTERACTIVE-P) the error status :INCOMPLETE"
                          (setf last-python-incomplete-p t))
                        (setf next-start-ix nil)
                        (values nil c))
-                     (:no-error (ast)
+                     (:no-error (python-ast)
                        (incf start-ix next-start-ix)
                        (setf next-start-ix nil)
-                       (values ast nil)))
+                       (values python-ast nil)))
                  #+(or)(warn "ast=~A error={~A}  start-ix=~A next-start-ix=~A res=~S" ast error start-ix next-start-ix res)
                  (cond ((not error)
                         ;; REST-STRING contains only Python code.
-                        (push `(handle-python ,ast) res))
+                        (push `(handle-python ,python-ast) res))
 
                        (next-start-ix
                         ;; At [START-IX] there is a valid Python top-level form. Lisp code starts at [START-IX + NEXT-START-IX-LIST].
@@ -162,6 +192,8 @@ or (in case of INTERACTIVE-P) the error status :INCOMPLETE"
                                                        (return-from read-lispy-toplevel-forms :incomplete)))
                                         (reader-error (lambda (c)
                                                         (declare (ignore c))
+                                                        (format t "reader-error: interactive-p=~A last-python-incomplete-p=~A"
+                                                                interactive-p last-python-incomplete-p)
                                                         (when (and interactive-p last-python-incomplete-p)
                                                           (return-from read-lispy-toplevel-forms :incomplete)))))
                            (let ((*readtable* (or lisp-readtable *standard-readtable*)))
@@ -217,18 +249,20 @@ with the addition of ~ as a prefix for a Python expression.")
   `(eval-when (:compile-toplevel :load-toplevel :execute)
      (if (eq *readtable* *lispy-readtable*)
          (warn "The mixed Lisp/Python syntax mode was already enabled.")
-       (with-line-prefixed-output (";; ")
-         (format t "The mixed Lisp/Python syntax mode is now enabled: custom *readtable* is set. ~%")
-         (format t "This readtable will also used by functions like READ and COMPILE-FILE. ~%")
-         (format t "To reset the mode: (~S)" 'exit-mixed-lisp-python-syntax)))
-     (setq *readtable* *lispy-readtable*)
+       (progn (terpri)
+              (with-line-prefixed-output (";; ")
+                (format t "The mixed Lisp/Python syntax mode is now enabled: custom *readtable* is set. ~%")
+                (format t "This readtable will also used by functions like READ and COMPILE-FILE. ~%")
+                (format t "To reset the mode: (~S)" 'exit-mixed-lisp-python-syntax))
+              (setq *readtable* *lispy-readtable*)))
      (values)))
 
 (defmacro exit-mixed-lisp-python-syntax ()
   `(eval-when (:compile-toplevel :load-toplevel :execute)
      (if (eq *readtable* *lispy-readtable*)
-         (with-line-prefixed-output (";; ")
-           (format t "The mixed Lisp/Python syntax mode is now disabled: *readtable* is reset to the standard readtable."))
+         (progn (terpri)
+                (with-line-prefixed-output (";; ")
+                  (format t "The mixed Lisp/Python syntax mode is now disabled:~% *readtable* is reset to the standard readtable.")))
        (warn "The mixed Lisp/Python syntax mode was not enabled."))
      (setq *readtable* (copy-readtable nil))
      (values)))
@@ -290,3 +324,5 @@ with the addition of ~ as a prefix for a Python expression.")
                                    :module-globals *lispy-package*
                                    :compile *lispy-compile-python*
                                    :compile-quiet t)))))
+
+
