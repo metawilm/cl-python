@@ -52,7 +52,7 @@
   "Execution of each expression is profiled according to this setting.
 Possible values: :time :ptime :space :pspace nil")
 
-(defvar *repl-compile* t
+(defvar *repl-compile* nil
   "Whether code typed in the REPL is compiled before running.")
 
 (defvar *ignore-copied-prompts* t
