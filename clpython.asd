@@ -186,13 +186,21 @@
 #+sbcl
 (let* ((package-mod (let ((sys (asdf:find-system :clpython.package)))
                       (car (asdf:module-components sys))))
-       (package-file (asdf:find-component package-mod "package")))
+       (package-file (asdf:find-component package-mod "package"))
+       (lib-mod (let ((sys (asdf:find-system :clpython.lib)))
+                  (car (asdf:module-components sys))))
+       (lib-pkg-file (asdf:find-component lib-mod "psetup"))
+       (pkg-files (list package-file lib-pkg-file)))
   
-  (defmethod asdf:perform :around ((op asdf:load-op) (c (eql package-file)))
-    (handler-bind ((sb-int:package-at-variance #'muffle-warning))
-      (call-next-method))))
+  (dolist (pkg-file pkg-files)
     
-
+    (defmethod asdf:perform :around ((op asdf:compile-op) (c (eql pkg-file)))
+      (handler-bind ((sb-int:package-at-variance #'muffle-warning))
+        (call-next-method)))
+    
+    (defmethod asdf:perform :around ((op asdf:load-op) (c (eql pkg-file)))
+      (handler-bind ((sb-int:package-at-variance #'muffle-warning))
+        (call-next-method)))))
 
 ;;; Show usage
 
