@@ -49,29 +49,78 @@
             (%get-py-file-name kind modname filepath type))
           *py-source-file-types*))
 
-(defparameter *use-asdf-binary-locations* t
-  "Whether to store fasl files in directory determined by asdf-binary-locations.")
+(defparameter *use-asdf-fasl-locations* t
+  "Whether to store fasl files in the place determined by ASDF.
+In particular, asdf-binary-locations is used if available.")
 
 (defgeneric compiled-file-name (kind modname filepath)
   (:method :around (kind modname filepath)
-           (declare (ignore filepath kind))
+           (declare (ignore kind) (ignorable filepath))
            (check-type modname string)
-           (let ((bin-path (call-next-method))
-                 bin-path-2)
-             (when *use-asdf-binary-locations*
-               (setf bin-path-2 
-                 (ignore-errors
-                  (let ((new-path (car (asdf:output-files
-                                        (make-instance 'asdf:compile-op)
-                                        (make-instance 'asdf:cl-source-file
-                                          :parent (asdf:find-system :clpython)
-                                          :pathname bin-path)))))
-                    (when new-path
-                      (setf new-path (ensure-directories-exist new-path)))))))
-             (or bin-path-2 bin-path)))
+           (let* ((bin-path (call-next-method))
+                  (asdf-path (when *use-asdf-fasl-locations*
+                               (ignore-errors
+                                (let ((path (car (asdf:output-files
+                                                  (make-instance 'asdf:compile-op)
+                                                  (make-instance 'asdf:cl-source-file
+                                                    :parent (asdf:find-system :clpython)
+                                                    :pathname bin-path)))))
+                                  (when path
+                                    (ensure-directories-exist path))))))
+                  (result-path (or asdf-path bin-path)))
+             #+allegro
+             (unless (file-writable-p result-path)
+               ;; Fall back to using a temporary file.
+               (whereas ((temp-file (get-temporary-fasl-file filepath modname)))
+                 (setf result-path temp-file)))
+             result-path))
   
   (:method (kind modname filepath)
            (%get-py-file-name kind modname filepath *py-compiled-file-type*)))
+
+(defparameter *temp-fasl-file-map* (make-hash-table :test 'equal)
+  "Mapping from Python source file to corresponding temporary fasl file.")
+
+(defun get-temporary-fasl-file (src-file modname)
+  (declare (ignorable modname))
+  (multiple-value-bind (file found-p)
+      (gethash src-file *temp-fasl-file-map*)
+    (when found-p
+      (return-from get-temporary-fasl-file file)))
+  #+allegro
+  (flet ((determine-temp-file ()
+           #+allegro
+           (let* ((temp-dir (sys:temporary-directory))
+                  ;; temp-dir might contain ~ as in C:\DOCUME~1\.. so careful with FORMAT
+                  (fname-formatter (lambda (i)
+                                     (format nil "~Aclpython.~A.~A.~A.fasl"
+                                             temp-dir modname (random 1000000) i))))
+             (dotimes (i 1000)
+               (let ((fname (funcall fname-formatter i)))
+                 (unless (probe-file fname)
+                   (when (file-writable-p fname)
+                     (return-from determine-temp-file fname)))))
+             (warn "Could not determine temporary fasl file in tempdir ~A." temp-dir)
+             nil)))
+    (setf (gethash src-file *temp-fasl-file-map*)
+      (pathname (determine-temp-file))))
+  #-allegro
+  (progn (break "No temporary-file functionality available in this implementation.")
+         nil))
+
+(defun file-writable-p (f)
+  (handler-case
+      (and (with-open-file (file f :direction :output :if-exists :supersede)
+             (declare (ignorable file))
+             t)
+           ;; Deleting the file is important, as e.g. Allegro happily loads
+           ;; zero-length fasl files, leading to bogus Python import behavior.
+           (delete-file f)
+           (prog1 t ;; DELETE-FILE returns T, or FILE-ERROR
+             (cached-probe-file f t)))
+    (file-error () nil)
+    ;; I don't expect errors other than FILE-ERROR, but who knows.
+    (error () nil)))
 
 (defun lisp-package-as-py-module (modname)
   "Return Lisp package with given name.
@@ -174,7 +223,7 @@ Caller is responsible for deciding if recompiling is really necessary."
     "Python source file ~A does not exist" filename)
   (let ((*current-module-path* filename) ;; used by compiler
         (*current-module-name* mod-name))
-    (with-auto-mode-recompile (:verbose *import-compile-verbose*)
+    (with-auto-mode-recompile (:verbose *import-compile-verbose* :filename filename)
       (with-noisy-compiler-warnings-muffled
           (with-proper-compiler-settings
               (clpython.parser::with-source-locations
@@ -201,10 +250,16 @@ LOAD failed and was aborted by the user)."
   (check-type mod-name (or symbol string))
   (check-type context-mod-name (or symbol string))
   (assert (cached-probe-file bin-filename t))
+
+  #+sbcl ;; SBCL only forces loading as fasl, if extension is _lower-case_ 'fasl' (2009.11.26)
+  (when (string= (pathname-type bin-filename) *py-compiled-file-type*)
+    (setf bin-filename
+      (merge-pathnames (make-pathname :type (string-downcase *py-compiled-file-type*))
+                       bin-filename)))
   
   (let (module new-module-p success source-func source)
     (unwind-protect
-        (handler-bind ((module-import-pre 
+        (handler-bind ((module-import-pre
                         (lambda (c)
                           ;; Being muffled means condition was intended for an earlier handler,
                           ;; corresponding to a nested inner import action.
@@ -219,8 +274,9 @@ LOAD failed and was aborted by the user)."
                             (setf (mip.muffled c) t)
                             (setf source-func (mip.source-func c))
                             (setf source (mip.source c))))))
-          
-          (with-auto-mode-recompile (:verbose *import-load-verbose* :restart-name delete-fasl-try-again)
+
+          (with-auto-mode-recompile (:filename bin-filename :verbose *import-load-verbose*
+                                               :restart-name delete-fasl-try-again)
             (unless (load bin-filename :verbose *import-load-verbose*)
               ;; Might happen if loading errs and there is a restart that lets LOAD return NIL.
               (return-from %load-compiled-python-file)))
@@ -246,7 +302,9 @@ LOAD failed and was aborted by the user)."
     
       (unless success
         (when new-module-p
-          (remove-loaded-module module habitat))))))
+          ;; It's a hack that there are two places:
+          (remove-loaded-module module habitat)
+          (remhash module *all-modules*))))))
 
 (defun module-dotted-name (list-name)
   (format nil "~{~A~^.~}" list-name))
@@ -291,6 +349,9 @@ operation on the same path again and again during one import action.")
 (defun make-probe-file-cache ()
   (make-hash-table :test 'equal))
 
+(defun delete-probe-file-entry (name)
+  (remhash name *import-probe-file-cache*))
+
 (defun cached-probe-file (name &optional update-cache)
   (unless *import-probe-file-cache*
     (return-from cached-probe-file (probe-file name)))
@@ -325,7 +386,7 @@ Otherwise raises ImportError."
   (check-type habitat habitat)
   (loop
     (catch 'py-import-retry
-  
+
       ;; Builtin modules are represented by Lisp module child packages of clpython.module
       ;; (e.g. clpython.module.sys).
       (when (= (length mod-name-as-list) 1)
@@ -338,13 +399,13 @@ Otherwise raises ImportError."
         ;; If name already registered in sys.modules, return it.
         ;; (Example: os.py sets the "os.path" entry)
         ;; XXX this should not happen for e.g. module "dist", as that is in either "distutils.dist" or "setuptools.dist".
-    ;; Need to figure out the exact rule; use this dot check for now.
+        ;; Need to figure out the exact rule; use this dot check for now.
         (unless force-reload
           (whereas ((mod (gethash dotted-name (find-symbol-value '#:|modules| :clpython.module.sys))))
             (return-from py-import (values mod :sys.modules))))
            
         ;; In case of a dotted import ("import a.b.c"), recursively import the parent "a.b"
-    ;; and set the search path to only the location of that package.
+        ;; and set the search path to only the location of that package.
         (when (> (length mod-name-as-list) 1)
           (let (parent)
             (unwind-protect
@@ -411,7 +472,7 @@ Otherwise raises ImportError."
               (setf bin-file (compiled-file-name kind just-mod-name find-path))
               (unless (gethash bin-file *import-recompiled-files*)
                 (when (or force-recompile
-                          (not (cached-probe-file bin-file))
+                          (not (cached-probe-file bin-file)) ;; the T should not be necessary?
                           (< (file-write-date bin-file)
                              (file-write-date src-file)))
                   ;; This would be a good place for a "try recompiling" restart,
@@ -441,29 +502,52 @@ Otherwise raises ImportError."
                                          dotted-name))
                   (new-module 'uninitialized))
               (unwind-protect
-                  (restart-case
-                      (setf new-module (%load-compiled-python-file bin-file
-                                                                   :mod-name new-mod-dotted-name
-                                                                   :habitat habitat))
-                    (delete-fasl-try-again ()
-                        :test (lambda (c)
-                                (declare (ignore c))
-                                (and src-file 
-                                     bin-file
-                                     (cached-probe-file src-file t)
-                                     (cached-probe-file bin-file t)))
-                        :report (lambda (s) (format s "Recompile and re-import module `~A' ~
-                                                   from file ~A" dotted-name src-file))
-                      (setf new-module 'recompiling-fasl)
-                      (delete-file bin-file)
-                      (remhash bin-file *import-recompiled-files*)
-                      (cached-probe-file bin-file t)
-                      (throw 'py-import-retry nil) ;; Restart the py-import call
-                      ))
-            
+                  (restart-bind ((delete-fasl-try-again
+                                     (lambda (&optional c)
+                                       (declare (ignore c))
+                                       (setf new-module 'recompiling-fasl)
+                                       (setf force-recompile t)
+                                       
+                                       ;; Try to delete the fasl file, to ensure it won't be reused
+                                       (handler-case (delete-file bin-file)
+                                         (file-error ()
+                                           ;; happens on SBCL, fasl might still be in use
+                                           ))
+                                       #+ccl
+                                       (when (probe-file bin-file)
+                                         ;; CCL issue: probe-file still ok after delete-file -> T ?!
+                                         ;; Does not matter here, but it's strange.
+                                         )
+                                       
+                                       ;; Delete fasl from caches
+                                       (remhash bin-file *import-recompiled-files*)
+                                       (cached-probe-file bin-file t)
+                                       
+                                       ;; Restart the py-import call.
+                                       ;; This used to recursively callpy-import instead of throw,
+                                       ;; but that is wrong: e.g. %load-compiled-python-file relies
+                                       ;; on immediate unwinding on failure, to keep loaded modules
+                                       ;; consistent.
+                                       (throw 'py-import-retry nil))
+                                   
+                                     :test-function (lambda
+                                                        #+allegro (&optional c) ;; ACL bug: C not supplied
+                                                        #-allegro (c)
+                                                        (declare (ignore c))
+                                                        (and src-file bin-file
+                                                             (cached-probe-file src-file t)
+                                                             (cached-probe-file bin-file t)))
+                                     :report-function
+                                       (lambda (s) (format s "Recompile and re-import module `~A' ~
+                                                              from file ~A" dotted-name src-file))))
+                    (setf new-module
+                      (%load-compiled-python-file bin-file
+                                                  :mod-name new-mod-dotted-name
+                                                  :habitat habitat)))
+                ;; Cleanup form:
                 (flet ((log-abort (error-p)
                          (let ((args (list "Loading of module `~A' was aborted. ~
-                                        ~@[~:@_Source: ~A~]~@[~:@_Binary: ~A~]~@[~:@_Imported by: ~A~]"
+                                            ~@[~:@_Source: ~A~]~@[~:@_Binary: ~A~]~@[~:@_Imported by: ~A~]"
                                            new-mod-dotted-name src-file bin-file within-mod-path)))
                            (if error-p
                                (apply #'py-raise '{ImportError} args)

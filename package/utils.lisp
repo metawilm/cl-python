@@ -15,23 +15,35 @@
 
 (defmacro with-auto-mode-recompile
     ((&key verbose
-           (restart-name #+allegro 'excl::recompile-due-to-incompatible-fasl #-allegro nil))
+           (restart-name #+allegro 'excl::recompile-due-to-incompatible-fasl #-allegro nil)
+           filename)
      &body body)
-  "Automatically recompile on ANSI/Modern conflicts."
+  "Automatically recompile when FASL is apparently intended for another implementation"
   (declare (ignorable restart-name verbose))
-  `(handler-bind
-       (#+allegro
-        ((or excl::file-incompatible-fasl-error
-	     excl::fasl-casemode-mismatch)
-	 (lambda (c)
-	   (declare (ignore c))
-	   (let ((r (and ',restart-name (find-restart ',restart-name))))
-	     (when r
-	       ,@(when verbose
-		   `((format t "; Recompiling ~A due to incompatible fasl"
-			     (or *load-pathname* *compile-file-pathname* "file"))))
-	       (invoke-restart r))))))
-     ,@body))
+  `(flet ((.invoke-recompile-restart (&optional c)
+            (declare (ignore c))
+            ,(when restart-name
+               `(progn 
+                  (whereas ((r (find-restart ',restart-name)))
+                    (format t "~&; Recompiling ~A due to wrong fasl format.~%"
+                            (or ,filename *load-pathname* *compile-file-truename* "fasl file"))
+                    (invoke-restart r))
+                  (break "No expected restart named ~A" ',restart-name)))))
+     
+     (handler-bind (#+allegro
+                    ((or excl::file-incompatible-fasl-error excl::fasl-casemode-mismatch)
+                     #'.invoke-recompile-restart)
+                    #+ccl
+                    (ccl::simple-reader-error
+                     (lambda (c)
+                       (declare (ignore c))
+                       (when (and *load-truename*
+                                  (string-equal (pathname-type *load-truename*) "fasl"))
+                         (.invoke-recompile-restart))))
+                    #+sbcl
+                    (sb-fasl::fasl-header-missing
+                     #'.invoke-recompile-restart))
+       ,@body)))
 
 ;;; To have Emacs properly indent the DEF-PY-METHOD form, add to .emacs:
 ;;;  (put 'when-let 'fi:lisp-indent-hook (get 'when 'fi:lisp-indent-hook))
