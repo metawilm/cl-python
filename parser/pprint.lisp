@@ -383,8 +383,7 @@ output to a string does not start with a newline."
     (write-char delim-quote stream))) ;; closing quote
 
 (defmethod py-pprint-literal (stream (kind (eql :lisp)) x)
-  42)
-
+  (format stream "~A" x))
 
 ;; Utils
 
