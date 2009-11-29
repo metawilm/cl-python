@@ -330,7 +330,8 @@ former requires that this form is executed within RECEIVE-YIELDED-VALUE."
   (with-gensyms (classdef-k)
     (let* ((inheritance-gensyms (loop for i from 1 repeat (length (second inheritance)) collect
                                       (gensym (format nil "superclass-~A-" i))))
-           (res `(progn (classdef-stmt-1 ,name ([tuple-expr] ,inheritance-gensyms) ,suite)
+           (res `(progn (with-pydecl ((:inside-cps-conversion nil))
+                          (classdef-stmt-1 ,name ([tuple-expr] ,inheritance-gensyms) ,suite))
                         (funcall ,classdef-k nil))))
       (loop for sup in (reverse (second inheritance)) for gensym in (reverse inheritance-gensyms)
           do (setf res `(with-cps-conversion (,sup ,gensym) ,res)))
@@ -752,15 +753,19 @@ former requires that this form is executed within RECEIVE-YIELDED-VALUE."
            (next-suite-value *the-none*)))
 ||#
          
-(def-cps-macro [yield-expr] (val)
+(def-cps-macro [yield-expr] (val &environment e)
+  (unless (eq :function (car (get-pydecl :context-type-stack e)))
+    (raise-syntax-error "Expression `yield' was found outside function."))
   (with-gensyms (after-yield-k e-val)
     `(let ((,after-yield-k ,%current-continuation))
        (with-cps-conversion (,val ,e-val)
          ,(%store-continuation `(lambda (x) (funcall ,after-yield-k (parse-generator-input x))))
          (yield-value ,e-val)))))
     
-(def-cps-macro [yield-stmt] (&optional value)
+(def-cps-macro [yield-stmt] (&optional value &environment e)
   ;; A yield statement is a yield expression whose value is not used.
+  (unless (eq :function (car (get-pydecl :context-type-stack e)))
+    (raise-syntax-error "Statement `yield' was found outside function."))
   `(%cps-convert ([yield-expr] ,(or value '*the-none*)) ,%current-continuation))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;

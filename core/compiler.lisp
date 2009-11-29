@@ -1432,7 +1432,7 @@ LOCALS shares share tail structure with input arg locals."
   `(py-print ,dest (list ,@items) ,(not (null comma?))))
 
 (defmacro [return-stmt] (val &environment e)
-  (if (member :function (get-pydecl :context-type-stack e))
+  (if (eq :function (car (get-pydecl :context-type-stack e)))
       `(return-from function-body ,(or val `(load-time-value *the-none*)))
     (raise-syntax-error "Statement `return' was found outside function.")))
 

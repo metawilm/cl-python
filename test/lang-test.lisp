@@ -57,7 +57,7 @@
     (call-next-method)))
 
 (defmethod test-lang ((kind (eql :assert-stmt)))
-  (run-error        "assert 0" {AssertionError})
+  (run-error        "assert 0" {AssertionError} )
   (run-no-error     "assert 1")
   (run-error "assert \"\"" {AssertionError})
   (run-no-error     "assert \"s\"")
@@ -755,7 +755,11 @@ assert x == ['1', '2']"))
   )
 
 (defmethod test-lang ((kind (eql :return-stmt)))
-  )
+  (run-error "
+def f():
+ class C:
+  return
+f()" {SyntaxError} :fail-info "return outside function"))
 
 (defmethod test-lang ((kind (eql :slice-expr)))
   (run-no-error "
@@ -1403,7 +1407,19 @@ try:
 except TypeError:
   pass" :fail-info "Generator function does not support iterating")
   (run-no-error "
-assert list((x+y) for x in range(3) for y in range(2)) == [0, 1, 1, 2, 2, 3]"))
+assert list((x+y) for x in range(3) for y in range(2)) == [0, 1, 1, 2, 2, 3]")
+  (run-error "
+def f():
+ yield 1
+ class C:
+  yield 2
+list(f())" {SyntaxError} :fail-info "Yield outside function")
+  (run-error "
+def f():
+ x = (yield 1)
+ class C:
+  y = (yield 2)
+list(f())" {SyntaxError} :fail-info "Yield outside function"))
   
 (defmethod test-lang ((kind (eql :yield-stmt)))
   (run-no-error "
