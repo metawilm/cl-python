@@ -487,7 +487,7 @@ an assigment statement. This changes at least the returned 'store' form.")
                                        locals)))
         
         (let ((lambda-expr `(lambda (%exec-globals-ns %exec-locals-ns)
-                              (with-pydecl ((:context :module))
+                              (with-pydecl ((:context-type-stack (:module)))
                                 (with-namespace (,globals-ns)
                                   (with-namespace (,locals-ns)
                                     (let ((.res ,(second ast)))
@@ -661,11 +661,11 @@ an assigment statement. This changes at least the returned 'store' form.")
   (multiple-value-bind (all-class-locals new-locals class-cumul-declared-globals)
       (suite-globals-locals suite () (get-pydecl :lexically-declared-globals e))
     (assert (equal new-locals all-class-locals))
-    (let* ((cname             (with-matching (name ([identifier-expr] ?name))
-                                ?name))
-	   (new-context-stack (cons cname (get-pydecl :context-stack e)))
-	   (context-cname     (ensure-user-symbol 
-			       (format nil "~{~A~^.~}" (reverse new-context-stack)))))
+    (let* ((cname (with-matching (name ([identifier-expr] ?name))
+                    ?name))
+	   (new-context-name-stack (cons cname (get-pydecl :context-name-stack e)))
+	   (context-cname (ensure-user-symbol 
+                           (format nil "~{~A~^.~}" (reverse new-context-name-stack)))))
       `(multiple-value-bind (namespace-ht cls-dict.__metaclass__)
            ;; Need a nested LET, as +cls-namespace+ may not be set when the ASSIGN-STMT
            ;; below is executed, as otherwise nested classes don't work.
@@ -682,9 +682,8 @@ an assigment statement. This changes at least the returned 'store' form.")
                
                ;; Local class variables are not locally visible (they don't extend ":lexically-visible-vars")
                ;; Variables declared `global' in a class scope are not global in sub-scopes.
-               (with-pydecl ((:context :class)
-                             (:context-stack ,new-context-stack)
-                             (:inside-class-p t)
+               (with-pydecl ((:context-type-stack ,(cons :class (get-pydecl :context-type-stack e)))
+                             (:context-name-stack ,new-context-name-stack)
                              (:declared-globals-current-scope ,class-cumul-declared-globals)
                              ;; :lexically-declared-globals is unchanged
                              )
@@ -985,35 +984,36 @@ LOCALS shares share tail structure with input arg locals."
       (multiple-value-bind (all-nontuple-func-locals new-locals func-cumul-declared-globals)
 	  (suite-globals-locals suite nontuple-arg-names (get-pydecl :lexically-declared-globals e))
 	(assert (null (intersection destructed-pos-key-args new-locals)))
-	(let* ((new-context-stack (cons fname (get-pydecl :context-stack e))) ;; fname can be :lambda
-	       (context-fname     (ensure-user-symbol
-				   (format nil "~A/~{~A~^.~}" *current-module-name* (reverse new-context-stack))))
-	       (body-decls       `((:lexically-declared-globals ,func-cumul-declared-globals)
-                                   (:declared-globals-current-scope ,func-cumul-declared-globals)
-				   (:context :function)
-				   (:context-stack ,new-context-stack)
-				   (:inside-function-p t)
-				   (:lexically-visible-vars
-                                    ,(let ((sum (remove-duplicates
-                                                 (append all-nontuple-func-locals
-                                                         (get-pydecl :lexically-visible-vars e)))))
-                                       ;; def f(x):
-                                       ;;   def g(y):
-                                       ;;     <Here G is locally visibe because it is a /local variable/
-                                       ;;      in F. In general the name of a function is not visible
-                                       ;;      in its body.>
-                                       ;; 
-                                       ;; See also the testcases for the :LEXICALLY-VISIBLE-VARS declaration.
-                                       (when (eq (get-pydecl :context e) :function)
-                                         (assert (get-pydecl :inside-function-p e))
-                                         (pushnew fname sum))
-                                       sum))
-				   (:safe-lex-visible-vars
-				    ,(nset-difference
-				      (append nontuple-arg-names
-					      (get-pydecl :safe-lex-visible-vars e))
-				      (ast-deleted-variables suite)))))
-	       (func-lambda
+	(let* ((new-context-name-stack (cons fname (get-pydecl :context-name-stack e)))
+	       (context-fname (ensure-user-symbol
+                               (format nil "~A/~{~A~^.~}" *current-module-name*
+                                       (reverse new-context-name-stack))))
+	       (body-decls `((:lexically-declared-globals ,func-cumul-declared-globals)
+                             (:declared-globals-current-scope ,func-cumul-declared-globals)
+                             (:context-type-stack ,(cons :function (get-pydecl :context-type-stack e)))
+                             (:context-name-stack ,new-context-name-stack)
+                             (:lexically-visible-vars
+                              ,(let ((sum (remove-duplicates
+                                           (append all-nontuple-func-locals
+                                                   (get-pydecl :lexically-visible-vars e)))))
+                                 ;; def f(x):
+                                 ;;   def g(y):
+                                 ;;     <Here G is locally visibe because it is a /local variable/
+                                 ;;      in F. In general the name of a function is not visible
+                                 ;;      in its body.>
+                                 ;; 
+                                 ;; See also the testcases for the :LEXICALLY-VISIBLE-VARS declaration.
+                                 #+(or);; think superfluous
+                                 (when (eq (car (get-pydecl :context-type-stack e)) :function)
+                                   (assert (member :function (get-pydecl :context-type-stack e)))
+                                   (pushnew fname sum))
+                                 sum))
+                             (:safe-lex-visible-vars
+                              ,(nset-difference
+                                (append nontuple-arg-names
+                                        (get-pydecl :safe-lex-visible-vars e))
+                                (ast-deleted-variables suite)))))
+               (func-lambda
 		`(py-arg-function
                   ,context-fname
 		  (,lambda-pos-args
@@ -1023,11 +1023,11 @@ LOCALS shares share tail structure with input arg locals."
 		   ,(when *-arg  (second *-arg))
 		   ,(when **-arg (second **-arg)))
                   (with-namespace (,(make-let-w/locals-ns
-                                      :parent (get-pydecl :namespace e)
-                                      :names all-nontuple-func-locals
-                                      :let-names (append destructed-pos-key-args new-locals)
-                                      :scope :function)
-                                      :define-%locals ,(funcdef-should-save-locals-p suite))
+                                     :parent (get-pydecl :namespace e)
+                                     :names all-nontuple-func-locals
+                                     :let-names (append destructed-pos-key-args new-locals)
+                                     :scope :function)
+                                   :define-%locals ,(funcdef-should-save-locals-p suite))
                     (block function-body
 		      (with-pydecl ,body-decls
                         ,tuples-destruct-form
@@ -1037,14 +1037,11 @@ LOCALS shares share tail structure with input arg locals."
                            `(progn ,suite
                                    ,@(when return-default-none
                                        `((load-time-value *the-none*)))))))))))
-	  
           (when (keywordp fname)
 	    (return-from funcdef-stmt-1 func-lambda))
-	  
           (let ((art-deco '.undecorated-func))
             (dolist (x (reverse decorators))
               (setf art-deco `(py-call ,x ,art-deco)))
-            
             `(let* ((.undecorated-func 
                      ,(if *create-simple-lambdas-for-python-functions*
                           `(let ((.f ,func-lambda))
@@ -1060,7 +1057,7 @@ LOCALS shares share tail structure with input arg locals."
                ;;   def __new__(..):    <-- the __new__ method inside a class
                ;;      ...                  automatically becomes a 'static-method'
                ;; XXX check whether this works correctly when user does same explicitly
-               ,@(when (and (eq (get-pydecl :context e) :class)
+               ,@(when (and (eq (car (get-pydecl :context-type-stack e)) :class)
                             (eq fname '{__new__}))
                    `((setf .decorated-func (py-call (find-class 'py-static-method) .decorated-func))))
                
@@ -1079,8 +1076,7 @@ LOCALS shares share tail structure with input arg locals."
   ;; FUNCDEF-STMT is handled.
   (declare (ignore names))
   (when (and *warn-bogus-global-declarations*
-             (not (or (get-pydecl :inside-function-p e)
-                      (get-pydecl :inside-class-p e))))
+             (null (intersection '(:function :class) (get-pydecl :context-type-stack e))))
     (warn "Bogus `global' statement found at top-level.")))
 
 (defparameter *debug-assume-variables-bound* nil
@@ -1314,7 +1310,7 @@ LOCALS shares share tail structure with input arg locals."
 
 (defmacro with-module-toplevel-context (() &body body)
   ;; Consider *module-namespace* ?
-  `(with-pydecl ((:context :module))
+  `(with-pydecl ((:context-type-stack (:module)))
      (with-namespace (,(or *module-namespace*
                            (make-hash-table-ns
                             :dict-form '%module-globals
@@ -1436,7 +1432,7 @@ LOCALS shares share tail structure with input arg locals."
   `(py-print ,dest (list ,@items) ,(not (null comma?))))
 
 (defmacro [return-stmt] (val &environment e)
-  (if (get-pydecl :inside-function-p e)
+  (if (member :function (get-pydecl :context-type-stack e))
       `(return-from function-body ,(or val `(load-time-value *the-none*)))
     (raise-syntax-error "Statement `return' was found outside function.")))
 
@@ -1463,7 +1459,7 @@ LOCALS shares share tail structure with input arg locals."
 #+(or)
 (define-compiler-macro [suite-stmt] (&whole whole stmts &environment e)
   ;; Skip checks for bound-ness, when a lexical variable is certainly bound.
-  (unless (eq (get-pydecl :context e) :function)
+  (unless (eq (car (get-pydecl :context-type-stack e)) :function)
     (return-from [suite-stmt] whole))
   
   (let* ((deleted-vars (ast-deleted-variables whole))
@@ -1501,7 +1497,7 @@ LOCALS shares share tail structure with input arg locals."
                                             (unless (member v (get-pydecl :safe-lex-visible-vars e))
                                               (push v new-safe-vars)
                                               (comp-msg "New safe-lev-vars in ~A, after assignment \"~A\": ~A."
-                                                                (get-pydecl :context e)
+                                                                (get-pydecl :context-type-stack e)
                                                                 (clpython.parser::py-pprint ass-stmt)
                                                                 v)))))))
                         ([suite-stmt] ,after-stmts))))))))) ;; recursive, but 1 assign-stmt less

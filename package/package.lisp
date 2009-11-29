@@ -202,7 +202,7 @@
            #:+max-char-code+ #:char-code-type #:ltv-find-class #:make-weak-key-hash-table
            #:schedule-finalization #:unschedule-finalization
            #:register-feature #:with-gensyms #:with-sane-debugging #:with-line-prefixed-output
-           #:class-initarg-p))
+           #:class-initarg-p #:define-macro-state-declaration))
 
 ;;; CLPYTHON.PARSER - Parser and Lexer
 

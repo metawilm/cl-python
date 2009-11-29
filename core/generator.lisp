@@ -200,13 +200,13 @@
   `(with-pydecl ((:inside-cps-conversion t)) ;; for non-cps macros for YIELD-{EXPR,STMT}
      (%cps-convert ,ast (lambda (,value) ,@body) :nil-allowed ,nil-allowed)))
 
-(defmacro make-generator-state (suite &key sub-generator)
+(defmacro make-generator-state (suite &key sub-generator &environment e)
   `(let ((%stored-k-cons (cons nil nil)))
      ,(%store-continuation `(lambda (&optional x)
                               (parse-generator-input x :initial t)
-                              (with-pydecl ((:context :function)
-                                            (:in-sub-generator ,sub-generator)
-                                            (:inside-function-p t))
+                              (with-pydecl ((:context-type-stack
+                                             ,(cons :function (get-pydecl :context-type-stack e)))
+                                            (:in-sub-generator ,sub-generator))
                                 ,(with-matching (suite ([suite-stmt] ?stmts))
                                    `(with-cps-conversion (,suite val)
                                       (declare (ignore val))
@@ -439,7 +439,7 @@ former requires that this form is executed within RECEIVE-YIELDED-VALUE."
     res))
 
 (def-cps-macro [global-stmt] (names &environment e)
-  (assert (get-pydecl :inside-function-p e))
+  (assert (member :function (get-pydecl :context-type-stack e)))
   (or names) ;; suppress warning
   (%call-continuation))
 
@@ -544,7 +544,7 @@ former requires that this form is executed within RECEIVE-YIELDED-VALUE."
   (cond (value
          (format t "!!! return + val")
          (raise-syntax-error "Generator ~A may not `return' with a value."
-                             (format nil "~{~A~^.~}" (reverse (get-pydecl :context-stack e)))))
+                             (format nil "~{~A~^.~}" (reverse (get-pydecl :context-type-stack e)))))
         ((get-pydecl :in-sub-generator e)
          `(yield-value :explicit-return))
         (t 

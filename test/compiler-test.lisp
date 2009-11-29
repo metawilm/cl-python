@@ -40,8 +40,8 @@
 
 (defun run-compiler-test ()
   (with-subtest (:name "CLPython-Compiler")
-    (test-comp-decl :context)
-    (test-comp-decl :context-stack)
+    (test-comp-decl :context-type-stack)
+    (test-comp-decl :context-name-stack)
     (test-comp-decl :inside-loop-p)
     (test-comp-decl :mod-futures)
     #+(or)(test-comp-decl :mod-globals-names)
@@ -58,8 +58,8 @@
   (with-subtest (:name (format nil "CLPython-Compiler-Decl-~S" kind))
     (call-next-method)))
 
-(defmethod test-comp-decl ((kind (eql :context)))
-  (run-code-test "TEST"               (test :module #1=(pydecl :context)))
+(defmethod test-comp-decl ((kind (eql :context-type-stack)))
+  (run-code-test "TEST"               (test :module #1=(car (pydecl :context-type-stack))))
   (run-code-test "def foo(x,y): TEST" (test :function #1#))
   (run-code-test "class C(D): TEST"   (test :class #1#))
   (run-code-test "
@@ -71,8 +71,8 @@ def f():
   class C:
     TEST"                             (test :class    #1#)))
 
-(defmethod test-comp-decl ((kind (eql :context-stack)))
-  (run-code-test "TEST"            (test-equal ()     #1=(pydecl :context-stack)))
+(defmethod test-comp-decl ((kind (eql :context-name-stack)))
+  (run-code-test "TEST"            (test-equal ()     #1=(pydecl :context-name-stack)))
   (run-code-test "def f(): TEST"   (test-equal '({f}) #1#))
   (run-code-test "class C: TEST"   (test-equal '({C}) #1#))
   (run-code-test "
@@ -266,7 +266,9 @@ def f():
   b = x"		 (test-true (seq-equal '({b}) #1#))))
 
 (defmethod test-comp-decl ((kind (eql :inside-function-p)))
-  (run-code-test "TEST"             (test-false #1=(pydecl :inside-function-p)))
+  (run-code-test "TEST"             (test-false #1=(let ((ctx-stack  (pydecl :context-type-stack)))
+                                                     (format t "[ctx-stack = ~A]" ctx-stack)
+                                                     (member :function ctx-stack))))
   (run-code-test "a = 3; TEST"      (test-false #1#))
   (run-code-test "def f(): TEST"    (test-true  #1#))
   (run-code-test "

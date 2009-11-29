@@ -440,12 +440,13 @@
   (:method (environment)
            #+allegro (check-type environment sys::augmentable-environment)
            (get-module-namespace (or (get-pydecl :namespace environment)
-                                     (error "Cannot determine module namespace: environment ~A has no namespace" environment))))
+                                     (break "Cannot determine module namespace: ~
+                                             environment ~A has no namespace."
+                                            environment))))
   (:method ((namespace namespace))
            (loop for ns = namespace then (ns.parent ns)
                while ns
                when (member (ns.scope ns) '(:module :exec-globals))
                return ns
-               finally (break "No global namespace found among parents, for: ~A" namespace))))
-           
-                         
+               finally (break "No global namespace found among parents, for: ~A."
+                              namespace))))

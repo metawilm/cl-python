@@ -27,7 +27,8 @@
                           :components ((:file "package")
                                        (:file "utils" :depends-on ("package"))
                                        (:file "readtable" :depends-on ("package"))
-                                       (:file "aupprint" :depends-on ("package"))))))
+                                       (:file "aupprint" :depends-on ("package"))
+                                       (:file "macro-state" :depends-on ("package" "utils"))))))
 
 (asdf:defsystem :clpython.parser
     :description "Python parser, code walker, and pretty printer"
