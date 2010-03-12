@@ -12,7 +12,7 @@
 (in-package :clpython.parser)
 (in-syntax *ast-user-readtable*)
 
-
+(defparameter *lispy-debug* nil)
 (defparameter *standard-readtable* (copy-readtable nil))
 
 (define-condition ambiguous-input-is-lisp-condition ()
@@ -75,14 +75,16 @@ expression that should be interpreted as Lisp code, signals AMBIGUOUS-INPUT-IS-L
              (let ((res (read-lispy-toplevel-forms string
                                                    :lisp-readtable lisp-readtable
                                                    :interactive-p interactive-p)))
-               (format t "~&[parse-string-toplevel-forms ~S~& -> ~S]~&" string res)
+               (when *lispy-debug*
+                 (format t "~&[parse-string-toplevel-forms ~S~& -> ~S]~&" string res))
                res))
            (input-semantically-finished-p (string)
              (check-type string string)
              (not (eq :incomplete (parse-string-toplevel-forms string)))))
     
     (loop with all = (normalize-input (clpython.package::slurp-file stream))
-        for dummy = (format t "~&[iter all: ~S]~&" (coerce all 'list))
+        for dummy = (when *lispy-debug*
+                      (format t "~&[iter all: ~S]~&" (coerce all 'list)))
         until (and (string-has-enter-p all)
                    (not (input-pending-p stream))
                    (input-semantically-finished-p all))
@@ -99,7 +101,8 @@ expression that should be interpreted as Lisp code, signals AMBIGUOUS-INPUT-IS-L
                              (plusp (length all))
                              (eql (aref all (1- (length all))) #\Newline))
                     (unread-char #\Newline stream)))
-                (format t "[finish all: ~S]" (coerce all 'list))
+                (when *lispy-debug*
+                  (format t "[finish all: ~S]" (coerce all 'list)))
                 (when (zerop (length all))
                   (break "zero all"))
                 (return (parse-string-toplevel-forms all)))))
