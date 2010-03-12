@@ -1940,7 +1940,8 @@ Non-negative integer denoting the number of args otherwise."
   ;; 
   ;; XXX todo: the generated code can be cleaned up a bit when there
   ;; are no arguments (currently zero-length vectors are created).
-  (declare #.+optimize-fast+)
+  (declare #.+optimize-fast+
+           (type list pos-args key-args))
   (let* ((num-pos-args (length pos-args))
 	 (num-key-args (length key-args))
 	 (num-pos-key-args  (+ num-pos-args num-key-args))
