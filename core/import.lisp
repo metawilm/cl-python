@@ -258,6 +258,7 @@ LOAD failed and was aborted by the user)."
                        bin-filename)))
   
   (let (module new-module-p success source-func source)
+    (declare (ignorable source-func source))
     (unwind-protect
         (handler-bind ((module-import-pre
                         (lambda (c)
