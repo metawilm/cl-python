@@ -285,8 +285,10 @@ LOAD failed and was aborted by the user)."
 
           (with-auto-mode-recompile (:filename bin-filename :verbose *import-load-verbose*
                                                :restart-name delete-fasl-try-again)
-            (unless (load bin-filename :verbose *import-load-verbose*)
-              ;; Might happen if loading errs and there is a restart that lets LOAD return NIL.
+            (unless (let (#+lispworks
+                          (system:*binary-file-type* (string-downcase *py-compiled-file-type*)))
+                      (load bin-filename :verbose *import-load-verbose*))
+                ;; Might happen if loading errs and there is a restart that lets LOAD return NIL.
               (return-from %load-compiled-python-file)))
           
           #+clpython-source-level-debugging
