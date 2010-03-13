@@ -500,10 +500,9 @@ Used by compiler to generate 'forbidden' identfiers.")
                                                             (raise-syntax-error
                                                              "Unicode escape \\N{...} misses closing `}' (line ~A)."
                                                              %lex-curr-line-no%))))
-                                              (let ((name (nsubstitute #\_ #\Space (subseq s start end))))
-                                                (setf s.ix end)
-                                                (or (when (plusp (length name))
-                                                      (name-char name))
+                                              (setf s.ix end)
+                                              (let ((name (subseq s start end)))
+                                                (or (lisp-char-by-python-name name)
                                                     (raise-syntax-error "No Unicode character with name ~S defined."
                                                                         name)))))
                                    (progn (warn "Unicode escape `\\N' found in non-unicode string (line ~A)."
@@ -533,7 +532,7 @@ Used by compiler to generate 'forbidden' identfiers.")
                                         (a.hex (progn (assert (characterp a))
                                                       (digit-char-p a 16)))
                                         (b.hex (and b (digit-char-p b 16))))
-                                   (unless a.hex (raise-syntax-error "Non-hex digit `~A' found after `\x' (line ~A)."
+                                   (unless a.hex (raise-syntax-error "Non-hex digit `~A' found after `\\x' (line ~A)."
                                                                      a %lex-curr-line-no%))
                                    (warn "a=~S b=~S a.hex=~S" a b a.hex)
                                    (if b.hex
@@ -586,6 +585,20 @@ Used by compiler to generate 'forbidden' identfiers.")
       (unless raw
         (setf string (replace-non-unicode-escapes string)))
       string)))
+
+(defun lisp-char-by-python-name (python-name)
+  "PYTHON-NAME has spaces as dividers, e.g. 'latin capital letter l with stroke'.
+Returns character or NIL."
+  (when (plusp (length python-name))
+    (let* ((division-char #+(or allegro sbcl) #\_
+                          #+lispworks #\-)
+           (lisp-char-name (substitute division-char #\Space python-name)))
+      (name-char lisp-char-name))))
+
+(deftype unicode-capable-string-type ()
+  "Used in parser test."
+  #+lispworks 'lispworks:text-string
+  #-lispworks 'string)
 
 (defun careful-code-char (code)
   (when (typep code '(integer 0 (#.char-code-limit)))
