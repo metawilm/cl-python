@@ -543,9 +543,9 @@ former requires that this form is executed within RECEIVE-YIELDED-VALUE."
 (def-cps-macro [return-stmt] (&optional value &environment e)
   ;; VALUE can be given, if this is inside a generator.
   (cond (value
-         (format t "!!! return + val")
-         (raise-syntax-error "Generator ~A may not `return' with a value."
-                             (format nil "~{~A~^.~}" (reverse (get-pydecl :context-type-stack e)))))
+         (raise-syntax-error 
+          "Generator ~A may not `return' with a value."
+          (format nil "~{~A~^.~}" (reverse (get-pydecl :context-name-stack e)))))
         ((get-pydecl :in-sub-generator e)
          `(yield-value :explicit-return))
         (t 
