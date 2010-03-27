@@ -534,7 +534,6 @@ Used by compiler to generate 'forbidden' identfiers.")
                                         (b.hex (and b (digit-char-p b 16))))
                                    (unless a.hex (raise-syntax-error "Non-hex digit `~A' found after `\\x' (line ~A)."
                                                                      a %lex-curr-line-no%))
-                                   (warn "a=~S b=~S a.hex=~S" a b a.hex)
                                    (if b.hex
                                        (careful-code-char (+ (* 16 a.hex) b.hex))
                                      (prog1 (careful-code-char a.hex)
