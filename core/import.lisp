@@ -579,7 +579,10 @@ Otherwise raises ImportError."
 (defun builtin-module-attribute (module attr)
   (check-type module symbol)
   (check-type attr string)
-  (symbol-value (find-symbol attr (find-package (concatenate 'string (package-name :clpython.module) "." (symbol-name module))))))
+  (let* ((pkg-name (concatenate 'string (package-name :clpython.module) "." (symbol-name module)))
+         (package (or (find-package pkg-name)
+                      (error "Builtin Python module (Lisp package) ~A not found." pkg-name)))) 
+    (symbol-value (find-symbol attr package))))
 
 (defun ensure-path-is-directory (path)
   (let* ((truename (truename path))
