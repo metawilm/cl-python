@@ -293,7 +293,7 @@ if 1 > \\
                                  ,(coerce (list (code-char #x0141)
                                                 #\Space
                                                 (code-char #x0141))
-                                          'clpython.parser::unicode-capable-string-type)))
+                                          clpython.parser::+unicode-capable-string-type+)))
     (test-error (ps "u'\\N'" nil)  :condition-type '{SyntaxError})
     (test-error (ps "u'\\N{foo'" nil)  :condition-type '{SyntaxError})
     (test-error (ps "u'\\N{foo}'" nil)  :condition-type '{SyntaxError})
@@ -316,7 +316,7 @@ if 1 > \\
     ;; octal code, non-escaping backslash
     (test-equal (ps "'\\5019\\z'" nil)
                 `([literal-expr] :string ,(coerce (list (code-char #x0141) #\9 #\\ #\z)
-                                                  'clpython.parser::unicode-capable-string-type)))
+                                                  clpython.parser::+unicode-capable-string-type+)))
     ;; ..
     (test-error (ps "[1, .., 3]") :condition-type '{SyntaxError})
     ;; !
@@ -606,7 +606,7 @@ finally:
                   (p "abc
 defg")
                   ))))
-      (declare (ignore test-form)
+      (declare (ignore test-form))
       #+allegro-cl-express ;; Work around out-of-memory due to heap limitation
       `(eval '#1#)
       #-allegro-cl-express

@@ -595,10 +595,12 @@ Returns character or NIL."
            (lisp-char-name (substitute division-char #\Space python-name)))
       (name-char lisp-char-name))))
 
-(deftype unicode-capable-string-type ()
-  "Used in parser test."
-  #+lispworks 'lispworks:text-string
-  #-lispworks 'string)
+;; This would be a DEFTYPE if SBCL supported that;
+;; now it leads to "STRING is too hairy for sequence functions."
+(defconstant +unicode-capable-string-type+
+    #+lispworks 'lispworks:text-string
+    #-lispworks 'string
+  "Used in parser test.")
 
 (defun careful-code-char (code)
   (when (typep code '(integer 0 (#.char-code-limit)))
