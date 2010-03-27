@@ -206,7 +206,7 @@ def f(): pass" nil))
     
     ;; parsing a file
     #+(and allegro unix) ;; no WITH-OPEN-TEMP-FILE on windows
-    (let ((fname (excl.osi:with-open-temp-file (s (format nil "_clpython-ast-test-~A" (gensym)))
+    (let ((fname (excl.osi:with-open-temp-file (s "_clpython-ast-test-XXXXXX")
 		   (format s "print 42"))))
       (test-equal '([print-stmt] nil (([literal-expr] :number 42)) nil)
 		  (values (clpython.parser:parse (pathname fname) :one-expr t)))
