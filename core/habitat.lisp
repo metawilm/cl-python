@@ -76,19 +76,23 @@
                     (= (module-bin-file-write-date m) bin-file-write-date)))
       return m))
 
+(defun get-sys.modules ()
+  (or (builtin-module-attribute 'sys "modules")
+      (error "Cannot access builtin module 'sys' or its field 'sys.modules'.")))
+
 (defun add-loaded-module (module habitat)
   (check-type module module)
   (check-type habitat habitat)
   (remove-loaded-module module habitat)
   (push module (habitat-loaded-mods habitat))
-  (setf (gethash (module-name module) (builtin-module-attribute 'sys "modules")) module))
+  (setf (gethash (module-name module) (get-sys.modules)) module))
 
 (defun remove-loaded-module (module habitat)
   (setf (habitat-loaded-mods habitat)
     (remove (module-bin-pathname module) (habitat-loaded-mods habitat)
             :key #'module-bin-pathname
             :test #'pathname-considered-equal))
-  (remhash (module-name module) (builtin-module-attribute 'sys "modules")))
+  (remhash (module-name module) (get-sys.modules)))
 
 (defun pathname-considered-equal (x y)
   (check-type x pathname)
