@@ -42,6 +42,9 @@
                          (.invoke-recompile-restart))))
                     #+sbcl
                     (sb-fasl::fasl-header-missing
+                     #'.invoke-recompile-restart)
+                    #+lispworks
+                    (conditions:fasl-error
                      #'.invoke-recompile-restart))
        ,@body)))
 
