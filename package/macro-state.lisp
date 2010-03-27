@@ -92,6 +92,7 @@ to retrieve value for :key1."
        ,@body)))
 
 (defun get-decl-state (decl-name decl-state-name env)
+  (declare (ignorable decl-name))
   (if *use-environment-acccessors*
       (progn #+(and :allegro :new-environments)
              (sys:declaration-information decl-name env)
