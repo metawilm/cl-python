@@ -71,7 +71,8 @@
                                        (:file "run"          )
                                        (:file "executable"   )
                                        
-                                       #+(and allegro allegro-version>= (version>= 8 2))
+                                       #+(or) ;; disable while in development
+                                       ;; #+(and allegro allegro-version>= (version>= 8 2))
                                        (:file "source"       )))))
 
 (asdf:defsystem :clpython.lib
