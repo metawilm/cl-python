@@ -606,7 +606,7 @@ finally:
                   (p "abc
 defg")
                   ))))
-
+      (declare (ignore test-form)
       #+allegro-cl-express ;; Work around out-of-memory due to heap limitation
       `(eval '#1#)
       #-allegro-cl-express
