@@ -339,156 +339,160 @@ if 1:
 (defun string-strip-= (x y)
   (string= (clpython::py-string.strip x)
 	   (clpython::py-string.strip y)))
+;;  #+allegro-cl-express
+;;  (warn "Skipped running RUN-PRETTY-PRINTER-TEST in Allegro Express edition, to prevent out-of-memory,")
+;;  #-allegro-cl-express
 
 (defun run-pretty-printer-test ()
-  (with-subtest (:name "CLPython-PrettyPrinter")
-    ;; Test  string -> ast -> string  and ast -> string -> ast
-    (macrolet ((p (str &rest options)
-		 `(progn 
-		    (test ,str (py-pprint (parse ,str))
-			  :test 'string-strip-= ,@options)
-		    (when (string-strip-= ,str (py-pprint (parse ,str)))
-		      (test-equal (values (parse ,str))
-				  (values (parse (py-pprint (parse ,str))))
-				  ,@options))))
-	       (pe (str &rest options)
-		 `(progn 
-		    (test ,str (py-pprint (parse ,str :one-expr t))
-			  :test 'string-strip-= ,@options)
-		    (when (string-strip-= ,str (py-pprint (parse ,str :one-expr t)))
-		      (test-equal (values (parse ,str))
-				  (values (parse (py-pprint (parse ,str :one-expr t))))
-				  ,@options)))))
-      #+(or)(parse "")
-      ;; number
-      (pe "42")
-      (pe "1.")
-      (pe "1.2")
-      (pe "3j" :known-failure t :fail-info "spaces between number and j")
-      ;; string
-      (pe "'x'")
-      (p "'\"'")
-      ;; bytes
-      (p "b'\\x41\\x42\\x03'")
-      ;; assert
-      (p "assert (1, 2, 3)")
-      (p "assert x > 0, 'error'")
-      ;; assign-stmt
-      (p "x = 42")			
-      (p "x, y = 1, 2")
-      (p "x = y = 4")
-      (p "x = y, z = 1, 2")
-      ;; attributeref-expr
-      (p "x.a")
-      (p "a.b.c.d.e.f")
-      (p "a.b = 3")
-      (p "a.b = x.y")
-      (p "a.b = x, x.y")
-      ;; augassign-stmt
-      (p "x += 3, 4")
-      (p "x, y += foo")
-      (p "x[0, 1] += 3, (4, 5)")
-      ;; backticks-expr
-      (p "`p`")
-      (p "`42`")
-      (p "`f.g[x]`")
-      (p "`'water'`")
-      ;; binary-expr
-      (p "a + 3")
-      (p "a.g * 23")
-      (p "24 << 12")
-      (p "3 + 4 * 5")
-      (p "(3 + 4) * 5")
-      (p "1 * (2 + 3) << 0")
-      (p "1 + 2 - 3 * 4 // 5 / 6 % 7 << 8 >> 9 & 10 | 11 ^ 12 ** 13")
-      (p "-1 * -2 * -(3 * 4)")
-      (p "1 < 2 < (3 < 4) < 5 < (6 < (7 < 8))")
-      (p "x + 3 in foo")
-      (p "y not in foo")
-      (p "x is y")
-      (p "x is not x")
-      (p "not x is not x")
-      (p "not x is (not x)")
-      (p "(not x) is (not x)")
-      (p "x in (not y)") ;; brackets not necessary
-      ;; binary-lazy-expr
-      (p "a or b")
-      (p "a and b or c")
-      (p "(a or b) and c")
-      ;; break-stmt
-      (p "break")
-      ;; call-expr
-      (p "f(a, bb, c)")
-      (p "f(x=3, y=4)")
-      (p "f(*x)")
-      (p "f(**x)")
-      (p "f(*x, **y)")
-      (p "f((1, 2), x=(3, (4, 5)))")
-      ;; classdef-stmt (more indenting and layout tests -> suite-stmt)
-      (p "class C:
+  #.(let ((test-form
+           #1='(with-subtest (:name "CLPython-PrettyPrinter")
+                ;; Test  string -> ast -> string  and ast -> string -> ast
+                (macrolet ((p (str &rest options)
+                             `(progn 
+                                (test ,str (py-pprint (parse ,str))
+                                      :test 'string-strip-= ,@options)
+                                (when (string-strip-= ,str (py-pprint (parse ,str)))
+                                  (test-equal (values (parse ,str))
+                                              (values (parse (py-pprint (parse ,str))))
+                                              ,@options))))
+                           (pe (str &rest options)
+                             `(progn 
+                                (test ,str (py-pprint (parse ,str :one-expr t))
+                                      :test 'string-strip-= ,@options)
+                                (when (string-strip-= ,str (py-pprint (parse ,str :one-expr t)))
+                                  (test-equal (values (parse ,str))
+                                              (values (parse (py-pprint (parse ,str :one-expr t))))
+                                              ,@options)))))
+                  #+(or)(parse "")
+                  ;; number
+                  (pe "42")
+                  (pe "1.")
+                  (pe "1.2")
+                  (pe "3j" :known-failure t :fail-info "spaces between number and j")
+                  ;; string
+                  (pe "'x'")
+                  (p "'\"'")
+                  ;; bytes
+                  (p "b'\\x41\\x42\\x03'")
+                  ;; assert
+                  (p "assert (1, 2, 3)")
+                  (p "assert x > 0, 'error'")
+                  ;; assign-stmt
+                  (p "x = 42")			
+                  (p "x, y = 1, 2")
+                  (p "x = y = 4")
+                  (p "x = y, z = 1, 2")
+                  ;; attributeref-expr
+                  (p "x.a")
+                  (p "a.b.c.d.e.f")
+                  (p "a.b = 3")
+                  (p "a.b = x.y")
+                  (p "a.b = x, x.y")
+                  ;; augassign-stmt
+                  (p "x += 3, 4")
+                  (p "x, y += foo")
+                  (p "x[0, 1] += 3, (4, 5)")
+                  ;; backticks-expr
+                  (p "`p`")
+                  (p "`42`")
+                  (p "`f.g[x]`")
+                  (p "`'water'`")
+                  ;; binary-expr
+                  (p "a + 3")
+                  (p "a.g * 23")
+                  (p "24 << 12")
+                  (p "3 + 4 * 5")
+                  (p "(3 + 4) * 5")
+                  (p "1 * (2 + 3) << 0")
+                  (p "1 + 2 - 3 * 4 // 5 / 6 % 7 << 8 >> 9 & 10 | 11 ^ 12 ** 13")
+                  (p "-1 * -2 * -(3 * 4)")
+                  (p "1 < 2 < (3 < 4) < 5 < (6 < (7 < 8))")
+                  (p "x + 3 in foo")
+                  (p "y not in foo")
+                  (p "x is y")
+                  (p "x is not x")
+                  (p "not x is not x")
+                  (p "not x is (not x)")
+                  (p "(not x) is (not x)")
+                  (p "x in (not y)") ;; brackets not necessary
+                  ;; binary-lazy-expr
+                  (p "a or b")
+                  (p "a and b or c")
+                  (p "(a or b) and c")
+                  ;; break-stmt
+                  (p "break")
+                  ;; call-expr
+                  (p "f(a, bb, c)")
+                  (p "f(x=3, y=4)")
+                  (p "f(*x)")
+                  (p "f(**x)")
+                  (p "f(*x, **y)")
+                  (p "f((1, 2), x=(3, (4, 5)))")
+                  ;; classdef-stmt (more indenting and layout tests -> suite-stmt)
+                  (p "class C:
     pass")
-      (p "class C(D, E):
+                  (p "class C(D, E):
     pass")
-      (p "class C:
+                  (p "class C:
     def m():
         pass")
-      ;; comparison-expr
-      (p "x < y")
-      (p "x <= y <= z")
-      (p "a < b > c == d != e <= f >= g != h")
-      (test "x != y" (clpython::py-string.strip (py-pprint (parse "x <> y"))) :test 'string=)
-      ;; continue-stmt
-      (p "continue")
-      ;; del-stmt
-      (p "del x")
-      (p "del x, y")
-      (p "del x[0]")
-      (p "del x.a")
-      ;; dict-expr
-      (p "{}")
-      (p "{1: 2}")
-      (p "{a: b}")
-      (p "{(1, 2): (3, 4)}")
-      (p "{[1, 2, 3]: f.g[0](1, 2, 3)}")
-      ;; exec-stmt
-      (p "exec foo")
-      (p "exec foo in glob")
-      (p "exec foo in glob, loc")
-      (p "exec foo in (a, b, c), (1, 2, 3)")
-      ;; for-in-stmt
-      (p "for x in y:
+                  ;; comparison-expr
+                  (p "x < y")
+                  (p "x <= y <= z")
+                  (p "a < b > c == d != e <= f >= g != h")
+                  (test "x != y" (clpython::py-string.strip (py-pprint (parse "x <> y"))) :test 'string=)
+                  ;; continue-stmt
+                  (p "continue")
+                  ;; del-stmt
+                  (p "del x")
+                  (p "del x, y")
+                  (p "del x[0]")
+                  (p "del x.a")
+                  ;; dict-expr
+                  (p "{}")
+                  (p "{1: 2}")
+                  (p "{a: b}")
+                  (p "{(1, 2): (3, 4)}")
+                  (p "{[1, 2, 3]: f.g[0](1, 2, 3)}")
+                  ;; exec-stmt
+                  (p "exec foo")
+                  (p "exec foo in glob")
+                  (p "exec foo in glob, loc")
+                  (p "exec foo in (a, b, c), (1, 2, 3)")
+                  ;; for-in-stmt
+                  (p "for x in y:
     pass")
-      (p "for x, y in zut:
+                  (p "for x, y in zut:
     pass")
-      (p "for [x, (y, z)] in grub:
+                  (p "for [x, (y, z)] in grub:
     pass")
-      (p "for x in a, b, c:
+                  (p "for x in a, b, c:
     pass")
-      ;; funcdef-stmt
-      (p "def foo():
+                  ;; funcdef-stmt
+                  (p "def foo():
     pass")
-      (p "def foo(x, y):
+                  (p "def foo(x, y):
     pass")
-      (p "def foo(x, y, z=3, *loc, **kw):
+                  (p "def foo(x, y, z=3, *loc, **kw):
     pass")
-      ;; generator-expr
-      (p "(x for x in y)")
-      ;; global-stmt
-      (p "global x")
-      (p "global x, y")
-      ;; identifier-expr
-      (p "x")
-      (p "x, y")
-      (p "FooBar")
-      ;; if-expr
-      (p "(3 if 1 > 0 else 2)")
-      ;; if-stmt
-      (p "if a > 3:
+                  ;; generator-expr
+                  (p "(x for x in y)")
+                  ;; global-stmt
+                  (p "global x")
+                  (p "global x, y")
+                  ;; identifier-expr
+                  (p "x")
+                  (p "x, y")
+                  (p "FooBar")
+                  ;; if-expr
+                  (p "(3 if 1 > 0 else 2)")
+                  ;; if-stmt
+                  (p "if a > 3:
     pass")
-      (p "if not a or b:
+                  (p "if not a or b:
     pass")
-      (p
-       "if a > 3:
+                  (p
+                   "if a > 3:
     x
 elif a > 4:
     y
@@ -496,8 +500,8 @@ elif a > 5:
     z
 else:
     qq")
-      (p
-       "if a:
+                  (p
+                   "if a:
     if b1:
         if c1:
             a
@@ -505,103 +509,108 @@ else:
             b
 else:
     r")
-      ;; import-stmt
-      (p "import foo")
-      (p "import foo, bar")
-      (p "import foo as bar")
-      (p "import foo, bar as baz, zut")
-      ;; import-from-stmt
-      (p "from foo import bar")
-      (p "from foo import bar, baz")
-      (p "from foo import *")
-      ;; lambda-expr
-      (p "lambda: 42")
-      (p "lambda x: 42")
-      (p "lambda x, y=3: x + y")
-      (p "lambda *args: args[0]")
-      (p "lambda x, y=lambda y: 42: 3")
-      (p "lambda (x, y): x, y")
-      ;; listcompr-expr
-      (p "[x for y in z]")
-      (p "[x + y for x, y in a, b() if x > 3]")
-      (p "[x for x in a, b, c]")
-      ;; list-expr
-      (p "[]")
-      (p "[x]")
-      (p "[1, 2, 3]")
-      (p "[1, 2, (3, 4), (5, (6, 7, [8]))]")
-      (p "[x] = [3]")
-      (p "[x, y] = []")
-      ;; pass-stmt
-      (p "pass")
-      ;; print-stmt
-      (p "print")
-      (p "print x")
-      (p "print x,")
-      (p "print x, y")
-      (p "print x, y,")
-      ;; return-stmt
-      (p "return")
-      (p "return x")
-      (p "return x, y")
-      (p "return x + y")
-      ;; slice-expr
-      (p "x[:]")
-      (p "x[1:]")
-      (p "x[:1]")
-      (p "x[1:3]")
-      (p "x[1:2:3]")
-      (p "x[::3]")
-      (p "x[:3]")
-      (p "x[::1]")
-      ;; subscription-expr
-      (p "x[0]")
-      (p "x[...]")
-      (p "x[a, b, (c, d)]")
-      (p "x[a, ..., b]")
-      (p "x[y[0]]")
-      ;; suite-stmt
-      ;; raise-stmt
-      (p "raise")
-      (p "raise x")
-      (p "raise x, y")
-      (p "raise x, y, z")
-      ;; try-except-stmt
-      (p "try:
+                  ;; import-stmt
+                  (p "import foo")
+                  (p "import foo, bar")
+                  (p "import foo as bar")
+                  (p "import foo, bar as baz, zut")
+                  ;; import-from-stmt
+                  (p "from foo import bar")
+                  (p "from foo import bar, baz")
+                  (p "from foo import *")
+                  ;; lambda-expr
+                  (p "lambda: 42")
+                  (p "lambda x: 42")
+                  (p "lambda x, y=3: x + y")
+                  (p "lambda *args: args[0]")
+                  (p "lambda x, y=lambda y: 42: 3")
+                  (p "lambda (x, y): x, y")
+                  ;; listcompr-expr
+                  (p "[x for y in z]")
+                  (p "[x + y for x, y in a, b() if x > 3]")
+                  (p "[x for x in a, b, c]")
+                  ;; list-expr
+                  (p "[]")
+                  (p "[x]")
+                  (p "[1, 2, 3]")
+                  (p "[1, 2, (3, 4), (5, (6, 7, [8]))]")
+                  (p "[x] = [3]")
+                  (p "[x, y] = []")
+                  ;; pass-stmt
+                  (p "pass")
+                  ;; print-stmt
+                  (p "print")
+                  (p "print x")
+                  (p "print x,")
+                  (p "print x, y")
+                  (p "print x, y,")
+                  ;; return-stmt
+                  (p "return")
+                  (p "return x")
+                  (p "return x, y")
+                  (p "return x + y")
+                  ;; slice-expr
+                  (p "x[:]")
+                  (p "x[1:]")
+                  (p "x[:1]")
+                  (p "x[1:3]")
+                  (p "x[1:2:3]")
+                  (p "x[::3]")
+                  (p "x[:3]")
+                  (p "x[::1]")
+                  ;; subscription-expr
+                  (p "x[0]")
+                  (p "x[...]")
+                  (p "x[a, b, (c, d)]")
+                  (p "x[a, ..., b]")
+                  (p "x[y[0]]")
+                  ;; suite-stmt
+                  ;; raise-stmt
+                  (p "raise")
+                  (p "raise x")
+                  (p "raise x, y")
+                  (p "raise x, y, z")
+                  ;; try-except-stmt
+                  (p "try:
     x
 except:
     y
 else:
     z
 ")
-      ;; try-finally-stmt
-      (p "try:
+                  ;; try-finally-stmt
+                  (p "try:
     x
 finally:
     y
 ")
-      ;; tuple-expr
-      (p "1, 2")
-      (p "x, y = 1, 2")
-      ;; unary-expr
-      (p "+x")
-      (p "-x")
-      (p "~x")
-      ;; while-stmt
-      (p "while x:
+                  ;; tuple-expr
+                  (p "1, 2")
+                  (p "x, y = 1, 2")
+                  ;; unary-expr
+                  (p "+x")
+                  (p "-x")
+                  (p "~x")
+                  ;; while-stmt
+                  (p "while x:
     y")
-      ;; yield-stmt
-      (p "(yield)")
-      (p "(yield x)")
-      (p "(yield x, y)")
-      (p "()")
-      ;; some strings
-      (p "'asdf'")
-      (p "'asdf\"'")
-      (p "\"'\"")
-      (p "abc
+                  ;; yield-stmt
+                  (p "(yield)")
+                  (p "(yield x)")
+                  (p "(yield x, y)")
+                  (p "()")
+                  ;; some strings
+                  (p "'asdf'")
+                  (p "'asdf\"'")
+                  (p "\"'\"")
+                  (p "abc
 defg")
-      )))
+                  ))))
+
+      #+allegro-cl-express ;; Work around out-of-memory due to heap limitation
+      `(eval '#1#)
+      #-allegro-cl-express
+      #1#))
 
 (defun run-lispy-test ()
   (let ((tests '(("()" (clpython.parser::handle-lisp nil))
