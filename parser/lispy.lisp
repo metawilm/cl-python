@@ -157,7 +157,7 @@ or (in case of INTERACTIVE-P) the error status :INCOMPLETE"
                        (setf next-start-ix nil)
                        (values nil c))
                      ({SyntaxError} (c) ;; includes subclass {UnexpectedEofError}
-                       (when (typep c '{UnexpectedEofError})
+                       (when (typep c (find-class '{UnexpectedEofError}))
                          (setf last-python-incomplete-p t))
                        (setf next-start-ix nil)
                        (values nil c))
