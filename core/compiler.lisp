@@ -1659,13 +1659,17 @@ LOCALS shares share tail structure with input arg locals."
        ,(let ((clpython.parser::*extra-identifier-char2-p* (list #\$)))
           `([suite-stmt]
             ,(clpython.parser::parse-with-replacements
-              "mgr$ = EXPR$
+              (concatenate 'string "mgr$ = EXPR$
 exit$ = mgr$.__exit__  # Not calling it yet
 value$ = mgr$.__enter__()
 exc$ = True
 try:
   try:
-    VAR$ = value$ ## Only if 'as VAR' is present
+"
+                           (when var "
+    VAR$ = value$  ## Only if 'as VAR' is present
+")
+                           "
     BLOCK$
   except:
     # The exceptional case is handled here
@@ -1676,9 +1680,9 @@ try:
 finally:
   # The normal and non-local-goto cases are handled here
   if exc$:
-    exit$(None, None, None)"
+    exit$(None, None, None)")
               `((([identifier-expr] {EXPR$})  . ,expr)
-                (([identifier-expr] {VAR$})   . ,var)
+                ,@(when var `((([identifier-expr] {VAR$})   . ,var)))
                 (([identifier-expr] {BLOCK$}) . ,block)
                 ({mgr$}   . ,mgr)
                 ({exit$}  . ,exit)

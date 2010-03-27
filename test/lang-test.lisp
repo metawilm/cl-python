@@ -936,6 +936,19 @@ def f():
  with C() as y:
   x.append(y)
   yield 1/0
+list(f())" {ZeroDivisionError})
+  (run-error "
+x = []
+class C:
+  def __enter__(self):
+    x.append('enter')
+    return 42
+  def __exit__(self, _x,_y,_z):
+    x.append('exit')
+def f():
+ with C():
+  x.append('y')
+  yield 1/0
 list(f())" {ZeroDivisionError}))
 
 (defparameter *cps-tests*
