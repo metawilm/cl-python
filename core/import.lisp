@@ -55,7 +55,7 @@ In particular, asdf-binary-locations is used if available.")
 
 (defgeneric compiled-file-name (kind modname filepath)
   (:method :around (kind modname filepath)
-           (declare (ignore kind) (ignorable filepath))
+           (declare (ignorable filepath))
            (check-type modname string)
            (let* ((bin-path (call-next-method))
                   (asdf-path (when *use-asdf-fasl-locations*
@@ -68,10 +68,9 @@ In particular, asdf-binary-locations is used if available.")
                                   (when path
                                     (ensure-directories-exist path))))))
                   (result-path (or asdf-path bin-path)))
-             #+allegro
              (unless (file-writable-p result-path)
                ;; Fall back to using a temporary file.
-               (whereas ((temp-file (get-temporary-fasl-file filepath modname)))
+               (whereas ((temp-file (get-temporary-fasl-file kind modname filepath)))
                  (setf result-path temp-file)))
              result-path))
   
@@ -81,32 +80,32 @@ In particular, asdf-binary-locations is used if available.")
 (defparameter *temp-fasl-file-map* (make-hash-table :test 'equal)
   "Mapping from Python source file to corresponding temporary fasl file.")
 
-(defun get-temporary-fasl-file (src-file modname)
+(defun get-temporary-fasl-file (kind modname src-file)
   (declare (ignorable modname))
-  (multiple-value-bind (file found-p)
-      (gethash src-file *temp-fasl-file-map*)
-    (when found-p
-      (return-from get-temporary-fasl-file file)))
-  #+allegro
-  (flet ((determine-temp-file ()
-           #+allegro
-           (let* ((temp-dir (sys:temporary-directory))
+  (let ((hash-key (list kind modname src-file)))
+    (multiple-value-bind (file found-p)
+        (gethash hash-key *temp-fasl-file-map*)
+      (when found-p
+        (return-from get-temporary-fasl-file file)))
+    (flet ((get-temp-file-name (i)
+             (let ((random-n (random 1000000)))
+               (declare (ignorable random-n))
+               (or 
+                #+allegro
+                (let* ((temp-dir (sys:temporary-directory)))
                   ;; temp-dir might contain ~ as in C:\DOCUME~1\.. so careful with FORMAT
-                  (fname-formatter (lambda (i)
-                                     (format nil "~Aclpython.~A.~A.~A.fasl"
-                                             temp-dir modname (random 1000000) i))))
-             (dotimes (i 1000)
-               (let ((fname (funcall fname-formatter i)))
-                 (unless (probe-file fname)
-                   (when (file-writable-p fname)
-                     (return-from determine-temp-file fname)))))
-             (warn "Could not determine temporary fasl file in tempdir ~A." temp-dir)
-             nil)))
-    (setf (gethash src-file *temp-fasl-file-map*)
-      (pathname (determine-temp-file))))
-  #-allegro
-  (progn (break "No temporary-file functionality available in this implementation.")
-         nil))
+                  (format nil "~Aclpython.~A.~A.~A.fasl" temp-dir modname random-n i))
+                #+(and sbcl unix)
+                (format nil "/tmp/clpython.~A.~A.~A.fasl" modname random-n i)
+                #+(and)
+                (error "No temporary-file functionality defined for this implementation.")))))
+      (dotimes (i 1000)
+        (let ((fname (get-temp-file-name i)))
+          (unless (probe-file fname)
+            (when (file-writable-p fname)
+              (return-from get-temporary-fasl-file
+                (setf (gethash hash-key *temp-fasl-file-map*) (pathname fname)))))))))
+  (error "Could not determine temporary fasl file"))
 
 (defun file-writable-p (f)
   (handler-case
