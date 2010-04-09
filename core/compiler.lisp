@@ -1340,10 +1340,15 @@ LOCALS shares share tail structure with input arg locals."
                  (dolist (f defun-wrappers result)
                    (loop named tlf
                        do #+(or)(format t "Evaluating top-level form ~A in ~A~%" (incf i) current-module-name)
-                          (with-simple-restart (retry "Retry evaluating this top-level form in module `~A'"
-                                                      current-module-name)
-                            (setf result (funcall f module-globals))
-                            (return-from tlf)))))))
+                          (restart-bind ((error (lambda () (return-from tlf *the-none*))
+                                             :report-function
+                                               (lambda (stream)
+                                                 (format stream "Skip this top-level form in module `~A'"
+                                                         current-module-name))))
+                            (with-simple-restart (retry "Retry evaluating this top-level form in module `~A'"
+                                                        current-module-name)
+                              (setf result (funcall f module-globals))
+                              (return-from tlf))))))))
         ;; Give outer function a chance to influence module loading actions:
         (restart-case
             (progn (signal 'module-import-pre
