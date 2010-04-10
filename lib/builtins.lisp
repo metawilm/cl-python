@@ -72,6 +72,22 @@
 Raises AttributeError when there is no `__abs__' method."
   (py-abs x))
 
+(defun {all} (x)
+  (let ((iter-fun (get-py-iterate-fun x)))
+    (loop (let ((item (funcall iter-fun)))
+            (cond ((null item) 
+                   (return-from {all} +the-true+))
+                  ((not (py-val->lisp-bool item))
+                   (return-from {all} +the-false+)))))))
+
+(defun {any} (x)
+  (let ((iter-fun (get-py-iterate-fun x)))
+    (loop (let ((item (funcall iter-fun)))
+            (cond ((null item) 
+                   (return-from {any} +the-false+))
+                  ((py-val->lisp-bool item)
+                   (return-from {any} +the-true+)))))))
+
 (defun {apply} (function &optional pos-args kw-dict)
   "Apply FUNCTION (a callable object) to given args.
 POS-ARGS is any iterable object; KW-DICT must be of type DICT." 

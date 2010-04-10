@@ -118,7 +118,7 @@
 
 (defpackage :clpython.user.builtin.function
   (:use )
-  (:export "__import__" "abs" "apply" "callable" "chr" "cmp" "coerce" "compile"
+  (:export "__import__" "abs" "all" "any" "apply" "callable" "chr" "cmp" "coerce" "compile"
 	   "delattr" "dir" "divmod" "eval" "execfile" "filter" "getattr" "globals"
 	   "hasattr" "hash" "hex" "id" "input" "intern" "isinstance" "issubclass"
 	   "iter" "len" "locals" "map" "max" "min" "oct" "open" "ord" "pow" "range"
@@ -127,7 +127,7 @@
 
 (defpackage :clpython.user.builtin.type.exception
   (:use )
-  (:export "ArithmeticError" "AssertionError" "AttributeError" "DeprecationWarning"
+  (:export "ArithmeticError" "AssertionError" "AttributeError" "BytesWarning" "DeprecationWarning"
 	   "EOFError" "EnvironmentError" "Exception" "FloatingPointError"
 	   "FutureWarning" "IOError" "ImportError" "ImportWarning" "IndentationError"
            "IndexError" "KeyError" "KeyboardInterrupt" "LookupError" "MemoryError"
