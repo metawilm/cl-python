@@ -101,7 +101,8 @@
 		       {SystemError}
 		       {MemoryError} )
       
-      ({Warning} {DeprecationWarning}
+      ({Warning} {BytesWarning}
+                 {DeprecationWarning}
 		 {FutureWarning}
                  {ImportWarning}
 		 {OverflowWarning}
