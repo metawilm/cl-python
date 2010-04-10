@@ -79,6 +79,25 @@ The corresponding module must be defined as package, e.g. :clpython.module.posix
   "Function to be called upon exit")
 (set-impl-status '|exitfunc| :todo "Currently never called.")
 
+;;; Command-line args, read-only
+(defparameter |flags| 
+    (copy-tree '((:bytes-warning 1) ;; 2=error, 1=default, 0=ignore ?
+                 (:debug nil)
+                 (:py3k-warning nil)
+                 (:division-warning nil)
+                 (:division-new nil)
+                 (:inspect nil)
+                 (:interactive nil)
+                 (:optimize nil)
+                 (:dont-write-bytecode nil)
+                 (:no-user-site nil)
+                 (:no-site nil)
+                 (:ignore-environment nil)
+                 (:tabcheck nil)
+                 (:verbose nil)
+                 (:unicode nil)
+                 (:bytes-warning nil))))
+
 (defun |setcheckinterval| (arg)
   "How often to check for thread switches and signal handlers"
   (declare (ignore arg))

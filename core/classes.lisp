@@ -2992,6 +2992,28 @@ invocation form.\"")
     (print-unreadable-object (x s :type nil :identity nil)
       (format s "symbol ~S" x))))
 
+;; Alist
+
+(def-proxy-class py-alist)
+
+(def-py-method py-alist.__getattribute__ (x attr)
+  (check-type x list)
+  (let ((attr-variants (list attr (substitute #\- #\_ attr))))
+    (loop for item in x
+        when (and (listp item)
+                  (let ((key (car item)))
+                    (and (symbolp key)
+                         (member key attr-variants :test 'string-equal))))
+        do (return-from py-alist.__getattribute__
+             (or (cadr item)
+                 *the-none*)))) ;; can't have NIL as Python value
+  (py-raise '{AttributeError} "Assoc-list ~S has no attribute `~A'." x attr))
+
+(def-py-method py-alist.__repr__ (x)
+  (check-type x list)
+  (with-standard-io-syntax
+    (format nil "~A" x)))
+
 ;; Tuple (Lisp object: consed list)
 
 (def-proxy-class py-tuple)
@@ -3123,7 +3145,12 @@ invocation form.\"")
   (:method ((x complex)) (ltv-find-class 'py-complex))
   (:method ((x string))  (ltv-find-class 'py-string ))
   (:method ((x vector))  (ltv-find-class 'py-list   ))
-  (:method ((x list))    (ltv-find-class 'py-tuple  ))
+  (:method ((x list))    (cond ((null x)
+                                (break "PY-CLASS-OF of NIL"))
+                               ((and (listp (car x)) (symbolp (caar x)))
+                                (ltv-find-class 'py-alist))
+                               (t
+                                (ltv-find-class 'py-tuple))))
   (:method ((x symbol))  (ltv-find-class 'py-symbol ))
   (:method ((x function))    (ltv-find-class 'py-function))
   (:method ((x py-function)) (ltv-find-class 'py-function))

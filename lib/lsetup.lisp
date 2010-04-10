@@ -127,6 +127,7 @@
   (:export #:|argv| #:|byteorder| #:|exc_info| #:|copyright|
 	   #:|builtin_module_names| #:|displayhook| #:|excepthook|
 	   #:|__displayhook__| #:|exc_info| #:|__excepthook__| #:|exit| #:|exitfunc|
+           #:|flags|
 	   #:|setcheckinterval| #:|getcheckinterval|
 	   #:|getdefaultencoding| #:|setdefaultencoding|
 	   #:|getfilesystemencoding|
