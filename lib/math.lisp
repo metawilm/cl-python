@@ -36,10 +36,13 @@
 (defun |ceil| (x) (ceiling (conv x)))
 (set-impl-status '(|ceil| |floor|) t)
 
+(defun |exp| (x) (exp x))
 (defun |pow| (x y) (expt (conv x) (conv y)))
+(defun |log| (x) (log x))
 (defun |log10| (x) (log (conv x) 10))
-(set-impl-status '(|pow| |exp| |log| |log10| |sqrt|) t)
-                 
+(defun |sqrt| (x) (sqrt x))
+(set-impl-status '(|exp| |pow| |log| |log10| |sqrt|) t)
+
 (set-impl-status '(|degrees| |radians|) :todo)
 
 (defun |fmod| (x y) (mod (conv x) (conv y)))
