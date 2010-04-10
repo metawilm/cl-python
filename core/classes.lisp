@@ -213,7 +213,9 @@
   (declare (ignore context-name)) ;; XXX for now
   (flet ((make-condition-exception ()
            (assert (not *exceptions-are-python-objects*))
-           (values (apply #'define-exception-subclass name (mapcar 'class-name supers))
+           (values (let ((cond-class-name (apply #'define-exception-subclass
+                                                 name (mapcar 'class-name supers))))
+                     (find-class cond-class-name))
                    :condition)))
     
     #+(or)(assert (symbolp name))
@@ -239,7 +241,7 @@
                  (loop for s in supers thereis (subtypep s 'condition)))
         (unless (loop for s in supers always (subtypep s 'condition))
           (py-raise '{TypeError}
-                    "Heregoneous superclasses: some 'condition, some not: ~A" supers))
+                    "Unsupported heterogeneous superclasses: some CONDITION, some not: ~A." supers))
         (return-from make-py-class-1 (make-condition-exception)))
       
       (loop for s in supers
