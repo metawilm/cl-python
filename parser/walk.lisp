@@ -350,6 +350,9 @@ CLASSDEF, FUNCDEF or LAMBDA."
                             (funcall f expr :value +normal-value+)
                           expr))))
     
+    ([literal-expr] 
+     (values ast t))
+    
     ([try-except-stmt]
      (destructuring-bind (suite except-clauses else-suite) (cdr ast)
        `([try-except-stmt]
