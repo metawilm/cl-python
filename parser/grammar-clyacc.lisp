@@ -16,12 +16,12 @@
 
 (eval-when (:compile-toplevel)
   #+sbcl (terpri)
-  (format t ";;; Compiling Python grammar for CL-Yacc: this may take a while...~%"))
-            
+  (format t ";;; Compiling Python grammar for CL-Yacc...~%"))
+
 #.`(yacc:define-parser *cl-yacc-python-parser*
        (:terminals ,*terminals*)
      (:precedence ,(nreverse (get-precedence-and-associativity :left :right :nonassoc)))
-     (:start-symbol clpython.parser::python-grammar)
+     (:start-symbol python-grammar)
      
      ,@(loop for name being each hash-key in *python-prods*
            using (hash-value rules)
@@ -31,7 +31,7 @@
                                  for func = `(lambda ,args
                                                (declare (ignorable ,@args))
                                                ,outcome)
-                                 collect `(,@(or terms `(())) ;; splice term or insert () 
+                                 collect `(,@(or terms `(())) ;; splice terms or insert () 
                                              ,func)))))
 
 ;;; Lexer
@@ -67,7 +67,7 @@
                   (raise-syntax-error
                    (format nil "Parse error at line ~A, at token `~A'. ~
                                 ~_Expected one of: ~{`~A'~^ ~}."
-			   ;;~%~[Internal error ~S caught due to ~S]"
+                           ;;~%~[Internal error ~S caught due to ~S]"
                            line value expected-tokens
-			   ;; c '*catch-yacc-conditions*
+                           ;; c '*catch-yacc-conditions*
 			   ))))))))
