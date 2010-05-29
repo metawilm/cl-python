@@ -62,35 +62,8 @@ Returns MATCH-P, BINDINGS; the latter is alist of wildcard-form pairs."
       
       (values t bindings))))
 
-(eval-when (:compile-toplevel :load-toplevel :execute)
-  (defvar *inside-match-check-template* nil))
-
-(define-compiler-macro match-p (&whole whole form template
-                                &key verbose (check-consistency t))
-  (declare (ignore form verbose))
-  (when (and check-consistency
-             (not *inside-match-check-template*)
-             (listp template)
-             (eq (car template) 'quote))
-    (check-consistent-template (second template)))
-  whole)
-
-(defun check-consistent-template (template)
-  (unless *inside-match-check-template*
-    (let ((*inside-match-check-template* t))
-      (let ((x (car template)))
-        (when (and (symbolp x)
-                   (eq x (find-symbol (symbol-name x) :clpython.ast)))
-          (whereas ((ast-pattern (clpython.parser::get-ast-pattern x)))
-            (unless (match-p template ast-pattern)
-              (warn "Attempt to use template of the form ~A. This template ~
-differs in structure from the template for ~A ast nodes, which is: ~A"
-                    template x ast-pattern))))))))
-
 (defmacro with-matching ((form template &key (must-hold t) (check-consistency t))
                          &body body)
-  (when check-consistency
-    (check-consistent-template template))
   (let ((wildcards (template-wildcards template)))
     `(multiple-value-bind (.match-p .bindings)
          (match-p ,form ',template :check-consistency nil)
