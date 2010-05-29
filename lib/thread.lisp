@@ -102,7 +102,7 @@
 
 (def-py-method |lock.__exit__| (x exc-type exc-value traceback)
   (|lock.release| x)
-  clpython::+the-false+)
+  clpython:+the-false+)
 
 
 ;;; Threads
@@ -122,7 +122,7 @@
                        (lambda () (apply #'py-call func args)))
            #-allegro (break "todo")))
     (let* ((pa (py-iterate->lisp-list args))
-           (ka (when kwargs (loop for (k v) in (clpython::dict.items kwargs)
+           (ka (when kwargs (loop for (k v) in (clpython:dict.items kwargs)
                                 collect (intern k :keyword)
                                 collect v)))
            (args (append pa ka))

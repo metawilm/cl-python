@@ -33,7 +33,7 @@
     `(dolist (,g1 (all-use-environment-accessor-values))
        (dolist (,g2 '(t nil))
          (let ((*use-environment-acccessors* ,g1)
-               (clpython::*compile-python-ast-before-running* ,g2))
+               (clpython:*compile-python-ast-before-running* ,g2))
            ,@body)))))
 
 (defmacro run-error (string condtype &rest options)
@@ -75,8 +75,8 @@
     (test-false x)
     (test-true err)
     (test-true (string= (pop (exception-args err)) "abc")
-               :fail-info (format nil "~A = ~A" 'clpython::*exceptions-are-python-objects*
-                                  clpython::*exceptions-are-python-objects*))))
+               :fail-info (format nil "~A = ~A" 'clpython:*exceptions-are-python-objects*
+                                  clpython:*exceptions-are-python-objects*))))
 
 (defmethod test-lang ((kind (eql :assign-stmt)))
   (run-test 3 "a = 3; a")
@@ -662,7 +662,7 @@ if f(): pass" :fail-info "Functions inherit __nonzero__ from object."))
              (error "Compile file lang-test.lisp using compile-file (or asdf), not using temp file, ~
                      otherwise import paths are incorrect: ~A." *compile-file-truename*))
            nil)
-  (let* ((new-dir #.(directory-namestring (clpython::derive-pathname
+  (let* ((new-dir #.(directory-namestring (clpython.util:derive-pathname
                                            (or *compile-file-truename* *load-truename*)
                                            :type nil :name nil)))
          (prefix (concatenate 'string "
@@ -1137,7 +1137,7 @@ MAX is a safey limit, in case the code erroneously goes into an endless loop."
         (wformat "G: ~A~%" gener)
         (wformat "Starting G with next()~%")
         (let ((values (multiple-value-list
-                       (handler-case (clpython::generator.next gener)
+                       (handler-case (clpython:generator.next gener)
                          ({StopIteration} ()
                            (wformat " exhausted~%")
                            :exhausted)))))
@@ -1153,7 +1153,7 @@ MAX is a safey limit, in case the code erroneously goes into an endless loop."
             (:yield
              (push (second values) yielded)
              (loop for val = (multiple-value-list
-                              (handler-case (clpython::generator.send gener *the-none*)
+                              (handler-case (clpython:generator.send gener *the-none*)
                                 ({StopIteration} ()
                                   (wformat " exhausted~%")
                                   :exhausted)))
@@ -1357,7 +1357,7 @@ class C:
   def g():
    lambda x, y=(yield 2): x+y
    return 2" {SyntaxError}
-   :known-failure (not clpython::*compile-python-ast-before-running*)
+   :known-failure (not clpython:*compile-python-ast-before-running*)
    :fail-info "In a generator, returning a value disallowed. Detected by macroexpansion.")
   (run-error "
 def f():

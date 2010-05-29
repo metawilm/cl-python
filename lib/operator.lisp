@@ -96,30 +96,30 @@
 
 (defun |countOf| (a b)
   "Return the number of occurrences of b in a."
-  (loop for x in (clpython::py-iterate->lisp-list a) count (clpython::py-==->lisp-val x b)))
+  (loop for x in (clpython:py-iterate->lisp-list a) count (clpython:py-==->lisp-val x b)))
 
 (eval-when (:load-toplevel :execute)
   (export '|countOf|))
 
 (def-magic-twins |delitem| (a b)
   "Remove the value of a at index b."
-  (setf (clpython::py-subs a b) nil))
+  (setf (clpython:py-subs a b) nil))
 
 (def-magic-twins |delslice| (a b c)
   "Delete the slice of a from index b to index c-1."
-  (setf (clpython::py-subs a (clpython::make-slice b c nil)) nil))
+  (setf (clpython:py-subs a (clpython:make-slice b c nil)) nil))
 
 (def-magic-twins |getitem| (a b)
   "Return the value of a at index b."
-  (clpython::py-subs a b))
+  (clpython:py-subs a b))
 
 (def-magic-twins |getslice| (a b c)
   "Return the slice of a from index b to index c-1."
-  (clpython::py-subs a (clpython::make-slice b c nil)))
+  (clpython:py-subs a (clpython:make-slice b c nil)))
 
 (defun |indexOf| (a b)
   "Return the index of the first of occurrence of b in a."
-  (or (position b a :test 'clpython::py-==->lisp-val)
+  (or (position b a :test 'clpython:py-==->lisp-val)
       (py-raise '{ValueError} "Item ~A not in sequence ~A." b a)))
 
 (eval-when (:load-toplevel :execute)
@@ -127,7 +127,7 @@
 
 (def-magic-twins |repeat| (a b)
   "Return a * b where a is a sequence and b is an integer."
-  (clpython::py-* a b))
+  (clpython:py-* a b))
 
 (eval-when (:load-toplevel :execute)
   (export '|repeat|))
@@ -137,11 +137,11 @@
 
 (def-magic-twins |setitem| (a b c)
   "Set the value of a at index b to c."
-  (setf (clpython::py-subs a b) c))
+  (setf (clpython:py-subs a b) c))
 
 (def-magic-twins |setslice| (a b c v)
   "Set the slice of a from index b to index c-1 to the sequence v."
-  (setf (clpython::py-subs a (clpython::make-slice b c nil)) v))
+  (setf (clpython:py-subs a (clpython:make-slice b c nil)) v))
 
 ;; "Many operations have an 'in-place' version. The following functions
 ;; provide a more primitive access to in-place operators than the usual

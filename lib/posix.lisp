@@ -36,14 +36,14 @@
 (defun |open| (name flags &optional mode)
   (when flags
     (warn "posix.open(): ignoring flags: ~A" flags))
-  (py-call (find-class 'clpython::py-file) name (or mode "r")))
+  (py-call (find-class 'clpython:py-file) name (or mode "r")))
 
 (defun |read| (file n)
   "Read at most N bytes, returned as string. Empty string for EOF"
-  (funcall 'clpython::py-file.read file n))
+  (funcall 'clpython:py-file.read file n))
 
 (defun |close| (file)
-  (funcall 'clpython::py-file.close file))
+  (funcall 'clpython:py-file.close file))
 
 (defun |remove| (path)
   (|unlink| path))
@@ -57,10 +57,10 @@
 ;;; Stat
 ;; TODO support stat_float_times()
 
-(defclass stat-result (clpython::object)
+(defclass stat-result (clpython:object)
   ;; todo make named-tuple?
   ((stat :accessor sr-stat :initarg :stat))
-  (:metaclass clpython::py-type))
+  (:metaclass clpython:py-type))
 
 (defun |stat| (path)
   (declare (ignorable path))

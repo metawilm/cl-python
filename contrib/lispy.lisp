@@ -312,20 +312,20 @@ with the addition of ~ as a prefix for a Python expression.")
               ,form))))
 
 (defmacro handle-python (form)
-  `(let ((clpython::*habitat* (or *lispy-habitat*
-                                  (setf *lispy-habitat* (funcall 'clpython::make-habitat))))
+  `(let ((clpython:*habitat* (or *lispy-habitat*
+                                 (setf *lispy-habitat* (funcall 'clpython:make-habitat))))
          (clpython::*module-namespace* (or *lispy-namespace*
                                            (setf *lispy-namespace* (clpython::make-package-ns
                                                                     :package (find-package :cl-user)
                                                                     :scope :module
                                                                     :parent (clpython::make-builtins-namespace)
                                                                     :incl-builtins t)))))
-     (declare (special clpython::*habitat* clpython::*module-namespace*))
+     (declare (special clpython:*habitat* clpython::*module-namespace*))
      (with-sane-debugging ("Error occured in Python/Lisp input mode, while handling a Python form:")
        (let ((*readtable* *standard-readtable*))
-         (clpython::run-python-ast ',form
-                                   :module-globals *lispy-package*
-                                   :compile *lispy-compile-python*
-                                   :compile-quiet t)))))
+         (clpython:run-python-ast ',form
+                                  :module-globals *lispy-package*
+                                  :compile *lispy-compile-python*
+                                  :compile-quiet t)))))
 
 

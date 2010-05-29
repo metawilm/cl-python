@@ -8,7 +8,7 @@
 ;; known as the LLGPL.
 
 (in-package :clpython.module.exceptions)
-(clpython::in-syntax clpython::*user-readtable*)
+(clpython:in-syntax clpython::*user-readtable*)
 
 (defparameter |ValueError| (find-class '{ValueError}))
 (defparameter |SyntaxError| (find-class '{SyntaxError}))

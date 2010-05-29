@@ -72,7 +72,7 @@
     (with-auto-mode-recompile (:verbose *import-compile-verbose* :filename filename)
       (with-noisy-compiler-warnings-muffled
           (with-proper-compiler-settings
-              (clpython.parser::with-source-locations
+              (clpython.parser:with-source-locations
                   (call-with-python-code-reader
                    `((in-package :clpython)
                      #+(or)(in-module :name ',mod-name
@@ -93,7 +93,7 @@
     (flet ((do-compile ()
              (%compile-py-file fname :mod-name module :output-file fasl-file)))
       (if source-information
-          (clpython.parser::with-source-locations
+          (clpython.parser:with-source-locations
               (do-compile))
         (do-compile)))))
 
@@ -139,7 +139,7 @@ or NIL on error (e.g. when the underlying LOAD failed and was aborted by the use
 
 (defun run-python-ast (ast &key (habitat *habitat*)
                                 (compile *compile-python-ast-before-running*)
-                                (module-globals (clpython::make-eq-hash-table "run-python-ast"))
+                                (module-globals (make-eq-hash-table "run-python-ast"))
                                 compile-quiet
                                 time
                                 args)
@@ -1632,7 +1632,7 @@ LOCALS shares share tail structure with input arg locals."
                                               (push v new-safe-vars)
                                               (comp-msg "New safe-lev-vars in ~A, after assignment \"~A\": ~A."
                                                                 (get-pydecl :context-type-stack e)
-                                                                (clpython.parser::py-pprint ass-stmt)
+                                                                (clpython.parser:py-pprint ass-stmt)
                                                                 v)))))))
                         ([suite-stmt] ,after-stmts))))))))) ;; recursive, but 1 assign-stmt less
 
@@ -1790,9 +1790,9 @@ LOCALS shares share tail structure with input arg locals."
                                     :parent (get-pydecl :namespace e))
                       :define-%locals nil
                       :define-%globals nil)
-       ,(let ((clpython.parser::*extra-identifier-char2-p* (list #\$)))
+       ,(let ((clpython.parser:*extra-identifier-char2-p* (list #\$)))
           `([suite-stmt]
-            ,(clpython.parser::parse-with-replacements
+            ,(clpython.parser:parse-with-replacements
               (concatenate 'string "mgr$ = EXPR$
 exit$ = mgr$.__exit__  # Not calling it yet
 value$ = mgr$.__enter__()

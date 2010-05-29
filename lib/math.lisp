@@ -11,7 +11,7 @@
 
 (defgeneric conv (x)
   (:method ((x number)) x)
-  (:method (x)          (clpython::py-float x)))
+  (:method (x)          (clpython:py-float x)))
   
 (defconstant-once |e| (cl:exp 1))
 (defconstant-once |pi| cl:pi)

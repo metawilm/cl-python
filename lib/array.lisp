@@ -8,14 +8,14 @@
 ;; known as the LLGPL.
 
 (in-package :clpython.module.array)
-(in-syntax clpython::*user-readtable*)
+(in-syntax clpython:*user-readtable*)
 
-(defclass |array| (clpython::object)
+(defclass |array| (clpython:object)
   ((kind    :type character :initarg :kind    :accessor py-array-kind)
    (array   :type cl:array  :initarg :array   :accessor py-array-array)
    (elmtype :type t         :initarg :elmtype :accessor py-array-elmtype)
    (elmsize :type fixnum    :initarg :elmsize :accessor py-array-elmsize))
-  (:metaclass clpython::py-type))
+  (:metaclass clpython:py-type))
 
 (defparameter *py-array-types*
     ;; code  type              item size

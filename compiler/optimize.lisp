@@ -410,7 +410,7 @@
 (defmethod py-** ((x float) (y float) &optional z)
   (declare (optimize (speed 3) (safety 0) (debug 0)))
   (if (null z)
-      (coerce (expt x y) '#.clpython.parser::*normal-float-representation-type*)
+      (coerce (expt x y) '#.clpython.parser:*normal-float-representation-type*)
     (py-raise '{TypeError} "Not implemented: x**y % z with x,y float and z provided.")))
 
 (defmethod py-** ((x number) (y number) &optional z)
@@ -422,7 +422,7 @@
              (mod (expt x y) z))
     (let ((res (expt x y)))
       (if (rationalp res)
-          (coerce res '#.clpython.parser::*normal-float-representation-type*)
+          (coerce res '#.clpython.parser:*normal-float-representation-type*)
         res))))
 
 (define-compiler-macro py-** (x y &optional z)

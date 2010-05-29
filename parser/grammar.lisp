@@ -700,7 +700,7 @@ For example: - (1 * 2) => (-1) * 2"
 (defun debug-print-locs (&optional (ht *python-form->source-location*))
   (when ht
     (maphash (lambda (k v) (format t "~30A: ~2@A .. ~2@A ~A~%"
-                                   (clpython.parser::py-pprint k) (getf v :start) (getf v :end) (if (listp k) (car k) k)))
+                                   (clpython.parser:py-pprint k) (getf v :start) (getf v :end) (if (listp k) (car k) k)))
              ht)))
 
 (defun maybe-unwrap-literal-value (x)

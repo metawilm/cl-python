@@ -11,7 +11,7 @@
 (in-syntax *user-readtable*)
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
-  (clpython::define-exception-subclass '{SocketError} '{Exception}))
+  (clpython:define-exception-subclass '{SocketError} '{Exception}))
 
 (defconstant-once |error| (find-class '{SocketError}))
 
@@ -25,8 +25,8 @@
                                  (excl.osi:gethostbyaddr address)
                                (excl.osi:gethostbyname address))
                    #-allegro (break "todo"))
-         (alias-list (clpython::make-py-list-from-list ())) ;; todo
-         (ip-addr-list (clpython::make-py-list-from-list (list #+allegro (socket:ipaddr-to-dotted (socket:lookup-hostname hostname))
+         (alias-list (clpython:make-py-list-from-list ())) ;; todo
+         (ip-addr-list (clpython:make-py-list-from-list (list #+allegro (socket:ipaddr-to-dotted (socket:lookup-hostname hostname))
                                                      #-allegro (break "todo")))))
     (make-tuple-from-list (list hostname alias-list ip-addr-list)))
         
@@ -35,11 +35,11 @@
 
 ;; Socket class
 
-(defclass |socket| (clpython::object)
+(defclass |socket| (clpython:object)
   ((address :accessor socket.address :initform nil)
    (socket :accessor socket.socket :initform nil)
    (stream :accessor socket.stream :initform nil :initarg :stream))
-  (:metaclass clpython::py-type))
+  (:metaclass clpython:py-type))
 
 (def-py-method |socket.__doc__| :attribute (x)
   "Socket")

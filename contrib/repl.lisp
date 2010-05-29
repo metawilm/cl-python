@@ -149,7 +149,7 @@ KIND can be :ptime, :time, :space, :pspace or NIL."
     (format t "REPL shortcuts: `:q' = quit, `:h' = help.~%")
     (clpython::maybe-warn-set-search-paths nil)
     (with-repl-toplevel-aliases
-        (clpython.parser::with-source-locations
+        (clpython.parser:with-source-locations
             (with-ast-user-readtable ()
               (let ((clpython::*muffle-sbcl-compiler-notes* t))
                 (maybe-with-ldb-backend
@@ -182,10 +182,10 @@ KIND can be :ptime, :time, :space, :pspace or NIL."
                           :dict-form '*repl-module-globals*
                           :scope :module
                           :parent (clpython::make-builtins-namespace)))
-         (clpython::*habitat* (clpython::make-habitat :cmd-line-args cmd-args))
+         (clpython:*habitat* (clpython:make-habitat :cmd-line-args cmd-args))
          (*truncation-explain* t)
 	 acc)
-    (declare (special clpython::*habitat*))
+    (declare (special clpython:*habitat*))
     (labels ((print-cmds ()
 	       (format t *doc*))
 	     (remember-value (val)

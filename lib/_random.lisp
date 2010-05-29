@@ -23,9 +23,9 @@ import _random
 >>> 
 ||#
 
-(defclass |Random| (clpython::object)
+(defclass |Random| (clpython:object)
   ((state))
-  (:metaclass clpython::py-type))
+  (:metaclass clpython:py-type))
 
 (defun make-random-state-with-seed (seed)
   (check-type seed integer)

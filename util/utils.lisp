@@ -324,3 +324,12 @@ See function ALIST-VS-HT.")
       do (check-type initarg keyword)
       always (loop for slot in (closer-mop:class-slots class)
                  thereis (member initarg (closer-mop:slot-definition-initargs slot)))))
+
+(defun derive-pathname (pathname &key (type      (pathname-type pathname      :case :common))
+                                      (name      (pathname-name pathname      :case :common))
+                                      (host      (pathname-host pathname      :case :common))
+                                      (device    (pathname-device pathname    :case :common))
+                                      (directory (pathname-directory pathname :case :common))
+                                      (version   (pathname-version pathname)))
+  (make-pathname :type type :name name :host host :device device
+                 :directory directory :version version :case :common))

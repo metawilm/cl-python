@@ -12,12 +12,12 @@
 (defmacro def-habitat-attribute (name accessor-func doc)
   `(progn (defparameter ,name
               (clpython::make-writable-attribute
-               (lambda () (,accessor-func clpython::*habitat*))
-               (lambda (val) (setf (,accessor-func clpython::*habitat*) val)))
+               (lambda () (,accessor-func clpython:*habitat*))
+               (lambda (val) (setf (,accessor-func clpython:*habitat*) val)))
             ,doc)
           (set-impl-status ',name t)))
 
-(def-habitat-attribute |argv| clpython::habitat-cmd-line-args
+(def-habitat-attribute |argv| clpython:habitat-cmd-line-args
   "Comand line args passed to script; argv[0] is script name (rel or abs)")
 
 (defvar |byteorder| :n/a "Byte order of implementation: 'big' or 'little'")
@@ -34,9 +34,9 @@
 
 (defun |exc_info| ()
   (declare (special *last-raised-exception*))
-  (clpython::make-tuple-from-list 
+  (clpython:make-tuple-from-list 
    (if *last-raised-exception*
-       (list (clpython::py-class-of *last-raised-exception*)
+       (list (clpython:py-class-of *last-raised-exception*)
 	     *last-raised-exception*
 	     *the-none*) ;; traceback object
      (list *the-none* *the-none* *the-none*))))
@@ -140,12 +140,12 @@ The corresponding module must be defined as package, e.g. :clpython.module.posix
   "Largest supported unicode code point")
 (set-impl-status '|maxunicode| t "Set to `char-code-limit'.")
 
-(defparameter |modules| (clpython::make-py-hash-table)
+(defparameter |modules| (clpython:make-py-hash-table)
   "Mapping from module names (strings) to modules")
 (set-impl-status '|modules| :incomplete)
 
 ;; List of search paths
-(def-habitat-attribute |path| clpython::habitat-search-paths
+(def-habitat-attribute |path| clpython:habitat-search-paths
   "List of directories to search for module to import. (Only directories ~
 supported (not zip files etc).")
 
@@ -163,9 +163,9 @@ supported (not zip files etc).")
 
 (set-impl-status '(|ps1| |ps2|) :todo "Not consulted by REPL yet.")
 
-(def-habitat-attribute |stdin| clpython::habitat-stdin "Standard input")
-(def-habitat-attribute |stdout| clpython::habitat-stdout "Standard output")
-(def-habitat-attribute |stderr| clpython::habitat-stderr "Error output")
+(def-habitat-attribute |stdin| clpython:habitat-stdin "Standard input")
+(def-habitat-attribute |stdout| clpython:habitat-stdout "Standard output")
+(def-habitat-attribute |stderr| clpython:habitat-stderr "Error output")
 
 (defvar |__stdin__|  (load-time-value *standard-input*) "Initial stdin")
 (defvar |__stdout__| (load-time-value *standard-output*) "Initial stdout")
@@ -178,7 +178,7 @@ supported (not zip files etc).")
 (defvar |version_info| :filled-later "Tuple like (2, 0, 0, 'final', 0)")
 (defvar |version|      :filled-later "String like '1.5.2 (#0 Apr 13 1999, 10:51:12) [MSC 32 bit (Intel)]'")
 
-(let ((py-version (clpython::make-tuple-from-list '(2 5 0 "alpha" 0)))) 
+(let ((py-version (clpython:make-tuple-from-list '(2 5 0 "alpha" 0)))) 
   ;; XXX figure out which we resemble
   (setf |version_info| py-version)
   (setf |version|      (format nil "CLPython 2.5.0 alpha (~A ~A)"
@@ -187,4 +187,4 @@ supported (not zip files etc).")
   (set-impl-status '|version_info| t (format nil "Set to `~A'" |version_info|))
   (set-impl-status '|version| t (format nil "Set to `~A'" |version|)))
 
-(defvar |warnoptions| (clpython::make-py-list-from-list ()))
+(defvar |warnoptions| (clpython:make-py-list-from-list ()))

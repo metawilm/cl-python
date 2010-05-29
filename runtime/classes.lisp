@@ -4256,7 +4256,7 @@ the lisp list will be returned).")
 (defun py-print (dest items comma?)
   (declare (special *habitat*))
   (setf dest (cond (dest)
-                   (*habitat* (clpython::habitat-stdout *habitat*))
+                   (*habitat* (clpython:habitat-stdout *habitat*))
                    (t
                     ;; e.g. when a __del__ method tries to print after habitat is gone
                     *standard-output*)))

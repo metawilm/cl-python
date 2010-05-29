@@ -22,15 +22,6 @@
 ;; Pathname handling is as suggested by Kent Pitman on comp.lang.lisp
 ;; <sfwzo21um0k.fsf@shell01.TheWorld.com>
 
-(defun derive-pathname (pathname &key (type      (pathname-type pathname      :case :common))
-                                      (name      (pathname-name pathname      :case :common))
-                                      (host      (pathname-host pathname      :case :common))
-                                      (device    (pathname-device pathname    :case :common))
-                                      (directory (pathname-directory pathname :case :common))
-                                      (version   (pathname-version pathname)))
-  (make-pathname :type type :name name :host host :device device
-                 :directory directory :version version :case :common))
-
 (defun %get-py-file-name (kind modname filepath type)
   (ecase kind
     (:module (derive-pathname filepath
@@ -503,13 +494,6 @@ Otherwise raises ImportError."
          (package (or (find-package pkg-name)
                       (error "Builtin Python module (Lisp package) ~A not found." pkg-name)))) 
     (symbol-value (find-symbol attr package))))
-
-(defun ensure-path-is-directory (path)
-  (let* ((truename (truename path))
-         (true-string (namestring truename)))
-    (if (member (aref true-string (1- (length true-string))) '(#\\ #\/))
-        true-string
-      (concatenate 'string true-string "/"))))
 
 (defun %reset-import-state ()
   ;; ugly hack

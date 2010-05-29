@@ -203,17 +203,20 @@
            #:class-initarg-p #:define-macro-state-declaration
            #:abbreviate-string #:abbreviate-to-one-line
            #:alist-remove-prop #:+dict-alist-to-hashtable-threshold+
-           #:match-p #:with-matching #:with-perhaps-matching #:quit))
+           #:match-p #:with-matching #:with-perhaps-matching #:quit
+           #:derive-pathname #:ensure-path-is-directory))
 
 ;;; CLPYTHON.PARSER - Parser and Lexer
 
 (defpackage :clpython.parser
   (:documentation "Parser and lexer for Python code")
   (:use :common-lisp :clpython.util)
-  (:export #:parse #:ast-p #:ast-complete-p ;; parser
+  (:export #:*tab-width-spaces*
+           #:parse #:ast-p #:ast-complete-p ;; parser
+           #:*extra-identifier-char2-p* #:parse-with-replacements
            #:*python-form->source-location* #:*module->source-positions*
-           #:string-literal-p
-           
+           #:string-literal-p #:with-source-locations
+           #:*normal-float-representation-type* #:*enormous-float-representation-type*
            #:walk-py-ast #:with-py-ast ;; code walker
 	   #:+normal-target+ #:+delete-target+ #:+augassign-target+ #:+no-target+
 	   #:+normal-value+ #:+augassign-value+ #:+no-value+
@@ -239,13 +242,38 @@
   (:documentation "CLPython: An implementation of Python in Common Lisp.")
   (:use :common-lisp :clpython.util :clpython.parser)
   (:export #:raise-syntax-error *raise-syntax-error-hook*
-           
-           #:py-val->string #:py-str-string #:py-repr #:py-bool #:make-module
-	   #:*the-none* #:*the-true* #:*the-false* #:*the-ellipsis* #:*the-notimplemented*
-	   #:*the-empty-tuple* #:make-tuple-from-list 
+           ;; string
+           #:py-val->string #:py-str-string #:py-repr #:py-string.strip
+           ;; numbers
+           #:py-val->number #:py-float
+           #:py-==->lisp-val
+           #:py-*
+           ;; generators
+           #:generator.next #:generator.send
+           #:py-bool #:*the-true* #:*the-false*
+           ;; unique objects
+           #:py-none #:*the-none* #:none-p
+           #:*the-ellipsis* #:*the-notimplemented*
+           ;; modules
+           ;; dict
+           #:make-py-hash-table #:dict.items
+           ;; file
+           #:py-file #:py-file.read #:py-file.close
+           ;; exceptions
+           #:define-exception-subclass
+           ;; habitat
+           #:*habitat* #:make-habitat
+           #:habitat-stdout #:habitat-stdin #:habitat-stderr #:habitat-cmd-line-args
+           #:habitat-search-paths
+           ;; tuple
+           #:*the-empty-tuple* #:make-tuple-from-list 
+           ;; sequences, mappings
+           #:py-subs
+           #:make-slice #:make-py-list-from-list
 	   #:*py-modules* #:dyn-globals #:py-call #:py-class-of #:py-raise #:bind-val
 	   #:py-repr-string #:py-attr #:py-attr*
-	   #:run #:exception-args #:*exceptions-loaded*
+	   #:run #:*compile-python-ast-before-running* #:*exceptions-are-python-objects*
+           #:exception-args #:*exceptions-loaded*
            #:def-py-method #:py-iterate->lisp-list #:py-raise
            #:+the-true+ #:+the-false+ #:object #:py-type
 
@@ -254,7 +282,9 @@
 	   #:*warn-unused-function-vars* #:*warn-bogus-global-declarations*
            #:with-line-numbers #:*runtime-line-number-hook*
 
-	   ;; module status
+           ;; run
+           #:run-python-ast
+           ;; module status
 	   #:impl-status #:set-impl-status
 	   
            ;; abstract syntax tree utils

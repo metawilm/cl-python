@@ -99,7 +99,7 @@
 (defun |translate| (string table &optional delete-chars)
   "Delete chars in DELETE-CHARS; TABLE is trans of 256 -> 256. If TABLE is None, then only delete chars."
   (check-type string string)
-  (check-type table (or string clpython::py-none))
+  (check-type table (or string clpython:py-none))
   (flet ((calc-filter ()
            (when delete-chars
              (let ((filter (make-array 256 :initial-element t)))
@@ -122,7 +122,7 @@
         for ch.code = (char-code ch)
         do (cond ((> ch.code 255) (py-raise '{ValueError} "Char ~S has code > 255." ch))
                  ((and filter (null (svref filter ch.code)))) ;; skip
-                 (t (let ((repl (if (clpython::none-p table)
+                 (t (let ((repl (if (clpython:none-p table)
                                     ch
                                   (aref table ch.code))))
                       (setf (aref res dest-i) repl)

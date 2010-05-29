@@ -70,11 +70,11 @@
     (test-equal '([literal-expr] :number #C(0.0 0.5d0)) (ps "0.5j" nil))
     (test-equal '([literal-expr] :number #C(0.0 0.5d0)) (ps ".5j" nil))
 
-    (assert (not (eq clpython.parser::*normal-float-representation-type*
-                     clpython.parser::*enormous-float-representation-type*))
+    (assert (not (eq clpython.parser:*normal-float-representation-type*
+                     clpython.parser:*enormous-float-representation-type*))
         () "Invalid float representation types: outside a FLOAT range an INTEGER should take over.")
     (destructuring-bind (min-f max-f)
-        (clpython.parser::number-range clpython.parser::*normal-float-representation-type*)
+        (clpython.parser::number-range clpython.parser:*normal-float-representation-type*)
       (assert (< min-f 0))
       (assert (< (expt 10 3) max-f) () "Really small float range in this Lisp implementation?!")
       (test-equal '([literal-expr] :number 1D3) (ps "1e3" nil)) ;; 1e3 is small enough to be a regular ..-FLOAT
@@ -326,7 +326,7 @@ if 1 > \\
 if 1:
 ~Afoo
 ~A~Abar"
-                                      (coerce (loop repeat (1+ clpython.parser::*tab-width-spaces*)
+                                      (coerce (loop repeat (1+ clpython.parser:*tab-width-spaces*)
                                                   collect #\Space)
                                               'string)
                                       #\Tab #\Space)))
@@ -337,8 +337,8 @@ if 1:
     ))
 
 (defun string-strip-= (x y)
-  (string= (clpython::py-string.strip x)
-	   (clpython::py-string.strip y)))
+  (string= (clpython:py-string.strip x)
+	   (clpython:py-string.strip y)))
 ;;  #+allegro-cl-express
 ;;  (warn "Skipped running RUN-PRETTY-PRINTER-TEST in Allegro Express edition, to prevent out-of-memory,")
 ;;  #-allegro-cl-express
@@ -440,7 +440,7 @@ if 1:
                   (p "x < y")
                   (p "x <= y <= z")
                   (p "a < b > c == d != e <= f >= g != h")
-                  (test "x != y" (clpython::py-string.strip (py-pprint (parse "x <> y"))) :test 'string=)
+                  (test "x != y" (clpython:py-string.strip (py-pprint (parse "x <> y"))) :test 'string=)
                   ;; continue-stmt
                   (p "continue")
                   ;; del-stmt
