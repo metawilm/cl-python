@@ -220,7 +220,7 @@ KIND can be :ptime, :time, :space, :pspace or NIL."
                total)
              (eval-print-ast (ast total)
                (with-matching (ast ([module-stmt] ?suite))
-		 (assert ([suite-stmt-p] ?suite))
+		 (assert (ast-p ?suite '[suite-stmt]))
 		 (let ((vals (multiple-value-list
                               (block :val 
                                 (loop (let ((helper-func (run-ast-func ast)))
@@ -293,7 +293,7 @@ KIND can be :ptime, :time, :space, :pspace or NIL."
                                     (return-syntax-error err))))))
                    (when ast
                      (when (eq ast-finished :maybe)
-                       (assert ([module-stmt-p] ast))
+                       (assert (ast-p ast '[module-stmt]))
                        (with-matching (ast ([module-stmt] ?suite-stmt))
                          (with-matching (?suite-stmt ([suite-stmt] ?items))
                            (assert (listp ?items)) ;; ?items can be multiple, e.g. in the case of "a=3; b=4".

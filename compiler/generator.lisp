@@ -298,7 +298,7 @@ former requires that this form is executed within RECEIVE-YIELDED-VALUE."
          (with-cps-conversion (,primary ,primary-gensym) ,res)))))
 
 (def-cps-macro [classdef-stmt] (name inheritance suite)
-  (assert ([tuple-expr-p] inheritance))
+  (assert (ast-p inheritance '[tuple-expr]))
   (with-gensyms (classdef-k)
     (let* ((inheritance-gensyms (loop for i from 1 repeat (length (second inheritance)) collect
                                       (gensym (format nil "superclass-~A-" i))))

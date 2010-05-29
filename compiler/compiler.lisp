@@ -874,7 +874,7 @@ an assigment statement. This changes at least the returned 'store' form.")
 (defun apply-comparison-brackets (whole)
   (let (args cmps)
     (labels ((apply-brackets (form)
-			     (if (not ([comparison-expr-p] form))
+			     (if (not (ast-p form '[comparison-expr]))
 				 (push form args)
 			       (with-matching (form ([comparison-expr] ?cmp ?left ?right))
                                  (progn (apply-brackets ?left)
@@ -1518,7 +1518,7 @@ LOCALS shares share tail structure with input arg locals."
 (defmacro [module-stmt] (suite &environment e)
   "If *MODULE-NAMESPACE* is bound, it is used."
   (declare (ignorable e))
-  (assert ([suite-stmt-p] suite))
+  (assert (ast-p suite '[suite-stmt]))
   (labels ((stmt-func-name (i stmt suite-hash)
              (ensure-user-symbol
               (format nil "{~A[~A] \"~A\" #~A}"
@@ -2434,7 +2434,7 @@ Non-negative integer denoting the number of args otherwise."
 (defun generator-ast-p (ast)
   "Is AST a function definition for a generator? Returns set of ([yield-expr] [yield-stmt]) of nodes found."
   ;; Note that LAMBDA-EXPR can't contain (yield) statements
-  (assert (not ([module-stmt-p] ast)) () "GENERATOR-AST-P on MODULE-STMT: does not make sense.")
+  (assert (not (ast-p ast '[module-stmt])) () "GENERATOR-AST-P on MODULE-STMT: does not make sense.")
   (let (res)
     (with-py-ast (form ast)
       (case (car form)

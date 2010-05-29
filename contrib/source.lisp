@@ -183,7 +183,7 @@ The :PYTHON records are thus a subset of the :LISP records."
                           (error "No Lisp source info for ~s" function))))
     (ecase kind
       (:lisp lisp-records)
-      (:python (coerce (remove-if-not #'clpython.parser::python-ast-p lisp-records
+      (:python (coerce (remove-if-not #'clpython.parser::ast-p lisp-records
                                       :key #'excl::ldb-code-source)
                        'vector)))))
 
@@ -354,7 +354,7 @@ The :PYTHON records are thus a subset of the :LISP records."
   ;; XXX For now requires exact match
   (let (best-subform)
     (dolist (subform (msi.subforms msi))
-      (when (and (clpython.parser::python-ast-p (subform.form subform)) ;; XXX needed?
+      (when (and (clpython.parser::ast-p (subform.form subform)) ;; XXX needed?
                  (<= (subform.start-char subform) char (subform.end-char subform))
                  (or (null best-subform)
                      (<= (- (subform.end-char subform) (subform.start-char subform))

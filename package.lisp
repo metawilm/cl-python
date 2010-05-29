@@ -209,10 +209,9 @@
 (defpackage :clpython.parser
   (:documentation "Parser and lexer for Python code")
   (:use :common-lisp :clpython.package)
-  (:export #:parse #:ast-complete-p ;; parser
+  (:export #:parse #:ast-p #:ast-complete-p ;; parser
            #:*python-form->source-location* #:*module->source-positions*
            #:string-literal-p
-           #:match-p #:with-matching #:with-perhaps-matching ;; AST pattern matcher
            
            #:walk-py-ast #:with-py-ast ;; code walker
 	   #:+normal-target+ #:+delete-target+ #:+augassign-target+ #:+no-target+
@@ -259,7 +258,8 @@
 	   #:impl-status #:set-impl-status
 	   
            ;; utils
-	   ))
+	   )
+  (:intern #:match-p #:with-matching #:with-perhaps-matching))
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (cascade-external-symbols :clpython))

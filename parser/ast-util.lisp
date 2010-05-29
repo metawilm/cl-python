@@ -12,11 +12,14 @@
 
 ;;;; Abstract Syntax Tree Utilities
 
-(defun python-ast-p (form)
+(defun ast-p (form &optional ast-node)
   "Whether FORM is a list represeting a Python AST. (Includes parsed literal numbers and strings.)"
   (and (listp form)
        (symbolp (car form))
-       (eq (symbol-package (car form)) #.(find-package :clpython.ast.node))))
+       (if ast-node
+           (progn (check-type ast-node symbol)
+                  (eq (car form) ast-node))
+         (eq (symbol-package (car form)) #.(find-package :clpython.ast.node)))))
 
 (defun abbreviated-python-code (ast)
   (clpython.package::abbreviate-to-one-line (py-pprint ast)))
@@ -102,7 +105,7 @@ starts a new top-level statement. Uses an extra heuristic if *use-ast-return-stm
   ;;    return
 
   (flet ((funcdef-complete-p (ast)
-           (assert ([funcdef-stmt-p] ast))
+           (assert (ast-p ast '[funcdef-stmt]))
            (with-matching (ast ([funcdef-stmt] ?decorators ([identifier-expr] ?fname) ?fargs
                                                ([suite-stmt] ?stmts)))
              (let ((last-stmt (car (last ?stmts))))
@@ -112,16 +115,16 @@ starts a new top-level statement. Uses an extra heuristic if *use-ast-return-stm
                    ([if-stmt]     (with-matching (last-stmt ([if-stmt] ?if-clauses ?else-clause)) ;; Pattern 2.
                                     (and (loop for ic in ?if-clauses
                                              always (with-matching (ic (?cond ([suite-stmt] ?stmts)))
-                                                      ([return-stmt-p] (car (last ?stmts)))))
+                                                      (ast-p (car (last ?stmts)) '[return-stmt])))
                                          ?else-clause ;; The `else' clause must be preesnt
                                          (with-matching (?else-clause ([suite-stmt] ?stmts))
-                                           ([return-stmt-p] (car (last ?stmts)))))))
+                                           (ast-p (car (last ?stmts)) '[return-stmt])))))
                    ([pass-stmt] t) ;; Pattern 3
                    ([raise-stmt] t))))))) ;; Pattern 4
     (etypecase ast
       ((or string number) t)
       (list (cond ((not (member (car ast) (mapcar #'car *multi-line-statements*)))
                    t)
-                  ((and *use-ast-return-stmt-heuristic* ([funcdef-stmt-p] ast))
+                  ((and *use-ast-return-stmt-heuristic* (ast-p ast '[funcdef-stmt]))
                    (funcdef-complete-p ast))
                   (t nil))))))

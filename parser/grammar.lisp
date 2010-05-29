@@ -666,9 +666,9 @@ Value should be a (weak) EQ hash table: (make-weak-key-hash-table :test 'eq).")
   "Fix AST so that unary +/- has higher precedence than *,/,//,%.
 For example: - (1 * 2) => (-1) * 2"
   ;; Should be fixable in the grammar too.
-  (assert ([unary-expr-p] unary-expr))
+  (assert (ast-p unary-expr '[unary-expr]))
   (destructuring-bind (unary-op unary-val) (cdr unary-expr)
-    (when ([binary-expr-p] unary-val)
+    (when (ast-p unary-val '[binary-expr])
       (destructuring-bind (binary-op bin-left bin-right) (cdr unary-val)
         (when (member binary-op *operators-with-precedence-between-binary-and-unary-plusmin*)
           ;; - (1 * 2 * 3) => (-1) * 2 * 3
