@@ -1514,7 +1514,7 @@ LOCALS shares share tail structure with input arg locals."
              (ensure-user-symbol
               (format nil "{~A[~A] \"~A\" #~A}"
                       *current-module-name* i
-                      (clpython.util::abbreviate-to-one-line (py-pprint stmt))
+                      (abbreviate-to-one-line (py-pprint stmt))
                       suite-hash)))
            (wrap-in-funcs (suite-hash)
              "Reason for wrapping top-level forms in functions, is that Allegro's upcoming

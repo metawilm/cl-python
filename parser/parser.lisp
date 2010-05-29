@@ -61,7 +61,7 @@ source location hash-table is returned as second value."
   (let ((*python-form->source-location*
          (case record-source-location
            ((nil))
-           ((t) (clpython.util::make-weak-key-hash-table :test 'eq))
+           ((t) (make-weak-key-hash-table :test 'eq))
            (t record-source-location))))
     (let (forms)
       (loop (multiple-value-bind (form eof-p)

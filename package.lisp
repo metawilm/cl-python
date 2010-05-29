@@ -186,13 +186,14 @@
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (cascade-external-symbols :clpython.user))
 
-;;; CLPYTHON.PACKAGE - Package and Readtables
+;;; CLPYTHON.UTIL - Independent utilities
 
 (defpackage :clpython.util
   (:documentation "Package, readtables, ast/user symbol pretty printer")
   (:use :common-lisp)
   (:export #:in-syntax 
            #:read-package-symbol-func
+           #:register-feature
            #:setup-omnivore-readmacro
            #:with-auto-mode-recompile #:whereas #:sans #:named-function #:slurp-file
            #:with-stack-list #:without-redefinition-warnings #:defconstant-once
@@ -200,9 +201,9 @@
            #:schedule-finalization #:unschedule-finalization
            #:register-feature #:with-gensyms #:with-sane-debugging #:with-line-prefixed-output
            #:class-initarg-p #:define-macro-state-declaration
-           ;; pattern matching
-           #:match-p #:with-matching #:with-perhaps-matching
-           ))
+           #:abbreviate-string #:abbreviate-to-one-line
+           #:alist-remove-prop #:+dict-alist-to-hashtable-threshold+
+           #:match-p #:with-matching #:with-perhaps-matching #:quit))
 
 ;;; CLPYTHON.PARSER - Parser and Lexer
 
@@ -221,8 +222,7 @@
            
            #:enter-mixed-lisp-python-syntax ;; lisp/python mixed readtable mode
            #:exit-mixed-lisp-python-syntax
-           #:with-mixed-lisp-python-syntax
-           ))
+           #:with-mixed-lisp-python-syntax))
 
 ;;; CLPYTHON.MODULE - Modules
 
@@ -259,8 +259,7 @@
 	   
            ;; abstract syntax tree utils
            #:*ast-readtable* #:*user-readtable* #:*ast-user-readtable*
-           #:with-ast-user-readtable #:with-ast-user-pprinter
-	   ))
+           #:with-ast-user-readtable #:with-ast-user-pprinter))
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (cascade-external-symbols :clpython))

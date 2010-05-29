@@ -107,13 +107,13 @@ where TOKEN-KIND is a symbol like '[identifier]"
   (print-unreadable-object (lexer stream :type t :identity t)
     (with-slots (yacc-version string last-read-char-ix) lexer
       (format stream "for \"~A\" at ~A using ~S"
-              (clpython.util::abbreviate-string string 25) 
+              (abbreviate-string string 25) 
               (let ((next-unread (1+ last-read-char-ix)))
                 (cond ((zerop next-unread)
                        "initial state")
                       ((< next-unread (length string))
                        (format nil "character ~A: \"~A\"" next-unread
-                               (clpython.util::abbreviate-string (subseq string next-unread) 10)))
+                               (abbreviate-string (subseq string next-unread) 10)))
                       (t "end state")))
               yacc-version))))
 

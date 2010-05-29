@@ -20,12 +20,12 @@
 ;; [NAME] already exists, while {NAME} is interned if new.
 
 (defun setup-ast-readmacro (&optional (readtable *readtable*))
-  (let ((read-[-func (clpython.util:read-package-symbol-func (find-package :clpython.ast) #\[ #\] :intern nil)))
+  (let ((read-[-func (read-package-symbol-func (find-package :clpython.ast) #\[ #\] :intern nil)))
     (set-macro-character #\[ read-[-func t readtable))
   readtable)
 
 (defun setup-user-readmacro (&optional (readtable *readtable*))
-  (let ((read-{-func (clpython.util:read-package-symbol-func (find-package :clpython.user) #\{ #\} :intern t)))
+  (let ((read-{-func (read-package-symbol-func (find-package :clpython.user) #\{ #\} :intern t)))
     (set-macro-character #\{ read-{-func t readtable))
   readtable)
 

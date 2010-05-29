@@ -45,7 +45,7 @@
         )
     "The PYDECL keys currently in use"))
 
-(clpython.util:define-macro-state-declaration pydecl #.*pydecl-keys*)
+(define-macro-state-declaration pydecl #.*pydecl-keys*)
 
 
 
