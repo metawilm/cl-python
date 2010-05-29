@@ -32,11 +32,11 @@ The comma does makes this input unambiguously Pythonic, but that fact gets lost 
   "Try to parse STRING as Python source code, but if it denotes an ambiguous
 expression that should be interpreted as Lisp code, signals AMBIGUOUS-INPUT-IS-LISP-CONDITION."
   (let ((result (apply #'parse object args)))
-    (with-perhaps-matching (result
-                            ([module-stmt] ([suite-stmt] (([bracketed-expr] ([identifier-expr] ?name))))))
+    (clpython:with-perhaps-matching (result
+                                     ([module-stmt] ([suite-stmt] (([bracketed-expr] ([identifier-expr] ?name))))))
       (error 'ambiguous-input-is-lisp-condition))
-    (with-perhaps-matching (result
-                            ([module-stmt] ([suite-stmt] (([tuple-expr] nil)))))
+    (clpython:with-perhaps-matching (result
+                                     ([module-stmt] ([suite-stmt] (([tuple-expr] nil)))))
       (error 'ambiguous-input-is-lisp-condition))
     result))
 

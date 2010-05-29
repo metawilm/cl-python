@@ -222,7 +222,7 @@
            #:enter-mixed-lisp-python-syntax ;; lisp/python mixed readtable mode
            #:exit-mixed-lisp-python-syntax
            #:with-mixed-lisp-python-syntax
-	   ))
+           ))
 
 ;;; CLPYTHON.MODULE - Modules
 
@@ -257,9 +257,9 @@
 	   ;; module status
 	   #:impl-status #:set-impl-status
 	   
-           ;; utils
-	   )
-  (:intern #:match-p #:with-matching #:with-perhaps-matching))
+           ;; pattern matching
+           #:match-p #:with-matching #:with-perhaps-matching
+	   ))
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (cascade-external-symbols :clpython))
