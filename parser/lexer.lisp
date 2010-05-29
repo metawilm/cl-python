@@ -919,3 +919,11 @@ Returns NEWLINE-P, NEW-INDENT, EOF-P."
   (loop for c = (lex-read-char :eof-error nil)
       while (and c (char/= c #\Newline))
       finally (when c (lex-unread-char c))))
+
+(defun raise-unexpected-eof (&optional line-no)
+  (declare (special clpython:*exceptions-loaded*))
+  (let ((msg (format nil "Unexpected end of file~@[ (line ~A)~]." line-no)))
+    (if clpython:*exceptions-loaded*
+	(funcall 'clpython:py-raise '{UnexpectedEofError} msg)
+      (raise-syntax-error msg)))
+  (break "unreachable"))

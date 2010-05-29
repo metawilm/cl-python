@@ -659,13 +659,16 @@ otherwise work well.")
   (:method ((f py-function)) (string (py-function-name f))))
 
 (defun make-py-function (&key name context-name lambda)
-  (let ((x (make-instance 'py-function
-			  :fname (string name)
-			  :lambda lambda
-			  :context-name context-name)))
-    (set-funcallable-instance-function x lambda)
-    ;; fill dict?
-    x))
+  (if *create-simple-lambdas-for-python-functions*
+      (progn (register-simple-function lambda name)
+             lambda)
+    (let ((x (make-instance 'py-function
+               :fname (string name)
+               :lambda lambda
+               :context-name context-name)))
+      (set-funcallable-instance-function x lambda)
+      ;; fill dict?
+      x)))
 
 (def-py-method py-function.__get__ (func inst cls)
   (py-lisp-function.__get__ func inst cls))
@@ -843,10 +846,6 @@ otherwise work well.")
 (def-py-method py-function.__doc__ :attribute-write (func^ doc)
   (setf (documentation func 'function) doc))
 
-(def-py-method py-function._exe (func)
-  "Create executable from function"
-  (build-executable :function func))
-    
 ;; Enumerate (core object)
 
 (defclass py-enumerate (object)
@@ -1449,6 +1448,15 @@ but the latter two classes are not in CPython.")
    (bin-file-write-date :initarg :bin-file-write-date :initform nil :accessor module-bin-file-write-date))
   (:metaclass py-type))
 
+(defun init-module-namespace (module-globals module-name)
+  ;; Called by compiler
+  ;; should dispatch on namespace type?
+  (etypecase module-globals
+    (hash-table (setf (gethash '{__name__} module-globals) module-name
+                      (gethash '{__debug__} module-globals) +the-true+))
+    (package (setf (symbol-value (intern (symbol-name '{__name__}) module-globals)) module-name
+                   (symbol-value (intern (symbol-name '{__debug__}) module-globals)) +the-true+))))
+
 ;;; Keep a registry of all loaded modules.
 
 (defvar *all-modules* (make-weak-key-hash-table :test 'eq))
@@ -1549,6 +1557,18 @@ but the latter two classes are not in CPython.")
   (loop for k being the hash-key in (module-ht from) using (hash-value v)
       do (setf (gethash k (module-ht to)) v)))
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;
+;;; Detecting names and values of built-ins
+
+(defun builtin-name-p (x)
+  (find-symbol (string x) (load-time-value (find-package :clpython.user.builtin))))
+
+(defun builtin-value (x)
+  (bound-in-some-way (builtin-name-p x)))
+
+;;;
+
 (def-py-method module.__getattribute__ (x^ attr)
   (let ((attr.sym (py-string-val->symbol attr)))
     (or (gethash attr.sym (module-ht x))
@@ -1571,15 +1591,6 @@ but the latter two classes are not in CPython.")
   (unless (remhash (py-string-val->symbol attr) (module-ht x))
     (py-raise '{AttributeError} "Module ~A has no attribute ~A (to delete)." x attr))
   (load-time-value *the-none*))
-
-(defun create-python-module (code)
-  (check-type code string)
-  (let* ((ast (parse code))
-         (mod nil)
-         (*module-hook* (lambda (m) (setf mod m))))
-    (declare (special *module-hook*))
-    (funcall (compile nil `(lambda () ,ast)))
-    mod))
 
 ;; Lisp Packages can be used like Python modules
 ;;
@@ -3225,13 +3236,35 @@ Returns nil upon lookup failure."
 	
 	(t whole)))
 
-
-
-
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Generator
 
+(defclass generator (object)
+  ;; XXX make funcallable instance? but should not be allowed by py-call it...
+  ((state :initarg :state :accessor generator-state))
+  (:metaclass py-type))
 
+(def-py-method generator.next (g)
+  "Returns the next yielded value."
+  (%generator.send g *the-none* t))
 
+(def-py-method generator.send (g value)
+  "Returns the next yielded value."
+  (%generator.send g value t))
+
+(def-py-method generator.throw (g &optional (value *the-none*) (traceback *the-none*))
+  "Raises exception in the generator at the current point of execution."
+  (%generator.send g (list :exception value traceback) nil))
+
+(def-py-method generator.__iter__ (g)
+  g)
+
+(def-py-method generator.close (g)
+  (%generator.close g))
+  
+#+(or) ;; todo -- will be the first built-in class with a del method?
+(defun generator.__del__ (g)
+  (generator.close g))
 
 ;; iterator from lambda
 

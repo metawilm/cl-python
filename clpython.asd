@@ -30,7 +30,10 @@
                           :components ((:file "utils")
                                        (:file "readtable")
                                        (:file "aupprint")
-                                       (:file "macro-state" :depends-on ("utils"))))))
+                                       (:file "macro-state" :depends-on ("utils"))
+                                       (:file "patternmatch")))
+                 (:module "shared"
+                          :components ((:file "ssetup")))))
 
 (asdf:defsystem :clpython.parser
     :description "Python parser, code walker, and pretty printer"
@@ -39,42 +42,42 @@
         #-allegro :yacc
         #+allegro ,@(when (asdf:find-system :yacc nil) `(:yacc)))
     :components ((:module "parser"
-                          :components ((:file "psetup"  )
-                                       (:file "grammar"  :depends-on ("psetup"))
+                          :components ((:file "grammar" )
                                        (:file "lexer"    :depends-on ("grammar"))
                                        (:file "parser"   :depends-on ("grammar" "lexer"))
                                        (:file "grammar-aclyacc" :depends-on ("grammar" "lexer" "parser"))
                                        (:file "grammar-clyacc"  :depends-on ("grammar" "lexer" "parser"))
-                                       (:file "ast-match" :depends-on ("grammar"))
-                                       (:file "ast-util" :depends-on ("ast-match" "grammar"))
-                                       (:file "walk"     :depends-on ("psetup"))
-                                       (:file "pprint"   :depends-on ("psetup"))))))
+                                       (:file "ast-util" :depends-on ("grammar"))
+                                       (:file "walk"   )
+                                       (:file "pprint" )))))
 
 (asdf:defsystem :clpython.compiler
     :description "Python compiler"
-    :depends-on (:clpython.basic :clpython.parser :closer-mop)
+    :depends-on (:clpython.basic :clpython.parser :clpython.runtime :closer-mop)
     :serial t
     :components ((:module "compiler"
+                          :serial t
                           :components ((:file "csetup"       )
+                                       (:file "pydecl"       )
+                                       (:file "namespace"    )
                                        (:file "compiler"     )
                                        (:file "generator"    )                                       
-                                       (:file "namespace"    )
-                                       (:file "optimize"     )
-                                       (:file "pydecl"       )))))
+                                       (:file "optimize"     )))))
 
 (asdf:defsystem :clpython.runtime
     :description "Python runtime environment"
-    :depends-on (:clpython.basic :clpython.compiler :closer-mop)
+    :depends-on (:clpython.basic :closer-mop)
     :components ((:module "runtime"
                           :serial t
-                          :components ((:file "formatstring" )
+                          :components ((:file "rsetup"       )
+                                       (:file "formatstring" )
                                        (:file "metaclass"    )
                                        (:file "dictattr"     )
                                        (:file "classes"      )
                                        (:file "exceptions"   )
                                        (:file "habitat"      )
-                                       (:file "import"       )
-                                       (:file "run"          )))))
+                                       (:file "run"          )
+                                       (:file "import"       )))))
 
 (asdf:defsystem :clpython.lib
     :description "Python module library"
@@ -118,8 +121,8 @@
 
 (asdf:defsystem :clpython
     :description "CLPython - an implementation of Python in Common Lisp"
-    :depends-on (:clpython.basic :clpython.parser :clpython.compiler :clpython.runtime :clpython.lib :clpython.contrib)
-    :in-order-to ((asdf:test-op (asdf:load-op :clpython-test))))
+    :depends-on (:clpython.basic :clpython.parser :clpython.runtime :clpython.compiler :clpython.lib :clpython.contrib)
+    :in-order-to ((asdf:test-op (asdf:load-op :clpython.test))))
 
 ;;; Unit test, linked to asdf operation "test-op" on the CL-Python system
 

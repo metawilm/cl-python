@@ -560,3 +560,21 @@
   (typecase x
     ((or string number) (py-val->lisp-bool x))
     (t                  whole)))
+
+
+;;; Function/object calling
+
+(define-compiler-macro py-call (&whole whole prim &rest args)
+  (with-perhaps-matching (prim ([attributeref-expr] ?x ([identifier-expr] ?attr-sym)))
+    ;; Optimize "obj.attr(..args..)" = (py-call (py-attr obj attr) ..args..)
+    ;; so the allocation of a bound method object is skipped.
+    (let ((res `(let* ((.x ,?x)
+                       (.val (class.attr-no-magic (py-class-of .x) ',?attr-sym)))
+                  (if (and (functionp .val) (not (instance.attr-no-magic .x ',?attr-sym)))
+                      (funcall .val .x ,@args)
+                    (locally (declare (notinline py-call))
+                      (py-call (attr .x ',?attr-sym) ,@args))))))
+      #+(or)(warn "py-call cm res: ~A" res)
+      (return-from py-call res)))
+  whole)
+

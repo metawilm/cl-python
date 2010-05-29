@@ -243,7 +243,7 @@
            
            #:py-val->string #:py-str-string #:py-repr #:py-bool #:make-module
 	   #:*the-none* #:*the-true* #:*the-false* #:*the-ellipsis* #:*the-notimplemented*
-	   #:*the-empty-tuple* #:make-tuple-from-list #:create-python-module
+	   #:*the-empty-tuple* #:make-tuple-from-list 
 	   #:*py-modules* #:dyn-globals #:py-call #:py-class-of #:py-raise #:bind-val
 	   #:py-repr-string #:py-attr #:py-attr*
 	   #:run #:exception-args #:*exceptions-loaded*

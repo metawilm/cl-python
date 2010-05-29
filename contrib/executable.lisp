@@ -92,3 +92,7 @@
       
       #-sbcl (error "Building Python executables is not yet supported in this Lisp implementation.")
       #+sbcl (build-sbcl))))
+
+(def-py-method py-function._exe (func)
+  "Create executable from function"
+  (build-executable :function func))

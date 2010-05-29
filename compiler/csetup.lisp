@@ -10,34 +10,6 @@
 (in-package :clpython)
 (in-syntax *ast-user-readtable*)
 
-;;; Raising exceptions
-
-(eval-when (:compile-toplevel :load-toplevel :execute)
-(defparameter *exceptions-are-python-objects*
-    #+allegro t
-    #+lispworks t
-    #+cmu nil    ;; CMUCL does not allow arbitrary meta/superclasses in conditions
-    #-(or allegro lispworks cmu) nil)
-
-(register-feature :clpython-exceptions-are-python-objects *exceptions-are-python-objects*)
-)
-
-(define-compiler-macro py-call (&whole whole prim &rest args)
-  (with-perhaps-matching (prim ([attributeref-expr] ?x ([identifier-expr] ?attr-sym)))
-    ;; Optimize "obj.attr(..args..)" = (py-call (py-attr obj attr) ..args..)
-    ;; so the allocation of a bound method object is skipped.
-    (let ((res `(let* ((.x ,?x)
-                       (.val (class.attr-no-magic (py-class-of .x) ',?attr-sym)))
-                  (if (and (functionp .val) (not (instance.attr-no-magic .x ',?attr-sym)))
-                      (funcall .val .x ,@args)
-                    (locally (declare (notinline py-call))
-                      (py-call (attr .x ',?attr-sym) ,@args))))))
-      #+(or)(warn "py-call cm res: ~A" res)
-      (return-from py-call res)))
-  whole)
-
-
-
 ;; If a macro raises an ERROR, it is undefined whether the compiler
 ;; catches that or passes it on outwards. CLHS on COMPILE: "compile is
 ;; permitted, but not required, to establish a handler for conditions

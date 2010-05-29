@@ -12,6 +12,173 @@
 
 ;;;; Python compiler
 
+;;; Compiler State
+
+(defparameter *current-module-name* *__main__-module-name*
+  "The name of the module now being compiled; module.__name__ is set to it.")
+
+(defparameter *current-module-path* nil
+  ;; XXX remove, use *load-truename*
+  "The path of the Python file being compiled; saved in module's `filepath' slot.")
+
+(defparameter *import-compile-verbose* #+sbcl nil #-sbcl t)
+(defparameter *import-load-verbose*    t)
+
+(defun call-with-python-code-reader (initial-forms func)
+  "Let the Python parser handle all reading."
+  (with-sane-debugging ("Error occured while reading input with the Python readtable:")
+    ;; The below SETUP-OMNIVORE-READMACRO can't be shared (e.g. inside LOAD-TIME-VALUE), as
+    ;; it contains state (the initial forms).
+    (let ((*readtable* (setup-omnivore-readmacro :function #'clpython.parser:parse
+                                                 :initial-forms initial-forms
+                                                 :readtable (copy-readtable nil))))
+      (funcall func))))
+
+(defmacro with-proper-compiler-settings (&body body)
+  `(call-with-proper-compiler-settings (lambda () ,@body)))
+
+(defun call-with-proper-compiler-settings (func)
+  "The idea is to save as much debug information as possible."
+  #+clpython-source-level-debugging
+  (let ((compiler:save-source-level-debug-info-switch t)
+        (compiler:save-local-names-switch t)
+        (compiler:tail-call-self-merge-switch nil)
+        (compiler:tail-call-non-self-merge-switch nil)
+        #+(or) ;; also?
+        (excl::*record-source-file-info* t))
+    (funcall func))
+  #-clpython-source-level-debugging
+  (funcall func))
+
+(defmacro with-noisy-compiler-warnings-muffled (&body body)
+  `(call-with-noisy-compiler-warnings-muffled (lambda () ,@body)))
+
+(defun call-with-noisy-compiler-warnings-muffled (func)
+  (handler-bind (#+sbcl (sb-int:simple-compiler-note #'muffle-warning)
+                 #+allegro (warning (lambda (c)
+                                      (when (loop for arg in (slot-value c 'excl::format-arguments)
+                                                thereis (and (stringp arg)
+                                                             (search "is incompatible for numeric operation" arg)))
+                                        ;; The compiler macro for != expands into inline guarded to /=.
+                                        ;; When arg is not a number, like for:  if x != 'a'
+                                        ;; this warning will come. Spurious because of the (numberp etc) guard.
+                                        (muffle-warning c)))))
+    (funcall func)))
+
+(defun compile-py-source-file (&key filename mod-name output-file)
+  (assert (and filename mod-name output-file))
+  (let ((*current-module-path* filename) ;; used by compiler
+        (*current-module-name* mod-name))
+    (with-auto-mode-recompile (:verbose *import-compile-verbose* :filename filename)
+      (with-noisy-compiler-warnings-muffled
+          (with-proper-compiler-settings
+              (clpython.parser::with-source-locations
+                  (call-with-python-code-reader
+                   `((in-package :clpython)
+                     #+(or)(in-module :name ',mod-name
+                                      :src-pathname ',filename
+                                      :bin-pathname ',output-file))
+                   (lambda ()
+                     (compile-file filename
+                                   :output-file output-file
+                                   :verbose *import-compile-verbose*)))))))))
+
+#+(or) ;; intended as high-level interface for users
+(defun compile-py-file (fname &key (verbose t) source-information)
+  (let* ((module (pathname-name fname))
+         (fasl-file (compiled-file-name :module module fname))
+         (*import-force-recompile* t)
+         (*import-compile-verbose* verbose))
+    (declare (special *import-force-recompile* *import-compile-verbose*))
+    (flet ((do-compile ()
+             (%compile-py-file fname :mod-name module :output-file fasl-file)))
+      (if source-information
+          (clpython.parser::with-source-locations
+              (do-compile))
+        (do-compile)))))
+
+(defun load-py-fasl-file (&key bin-filename 
+                               pre-import-hook)
+  "Loads given compiled Python file.
+Returns MODULE, NEW-MODULE-P, SOURCE-FUNC, SOURCE
+or NIL on error (e.g. when the underlying LOAD failed and was aborted by the user)"
+  (assert (and bin-filename))
+  (let #1=(module new-module-p source-func source)
+         (handler-bind ((module-import-pre
+                         (lambda (c)
+                           ;; Being muffled means condition was intended for an earlier handler,
+                           ;; corresponding to a nested inner import action.
+                           (unless (mip.muffled c)
+                             ;; Need to register module before it is fully loaded,
+                             ;; otherwise infinite recursion if two modules import
+                             ;; each other.
+                             (unless (fasl-matches-compiler-p (mip.compiler-id c))
+                               (whereas ((r (find-restart 'delete-fasl-try-again)))
+                                 (format t "~&;; Recompiling obsolete Python fasl file.~%")
+                                 (invoke-restart r))
+                               (fasl-mismatch-cerror bin-filename))
+                             (setf module (mip.module c)
+                                   new-module-p (mip.module-new-p c)
+                                   source-func (mip.source-func c)
+                                   source (mip.source c)
+                                   (mip.muffled c) t)
+                             (when pre-import-hook
+                               (funcall pre-import-hook (mip.module c)))))))
+           
+           (with-auto-mode-recompile (:filename bin-filename :verbose *import-load-verbose*
+                                                :restart-name delete-fasl-try-again)
+             (unless (let (#+lispworks
+                           (system:*binary-file-type* (string-downcase *py-compiled-file-type*)))
+                       (load bin-filename :verbose *import-load-verbose*))
+               ;; Might happen if loading errs and there is a restart that lets LOAD return NIL.
+               (return-from load-py-fasl-file nil))))
+         (values . #1#)))
+
+(defparameter *compile-python-ast-before-running* nil
+  "Whether to compile an AST before running it.")
+
+(defun run-python-ast (ast &key (habitat *habitat*)
+                                (compile *compile-python-ast-before-running*)
+                                (module-globals (clpython::make-eq-hash-table "run-python-ast"))
+                                compile-quiet
+                                time
+                                args)
+  "Run Python AST in freshly bound habitat.
+HABITAT is the execution environment; a fresh one will be used otherwie.
+If COMPILE is true, the AST is compiled into a function before running.
+MODULE-RUN-ARGS is a list with options passed on to the module-function; e.g. %module-globals, module-name, src-module-path.
+ARGS are the command-line args, available as `sys.argv'; can be a string or a list of strings."
+  (with-compiler-generated-syntax-errors ()
+    (handler-bind (#+sbcl
+                   (sb-kernel:redefinition-with-defun #'muffle-warning))
+      (let* ((*habitat* habitat)
+             (get-module-f `(lambda () ,ast))
+             (fc (if compile
+                     (let ((*compile-print* (if compile-quiet nil *compile-print*))
+                           (*compile-verbose* (if compile-quiet nil *compile-verbose*)))
+                       ;; Same context as for importing a module
+                       (with-proper-compiler-settings
+                           (with-noisy-compiler-warnings-muffled
+                               (compile nil get-module-f))))
+                   (coerce get-module-f 'function))))
+        (unless *habitat* (setf *habitat* (make-habitat)))
+        (when (or args (null (habitat-cmd-line-args *habitat*)))
+          (setf (habitat-cmd-line-args *habitat*) args))
+        (let (result)
+          (handler-bind ((module-import-pre
+                          (lambda (c)
+                            ;; At the moment there are only hashtable or package module namespaces:
+                            (check-type module-globals (or hash-table package))
+                            (flet ((run ()
+                                     (funcall (mip.init-func c) module-globals) ;; always set __name__, __debug__
+                                     (setf result (funcall (mip.run-tlv-func c) module-globals))))
+                              (if time
+                                  (time (run))
+                                (run)))
+                            (invoke-restart 'abort-loading))))
+            (funcall fc))
+          result)))))
+
 
 ;;; Python source files are compiled to fasl files. A way is needed to mark
 ;;; the compiler version used to produce the fasl, so outdated fasls can be
@@ -167,21 +334,6 @@ Disabled by default, to not confuse the test suite.")
      (handler-bind ((compiler-message
                      (lambda (c) (format t ";; Compiler message: ~A~%" c))))
        ,@body)))
-
-;;; Compiler State
-
-(defparameter *__main__-module-name* "__main__")
-
-(defun default-module-name-p (x)
-  (and (stringp x)
-       (string= x *__main__-module-name*)))
-
-(defparameter *current-module-name* *__main__-module-name*
-  "The name of the module now being compiled; module.__name__ is set to it.")
-
-(defparameter *current-module-path* nil
-  ;; XXX remove, use *load-truename*
-  "The path of the Python file being compiled; saved in module's `filepath' slot.")
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; Setf expansion
@@ -1042,16 +1194,10 @@ LOCALS shares share tail structure with input arg locals."
           (let ((art-deco '.undecorated-func))
             (dolist (x (reverse decorators))
               (setf art-deco `(py-call ,x ,art-deco)))
-            `(let* ((.undecorated-func 
-                     ,(if *create-simple-lambdas-for-python-functions*
-                          `(let ((.f ,func-lambda))
-                             (register-simple-function .f ',fname)
-                             .f)
-                        `(make-py-function :name ',fname
-                                           :context-name ',context-fname
-                                           :lambda ,func-lambda)))
+            `(let* ((.undecorated-func (make-py-function :name ',fname
+                                                         :context-name ',context-fname
+                                                         :lambda ,func-lambda))
                     (.decorated-func ,art-deco))
-               
                ;; Ugly special case:
                ;;  class C:
                ;;   def __new__(..):    <-- the __new__ method inside a class
@@ -1207,7 +1353,6 @@ LOCALS shares share tail structure with input arg locals."
              value)
     (:lisp   value)))
 
-(defvar *habitat* nil)
 (defvar *module-preload-hook*)
 
 (defun unbound-variable-error (name &key (expect-value t))
@@ -1280,6 +1425,7 @@ LOCALS shares share tail structure with input arg locals."
 (defvar *load-file->module* (make-hash-table :test 'equal)
   "Mapping from loading file name to Python module")
 
+#||
 (defmacro in-module (&rest args)
   `(eval-when (:load-toplevel :execute)
      (in-module-1 ,@args)))
@@ -1293,21 +1439,13 @@ LOCALS shares share tail structure with input arg locals."
   (unless *habitat*
     (warn "IN-MODULE-1: Creating *habitat*")
     (setf *habitat* (make-habitat))))
+||#
 
 (defun careful-derive-pathname (pathname default)
   (if pathname
       (derive-pathname pathname)
     default))
   
-(defun init-module-namespace (module-globals module-name)
-  ;; should dispatch on namespace type?
-  (etypecase module-globals
-    (hash-table (setf (gethash '{__name__} module-globals) module-name
-                      (gethash '{__debug__} module-globals) +the-true+))
-    (package (setf (symbol-value (intern (symbol-name '{__name__}) module-globals)) module-name
-                   (symbol-value (intern (symbol-name '{__debug__}) module-globals)) +the-true+))))
-                                         
-
 (defmacro with-module-toplevel-context (() &body body)
   ;; Consider *module-namespace* ?
   `(with-pydecl ((:context-type-stack (:module)))
@@ -1742,17 +1880,6 @@ finally:
 			   (return-from test s))))
 	       (t    nil))))
     (test ast)))
-
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;;;
-;;; Detecting names and values of built-ins
-
-(defun builtin-name-p (x)
-  (find-symbol (string x) (load-time-value (find-package :clpython.user.builtin))))
-
-(defun builtin-value (x)
-  (bound-in-some-way (builtin-name-p x)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;

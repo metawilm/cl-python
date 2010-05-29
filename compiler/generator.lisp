@@ -55,25 +55,20 @@
 ;;; Conversion into Continuation Passing Style
 ;;; PEP 342
 
-(defun generator-input-value (g value)
-  (generator-state-input-value (generator-state g) value))
+(defun generator-state.function (gs)
+  (car gs))
 
-(defun generator-raise-exception (g value traceback)
-  (generator-state-input-value (generator-state g) (list :exception value traceback)))
-
-(defun generator-state-input-value (gs val)
-  (funcall (generator-state-function gs) val))
+(defun generator-state.input-value (gs val)
+  (funcall (generator-state.function gs) val))
 
 (defun parse-generator-input (x &key initial)
   "Either calls RAISE-STMT-1, or returns the input value (or None if X is NIL)."
-  (unless x
-    (setf x *the-none*))
+  (assert x)
   (cond ((and x (listp x) (eq (car x) :exception))
          (apply #'raise-stmt-1 (cdr x)))
         ((and initial (not (none-p x)))
          (py-raise '{ValueError} "Generator must have `None' as initial input value (got: ~A)." x))
         (t x)))
-
 
 (defun error-fall-through (arg)
   (cerror "Continue"
@@ -82,47 +77,28 @@
 (defmacro yield-value (val)
   `(throw '.generator-body ,val))
 
-(defmacro receive-yielded-value (&body body)
-  `(let ((val (catch '.generator-body (progn ,@body (error-fall-through ',body)))))
-     (or val (error "No yielded value received."))))
+(defun %generator.close (g)
+  #+(or)(warn "generator.close ~A" g)
+  (generator-state.close (generator-state g)))
 
-(defclass generator (object)
-  ;; XXX make funcallable instance? but should not be allowed by py-call it...
-  ((state :initarg :state :accessor generator-state))
-  (:metaclass py-type))
-
-(def-py-method generator.next (g)
-  "Returns the next yielded value."
-  (generator.send g *the-none*))
-
-(def-py-method generator.send (g value)
-  "Returns the next yielded value."
-  (receive-yielded-value (generator-input-value g value)))
-
-(def-py-method generator.throw (g &optional (value *the-none*) (traceback *the-none*))
-  "Raises exception in the generator at the current point of execution."
-  (generator-raise-exception g value traceback))
-
-(def-py-method generator._k :attribute (g)
-  "The current continuation of the generator, for debugging."
-  (generator-state-function (generator-state g)))
-
-(def-py-method generator.__iter__ (g)
-  g)
-
-(defun generator-state-close (gs)
-  (handler-case (generator-state-input-value gs (list :exception (find-class '{GeneratorExit}))) ;; XXX no traceback yet
+(defun generator-state.close (gs)
+  (handler-case (generator-state.input-value gs (list :exception (find-class '{GeneratorExit}))) ;; XXX no traceback yet
     ((or {GeneratorExit} {StopIteration}) () *the-none*)
     ({Exception} () (py-raise '{RuntimeError} "Generator ~A ignored GeneratorExit sent by generator.close()."))))
 
-(def-py-method generator.close (g)
-  #+(or)(warn "generator.close ~A" g)
-  (generator-state-close (generator-state g)))
-  
-#+(or) ;; todo -- will be the first built-in class with a del method?
-(defun generator.__del__ (g)
-  (generator.close g))
+(defmacro receive-yielded-value (&body body)
+  `(let ((val (catch '.generator-body
+                (progn ,@body
+                       (error-fall-through ',body)))))
+     (or val (error "No yielded value received."))))
 
+(defun %generator.send (g value wait)
+  (flet ((insert ()
+           (generator-state.input-value (generator-state g) value)))
+    (declare (dynamic-extent #'insert))
+    (if wait
+        (receive-yielded-value (insert))
+      (insert))))
 
 (defun %store-continuation (f)
   `(setf (car %stored-k-cons) ,f))
@@ -130,10 +106,6 @@
 (defun %mark-generator-finished ()
   `(progn (%store-continuation 'raise-stop-iteration)
           (raise-stop-iteration)))
-
-(defun generator-state-function (gs)
-  (car gs))
-
 
 (defvar *cps-macro-functions* (make-hash-table :test 'eq)
   "Mapping from node to CPS macro function, e.g. [ASSERT-STMT] -> #'cps-convert-assert-stmt")
@@ -605,7 +577,7 @@ former requires that this form is executed within RECEIVE-YIELDED-VALUE."
          (labels ((next-try-value (val-for-gener)
                     (handler-case
                         (receive-yielded-value (with-py-errors ()
-                                                 (generator-state-input-value gen-state val-for-gener)))
+                                                 (generator-state.input-value gen-state val-for-gener)))
                       ({Exception} (c) (.attempt-handle-error c))
                       (:no-error (val)
                         (case val
@@ -635,7 +607,7 @@ former requires that this form is executed within RECEIVE-YIELDED-VALUE."
                       ;;  - if this does not result in an error, then FINALLY is not yet run.
                       (handler-case (receive-yielded-value
                                      (with-py-errors ()
-                                       (generator-state-input-value gen-state val-for-generator)))
+                                       (generator-state.input-value gen-state val-for-generator)))
                         ({Exception} (c)
                           (run-finally (lambda () (error c))))
                         (:no-error (val)
@@ -651,7 +623,7 @@ former requires that this form is executed within RECEIVE-YIELDED-VALUE."
                              ;; further. To ensure the FINALLY block is run some time, schedule
                              ;; finalization function.
                              (unless ,finalization-scheduled
-                               (setf ,finalization-scheduled (schedule-finalization gen-state 'generator-state-close)))
+                               (setf ,finalization-scheduled (schedule-finalization gen-state 'generator-state.close)))
                              ,(%store-continuation `(lambda (v) (next-val v)))
                              (yield-value val)))))))
              (next-val *the-none*)))))))
@@ -740,7 +712,7 @@ former requires that this form is executed within RECEIVE-YIELDED-VALUE."
            (labels ((next-suite-value (val-for-gener)
                       (handler-case
                           (receive-yielded-value (with-py-errors ()
-                                                   (generator-state-input-value gen-state val-for-gener)))
+                                                   (generator-state.input-value gen-state val-for-gener)))
                         (error (c)
                           (setf ,no-exc nil)
                           ...)

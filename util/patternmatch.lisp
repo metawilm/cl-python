@@ -1,4 +1,4 @@
-;; -*- Mode: LISP; Syntax: COMMON-LISP; Package: CLPYTHON.PARSER -*-
+;; -*- Mode: LISP; Syntax: COMMON-LISP; Package: CLPYTHON -*-
 ;;
 ;; This software is Copyright (c) Franz Inc. and Willem Broekema.
 ;; Franz Inc. and Willem Broekema grant you the rights to
@@ -7,7 +7,7 @@
 ;; (http://opensource.franz.com/preamble.html),
 ;; known as the LLGPL.
 
-(in-package :clpython.parser)
+(in-package :clpython)
 
 ;;;; Generic list/symbol pattern matching
 ;;;; (Maybe use CL-Unification at some point)
@@ -27,13 +27,11 @@
       (collect template)
       (sort (remove-duplicates res) #'string<))))
 
-(defun match-p (form template &key verbose (check-consistency t))
+(defun match-p (form template &key verbose)
   "Pattern matcher for lists/symbols, to detect AST patterns.
 FORM and TEMPLATE must both be trees. Symbols starting with #\?
 in TEMPLATE are wildcards, bound to list or symbol of FORM.
 Returns MATCH-P, BINDINGS; the latter is alist of wildcard-form pairs."
-  (when check-consistency
-    (check-consistent-template template))
   (let (bindings)
     (labels ((match-forms (form template)
                (cond ((wildcard-sym-p template) ;; wildcards symbol
@@ -62,11 +60,11 @@ Returns MATCH-P, BINDINGS; the latter is alist of wildcard-form pairs."
       
       (values t bindings))))
 
-(defmacro with-matching ((form template &key (must-hold t) (check-consistency t))
+(defmacro with-matching ((form template &key (must-hold t))
                          &body body)
   (let ((wildcards (template-wildcards template)))
     `(multiple-value-bind (.match-p .bindings)
-         (match-p ,form ',template :check-consistency nil)
+         (match-p ,form ',template)
        ,@(unless wildcards
            `((declare (ignore .bindings))))
        ,@(when must-hold

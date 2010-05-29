@@ -1496,7 +1496,8 @@ assert error == 1
 def f():
   yield 1
 g = f()
-assert g._k.__call__ # _k is the continuation
+assert g.next
+assert g.send
 ")
   (run-no-error "
 x = 0
