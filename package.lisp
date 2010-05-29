@@ -191,24 +191,27 @@
 
 ;;; CLPYTHON.PACKAGE - Package and Readtables
 
-(defpackage :clpython.package
+(defpackage :clpython.util
   (:documentation "Package, readtables, ast/user symbol pretty printer")
   (:use :common-lisp)
-  (:export #:in-syntax #:*ast-readtable* #:*user-readtable* #:*ast-user-readtable*
-           #:with-ast-user-readtable #:with-ast-user-pprinter
+  (:export #:in-syntax 
+           #:read-package-symbol-func
            #:setup-omnivore-readmacro
            #:with-auto-mode-recompile #:whereas #:sans #:named-function #:slurp-file
            #:with-stack-list #:without-redefinition-warnings #:defconstant-once
            #:+max-char-code+ #:char-code-type #:ltv-find-class #:make-weak-key-hash-table
            #:schedule-finalization #:unschedule-finalization
            #:register-feature #:with-gensyms #:with-sane-debugging #:with-line-prefixed-output
-           #:class-initarg-p #:define-macro-state-declaration))
+           #:class-initarg-p #:define-macro-state-declaration
+           ;; pattern matching
+           #:match-p #:with-matching #:with-perhaps-matching
+           ))
 
 ;;; CLPYTHON.PARSER - Parser and Lexer
 
 (defpackage :clpython.parser
   (:documentation "Parser and lexer for Python code")
-  (:use :common-lisp :clpython.package)
+  (:use :common-lisp :clpython.util)
   (:export #:parse #:ast-p #:ast-complete-p ;; parser
            #:*python-form->source-location* #:*module->source-positions*
            #:string-literal-p
@@ -237,7 +240,7 @@
 
 (defpackage :clpython
   (:documentation "CLPython: An implementation of Python in Common Lisp.")
-  (:use :common-lisp :clpython.package :clpython.parser)
+  (:use :common-lisp :clpython.util :clpython.parser)
   (:export #:raise-syntax-error *raise-syntax-error-hook*
            
            #:py-val->string #:py-str-string #:py-repr #:py-bool #:make-module
@@ -257,15 +260,17 @@
 	   ;; module status
 	   #:impl-status #:set-impl-status
 	   
-           ;; pattern matching
-           #:match-p #:with-matching #:with-perhaps-matching
+           ;; abstract syntax tree utils
+           #:*ast-readtable* #:*user-readtable* #:*ast-user-readtable*
+           #:with-ast-user-readtable #:with-ast-user-pprinter
 	   ))
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (cascade-external-symbols :clpython))
  
 (eval-when (:compile-toplevel :load-toplevel :execute)
-  (import '(clpython:raise-syntax-error clpython:*raise-syntax-error-hook*)
+  (import '(clpython:raise-syntax-error clpython:*raise-syntax-error-hook* 
+            clpython:*ast-readtable* clpython:*user-readtable* clpython:*ast-user-readtable*)
           :clpython.parser))
 
 ;;; There are small references from CLPython to the REPL
@@ -274,8 +279,7 @@
   (:documentation "Python read-eval-print loop")
   (:use :common-lisp :clpython :clpython.parser)
   (:export #:repl #:*repl-compile* #:*repl-prof*
-           #:return-python-toplevel #:*repl-module-globals*)
-  (:import-from :clpython #:with-matching))
+           #:return-python-toplevel #:*repl-module-globals*))
 
 ;; Ensure that CLPython starts with repl's symbol, for code that uses :clpython
 ;; and has the symbol 'repl somewhere, and export it.

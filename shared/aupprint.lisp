@@ -11,7 +11,7 @@
 ;;;; `clpython.user' packages as [x] and {x}, respectively.
 ;;;; It is the reverse of the `readtable.lisp'.
 
-(in-package :clpython.package)
+(in-package :clpython)
 
 (defvar *ast-user-pprint-dispatch* (copy-pprint-dispatch nil))
 (defvar *ast-user-print-delims*)
@@ -28,9 +28,6 @@
            (when *ast-user-print-delims* (write-char post stream))
            (return-from ast-user-print-symbol)))
   (with-standard-io-syntax (format stream "~S" s)))
-
-(defun dummy (stream x)
-  (format stream "dummy ~A" x))
 
 (set-pprint-dispatch 'symbol 'ast-user-print-symbol 0 *ast-user-pprint-dispatch*)
 

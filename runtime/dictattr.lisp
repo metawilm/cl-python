@@ -26,10 +26,10 @@
       (cond (old
              (progn (setf (cdr old) val)
                     dict))
-            ((< (length dict) clpython.package::+dict-alist-to-hashtable-threshold+)
+            ((< (length dict) clpython.util::+dict-alist-to-hashtable-threshold+)
              (acons attr val dict))
             (t (loop with ht = (make-eq-hash-table (format nil "dict #keys > ~A [~A]"
-                                                           clpython.package::+dict-alist-to-hashtable-threshold+ dict))
+                                                           clpython.util::+dict-alist-to-hashtable-threshold+ dict))
                    for (k . v) in dict
                    do (setf (gethash k ht) v)
                    finally (setf (gethash attr ht) val)
@@ -38,7 +38,7 @@
 (defun funky-dict-del (dict attr)
   (if (hash-table-p dict)
       (values dict (remhash attr dict))
-    (clpython.package::alist-remove-prop dict attr)))
+    (clpython.util::alist-remove-prop dict attr)))
 
 (defun funky-dict-map (dict func)
   (if (hash-table-p dict)

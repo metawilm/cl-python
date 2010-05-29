@@ -7,7 +7,7 @@
 ;; (http://opensource.franz.com/preamble.html),
 ;; known as the LLGPL.
 
-(in-package :clpython.package)
+(in-package :clpython.util)
 
 ;;;; Keeping lexical context state in macros
 

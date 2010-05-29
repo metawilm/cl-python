@@ -116,7 +116,7 @@
   (:export #:|ascii_letters| #:|ascii_lowercase| #:|ascii_uppercase| #:|digits|
            #:|hexdigits| #:|octdigits| #:|lowercase| #:|uppercase| #:|letters|
            #:|punctuation| #:|whitespace| #:|printable| #:|translate| #:|maketrans|)
-  (:import-from :clpython.package +max-char-code+))
+  (:import-from :clpython.util #:+max-char-code+))
 
 (defpackage :clpython.module.symbol
   (:use :clpython :common-lisp)

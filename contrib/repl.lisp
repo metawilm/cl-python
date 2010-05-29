@@ -219,7 +219,7 @@ KIND can be :ptime, :time, :space, :pspace or NIL."
                         (setf total (concatenate 'string (subseq total 0 30) "...")))))
                total)
              (eval-print-ast (ast total)
-               (with-matching (ast ([module-stmt] ?suite))
+               (clpython.util:with-matching (ast ([module-stmt] ?suite))
 		 (assert (ast-p ?suite '[suite-stmt]))
 		 (let ((vals (multiple-value-list
                               (block :val 
@@ -294,8 +294,8 @@ KIND can be :ptime, :time, :space, :pspace or NIL."
                    (when ast
                      (when (eq ast-finished :maybe)
                        (assert (ast-p ast '[module-stmt]))
-                       (with-matching (ast ([module-stmt] ?suite-stmt))
-                         (with-matching (?suite-stmt ([suite-stmt] ?items))
+                       (clpython.util:with-matching (ast ([module-stmt] ?suite-stmt))
+                         (clpython.util:with-matching (?suite-stmt ([suite-stmt] ?items))
                            (assert (listp ?items)) ;; ?items can be multiple, e.g. in the case of "a=3; b=4".
                            (when (ast-complete-p (car (last ?items)))
                              (setf ast-finished t)))))
@@ -352,7 +352,7 @@ KIND can be :ptime, :time, :space, :pspace or NIL."
 
              (exit-repl ()
                (if lisp-exit
-                   (clpython.package::quit)
+                   (clpython.util::quit)
                  (return-from repl-1 (values)))))
       (clear-history)
       (loop 

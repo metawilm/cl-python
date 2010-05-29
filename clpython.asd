@@ -29,11 +29,14 @@
                  (:module "util"
                           :components ((:file "utils")
                                        (:file "readtable")
-                                       (:file "aupprint")
                                        (:file "macro-state" :depends-on ("utils"))
                                        (:file "patternmatch")))
                  (:module "shared"
-                          :components ((:file "ssetup")))))
+                          :serial t
+                          :components ((:file "ssetup")
+                                       (:file "aureadtable")
+                                       (:file "errors")
+                                       (:file "aupprint")))))
 
 (asdf:defsystem :clpython.parser
     :description "Python parser, code walker, and pretty printer"

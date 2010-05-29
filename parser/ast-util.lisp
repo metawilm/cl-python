@@ -22,7 +22,7 @@
          (eq (symbol-package (car form)) #.(find-package :clpython.ast.node)))))
 
 (defun abbreviated-python-code (ast)
-  (clpython.package::abbreviate-to-one-line (py-pprint ast)))
+  (clpython.util::abbreviate-to-one-line (py-pprint ast)))
 
 (defun symbol-ends-with-p (symbol suffix)
   (check-type symbol symbol)
@@ -106,18 +106,18 @@ starts a new top-level statement. Uses an extra heuristic if *use-ast-return-stm
 
   (flet ((funcdef-complete-p (ast)
            (assert (ast-p ast '[funcdef-stmt]))
-           (clpython:with-matching (ast ([funcdef-stmt] ?decorators ([identifier-expr] ?fname) ?fargs
-                                                        ([suite-stmt] ?stmts)))
+           (clpython.util:with-matching (ast ([funcdef-stmt] ?decorators ([identifier-expr] ?fname) ?fargs
+                                                             ([suite-stmt] ?stmts)))
              (let ((last-stmt (car (last ?stmts))))
                (when (listp last-stmt)
                  (case (car last-stmt)
                    ([return-stmt] t) ;; Pattern 1.
-                   ([if-stmt]     (clpython:with-matching (last-stmt ([if-stmt] ?if-clauses ?else-clause)) ;; Pattern 2.
+                   ([if-stmt]     (clpython.util:with-matching (last-stmt ([if-stmt] ?if-clauses ?else-clause)) ;; Pattern 2.
                                     (and (loop for ic in ?if-clauses
-                                             always (clpython:with-matching (ic (?cond ([suite-stmt] ?stmts)))
+                                             always (clpython.util:with-matching (ic (?cond ([suite-stmt] ?stmts)))
                                                       (ast-p (car (last ?stmts)) '[return-stmt])))
                                          ?else-clause ;; The `else' clause must be preesnt
-                                         (clpython:with-matching (?else-clause ([suite-stmt] ?stmts))
+                                         (clpython.util:with-matching (?else-clause ([suite-stmt] ?stmts))
                                            (ast-p (car (last ?stmts)) '[return-stmt])))))
                    ([pass-stmt] t) ;; Pattern 3
                    ([raise-stmt] t))))))) ;; Pattern 4

@@ -7,24 +7,12 @@
 ;; (http://opensource.franz.com/preamble.html),
 ;; known as the LLGPL.
 
-;;;; These readtables ease working with Abstract Syntax Trees
-;;;; and Python variable names.
+;;; Readtable utilities
 
-(in-package :clpython.package)
+(in-package :clpython.util)
 
 ;; The readtable setup is as suggested by Kent Pitman in
 ;;  http://groups.google.nl/group/comp.lang.lisp/msg/d97a08bd49db2b82?dmode=source
-;; 
-;; When parsing Python code, instead of using package prefixes it is must easier to
-;; use a syntactical shorthand: "[NAME]" will refer to the symbol clpython.ast::NAME,
-;; so we have [+], [def], [newline] etc.
-;;
-;; In the same way, {NAME} refers to clpython.user::NAME. It is required that
-;; [NAME] already exists, while {NAME} is interned if new.
-;;
-;; The escape character is backslash: token "]" is thus [\]]. The character "|" will
-;; be superfluously escaped, so [\|] and [\|=] instead of [|] and [|=], in order
-;; not to confuse emacs.
 
 (defmacro in-syntax (readtable-expression)
   `(eval-when (:compile-toplevel :load-toplevel :execute)
@@ -60,36 +48,6 @@ it will be interned if INTERN, otherwise an error is raised."
                                              "No symbol named ~S in package ~S"
                                              :format-arguments
                                              (list name (find-package package))))))))))))
-    
-(defun setup-ast-readmacro (&optional (readtable *readtable*))
-  (let ((read-[-func (read-package-symbol-func (find-package :clpython.ast) #\[ #\] :intern nil)))
-    (set-macro-character #\[ read-[-func t readtable))
-  readtable)
-
-(defun setup-user-readmacro (&optional (readtable *readtable*))
-  (let ((read-{-func (read-package-symbol-func (find-package :clpython.user) #\{ #\} :intern t)))
-    (set-macro-character #\{ read-{-func t readtable))
-  readtable)
-
-(defvar *ast-readtable* 
-    (setup-ast-readmacro (copy-readtable nil))
-  "Readtable where [NAME] refers to clpython.ast::NAME")
-
-(defvar *user-readtable*
-    (setup-user-readmacro (copy-readtable nil))
-  "Readtable where {NAME} refers to clpython.user::NAME")
-
-(defvar *ast-user-readtable*
-    (setup-user-readmacro (setup-ast-readmacro (copy-readtable nil)))
-  "Readtable where [NAME] refers to clpython.ast::NAME and {NAME} to clpython.user::NAME")
-
-;; To be able to mention these readtables in mode lines, they have to
-;; be named.
-#+allegro
-(progn (setf (excl:named-readtable :py-ast-readtable) *ast-readtable*)
-       (setf (excl:named-readtable :py-user-readtable) *user-readtable*)
-       (setf (excl:named-readtable :py-ast-user-readtable) *ast-user-readtable*))
-
 
 ;;; Readtable that takes in everything available
 
@@ -111,7 +69,3 @@ As a side effect, the function call of FUNCTION is executed with *PACKAGE* bound
     (dotimes (i 256) ;; use file encoding or char-code-limit?
       (set-macro-character (code-char i) #'omnivore-read-func t readtable)))
   readtable)
-
-(defmacro with-ast-user-readtable (&body body)
-  `(let ((*readtable* *ast-user-readtable*))
-     ,@body))

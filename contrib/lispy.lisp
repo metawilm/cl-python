@@ -82,7 +82,7 @@ expression that should be interpreted as Lisp code, signals AMBIGUOUS-INPUT-IS-L
              (check-type string string)
              (not (eq :incomplete (parse-string-toplevel-forms string)))))
     
-    (loop with all = (normalize-input (clpython.package::slurp-file stream))
+    (loop with all = (normalize-input (clpython.util::slurp-file stream))
         for dummy = (when *lispy-debug*
                       (format t "~&[iter all: ~S]~&" (coerce all 'list)))
         until (and (string-has-enter-p all)

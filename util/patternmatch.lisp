@@ -7,7 +7,7 @@
 ;; (http://opensource.franz.com/preamble.html),
 ;; known as the LLGPL.
 
-(in-package :clpython)
+(in-package :clpython.util)
 
 ;;;; Generic list/symbol pattern matching
 ;;;; (Maybe use CL-Unification at some point)

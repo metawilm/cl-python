@@ -16,20 +16,6 @@
 ;; Same for EOF error.
 
 (in-package :clpython)
-(in-syntax *ast-user-readtable*)
-
-(defvar *exceptions-loaded* nil)
-(defvar *raise-syntax-error-hook* 'raise-syntax-error-default)
-
-(defun raise-syntax-error (&rest args)
-  (apply *raise-syntax-error-hook* args))
-
-(defun raise-syntax-error-default (formatstring &rest args)
-  "Raise SyntaxError, or (if that condition is unavailable) a regular error."
-  (if *exceptions-loaded*
-      (apply 'py-raise '{SyntaxError} formatstring args)
-    (apply #'error (concatenate 'string "SyntaxError: " formatstring) args))
-  (break "never"))
 
 ;;; Allegro's Source level debugging
 
