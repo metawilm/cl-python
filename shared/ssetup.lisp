@@ -31,10 +31,6 @@
     (apply #'error (concatenate 'string "SyntaxError: " formatstring) args))
   (break "never"))
 
-(defun py-raise (exc-type string &rest format-args)
-  "Raise a Python exception with given format string"
-  (error exc-type :args (cons string format-args)))
-
 ;;; Allegro's Source level debugging
 
 (defparameter *source-level-debugging*
