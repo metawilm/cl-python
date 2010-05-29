@@ -862,15 +862,6 @@ an assigment statement. This changes at least the returned 'store' form.")
   (declare (ignore cname suite))
   (error "todo"))
 
-#+(or) ;; now unused
-(defmacro [clpython-stmt] (&key line-no)
-  ;; XXX The module name should also be a param.
-  (when *include-line-number-hook-calls*
-    (when *compile-line-number-hook*
-      (funcall *compile-line-number-hook* line-no))
-    `(let ((hook *runtime-line-number-hook*))
-       (when hook (funcall hook ,line-no)))))
-
 (defun apply-comparison-brackets (whole)
   (let (args cmps)
     (labels ((apply-brackets (form)

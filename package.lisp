@@ -80,9 +80,7 @@
            "slice-expr" "subscription-expr" "tuple-expr" "unary-expr" "yield-expr"
 	   
 	   "for-in-clause" "if-clause" ;; not really nodes
-           )
-  (:intern "clpython-stmt" ;; internal state
-	   ))
+           ))
 
 (defpackage :clpython.ast.node-p
   (:documentation "Statement and expression nodes")
@@ -104,8 +102,7 @@
   (:use :clpython.ast.reserved :clpython.ast.node :clpython.ast.punctuation
 	:clpython.ast.operator :clpython.ast.token :clpython.ast.node-p)
   (:import-from :clpython.ast.operator "/t/" "<divmod>")
-  (:import-from :clpython.ast.reserved "is not" "not in")
-  (:import-from :clpython.ast.node     "clpython-stmt"))
+  (:import-from :clpython.ast.reserved "is not" "not in"))
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (cascade-external-symbols :clpython.ast))
