@@ -227,7 +227,7 @@
 ;;; CLPYTHON.MODULE - Modules
 
 (defpackage :clpython.module
-  (:documentation "Aggregation package for Python modules")
+  (:documentation "Aggregation package for Python modules; subpackages are defined in lib/lsetup.lisp")
   (:use ))
 
 ;;; CLPYTHON - The main package
