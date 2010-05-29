@@ -21,15 +21,19 @@
 (defvar *exceptions-loaded* nil)
 (defvar *raise-syntax-error-hook* 'raise-syntax-error-default)
 
-(defun clpython:raise-syntax-error (&rest args)
+(defun raise-syntax-error (&rest args)
   (apply *raise-syntax-error-hook* args))
 
 (defun raise-syntax-error-default (formatstring &rest args)
   "Raise SyntaxError, or (if that condition is unavailable) a regular error."
-  (if clpython:*exceptions-loaded*
-      (apply 'clpython:py-raise '{SyntaxError} formatstring args)
+  (if *exceptions-loaded*
+      (apply 'py-raise '{SyntaxError} formatstring args)
     (apply #'error (concatenate 'string "SyntaxError: " formatstring) args))
   (break "never"))
+
+(defun py-raise (exc-type string &rest format-args)
+  "Raise a Python exception with given format string"
+  (error exc-type :args (cons string format-args)))
 
 ;;; Allegro's Source level debugging
 
@@ -38,3 +42,4 @@
   #- #1# nil)
 
 (register-feature :clpython-source-level-debugging *source-level-debugging*)
+

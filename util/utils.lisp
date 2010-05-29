@@ -9,10 +9,6 @@
 
 (in-package :clpython.package)
 
-(defun py-raise (exc-type string &rest format-args)
-  "Raise a Python exception with given format string"
-  (error exc-type :args (cons string format-args)))
-
 (defmacro with-auto-mode-recompile
     ((&key verbose
            (restart-name #+allegro 'excl::recompile-due-to-incompatible-fasl #-allegro nil)
@@ -47,9 +43,6 @@
                     (conditions:fasl-error
                      #'.invoke-recompile-restart))
        ,@body)))
-
-;;; To have Emacs properly indent the DEF-PY-METHOD form, add to .emacs:
-;;;  (put 'when-let 'fi:lisp-indent-hook (get 'when 'fi:lisp-indent-hook))
 
 (defmacro whereas (bindings &body body)
   "A simple version of Erik Naggum's idea in
