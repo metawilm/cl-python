@@ -191,41 +191,51 @@
 (defpackage :clpython.util
   (:documentation "Package, readtables, ast/user symbol pretty printer")
   (:use :common-lisp)
-  (:export #:in-syntax 
-           #:read-package-symbol-func
-           #:register-feature
-           #:setup-omnivore-readmacro
-           #:with-auto-mode-recompile #:whereas #:sans #:named-function #:slurp-file
-           #:with-stack-list #:without-redefinition-warnings #:defconstant-once
-           #:+max-char-code+ #:char-code-type #:ltv-find-class #:make-weak-key-hash-table
-           #:schedule-finalization #:unschedule-finalization
-           #:register-feature #:with-gensyms #:with-sane-debugging #:with-line-prefixed-output
-           #:class-initarg-p #:define-macro-state-declaration
-           #:abbreviate-string #:abbreviate-to-one-line
+  (:export #:in-syntax #:whereas #:sans #:defconstant-once  #:with-gensyms
+           ;; reader
+           #:setup-omnivore-readmacro #:read-package-symbol-func #:register-feature
+           ;; compilation
+           #:with-auto-mode-recompile  #:without-redefinition-warnings
+           #:define-macro-state-declaration #:with-sane-debugging
+           ;; data types
+           #:named-function #:slurp-file #:with-stack-list #:make-weak-key-hash-table
+           #:ltv-find-class #:class-initarg-p 
            #:alist-remove-prop #:+dict-alist-to-hashtable-threshold+
-           #:match-p #:with-matching #:with-perhaps-matching #:quit
-           #:derive-pathname #:ensure-path-is-directory))
+           #:+max-char-code+ #:char-code-type
+           #:derive-pathname #:ensure-path-is-directory
+           ;; finalization
+           #:schedule-finalization #:unschedule-finalization
+           ;; strings
+           #:with-line-prefixed-output #:abbreviate-string #:abbreviate-to-one-line
+           ;; pattern matching
+           #:match-p #:with-matching #:with-perhaps-matching
+           ;; process
+           #:quit))
 
 ;;; CLPYTHON.PARSER - Parser and Lexer
 
 (defpackage :clpython.parser
   (:documentation "Parser and lexer for Python code")
   (:use :common-lisp :clpython.util)
-  (:export #:*tab-width-spaces*
-           #:parse #:ast-p #:ast-complete-p ;; parser
-           #:*extra-identifier-char2-p* #:parse-with-replacements
-           #:*python-form->source-location* #:*module->source-positions*
-           #:string-literal-p #:with-source-locations
-           #:*normal-float-representation-type* #:*enormous-float-representation-type*
-           #:walk-py-ast #:with-py-ast ;; code walker
-	   #:+normal-target+ #:+delete-target+ #:+augassign-target+ #:+no-target+
-	   #:+normal-value+ #:+augassign-value+ #:+no-value+
-
-	   #:py-pprint #:*py-pprint-dispatch* ;; pretty printer
-           
-           #:enter-mixed-lisp-python-syntax ;; lisp/python mixed readtable mode
-           #:exit-mixed-lisp-python-syntax
-           #:with-mixed-lisp-python-syntax))
+  (:export
+   ;; lexer
+   #:*tab-width-spaces* #:*extra-identifier-char2-p* 
+   #:*normal-float-representation-type* #:*enormous-float-representation-type*
+   ;; parser
+   #:parse #:parse-with-replacements
+   ;; ast
+   #:ast-p #:ast-complete-p #:string-literal-p
+   #:walk-py-ast #:with-py-ast
+   #:+normal-target+ #:+delete-target+ #:+augassign-target+ #:+no-target+
+   #:+normal-value+ #:+augassign-value+ #:+no-value+
+   ;; source locations
+   #:*python-form->source-location* #:*module->source-positions* #:with-source-locations
+    ;; pretty printer
+   #:py-pprint #:*py-pprint-dispatch*
+    ;; lisp/python mixed readtable mode
+   #:enter-mixed-lisp-python-syntax
+   #:exit-mixed-lisp-python-syntax
+   #:with-mixed-lisp-python-syntax))
 
 ;;; CLPYTHON.MODULE - Modules
 
@@ -242,51 +252,53 @@
   (:documentation "CLPython: An implementation of Python in Common Lisp.")
   (:use :common-lisp :clpython.util :clpython.parser)
   (:export #:raise-syntax-error *raise-syntax-error-hook*
-           ;; string
-           #:py-val->string #:py-str-string #:py-repr #:py-string.strip
+           ;; strings
+           #:py-repr-string #:py-val->string #:py-str-string
+           #:py-repr #:py-string.strip
            ;; numbers
            #:py-val->number #:py-float
            #:py-==->lisp-val
            #:py-*
+           ;; booleans
+           #:py-bool #:+the-true+ #:+the-false+
            ;; generators
            #:generator.next #:generator.send
-           #:py-bool #:*the-true* #:*the-false*
            ;; unique objects
            #:py-none #:*the-none* #:none-p
            #:*the-ellipsis* #:*the-notimplemented*
-           ;; modules
-           ;; dict
+           ;; dicts
            #:make-py-hash-table #:dict.items
-           ;; file
+           ;; files
            #:py-file #:py-file.read #:py-file.close
            ;; exceptions
+           #:py-raise
            #:define-exception-subclass
-           ;; habitat
+           #:*exceptions-are-python-objects* #:exception-args #:*exceptions-loaded*
+           ;; habitats
            #:*habitat* #:make-habitat
            #:habitat-stdout #:habitat-stdin #:habitat-stderr #:habitat-cmd-line-args
            #:habitat-search-paths
-           ;; tuple
+           ;; tuples
            #:*the-empty-tuple* #:make-tuple-from-list 
            ;; sequences, mappings
            #:py-subs
-           #:make-slice #:make-py-list-from-list
-	   #:*py-modules* #:dyn-globals #:py-call #:py-class-of #:py-raise #:bind-val
-	   #:py-repr-string #:py-attr #:py-attr*
-	   #:run #:*compile-python-ast-before-running* #:*exceptions-are-python-objects*
-           #:exception-args #:*exceptions-loaded*
-           #:def-py-method #:py-iterate->lisp-list #:py-raise
-           #:+the-true+ #:+the-false+ #:object #:py-type
-
-	   ;; compiler
-	   #:+standard-module-globals+
-	   #:*warn-unused-function-vars* #:*warn-bogus-global-declarations*
-           #:with-line-numbers #:*runtime-line-number-hook*
-
-           ;; run
-           #:run-python-ast
-           ;; module status
+           #:make-slice
+           #:make-py-list-from-list
+           #:py-iterate->lisp-list
+	   ;; callables
+           #:py-call 
+           ;; modules
 	   #:impl-status #:set-impl-status
-	   
+           ;; types, methods
+           #:object #:py-type
+           #:py-class-of
+           #:def-py-method
+           ;; attributes
+           #:py-attr #:bind-val
+           ;; execution
+	   #:run #:run-python-ast #:*compile-python-ast-before-running*
+           ;; compiler
+	   #:+standard-module-globals+ #:*warn-bogus-global-declarations*
            ;; abstract syntax tree utils
            #:*ast-readtable* #:*user-readtable* #:*ast-user-readtable*
            #:with-ast-user-readtable #:with-ast-user-pprinter))

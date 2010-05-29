@@ -3186,16 +3186,6 @@ invocation form.\"")
 
 ;;; Attributes are a fundamental thing: getting, setting, deleting
 
-(defun py-attr* (x &rest chained-attr)
-  "Chained attribute lookup. Attributes may be strings or symbols.
-Returns nil upon lookup failure."
-  (dolist (attr chained-attr x)
-    (let* ((attr.sym (ensure-user-symbol (string attr)))
-           (res (attr x attr.sym)))
-      (unless res
-        (return-from py-attr* nil))
-      (setf x res))))
-
 #+(or)
 ;;#+(and allegro-version>= (version>= 8 0))
 (define-compiler-macro py-attr (&whole whole x attr &key (bind-class-attr t) via-getattr &environment e)
