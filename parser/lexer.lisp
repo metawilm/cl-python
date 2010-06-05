@@ -357,6 +357,7 @@ Used by compiler to generate 'forbidden' identfiers.")
            ch))
         (eof-error
          (raise-unexpected-eof %lex-curr-line-no%))))
+(declaim (ftype (function (&key (:eof-error t)) (or character null)) lex-read-char))
 
 (defun lex-unread-char (&optional (ch nil))
   "Unread last character read. If CH is supplied, it is checked."
