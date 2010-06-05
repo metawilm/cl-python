@@ -30,9 +30,9 @@
 (defmacro with-all-compiler-variants-tried (&body body)
   (let ((g1 (gensym))
         (g2 (gensym)))
-    `(dolist (,g1 (all-use-environment-accessor-values))
+    `(dolist (,g1 (clpython.util::all-use-environment-accessor-values))
        (dolist (,g2 '(t nil))
-         (let ((*use-environment-acccessors* ,g1)
+         (let ((clpython.util::*use-environment-acccessors* ,g1)
                (clpython:*compile-python-ast-before-running* ,g2))
            ,@body)))))
 
