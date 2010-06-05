@@ -128,9 +128,10 @@ If the stream length can not be determined (e.g. for standard input), all availa
 
 (defmacro without-redefinition-warnings (&body body)
   #+allegro `(excl:without-redefinition-warnings ,@body)
+  #+lispworks `(system::without-warning-on-redefinition ,@body)
   #+sbcl `(handler-bind ((sb-kernel:redefinition-warning #'muffle-warning))
             ,@body)
-  #-(or allegro sbcl) `(progn ,@body))
+  #-(or allegro lispworks sbcl) `(progn ,@body))
 
 (defmacro fast (&body body)
   `(locally (declare (optimize (speed 3)))
