@@ -179,32 +179,31 @@
 
 ;;; Nice error messages for missing required libraries
 
-(defmacro with-missing-dep-help ((library warning-test) &body body)
+(defmacro with-missing-dep-help (lib-texts &body body)
   `(handler-bind ((asdf:missing-dependency
-                   (lambda (c) (when (eq (asdf::missing-requires c) ,library)
-                                 (warn ,warning-test)))))
+                   (lambda (c)
+		     ,@(loop for (library warning-text) in lib-texts
+			     collect `(when (eq (asdf::missing-requires c) ,library)
+					(warn ,warning-text))))))
      ,@body))
 
 (let ((clpython (asdf:find-system :clpython)))
   
   (defmethod asdf::traverse :around ((op asdf:compile-op) (system (eql clpython)))
-    (with-missing-dep-help (:closer-mop
-                            "CL-Python requires library \"Closer to MOP\". ~
-                             Please check it out from the darcs repo: ~
-                             \"darcs get http://common-lisp.net/project/closer/repos/closer-mop\" ~
-                             or download the latest release from: ~
-                             http://common-lisp.net/project/closer/ftp/closer-mop_latest.tar.gz")
-      (call-next-method)))
-
-  #-allegro
-  (defmethod asdf::traverse :around ((op asdf:compile-op) (system (eql clpython)))
-    (with-missing-dep-help (:yacc
-                            "CL-Python requires library \"CL-Yacc\". ~
-                             Please check it out from the darcs repo: ~
-                             \"darcs get http://www.pps.jussieu.fr/~~jch/software/repos/cl-yacc\" ~
-                             or download the latest release from: ~
-                             http://www.pps.jussieu.fr/~~jch/software/files/")
-      (call-next-method)))
+    (with-missing-dep-help ((:closer-mop
+			     "CL-Python requires library \"Closer to MOP\". ~
+                              Please check it out from the darcs repo: ~
+                              \"darcs get http://common-lisp.net/project/closer/repos/closer-mop\" ~
+                              or download the latest release from: ~
+                              http://common-lisp.net/project/closer/ftp/closer-mop_latest.tar.gz")
+			    #-allegro
+			    (:yacc
+                             "CL-Python requires library \"CL-Yacc\". ~
+                              Please check it out from the darcs repo: ~
+                              \"darcs get http://www.pps.jussieu.fr/~~jch/software/repos/cl-yacc\" ~
+                              or download the latest release from: ~
+                              http://www.pps.jussieu.fr/~~jch/software/files/"))
+			   (call-next-method)))
   
   #-allegro
   (defmethod asdf::traverse :around ((op asdf:test-op) (system (eql clpython)))
@@ -217,10 +216,18 @@
 
 ;;; Suppress some warnings about package trickery 
 
-#+sbcl
-(let* ((package-mod (let ((sys (asdf:find-system :clpython.package)))
-                      (car (asdf:module-components sys))))
-       (package-file (asdf:find-component package-mod "package"))
+(defmacro suppress-package-warnings (&body body)
+  `(handler-bind (#+sbcl 
+		  (sb-int:package-at-variance #'muffle-warning)
+		  #+lispworks
+		  (simple-warning (lambda (c)
+				    (let ((fmt (slot-value c 'conditions::format-string)))
+				      (when (search "Using DEFPACKAGE" fmt)
+					(muffle-warning c))))))
+		 ,@body))
+      
+(let* ((package-file (let ((sys (asdf:find-system :clpython.basic)))
+		       (car (asdf:module-components sys))))
        (lib-mod (let ((sys (asdf:find-system :clpython.lib)))
                   (car (asdf:module-components sys))))
        (lib-pkg-file (asdf:find-component lib-mod "psetup"))
@@ -229,12 +236,12 @@
   (dolist (pkg-file pkg-files)
     
     (defmethod asdf:perform :around ((op asdf:compile-op) (c (eql pkg-file)))
-      (handler-bind ((sb-int:package-at-variance #'muffle-warning))
-        (call-next-method)))
+      (suppress-package-warnings
+       (call-next-method)))
     
     (defmethod asdf:perform :around ((op asdf:load-op) (c (eql pkg-file)))
-      (handler-bind ((sb-int:package-at-variance #'muffle-warning))
-        (call-next-method)))))
+      (suppress-package-warnings
+       (call-next-method)))))
 
 
 ;;; Show usage after loading the system
