@@ -2039,12 +2039,17 @@ finally:
 (defun only-pos-args (args)
   "Returns NIL if not only pos args;
 Non-negative integer denoting the number of args otherwise."
-  (declare (optimize (speed 3) (safety 1) (debug 0)))
-  (loop with num fixnum = 0
-      for a in args
-      if (symbolp a) return nil ;; regular Python values are never symbols,
-      else do (incf num)   ;; so a symbol is a keyword
-      finally (return num)))
+  (declare (optimize (speed 3) (safety 0) (debug 0)))
+  (let ((num 0))
+    (declare (type (integer 0 #.most-positive-fixnum) num))
+    (dolist (a args)
+      (cond ((symbolp a)
+	     ;; Regular Python values are never symbols,
+	     ;; so a symbol is a keyword.
+	     (return-from only-pos-args nil))
+	    (t (incf num))))
+      num))
+(declaim (ftype (function (list) (or (integer 0 #.most-positive-fixnum) null)) only-pos-args))
 
 (defun raise-wrong-args-error ()
   (py-raise '{TypeError} "Wrong number of arguments, or wrong keyword, supplied to function."))
@@ -2067,8 +2072,6 @@ Non-negative integer denoting the number of args otherwise."
   ;; 
   ;; XXX todo: the generated code can be cleaned up a bit when there
   ;; are no arguments (currently zero-length vectors are created).
-  (declare #.+optimize-fast+
-           (type list pos-args key-args))
   (let* ((num-pos-args (length pos-args))
 	 (num-key-args (length key-args))
 	 (num-pos-key-args  (+ num-pos-args num-key-args))
@@ -2081,61 +2084,63 @@ Non-negative integer denoting the number of args otherwise."
     ;; This MAKE-FA can not be moved inside the fuction as load-time-value, because
     ;;  1. it will probably not be evaluated at the right moment (top-level forms executed);
     ;;  2. some issue with default argument values and namespaces.
-    `(let (,@(when (or *-arg **-arg some-args-p)
-               `((fa (make-fa
-                      :func-name        ',name
-                      :num-pos-args     ,num-pos-args
-                      :num-key-args     ,num-key-args
-                      :num-pos-key-args ,num-pos-key-args
-                      :pos-key-arg-names ',(make-array (length pos-key-arg-names)
-                                                       :initial-contents pos-key-arg-names)
-                      :key-arg-default-vals (make-array ,num-key-args
-                                                        :initial-contents (list ,@key-arg-default-asts))
-                      :arg-kwname-vec   ,arg-kwname-vec
-                      :*-arg            ',*-arg
-                      :**-arg           ',**-arg)))))
-       ,(let ((fname (intern (format nil "~A.~A" *current-module-name* name) #.*package*)))
-          `(flet ((,fname (&rest %args)
-                    (declare #+(or)(dynamic-extent %args)
-                             #.+optimize-std+)
-                    ,(let ((let-variables (append pos-key-arg-names
-                                                  (when *-arg (list *-arg))
-                                                  (when **-arg (list **-arg))))
-                           (maybe-only-pos-args-case (and some-args-p (not *-arg) (not **-arg))))
-                       `(let (,@let-variables
-                              ,@(when maybe-only-pos-args-case
-                                  `((only-pos-args (only-pos-args %args)))))
-                          (declare (ignorable ,@let-variables))
-                          ;; There are two ways to parse the argument list:
-                          ;; - The pop way, which quickly assigns the variables a local name (only usable
-                          ;;   when there are a correct number of positional arguments).
-                          ;; - The array way, where a temporary array is created and a arg-parse function
-                          ;;   is called (used everywhere else).
-                          ,(let ((the-array-way
-                                  `(let ((arg-val-vec (make-array ,(+ num-pos-key-args
-                                                                      (if (or *-arg **-arg) 1 0)
-                                                                      (if **-arg 1 0)) :initial-element nil)))
-                                     (declare (dynamic-extent arg-val-vec))
-                                     (parse-py-func-args %args arg-val-vec fa)
-                                     ,@(loop for p in pos-key-arg-names and i from 0
-                                           collect `(setf ,p (svref arg-val-vec ,i)))
-                                     ,@(when  *-arg
-                                         `((setf ,*-arg (svref arg-val-vec ,num-pos-key-args))))
-                                     ,@(when **-arg
-                                         `((setf ,**-arg (svref arg-val-vec ,(1+ num-pos-key-args)))))))
-                                 (the-pop-way
-                                  `(progn ,@(loop for p in pos-key-arg-names collect `(setf ,p (pop %args))))))
-                             
-                             (cond ((or *-arg **-arg)  the-array-way)
-                                   (some-args-p        `(if (and only-pos-args
-                                                                 (= (the fixnum only-pos-args) ,num-pos-key-args))
-                                                            ,the-pop-way
-                                                          ,the-array-way))
-                                   (t `(when %args (raise-wrong-args-error)))))
-                          
-                          (locally #+(or)(declare (optimize (safety 3) (debug 3)))
-                                   ,@body)))))
-             #',fname)))))
+    `(locally
+	 (declare #.+optimize-fast+)
+       (let (,@(when (or *-arg **-arg some-args-p)
+		     `((fa (make-fa
+			    :func-name        ',name
+			    :num-pos-args     ,num-pos-args
+			    :num-key-args     ,num-key-args
+			    :num-pos-key-args ,num-pos-key-args
+			    :pos-key-arg-names ',(make-array (length pos-key-arg-names)
+							     :initial-contents pos-key-arg-names)
+			    :key-arg-default-vals (make-array ,num-key-args
+							      :initial-contents (list ,@key-arg-default-asts))
+			    :arg-kwname-vec   ,arg-kwname-vec
+			    :*-arg            ',*-arg
+			    :**-arg           ',**-arg)))))
+	 ,(let ((fname (intern (format nil "~A.~A" *current-module-name* name) #.*package*)))
+	       `(flet ((,fname (&rest %args)
+			 (declare #+(or)(dynamic-extent %args)
+				  #.+optimize-std+)
+			 ,(let ((let-variables (append pos-key-arg-names
+						       (when *-arg (list *-arg))
+						       (when **-arg (list **-arg))))
+				(maybe-only-pos-args-case (and some-args-p (not *-arg) (not **-arg))))
+			       `(let (,@let-variables
+				      ,@(when maybe-only-pos-args-case
+					      `((only-pos-args (only-pos-args %args)))))
+				  (declare (ignorable ,@let-variables))
+				  ;; There are two ways to parse the argument list:
+				  ;; - The pop way, which quickly assigns the variables a local name (only usable
+				  ;;   when there are a correct number of positional arguments).
+				  ;; - The array way, where a temporary array is created and a arg-parse function
+				  ;;   is called (used everywhere else).
+				  ,(let ((the-array-way
+					  `(let ((arg-val-vec (make-array ,(+ num-pos-key-args
+									      (if (or *-arg **-arg) 1 0)
+									      (if **-arg 1 0)) :initial-element nil)))
+					     (declare (dynamic-extent arg-val-vec))
+					     (parse-py-func-args %args arg-val-vec fa)
+					     ,@(loop for p in pos-key-arg-names and i from 0
+						  collect `(setf ,p (svref arg-val-vec ,i)))
+					     ,@(when  *-arg
+						      `((setf ,*-arg (svref arg-val-vec ,num-pos-key-args))))
+					     ,@(when **-arg
+						     `((setf ,**-arg (svref arg-val-vec ,(1+ num-pos-key-args)))))))
+					 (the-pop-way
+					  `(progn ,@(loop for p in pos-key-arg-names collect `(setf ,p (pop %args))))))
+					
+					(cond ((or *-arg **-arg)  the-array-way)
+					      (some-args-p        `(if (and only-pos-args
+									    (= (the fixnum only-pos-args) ,num-pos-key-args))
+								       ,the-pop-way
+								       ,the-array-way))
+					      (t `(when %args (raise-wrong-args-error)))))
+				  
+				  (locally #+(or)(declare (optimize (safety 3) (debug 3)))
+					   ,@body)))))
+		  #',fname))))))
 
 #+allegro
 (progn
