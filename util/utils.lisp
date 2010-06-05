@@ -333,3 +333,10 @@ See function ALIST-VS-HT.")
                                       (version   (pathname-version pathname)))
   (make-pathname :type type :name name :host host :device device
                  :directory directory :version version :case :common))
+
+(defun ensure-path-is-directory (path)
+  (let* ((truename (truename path))
+         (true-string (namestring truename)))
+    (if (member (aref true-string (1- (length true-string))) '(#\\ #\/))
+        true-string
+      (concatenate 'string true-string "/"))))
