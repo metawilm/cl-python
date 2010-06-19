@@ -14,27 +14,28 @@
 (eval-when (:compile-toplevel)
   (error "This ASDF file should be run interpreted."))
 
-;;; Core systems: parser, compiler, runtime
 
-;; Here several ASDF systems are defined. The main system :clpython depends on all of them and has no
-;; components of its own. This makes it possible to load a specific part of CLPython, in particular the
-;; parser (system :clpython.parser).
+;;; CL-Python is split into several ASDF systems, to make it possible to load 
+;;; specific components -- in particular, to load the compiler or parser without
+;;; the runtime environment.
+;;; 
+;;; The main system :CLPYTHON is the sum of all components, including contributions.
 
-(asdf:defsystem :clpython.package
-    :description "CLPython package and readtables"
+(asdf:defsystem :clpython.basic
+    :description "CLPython package and utils"
     :depends-on (:closer-mop)
-    :components ((:module "package"
-                          :components ((:file "package")
-                                       (:file "utils" :depends-on ("package"))
-                                       (:file "readtable" :depends-on ("package"))
-                                       (:file "aupprint" :depends-on ("package"))
-                                       (:file "macro-state" :depends-on ("package" "utils"))))))
+    :serial t
+    :components ((:file "package")
+                 (:module "util"
+                          :components ((:file "utils")
+                                       (:file "readtable")
+                                       (:file "aupprint")
+                                       (:file "macro-state" :depends-on ("utils"))))))
 
 (asdf:defsystem :clpython.parser
     :description "Python parser, code walker, and pretty printer"
     :depends-on 
-    #.`(:clpython.package
-        :closer-mop
+    #.`(:clpython.basic :closer-mop
         #-allegro :yacc
         #+allegro ,@(when (asdf:find-system :yacc nil) `(:yacc)))
     :components ((:module "parser"
@@ -47,37 +48,37 @@
                                        (:file "ast-match" :depends-on ("grammar"))
                                        (:file "ast-util" :depends-on ("ast-match" "grammar"))
                                        (:file "walk"     :depends-on ("psetup"))
-                                       (:file "pprint"   :depends-on ("psetup"))
-                                       (:file "lispy"    :depends-on ("psetup" "parser" "ast-match"))))))
+                                       (:file "pprint"   :depends-on ("psetup"))))))
 
-(asdf:defsystem :clpython.core
-    :description "Python semantics and compiler"
-    :depends-on (:clpython.package :clpython.parser :closer-mop)
-    :components ((:module "core"
-                          :serial t
+(asdf:defsystem :clpython.compiler
+    :description "Python compiler"
+    :depends-on (:clpython.basic :clpython.parser :closer-mop)
+    :serial t
+    :components ((:module "compiler"
                           :components ((:file "csetup"       )
-                                       (:file "pydecl"       )
-                                       (:file "formatstring" )
+                                       (:file "compiler"     )
+                                       (:file "generator"    )                                       
+                                       (:file "namespace"    )
+                                       (:file "optimize"     )
+                                       (:file "pydecl"       )))))
+
+(asdf:defsystem :clpython.runtime
+    :description "Python runtime environment"
+    :depends-on (:clpython.basic :clpython.compiler :closer-mop)
+    :components ((:module "runtime"
+                          :serial t
+                          :components ((:file "formatstring" )
                                        (:file "metaclass"    )
                                        (:file "dictattr"     )
                                        (:file "classes"      )
                                        (:file "exceptions"   )
-                                       (:file "namespace"    )
-                                       (:file "compiler"     )
-                                       (:file "generator"    )
-                                       (:file "optimize"     )
                                        (:file "habitat"      )
                                        (:file "import"       )
-                                       (:file "run"          )
-                                       (:file "executable"   )
-                                       
-                                       #+(or) ;; disable while in development
-                                       ;; #+(and allegro allegro-version>= (version>= 8 2))
-                                       (:file "source"       )))))
+                                       (:file "run"          )))))
 
 (asdf:defsystem :clpython.lib
     :description "Python module library"
-    :depends-on (:clpython.package :clpython.parser :clpython.core)
+    :depends-on (:clpython.basic :clpython.runtime)
     :components ((:module "lib"
                           :components ((:file "builtins-file")
                                        (:file "builtins-set")
@@ -102,29 +103,51 @@
                                        (:file "thread" :depends-on ("lsetup"))
                                        (:file "time" :depends-on ("lsetup"))))))
 
-;;; Application systems
-
-(asdf:defsystem :clpython.app.repl
-    :description "CLPython read-eval-print loop"
-    :depends-on (:clpython.core)
-    :components ((:module "app"
-                          :components ((:module "repl"
-                                                :components ((:file "repl")))))))
-
-(asdf:defsystem :clpython.app
-    :description "CLPython applications"
-    :depends-on (:clpython.app.repl))
+(asdf:defsystem :clpython.contrib
+    :description "CLPython contributions and experiments"
+    :depends-on (:clpython.basic :clpython.runtime :clpython.compiler)
+    :components ((:module "contrib"
+                          :components ((:file "repl")
+                                       (:file "lispy")
+                                       (:file "executable" )
+                                       #+(or) ;; disable while in development
+                                       ;; #+(and allegro allegro-version>= (version>= 8 2))
+                                       (:file "source"       )))))
 
 ;;; The main system
 
 (asdf:defsystem :clpython
     :description "CLPython - an implementation of Python in Common Lisp"
-    :depends-on (:clpython.package :clpython.parser :clpython.core :clpython.lib clpython.app)
+    :depends-on (:clpython.basic :clpython.parser :clpython.compiler :clpython.runtime :clpython.lib :clpython.contrib)
     :in-order-to ((asdf:test-op (asdf:load-op :clpython-test))))
 
+;;; Unit test, linked to asdf operation "test-op" on the CL-Python system
 
-;; In Allegro, which provides its own Yacc, CL-Yacc can optionally be used.
-;; In other implementations, Allegro Yacc can't be used.
+(asdf:defsystem :clpython.test
+    :description "CLPython tests"
+    :depends-on (:clpython #-allegro :ptester)
+    :components ((:module "test"
+                          :serial t
+                          :components ((:file "tsetup")
+                                       (:file "parser-test")
+                                       (:file "compiler-test")
+                                       (:file "lang-test")
+                                       (:file "mod-builtins-test")
+                                       (:file "mod-string-test")
+                                       (:file "mod-math-test")))))
+
+
+(defmethod asdf:perform :after ((op asdf:test-op) (c (eql (asdf:find-system :clpython))))
+  (funcall (find-symbol (string '#:run-tests) :clpython.test)))
+
+(defmethod asdf:operation-done-p ((o asdf:test-op)
+                                  (c (eql (asdf:find-system :clpython))))
+  "Testing is never finished."
+  nil)
+
+
+;;; In Allegro, which provides its own Yacc, CL-Yacc can optionally be used.
+;;; In other implementations, Allegro Yacc is unavailable
 
 (let* ((parser-mod (let ((sys (asdf:find-system :clpython.parser)))
                      (car (asdf:module-components sys)))))
@@ -147,7 +170,8 @@
     (defmethod asdf:perform :around ((op asdf:compile-op) (c (eql allegro-yacc-grammar)))
       nil)))
 
-;; Give a nice error message when a required lib is not found.
+
+;;; Nice error messages for missing required libraries
 
 (defmacro with-missing-dep-help ((library warning-test) &body body)
   `(handler-bind ((asdf:missing-dependency
@@ -185,6 +209,8 @@
       (call-next-method))))
 
 
+;;; Suppress some warnings about package trickery 
+
 #+sbcl
 (let* ((package-mod (let ((sys (asdf:find-system :clpython.package)))
                       (car (asdf:module-components sys))))
@@ -204,7 +230,8 @@
       (handler-bind ((sb-int:package-at-variance #'muffle-warning))
         (call-next-method)))))
 
-;;; Show usage
+
+;;; Show usage after loading the system
 
 (defun show-clpython-quick-start ()
   (format t "~%CLPython quick start guide:~%")
@@ -217,12 +244,4 @@
 (defmethod asdf:perform :after ((op asdf:load-op) (c (eql (asdf:find-system :clpython))))
   (show-clpython-quick-start))
 
-;;; Link asdf operation "test-op" to asdf system "clpython.test"
 
-(defmethod asdf:perform :after ((op asdf:test-op) (c (eql (asdf:find-system :clpython))))
-  (funcall (find-symbol (string '#:run-tests) :clpython.test)))
-
-(defmethod asdf:operation-done-p ((o asdf:test-op)
-                                  (c (eql (asdf:find-system :clpython))))
-  "Testing is never finished."
-  nil)
