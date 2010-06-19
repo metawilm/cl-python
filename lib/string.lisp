@@ -23,13 +23,9 @@
       arr))
   
   (defun chars-satisfying (pred)
-    ;; Allegro does stack allocation if size is a literal number, but not if
-    ;; it is a constant number; therefore #. of char-code-limit. Also,
-    ;; stack-allocated bit vectors can't have an initializer.
     (let ((bit-arr (make-array +max-char-code+
                                :element-type 'bit
                                :initial-element 0)))
-      (declare (dynamic-extent bit-arr))
       (let* ((num-chars (loop with num-chars = 0
                             for i from 0 below +max-char-code+
                             for ch = (code-char i)
