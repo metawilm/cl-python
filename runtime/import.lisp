@@ -79,6 +79,7 @@ In particular, asdf-binary-locations is used if available.")
       (when found-p
         (return-from get-temporary-fasl-file file)))
     (flet ((get-temp-file-name (i)
+             (declare (ignorable i))
              (let ((random-n (random 1000000)))
                (declare (ignorable random-n))
                (or 
@@ -86,7 +87,7 @@ In particular, asdf-binary-locations is used if available.")
                 (let* ((temp-dir (sys:temporary-directory)))
                   ;; temp-dir might contain ~ as in C:\DOCUME~1\.. so careful with FORMAT
                   (format nil "~Aclpython.~A.~A.~A.fasl" temp-dir modname random-n i))
-                #+(and sbcl unix)
+                #+unix ;; at least for lispworks, abcl
                 (format nil "/tmp/clpython.~A.~A.~A.fasl" modname random-n i)
                 #+(and)
                 (error "No temporary-file functionality defined for this implementation.")))))
