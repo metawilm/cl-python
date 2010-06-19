@@ -207,10 +207,10 @@
   
   #-allegro
   (defmethod asdf::traverse :around ((op asdf:test-op) (system (eql clpython)))
-    (with-missing-dep-help (:ptester
-                            "CL-Python requires library \"ptester\". ~
-                             Please download the latest release from: ~
-                             http://files.b9.com/ptester/ptester-latest.tar.gz")
+    (with-missing-dep-help ((:ptester
+			     "CL-Python requires library \"ptester\". ~
+                              Please download the latest release from: ~
+                              http://files.b9.com/ptester/ptester-latest.tar.gz"))
       (call-next-method))))
 
 
