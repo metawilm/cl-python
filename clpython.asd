@@ -232,16 +232,19 @@
                   (car (asdf:module-components sys))))
        (lib-pkg-file (asdf:find-component lib-mod "psetup"))
        (pkg-files (list package-file lib-pkg-file)))
-  
-  (dolist (pkg-file pkg-files)
-    
-    (defmethod asdf:perform :around ((op asdf:compile-op) (c (eql pkg-file)))
-      (suppress-package-warnings
-       (call-next-method)))
-    
-    (defmethod asdf:perform :around ((op asdf:load-op) (c (eql pkg-file)))
-      (suppress-package-warnings
-       (call-next-method)))))
+
+  (#+allegro without-redefinition-warnings ;; invalid complaint about method redefinition
+   #-allegro progn
+
+   (dolist (pkg-file pkg-files)
+     
+     (defmethod asdf:perform :around ((op asdf:compile-op) (c (eql pkg-file)))
+       (suppress-package-warnings
+	(call-next-method)))
+     
+     (defmethod asdf:perform :around ((op asdf:load-op) (c (eql pkg-file)))
+       (suppress-package-warnings
+	(call-next-method))))))
 
 
 ;;; Show usage after loading the system
