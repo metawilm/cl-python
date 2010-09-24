@@ -590,8 +590,10 @@ Used by compiler to generate 'forbidden' identfiers.")
   "PYTHON-NAME has spaces as dividers, e.g. 'latin capital letter l with stroke'.
 Returns character or NIL."
   (when (plusp (length python-name))
-    (let* ((division-char #+(or allegro sbcl) #\_
-                          #+lispworks #\-)
+    (let* ((division-char #+(or allegro ccl sbcl) #\_
+                          #+lispworks #\-
+                          #-(or allegro ccl lispworks sbcl)
+                          (error "lisp-char-by-python-name not implemented"))
            (lisp-char-name (substitute division-char #\Space python-name)))
       (name-char lisp-char-name))))
 
