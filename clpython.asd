@@ -84,7 +84,7 @@
 
 (asdf:defsystem :clpython.lib
     :description "Python module library"
-    :depends-on (:clpython.basic :clpython.runtime)
+    :depends-on (:clpython.basic :clpython.runtime :clpython.compiler #| TODO: remove compiler dep |#)
     :components ((:module "lib"
                           :components ((:file "builtins-file")
                                        (:file "builtins-set")
