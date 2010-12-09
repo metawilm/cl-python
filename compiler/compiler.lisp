@@ -148,6 +148,8 @@ HABITAT is the execution environment; a fresh one will be used otherwie.
 If COMPILE is true, the AST is compiled into a function before running.
 MODULE-RUN-ARGS is a list with options passed on to the module-function; e.g. %module-globals, module-name, src-module-path.
 ARGS are the command-line args, available as `sys.argv'; can be a string or a list of strings."
+  ;; At the moment there are only hashtable or package module namespaces:
+  (check-type module-globals (or hash-table package))
   (with-compiler-generated-syntax-errors ()
     (handler-bind (#+sbcl
                    (sb-kernel:redefinition-with-defun #'muffle-warning))
@@ -164,19 +166,21 @@ ARGS are the command-line args, available as `sys.argv'; can be a string or a li
         (unless *habitat* (setf *habitat* (make-habitat)))
         (when (or args (null (habitat-cmd-line-args *habitat*)))
           (setf (habitat-cmd-line-args *habitat*) args))
-        (let (result)
-          (handler-bind ((module-import-pre
-                          (lambda (c)
-                            ;; At the moment there are only hashtable or package module namespaces:
-                            (check-type module-globals (or hash-table package))
-                            (flet ((run ()
-                                     (funcall (mip.init-func c) module-globals) ;; always set __name__, __debug__
-                                     (setf result (funcall (mip.run-tlv-func c) module-globals))))
-                              (if time
-                                  (time (run))
-                                (run)))
-                            (invoke-restart 'abort-loading))))
+        (let (module-init-func module-run-tlv-func result)
+          (handler-bind ((module-import-pre (lambda (c)
+                                              ;; This handler just saves the relevant functions,
+                                              ;; unwinding the import state with restarts like
+                                              ;; continue-loading, abort-loading, so the user is not
+                                              ;; bothered by these restarts.
+                                              (setf module-init-func (mip.init-func c)
+                                                    module-run-tlv-func (mip.run-tlv-func c))
+                                              (invoke-restart 'abort-loading))))
             (funcall fc))
+          (assert (and module-init-func module-run-tlv-func) () "Unexpected module import behaviour")
+          (flet ((run ()
+                   (funcall module-init-func module-globals) ;; always set __name__, __debug__
+                   (setf result (funcall module-run-tlv-func module-globals))))
+            (if time (time (run)) (run)))
           result)))))
 
 
