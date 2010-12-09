@@ -33,25 +33,25 @@
 (set-impl-status '(|sin| |cos| |tan| |asin| |acos| |atan| |sinh| |cosh| |tanh|) t)
 (set-impl-status '|atan2| :todo "CL does not have it?")
 
-(defun |ceil| (x) (ceiling (conv x)))
+(defun |ceil| (x) (cl:ceiling (conv x)))
 (set-impl-status '(|ceil| |floor|) t)
 
-(defun |exp| (x) (exp x))
-(defun |pow| (x y) (expt (conv x) (conv y)))
-(defun |log| (x) (log x))
-(defun |log10| (x) (log (conv x) 10))
-(defun |sqrt| (x) (sqrt x))
+(defun |exp| (x) (cl:exp x))
+(defun |pow| (x y) (cl:expt (conv x) (conv y)))
+(defun |log| (x) (cl:log x))
+(defun |log10| (x) (cl:log (conv x) 10))
+(defun |sqrt| (x) (cl:sqrt x))
 (set-impl-status '(|exp| |pow| |log| |log10| |sqrt|) t)
 
 (set-impl-status '(|degrees| |radians|) :todo)
 
-(defun |fmod| (x y) (mod (conv x) (conv y)))
-(defun |fabs| (x) (abs (conv x)))
-(defun |modf| (x) (make-tuple-from-list (multiple-value-list (truncate (conv x)))))
+(defun |fmod| (x y) (cl:mod (conv x) (conv y)))
+(defun |fabs| (x) (cl:abs (conv x)))
+(defun |modf| (x) (make-tuple-from-list (multiple-value-list (cl:truncate (conv x)))))
 (set-impl-status '(|fmod| |fabs| |modf|) t)
 
 (set-impl-status '|frexp| :todo)
 
-(defun |hypot| (x y) (abs (complex (conv x) (conv y))))
-(defun |ldexp| (x y) (* x (expt 2 (conv y))))
+(defun |hypot| (x y) (cl:abs (cl:complex (conv x) (conv y))))
+(defun |ldexp| (x y) (* x (cl:expt 2 (conv y))))
 (set-impl-status '(|hypot| |ldexp|) t)

@@ -43,8 +43,8 @@
            #:|pow| #:|exp| #:|log| #:|log10| #:|sqrt|
            #:|sin| #:|cos| #:|tan| #:|asin| #:|acos| #:|atan| #:|sinh| #:|cosh| #:|tanh| #:|atan2|
            #:|ceil| #:|floor| #:|degrees| #:|radians|
-           #:|fmod| #:|fabs| #:|modf| #:|frexp| #:|hypot| #:|ldexp| )
-  (:shadow #:|sin| #:|cos| #:|tan| #:|asin| #:|acos| #:|atan| #:|sinh| #:|cosh| #:|tanh|))
+           #:|fmod| #:|fabs| #:|modf| #:|frexp| #:|hypot| #:|ldexp| #:|sqrt|)
+  (:shadow #:|sin| #:|cos| #:|tan| #:|asin| #:|acos| #:|atan| #:|sinh| #:|cosh| #:|tanh| #:|log| #:|exp| #:|sqrt|))
 
 (defpackage :clpython.module.operator
   (:use :clpython :common-lisp)
