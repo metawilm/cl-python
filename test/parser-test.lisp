@@ -13,10 +13,8 @@
 
 (in-syntax *ast-user-readtable*)
 	   
-(defun ps (s &optional (incl-module t))
-  (if incl-module
-      (values (parse s :incl-module t))
-    (values (parse s :one-expr t :incl-module nil))))
+(defun ps (s &optional (one-expr nil))
+  (values (parse s :one-expr one-expr)))
 
 (defmacro test-signals-warning (&body body)
   `(test-true (block .test
@@ -61,14 +59,14 @@
     (test-equal '([module-stmt] ([suite-stmt] (([literal-expr] :bytes "x")))) (ps "b'x'"))
       
     ;; variables
-    (test-equal '([assign-stmt] ([literal-expr] :number 3) (([identifier-expr] {y} ))) (ps "y = 3" nil))
-    (test-equal '([assign-stmt] ([literal-expr] :number 3) (([identifier-expr] {len}))) (ps "len = 3" nil))
+    (test-equal '([assign-stmt] ([literal-expr] :number 3) (([identifier-expr] {y} ))) (ps "y = 3" t))
+    (test-equal '([assign-stmt] ([literal-expr] :number 3) (([identifier-expr] {len}))) (ps "len = 3" t))
 
     ;; floating point (complex) numbers
-    (test-equal '([literal-expr] :number 0.5d0) (ps "0.5" nil))
-    (test-equal '([literal-expr] :number 0.5d0) (ps ".5" nil))
-    (test-equal '([literal-expr] :number #C(0.0 0.5d0)) (ps "0.5j" nil))
-    (test-equal '([literal-expr] :number #C(0.0 0.5d0)) (ps ".5j" nil))
+    (test-equal '([literal-expr] :number 0.5d0) (ps "0.5" t))
+    (test-equal '([literal-expr] :number 0.5d0) (ps ".5" t))
+    (test-equal '([literal-expr] :number #C(0.0 0.5d0)) (ps "0.5j" t))
+    (test-equal '([literal-expr] :number #C(0.0 0.5d0)) (ps ".5j" t))
 
     (assert (not (eq clpython.parser:*normal-float-representation-type*
                      clpython.parser:*enormous-float-representation-type*))
@@ -77,15 +75,15 @@
         (clpython.parser::number-range clpython.parser:*normal-float-representation-type*)
       (assert (< min-f 0))
       (assert (< (expt 10 3) max-f) () "Really small float range in this Lisp implementation?!")
-      (test-equal '([literal-expr] :number 1D3) (ps "1e3" nil)) ;; 1e3 is small enough to be a regular ..-FLOAT
+      (test-equal '([literal-expr] :number 1D3) (ps "1e3" t)) ;; 1e3 is small enough to be a regular ..-FLOAT
       (let* ((n-expt (1+ (floor (log max-f 10))))
              (s (format nil "1E~A" n-expt)))
-        (test-error (ps s nil) :condition-type '{SyntaxError}) ;; "too large to represent as ..-FLOAT"
+        (test-error (ps s t) :condition-type '{SyntaxError}) ;; "too large to represent as ..-FLOAT"
         (test-equal (handler-bind (({SyntaxError} (lambda (c)
                                                     (declare (ignore c))
                                                     (test-true (find-restart 'continue))
                                                     (invoke-restart (find-restart 'continue)))))
-                      (ps s nil))
+                      (ps s t))
                     `([literal-expr] :number ,(expt 10 n-expt)))))
     
     ;; suffix operations
@@ -94,7 +92,7 @@
 		   ([subscription-expr] ([identifier-expr] {x}) ([literal-expr] :number 1))
 		   (([literal-expr] :number 2)) nil nil nil)
 		  ([identifier-expr] {a3}))
-		(ps "x[1](2).a3" nil))
+		(ps "x[1](2).a3" t))
       
     ;; call arguments
     (test-equal '([attributeref-expr]
@@ -102,7 +100,7 @@
 				([literal-expr] :number 1))
 		   nil ((([identifier-expr] {len}) ([literal-expr] :number 2))) nil nil)
 		  ([identifier-expr] {a3}))
-		(ps "x[1](len=2).a3" nil))
+		(ps "x[1](len=2).a3" t))
       
     (test-equal '([call-expr] 
 		  ([identifier-expr] {f})
@@ -110,19 +108,19 @@
                   ((([identifier-expr] {y}) ([literal-expr] :number 3)))
                   ([identifier-expr] {args})
                   ([identifier-expr] {kw}))
-		(ps "f(1, 2, y=3, *args, **kw)" nil))
+		(ps "f(1, 2, y=3, *args, **kw)" t))
 
     ;; order of args: pos, key, *, **
-    (test-error (ps "f(a=1,b)" nil)
+    (test-error (ps "f(a=1,b)" t)
 		:condition-type '{SyntaxError})
     
-    (test-error (ps "f(*a,1)" nil)
+    (test-error (ps "f(*a,1)" t)
 		:condition-type '{SyntaxError})
     
-    (test-error (ps "f(**a,*b)" nil)
+    (test-error (ps "f(**a,*b)" t)
 		:condition-type '{SyntaxError})
     
-    (test-no-error (ps "f(x,y,z=3,*a,**b)" nil))
+    (test-no-error (ps "f(x,y,z=3,*a,**b)" t))
     
     ;; function decorators
     (test-equal '([funcdef-stmt]
@@ -136,46 +134,46 @@
 		(ps "
 @foo(bar)
 @zut
-def f(): pass" nil))
+def f(): pass" t))
 
     ;; Precedence of unary operators and exponentiation
     (test-equal '([binary-expr] [*] 
                   ([unary-expr] [-] ([literal-expr] :number 1))
                   ([literal-expr] :number 2))
-                (ps "-1 * 2" nil)
+                (ps "-1 * 2" t)
                 :fail-info "-1 * 2 == (-1) * 2")
     (test-equal '([binary-expr] [*] 
                   ([unary-expr] [+] ([literal-expr] :number 1))
                   ([literal-expr] :number 2))
-                (ps "+1 * 2" nil)
+                (ps "+1 * 2" t)
                 :fail-info "+1 * 2 == (+1) * 2")
     (test-equal '([unary-expr] [-] ([binary-expr] [**]
                                     ([literal-expr] :number 1)
                                     ([literal-expr] :number 2)))
-                (ps "-1 ** 2" nil)
+                (ps "-1 ** 2" t)
                 :fail-info "-1 ** 2 == - (1 ** 2)")
     (test-equal '([unary-expr] [+] ([binary-expr] [**]
                                     ([literal-expr] :number 1)
                                     ([literal-expr] :number 2)))
-                (ps "+1 ** 2" nil)
+                (ps "+1 ** 2" t)
                 :fail-info "+1 ** 2 == + (1 ** 2)")
     (test-equal '([binary-expr] [-]
                   ([literal-expr] :number 1)
                   ([binary-expr] [*]
                    ([literal-expr] :number 2)
                    ([literal-expr] :number 3)))
-                (ps "1 - 2 * 3" nil)
+                (ps "1 - 2 * 3" t)
                 :fail-info "1 - 2 * 3 == 1 - (2 * 3)")
     (test-equal '([binary-expr] [/]
                   ([unary-expr] [~] ([literal-expr] :number 1))
                   ([literal-expr] :number 2))
-                (ps "~1 / 2" nil)
+                (ps "~1 / 2" t)
                 :fail-info "~1 / 2 == (~1) / 2")
     (test-equal '([unary-expr] [~]
                   ([binary-expr] [**]
                    ([literal-expr] :number 1)
                    ([literal-expr] :number 2)))
-                (ps "~1 ** 2" nil)
+                (ps "~1 ** 2" t)
                 :fail-info "~1 ** 2 == ~ (1 ** 2)")
     (test-equal '([binary-expr] [*]
                   ([unary-expr] [-] ([literal-expr] :number 1))
@@ -184,7 +182,7 @@ def f(): pass" nil))
                    ([binary-expr] [*]
                     ([unary-expr] [-] ([literal-expr] :number 3))
                     ([unary-expr] [+] ([literal-expr] :number 4)))))
-                (ps "-1 * +2 * -3 * +4" nil))
+                (ps "-1 * +2 * -3 * +4" t))
     (test-equal '([binary-expr] [*]
                   ([literal-expr] :number 1)
                   ([unary-expr] [-]
@@ -195,7 +193,7 @@ def f(): pass" nil))
                                      ([unary-expr] [-] ([literal-expr] :number 2))
                                      ([literal-expr] :number 3)))
                      ([literal-expr] :number 4)))))
-                (ps "1 * -((-2 * 3) * 4)" nil))
+                (ps "1 * -((-2 * 3) * 4)" t))
         
     ;; Empty string is parsed as module without body
     #+(or)(test-equal '([module-stmt] ([suite-stmt] () ))
@@ -244,7 +242,7 @@ if a:
   foo
 \
 else:
-  b" nil)
+  b" t)
                 '([if-stmt] ((([identifier-expr] {a})
                               ([suite-stmt] (([identifier-expr] {foo})))))
                   ([suite-stmt] (([identifier-expr] {b})))))
@@ -254,67 +252,67 @@ if 1:
   if 2:
     pass
  else:
-  pass" nil) :condition-type '{SyntaxError})
+  pass" t) :condition-type '{SyntaxError})
     ;; unexpected character
     (test-error (ps "
 a
-$" nil) :condition-type '{SyntaxError})
+$" t) :condition-type '{SyntaxError})
     ;; empty file = None
-    (test-equal (ps "" nil) '([identifier-expr] {None}))
+    (test-equal (ps "" t) '([identifier-expr] {None}))
     ;; comments
     (test-equal (ps "
 None
-##" nil) '([identifier-expr] {None}))
+##" t) '([identifier-expr] {None}))
     (test-equal (ps "
 ##
-a" nil) '([identifier-expr] {a}))
+a" t) '([identifier-expr] {a}))
     ;; end-of-line continuation
     (test-equal (ps "
 if 1 > \\
  2:
   pass
-" nil) '([if-stmt] ((([comparison-expr] [>] ([literal-expr] :number 1) ([literal-expr] :number 2))
+" t) '([if-stmt] ((([comparison-expr] [>] ([literal-expr] :number 1) ([literal-expr] :number 2))
                      ([suite-stmt] (([pass-stmt])))))
          nil))
-    (test-error (ps "\\1" nil) :condition-type '{SyntaxError})
+    (test-error (ps "\\1" t) :condition-type '{SyntaxError})
     ;; unicode
     
-    (test-equal (ps (concatenate 'string "u'\\N{" #1="Latin Small Letter Y With Acute" "}'") nil)
+    (test-equal (ps (concatenate 'string "u'\\N{" #1="Latin Small Letter Y With Acute" "}'") t)
                 `([literal-expr] :string
                                  ,(coerce (list (or (clpython.parser::lisp-char-by-python-name #1#)
                                                     (error "Unicode char ~A not available in this Lisp?" #1#)))
                                           'string)))
     #-lispworks ;; Lispworks has no names for chars > 255
-    (test-equal (ps "u'\\N{latin capital letter l with stroke}'" nil)
+    (test-equal (ps "u'\\N{latin capital letter l with stroke}'" t)
                 `([literal-expr] :string
                                  ,(coerce (list (name-char "latin_capital_letter_l_with_stroke")) 'string)))
-    (test-equal (ps "u'\\u0141 \\U00000141'" nil)
+    (test-equal (ps "u'\\u0141 \\U00000141'" t)
                 `([literal-expr] :string
                                  ,(coerce (list (code-char #x0141)
                                                 #\Space
                                                 (code-char #x0141))
                                           clpython.parser::+unicode-capable-string-type+)))
-    (test-error (ps "u'\\N'" nil)  :condition-type '{SyntaxError})
-    (test-error (ps "u'\\N{foo'" nil)  :condition-type '{SyntaxError})
-    (test-error (ps "u'\\N{foo}'" nil)  :condition-type '{SyntaxError})
-    (test-equal (ps "u'\\r'" nil) `([literal-expr] :string ,(coerce (list #\Return) 'string)))
+    (test-error (ps "u'\\N'" t)  :condition-type '{SyntaxError})
+    (test-error (ps "u'\\N{foo'" t)  :condition-type '{SyntaxError})
+    (test-error (ps "u'\\N{foo}'" t)  :condition-type '{SyntaxError})
+    (test-equal (ps "u'\\r'" t) `([literal-expr] :string ,(coerce (list #\Return) 'string)))
     ;; warning then using unicode escape
     (test-signals-warning (ps "'\\N{foo}'"))
     (test-signals-warning (ps "'\\u0123'"))
     (test-signals-warning (ps "'\\U0123'"))
-    (test-error (ps "u'\\xG'" nil) :condition-type '{SyntaxError})
-    (test-error (ps "u'\\uG000'" nil) :condition-type '{SyntaxError})
-    (test-error (ps "u'\\u'" nil) :condition-type '{SyntaxError})
-    (test-error (ps "u'\\U0000000G'" nil) :condition-type '{SyntaxError})
-    (test-error (ps "u'\\UFFFFFFFF'" nil) :condition-type '{SyntaxError} :fail-info "No such char")
+    (test-error (ps "u'\\xG'" t) :condition-type '{SyntaxError})
+    (test-error (ps "u'\\uG000'" t) :condition-type '{SyntaxError})
+    (test-error (ps "u'\\u'" t) :condition-type '{SyntaxError})
+    (test-error (ps "u'\\U0000000G'" t) :condition-type '{SyntaxError})
+    (test-error (ps "u'\\UFFFFFFFF'" t) :condition-type '{SyntaxError} :fail-info "No such char")
         
     ;; valid, invalid hex code
-    (test-equal (ps "'\\x12'" nil) `([literal-expr] :string ,(coerce (list (code-char #x12)) 'string)))
-    (test-equal (ps "'\\xF'" nil) `([literal-expr] :string ,(coerce (list (code-char #xF)) 'string)))
-    (test-error (ps "'\\xG'" nil) :condition-type '{SyntaxError})
+    (test-equal (ps "'\\x12'" t) `([literal-expr] :string ,(coerce (list (code-char #x12)) 'string)))
+    (test-equal (ps "'\\xF'" t) `([literal-expr] :string ,(coerce (list (code-char #xF)) 'string)))
+    (test-error (ps "'\\xG'" t) :condition-type '{SyntaxError})
     
     ;; octal code, non-escaping backslash
-    (test-equal (ps "'\\5019\\z'" nil)
+    (test-equal (ps "'\\5019\\z'" t)
                 `([literal-expr] :string ,(coerce (list (code-char #x0141) #\9 #\\ #\z)
                                                   clpython.parser::+unicode-capable-string-type+)))
     ;; ..

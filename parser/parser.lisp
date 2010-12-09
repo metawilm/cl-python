@@ -23,23 +23,12 @@
   (:documentation "Parse THING (pathname or string); return AST.
 Most important options:
   :YACC-VERSION -- :allegro-yacc (default) or :cl-yacc
-  :INCL-MODULE  -- wrap AST in module statement?
-  :ONE-EXPR     -- only return first form read (implies :INCL-MODULE NIL)
+  :ONE-EXPR     -- only return first form read, not wrapped in module/suite
   :TAB-WIDTH    -- width of one tab character in spaces")
   
-  (:method :around (x &rest options &key (one-expr nil) (incl-module (not one-expr)) &allow-other-keys)
-           (assert (not (and incl-module one-expr)) ()
-             "PARSE options :ONE-EXPR and :INCL-MODULE are mutually exclusive.")
-           (let ((res-list (multiple-value-list (apply #'call-next-method x :incl-module incl-module (sans options :one-expr)))))
-             (when one-expr
-               (assert (= (length (car res-list)) 1) ()
-                 "PARSE got ~A forms, while only one expected (due to :ONE-EXPR), in AST for ~S."
-                 (length (car res-list)) x)
-               (setf (car res-list) (caar res-list)))
-             (values-list res-list)))
-  
-  (:method ((x string) &rest options &key (yacc-version *default-yacc-version*))
-           (let ((lexer (apply #'make-lexer yacc-version x (sans options :incl-module :record-source-location))))
+  (:method ((x string) &rest options &key (yacc-version *default-yacc-version*) one-expr record-source-location tab-width)
+           (declare (ignore one-expr record-source-location tab-width))
+           (let ((lexer (apply #'make-lexer yacc-version x (sans options :one-expr :record-source-location))))
              (apply #'parse-module-with-yacc yacc-version lexer (sans options :tab-width))))
   
   (:method ((x pathname) &rest options)
@@ -53,10 +42,9 @@ Most important options:
          (*python-form->source-location* (make-weak-key-hash-table :test 'eq)))
      ,@body))
 
-(defun parse-module-with-yacc (yacc-version lexer &key incl-module (record-source-location *python-form->source-location*))
+(defun parse-module-with-yacc (yacc-version lexer &key one-expr (record-source-location *python-form->source-location*))
   "Collect all parsed top-level forms. If RECORD-SOURCE-LOCATION, the (new or existing)
 source location hash-table is returned as second value."
-  
   (let ((*python-form->source-location*
          (case record-source-location
            ((nil))
@@ -69,8 +57,12 @@ source location hash-table is returned as second value."
               (when eof-p
                 (setf forms (nreverse forms))
                 (return))))
-      (when incl-module
-        (setf forms `([module-stmt] ([suite-stmt] ,forms))))
+      (cond (one-expr
+             (assert (= (length forms) 1) ()
+               "Got ~A forms, while only one expected (due to :ONE-EXPR), in AST for ~S." (length forms))
+             (setf forms (car forms)))
+            (t 
+             (setf forms `([module-stmt] ([suite-stmt] ,forms)))))
       (if *python-form->source-location*
           (values forms *python-form->source-location*)
         forms))))

@@ -1129,9 +1129,10 @@ are increasing integers starting from 1, up to MAX.
 MAX is a safey limit, in case the code erroneously goes into an endless loop."
   (flet ((wformat (&rest args)
            (when debug (apply #'format t args)))) 
-    (let* ((ast `([suite-stmt] ,(nconc (parse string :incl-module nil))))
+    (let* ((suite-stmt (with-matching ((parse string) ([module-stmt] ?suite-stmt))
+                         ?suite-stmt))
            (gener (eval `(with-dummy-namespace
-                             (clpython::make-generator ,ast))))
+                             (clpython::make-generator ,suite-stmt))))
            (yielded ()))
       (block iterate
         (wformat "G: ~A~%" gener)

@@ -1791,19 +1791,18 @@ LOCALS shares share tail structure with input arg locals."
                       :define-%locals nil
                       :define-%globals nil)
        ,(let ((clpython.parser:*extra-identifier-char2-p* (list #\$)))
-          `([suite-stmt]
-            ,(clpython.parser:parse-with-replacements
-              (concatenate 'string "mgr$ = EXPR$
+          (with-matching ((clpython.parser:parse-with-replacements
+                           (concatenate 'string "mgr$ = EXPR$
 exit$ = mgr$.__exit__  # Not calling it yet
 value$ = mgr$.__enter__()
 exc$ = True
 try:
   try:
 "
-                           (when var "
+                                        (when var "
     VAR$ = value$  ## Only if 'as VAR' is present
 ")
-                           "
+                                        "
     BLOCK$
   except:
     # The exceptional case is handled here
@@ -1815,17 +1814,18 @@ finally:
   # The normal and non-local-goto cases are handled here
   if exc$:
     exit$(None, None, None)")
-              `((([identifier-expr] {EXPR$})  . ,expr)
-                ,@(when var `((([identifier-expr] {VAR$})   . ,var)))
-                (([identifier-expr] {BLOCK$}) . ,block)
-                ({mgr$}   . ,mgr)
-                ({exit$}  . ,exit)
-                ({value$} . ,value)
-                ({exc$}   . ,exc)
-                (([identifier-expr] {exc_info$})
-                 . ([literal-expr] :lisp (symbol-function
-                                       (find-symbol "exc_info" :clpython.module.sys)))))
-              :parse-options '(:incl-module nil)))))))
+                           `((([identifier-expr] {EXPR$})  . ,expr)
+                             ,@(when var `((([identifier-expr] {VAR$})   . ,var)))
+                             (([identifier-expr] {BLOCK$}) . ,block)
+                             ({mgr$}   . ,mgr)
+                             ({exit$}  . ,exit)
+                             ({value$} . ,value)
+                             ({exc$}   . ,exc)
+                             (([identifier-expr] {exc_info$})
+                              . ([literal-expr] :lisp (symbol-function
+                                                       (find-symbol "exc_info" :clpython.module.sys))))))
+                          ([module-stmt] ?suite-stmt))
+            ?suite-stmt)))))
 
 ;; We should not come here during normal macroexpansion, as generators
 ;; are handled by the CPS convertor. However, some implementations

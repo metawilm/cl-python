@@ -175,7 +175,7 @@ or (in case of INTERACTIVE-P) the error status :INCOMPLETE"
                         ;; REST-STRING already starts at [START-IX].
                         (let ((ast (with-errors-handled (rest-string "Error occured while parsing the following source as Python code~%~
                                                                       around input character position ~A:~%" start-ix)
-                                     (limited-parse (subseq rest-string 0 next-start-ix) #| :incl-module nil |#))))
+                                     (limited-parse (subseq rest-string 0 next-start-ix)))))
                           (push `(handle-python ,ast) res))
                         (incf start-ix next-start-ix))
                        
