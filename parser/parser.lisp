@@ -23,7 +23,6 @@
   (:documentation "Parse THING (pathname or string); return AST.
 Most important options:
   :YACC-VERSION -- :allegro-yacc (default) or :cl-yacc
-  :DEBUG        -- print debug output?
   :INCL-MODULE  -- wrap AST in module statement?
   :ONE-EXPR     -- only return first form read (implies :INCL-MODULE NIL)
   :TAB-WIDTH    -- width of one tab character in spaces")
@@ -41,7 +40,7 @@ Most important options:
   
   (:method ((x string) &rest options &key (yacc-version *default-yacc-version*))
            (let ((lexer (apply #'make-lexer yacc-version x (sans options :incl-module :record-source-location))))
-             (apply #'parse-module-with-yacc yacc-version lexer options)))
+             (apply #'parse-module-with-yacc yacc-version lexer (sans options :tab-width))))
   
   (:method ((x pathname) &rest options)
            (apply #'parse (slurp-file x) options))

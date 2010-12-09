@@ -330,7 +330,15 @@ if 1:
                                                   collect #\Space)
                                               'string)
                                       #\Tab #\Space)))
-    ))
+    (test-error (parse "if 1:
+  1
+	2" :tab-width 21) :condition-type '{SyntaxError})
+    (test-equal (parse "if 1:
+  1
+	2" :tab-width 2)
+                (parse "if 1:
+  1
+  2"))))
 
 (defun run-code-walker-test ()
   (with-subtest (:name "CLPython-Codewalker")

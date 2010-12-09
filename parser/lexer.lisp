@@ -99,7 +99,6 @@ where TOKEN-KIND is a symbol like '[identifier]"
    (indent-stack  :accessor ls-indent-stack  :initform (list 0) :type list)
    (bracket-level :accessor ls-bracket-level :initform 0  :type fixnum)
    (open-deco                                :initform nil)
-   (debug         :accessor ls-debug         :initform *lex-debug* :initarg :debug)
    (return-count                             :initform 0))
   (:metaclass closer-mop:funcallable-standard-class))
 
@@ -128,7 +127,7 @@ where TOKEN-KIND is a symbol like '[identifier]"
 (defgeneric call-lexer (yacc-version lexer op)
   (:documentation "Returns either the eof-token, or two values: TOKEN-KIND, TOKEN-VALUE"))
 
-(defun make-lexer-3 (string &rest options &key yacc-version)
+(defun make-lexer-3 (string &rest options &key yacc-version &allow-other-keys)
   "Return a lexer for the given string of Python code.
 Will return two value each time: TYPE, VALUE.
 On EOF returns: eof-token, eof-token."
@@ -143,7 +142,7 @@ On EOF returns: eof-token, eof-token."
 (defmethod call-lexer (yacc-version (lexer lexer) (op (eql nil)))
   (declare (ignorable yacc-version op))
   (with-slots (last-read-char-ix curr-line-no yacc-version
-               tokens-todo indent-stack bracket-level open-deco debug return-count) lexer
+               tokens-todo indent-stack bracket-level open-deco return-count) lexer
     (when (= last-read-char-ix -1)
       ;; Check leading whitespace. This will go unnoticed by the lexer otherwise.
       (destructuring-bind (newline-p new-indent eof-p)
@@ -154,11 +153,11 @@ On EOF returns: eof-token, eof-token."
               (raise-syntax-error "Leading whitespace on first non-blank line.")
             (cl-user::continue () :report "Continue parsing, ignoring the leading whitespace.")))))
     (flet ((lex-return (token value source-loc &optional msg)
-             (when debug (format t "Lexer returns: ~S ~S ~S~@[ ~A~]~%" token value source-loc msg))
+             (when *lex-debug* (format t "Lexer returns: ~S ~S ~S~@[ ~A~]~%" token value source-loc msg))
              (incf return-count)
              (return-from call-lexer (values token value source-loc)))
            (lex-todo (token value)
-             (when debug (format t "Lexer todo: ~S ~S~%" token value))
+             (when *lex-debug* (format t "Lexer todo: ~S ~S~%" token value))
              (push (list token value) tokens-todo)))
       (when tokens-todo
         (destructuring-bind (token value) (pop tokens-todo)
@@ -170,7 +169,7 @@ On EOF returns: eof-token, eof-token."
                    (lex-return '[identifier] '{None} nil))
                  (when *lex-fake-eof-after-toplevel-form*
                    (with-simple-restart (muffle "Muffle")
-                     (when debug (format t "Lexer signals: next-eof-real~%"))
+                     (when *lex-debug* (format t "Lexer signals: next-eof-real~%"))
                      (signal 'next-eof-real :char-ix %lex-next-unread-char-ix%)))
                  (lex-todo (lexer-eof-token yacc-version) (lexer-eof-token yacc-version))
                  (loop while (plusp (pop indent-stack))
@@ -254,7 +253,7 @@ On EOF returns: eof-token, eof-token."
                                          (lex-looking-at-token "except")
                                          (lex-looking-at-token "finally"))))
                        (with-simple-restart (muffle "Muffle")
-                         (when debug (format t "Lexer signals: next-eof-fake-after-toplevel-form~%"))
+                         (when *lex-debug* (format t "Lexer signals: next-eof-fake-after-toplevel-form~%"))
                          (signal 'next-eof-fake-after-toplevel-form :char-ix %lex-next-unread-char-ix%))
                        (lex-todo (lexer-eof-token yacc-version) (lexer-eof-token yacc-version)))
                      (cond ((< (car indent-stack) new-indent) ; one indent

@@ -44,8 +44,6 @@
 (defmethod lexer-eof-token ((yacc-version (eql :cl-yacc)))
   nil)
 
-;; No need to specialize #'CALL-LEXER
-
 
 ;;; Parser
 
