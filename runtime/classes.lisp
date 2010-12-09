@@ -2034,9 +2034,18 @@ But if RELATIVE-TO package name is given, result may contains dots."
 
 (defun careful-floor-1ret (x y)
   "ANSI requires second arg to be non-zero. Test for that."
-  (if (zerop y)
-      (py-raise '{ZeroDivisionError} "Attempt to divide ~A by zero." x)
-    (values (floor x y))))
+  (when (zerop y)
+    (restart-case (py-raise '{ZeroDivisionError} "Attempt to divide ~A by zero." x)
+      (use-another-divisor (new-divisor)
+	  :report "Use another divisor instead of zero"
+	  :interactive (lambda ()
+			 (loop with divisor = 0
+			     while (zerop divisor)
+			     do (format *query-io* "New divisor value: ")
+				(setf divisor (eval (read *query-io*)))
+			     finally (return (list divisor))))
+	(setf y new-divisor))))
+  (values (floor x y)))
 
 (def-py-method py-int.__floordiv__ (x^ y^)
   (careful-floor-1ret x y))
