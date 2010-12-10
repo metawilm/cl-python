@@ -1466,8 +1466,10 @@ but the latter two classes are not in CPython.")
   (with-slots (name src-pathname src-file-write-date bin-pathname bin-file-write-date)
       m
     (when (and src-pathname (not src-file-write-date))
-      (assert (probe-file src-pathname))
-      (setf src-file-write-date (file-write-date src-pathname)))
+      (if (probe-file src-pathname)
+          (setf src-file-write-date (file-write-date src-pathname))
+        (warn "Cannot set module SRC-FILE-WRITE-DATE: probe-file ~S failed, for module ~A"
+              src-pathname m)))
     (when (and bin-pathname (not bin-file-write-date))
       (unless (string-equal (namestring bin-pathname) "__main__") ;; XXX ugly
         (assert (probe-file (probe-file bin-pathname)))
@@ -1523,7 +1525,10 @@ but the latter two classes are not in CPython.")
 
 (defmethod dir-items ((x package) &key use-all)
   (declare (ignore use-all))
-  (loop for s being each external-symbol in x collect (cons (symbol-name s) (bound-in-some-way s))))
+  (loop for s being each external-symbol in x
+      for value = (bound-in-some-way s)
+      when value
+      collect (cons (symbol-name s) value)))
 
 (defmethod dir-items ((x module) &key (use-all t))
   (whereas ((all (and use-all (instance.attr-no-magic x '{__all__}))))
@@ -1710,18 +1715,25 @@ But if RELATIVE-TO package name is given, result may contains dots."
               (package-name pkg)
               (loop for s being the external-symbol in pkg count s)))))
 
+(defun bind-in-some-way (sym value)
+  (check-type sym symbol)
+  (typecase value
+    (function (setf (symbol-function sym) value))
+    (class    (setf (find-class sym) value))
+    (t        (setf (symbol-value sym) value))))
+
 (defun bound-in-some-way (sym)
-  (cond ((boundp sym) 
-         (symbol-value sym))
-        ((fboundp sym)
-         (symbol-function sym))
+  (check-type sym symbol)
+  (cond ((boundp sym)  (symbol-value sym))
+        ((fboundp sym) (symbol-function sym))
         ((find-class sym nil))
         (t nil)))
 
-(defun find-symbol-value (symbol pkg)
-  (let ((sym (or (find-symbol (symbol-name symbol) (or (find-package pkg)
-                                                       (error "No such package: ~A." pkg)))
-                 (error "Symbol ~S not found in package ~A." symbol pkg))))
+(defun find-symbol-value (symbol pkg-designator)
+  (let* ((pkg (or (find-package pkg-designator)
+                  (error "No such package: ~A." pkg-designator)))
+         (sym (or (find-symbol (symbol-name symbol) pkg)
+                  (error "Symbol ~S not found in package ~A." symbol pkg))))
     (or (bound-in-some-way sym)
         (error "Symbol ~A not bound in any way." sym))))
 

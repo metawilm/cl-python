@@ -123,7 +123,7 @@ seems to give implementations some freedom here. (In practice: Allegro=NIL, LisW
   (with-subtest (:name "CLPython")
     (test-comp-testfunc)
     (run-parser-test)
-    (run-lispy-test)
+    #+(or)(run-lispy-test)
     (run-compiler-test)
     (run-code-walker-test)
     (run-pretty-printer-test)

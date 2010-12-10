@@ -31,7 +31,8 @@
 (defgeneric ns.read-form (namespace name))
 (defgeneric ns.write-form (namespace name val-form))
 (defgeneric ns.write-runtime-form (namespace name-form val-form))
-(defgeneric ns.del-form (namespace name))
+(defgeneric ns.del-form (namespace name)
+  (:documentation "Returns value currently bound to name, then unbinds it."))
 (defgeneric ns.locals-form (namespace))
 
 (defmacro with-namespace ((ns &key (define-%locals (not *debug-no-locals-dict*))
@@ -382,7 +383,7 @@
 
 (defmethod ns.write-form ((ns package-ns) (s symbol) val-form)
   (let ((ps (package-ns-intern ns s)))
-    `(setf (symbol-value ',ps) ,val-form)))
+    `(bind-in-some-way ',ps ,val-form)))
 
 (defmethod ns.write-runtime-form ((ns package-ns) name-form val-form)
   `(let ((.ps (package-ns-intern ,(ns.package ns) ,name-form)))

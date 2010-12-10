@@ -51,21 +51,42 @@ it will be interned if INTERN, otherwise an error is raised."
 
 ;;; Readtable that takes in everything available
 
+(defparameter *omnivore-debug* nil)
+
 (defun setup-omnivore-readmacro (&key function initial-forms (readtable *readtable*))
-  "Create a readtable that dispatches all characters to FUNCTION.
-The reader will initially return the INITAL-FORMS one by one, and then the result(s) of
-calling FUNCTION on the stream.
+  "Create a readtable that, for any initial character, will let FUNCTION do the parsing.
+The reader will return `(PROGN ,@INITAL-FORMS ,(FUNCALL FUNCTION STREAM)).
+
+The STREAM supplied to FUNCTION will not be the original stream passed to the readtable
+function, but rather a CONCATENATED-STREAM wrapper.
 
 INITIAL-FORMS typically contains an IN-PACKAGE form to ensure that compilation and loading of
-the fasl file satisfies CLHS 3.2.4.4 \"Additional Constraints on Externalizable Objects\".
-As a side effect, the function call of FUNCTION is executed with *PACKAGE* bound to PACKAGE."
+the fasl file satisfies CLHS 3.2.4.4 \"Additional Constraints on Externalizable Objects\"."
   (check-type function function)
   (check-type readtable readtable)
   (flet ((omnivore-read-func (stream char)
-           (unread-char char stream)
-           (if initial-forms
-               (pop initial-forms)
-             (funcall function stream))))
-    (dotimes (i 256) ;; use file encoding or char-code-limit?
+           ;; In Allegro CL, is stream is the RPEL stream, unreading the first char fails.
+           ;; Therefore below a concatenated-stream is created.
+           (let ((res `(progn ,@initial-forms
+                              ,(let ((prefixed-stream (make-concatenated-stream
+                                                       (make-string-input-stream (string char))
+                                                       stream)))
+                                 (funcall function prefixed-stream)))))
+             (when *omnivore-debug*
+               (format t "~&OMNIVORE-READ-FUNC result:~%  ~S~%" res))
+             res)))
+    (dotimes (i 256) ;; XXX use file encoding or char-code-limit?
       (set-macro-character (code-char i) #'omnivore-read-func t readtable)))
   readtable)
+
+(defun concatenated-stream-active-stream (stream)
+  "If STREAM is a CONCATENATED-STREAM then returns its active stream (recursively),
+otherwise return STREAM."
+  (loop while (typep stream 'concatenated-stream)
+      do (setf stream (car (concatenated-stream-streams stream)))
+      finally (return stream)))
+
+(defun interactive-stream-p-recursive (stream)
+  "In case of CONCATENATED-STREAM it looks at the active stream within."
+  (interactive-stream-p (concatenated-stream-active-stream stream)))
+    

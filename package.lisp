@@ -193,7 +193,8 @@
   (:use :common-lisp)
   (:export #:in-syntax #:whereas #:sans #:defconstant-once  #:with-gensyms
            ;; reader
-           #:setup-omnivore-readmacro #:read-package-symbol-func #:register-feature
+           #:setup-omnivore-readmacro #:interactive-stream-p-recursive
+           #:read-package-symbol-func #:register-feature
            ;; compilation
            #:with-auto-mode-recompile  #:without-redefinition-warnings
            #:define-macro-state-declaration #:with-sane-debugging

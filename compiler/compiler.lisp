@@ -26,7 +26,7 @@
 
 (defun call-with-python-code-reader (initial-forms func)
   "Let the Python parser handle all reading."
-  (with-sane-debugging ("Error occured while reading input with the Python readtable:")
+  (with-sane-debugging ("Error occured while reading input with the Python readtable:~%  ~A")
     ;; The below SETUP-OMNIVORE-READMACRO can't be shared (e.g. inside LOAD-TIME-VALUE), as
     ;; it contains state (the initial forms).
     (let ((*readtable* (setup-omnivore-readmacro :function #'clpython.parser:parse

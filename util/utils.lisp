@@ -300,19 +300,24 @@ See function ALIST-VS-HT.")
   `(pprint-logical-block (nil nil :per-line-prefix ,prefix)
      ,@body))
 
-(defmacro with-sane-debugging ((error-prefix &rest args) &body body)
-  "Reset the readtable and other i/o variables uncaught errors occur."
-  (check-type error-prefix string)
-  (with-gensyms (c)
-    `(handler-bind
-         ((error (lambda (,c)
-                   (signal ,c)
-                   (with-standard-io-syntax
-                     (with-line-prefixed-output (";; ")
-                       (format t ',error-prefix ,@args)
-                       (format t "~&Input/output variables (*readtable* etc) have been reset to enable debugging."))
-                     (error ,c)))))
-       ,@body)))
+(defmacro with-sane-debugging ((error-format-string) &body body)
+  "Reset the readtable to standard IO syntax in case of uncaught serious conditions (errors).
+ This makes debugging readtable issues. The single argument to error-format-string is the condition object."
+  `(call-with-sane-debugging ',error-format-string (lambda () ,@body)))
+
+(defun call-with-sane-debugging (error-format-string func)
+  (check-type error-format-string string)
+  (handler-bind
+      ((serious-condition (lambda (c)
+                            (signal c)
+                            (with-standard-io-syntax
+                              (format t "~%")
+                              (with-line-prefixed-output (";; ")
+                                (format t error-format-string c)
+                                (format t "~&Standard IO syntax (*readtable* etc) has been activated to enable debugging."))
+                              (format t "~%~%")
+                              (error c)))))
+    (funcall func)))
 
 (defun class-initargs-p (class &rest initargs)
   (check-type class (or symbol class))
