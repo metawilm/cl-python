@@ -223,6 +223,15 @@ def f(): pass" t))
       (test :unexp-eof-error (try-parse "def f():") :fail-info "(EOF in grammar)")
       (test :syntax-error    (try-parse "def def") :fail-info "(Incorrect grammar)")
       (test :syntax-error    (try-parse " 42") :fail-info "(Leading whitespace)"))
+
+    ;; Don't complain about eof if the newline in front is the actual problem
+    (multiple-value-bind (value error-p)
+        (ignore-errors (clpython:parse (format nil "def ~A" #\Newline)))
+      (declare (ignore value))
+      (let ((error-string (prin1-to-string error-p)))
+        (test-true (and (search "unexpected token" error-string)
+                        (search "newline" error-string)))))
+    
     (test-equal '([literal-expr] :number 42)
                 (handler-bind (({SyntaxError} (lambda (c) (declare (ignore c))
                                                       (continue))))

@@ -1,4 +1,4 @@
-;; -*- Mode: LISP; Syntax: COMMON-LISP; Package: CLPYTHON.PARSER -*-
+;; -*- Mode: LISP; Syntax: COMMON-LISP; Package: CLPYTHON.PARSER; Readtable: PY-AST-USER-READTABLE -*-
 ;; 
 ;; This software is Copyright (c) Franz Inc. and Willem Broekema.
 ;; Franz Inc. and Willem Broekema grant you the rights to
@@ -10,6 +10,7 @@
 ;;;; Python grammar for CL-Yacc
 
 (in-package :clpython.parser)
+(in-syntax *ast-user-readtable*)
 
 
 ;;; Grammar
@@ -54,18 +55,16 @@
   (cond ((typep c 'yacc:yacc-parse-error)
          (let* ((pos (funcall lexer :report-location))
                 (line (second (assoc :line-no pos)))
-                (eof-seen (second (assoc :eof-seen pos)))
+                (last-newline-in-source (second (assoc :last-newline-in-source pos)))
                 (token (yacc:yacc-parse-error-terminal c))
                 (value (maybe-unwrap-literal-value (yacc:yacc-parse-error-value c)))
                 (expected-tokens (yacc:yacc-parse-error-expected-terminals c)))
            
-           (cond ((or eof-seen (eq token (lexer-eof-token yacc-version)))
-                  (raise-unexpected-eof))
-                 (t
+           (cond ((and (not (eq token (lexer-eof-token yacc-version)))
+                       (not (and (eq token '[newline]) (not last-newline-in-source))))
                   (raise-syntax-error
-                   (format nil "Parse error at line ~A, at token `~A'. ~
+                   (format nil "At line ~A, parser got unexpected token: ~S. ~
                                 ~_Expected one of: ~{`~A'~^ ~}."
-                           ;;~%~[Internal error ~S caught due to ~S]"
-                           line value expected-tokens
-                           ;; c '*catch-yacc-conditions*
-			   ))))))))
+                           line value expected-tokens)))
+                 (t
+                  (raise-unexpected-eof)))))))

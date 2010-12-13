@@ -99,7 +99,8 @@ where TOKEN-KIND is a symbol like '[identifier]"
    (indent-stack  :accessor ls-indent-stack  :initform (list 0) :type list)
    (bracket-level :accessor ls-bracket-level :initform 0  :type fixnum)
    (open-deco                                :initform nil)
-   (return-count                             :initform 0))
+   (return-count                             :initform 0)
+   (last-newline-in-source :reader ls-last-newline-in-source :initform nil))
   (:metaclass closer-mop:funcallable-standard-class))
 
 (defmethod print-object ((lexer lexer) stream)
@@ -141,8 +142,8 @@ On EOF returns: eof-token, eof-token."
 
 (defmethod call-lexer (yacc-version (lexer lexer) (op (eql nil)))
   (declare (ignorable yacc-version op))
-  (with-slots (last-read-char-ix curr-line-no yacc-version
-               tokens-todo indent-stack bracket-level open-deco return-count) lexer
+  (with-slots (last-read-char-ix curr-line-no yacc-version tokens-todo
+               indent-stack bracket-level open-deco return-count last-newline-in-source) lexer
     (when (= last-read-char-ix -1)
       ;; Check leading whitespace. This will go unnoticed by the lexer otherwise.
       (destructuring-bind (newline-p new-indent eof-p)
@@ -242,8 +243,9 @@ On EOF returns: eof-token, eof-token."
                  (lex-unread-char c)
                  (destructuring-bind (newline-p new-indent eof-p)
                      (read-kind :whitespace c)
-                   (declare (ignore eof-p))
-                   (when (and newline-p (zerop bracket-level))
+                   (when (and eof-p newline-p)
+                     (setf last-newline-in-source t))
+                   (when (and (not eof-p) newline-p (zerop bracket-level))
                      ;; Queue eof before dedents as todo.
                      (when (and (zerop new-indent)
                                 *lex-fake-eof-after-toplevel-form*
@@ -291,9 +293,10 @@ On EOF returns: eof-token, eof-token."
   "Called when Allegro CL Yacc is about to signal a GRAMMAR-PARSE-ERROR.
 Also called by CLPython in case of CL-YACC.
 In Allegro, result ends up being stored in the condition slot EXCL.YACC:GRAMMAR-PARSE-ERROR-POSITION"
-  (with-slots (curr-line-no tokens-todo) lexer
+  (declare (ignore yacc-version))
+  (with-slots (curr-line-no last-newline-in-source) lexer
     `((:line-no ,curr-line-no)
-      (:eof-seen ,(not (null (member (lexer-eof-token yacc-version) tokens-todo :key #'second)))))))
+      (:last-newline-in-source ,last-newline-in-source))))
 
 (defgeneric read-kind (kind c1 &rest args)
   (:method :around (kind c1 &rest args)
@@ -893,7 +896,7 @@ Returns NEWLINE-P, NEW-INDENT, EOF-P."
       for c = c1 then (lex-read-char :eof-error nil)
       do (case c
 	   ((nil)                (return-from read-kind
-                                   (list nil nil t)))
+                                   (list newline-p nil t)))
            ((#\Newline #\Return) (setf newline-p t
                                        n-spaces 0
                                        n-tabs 0))
