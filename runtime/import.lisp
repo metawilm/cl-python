@@ -166,7 +166,9 @@ with KIND one of :module, :package
                                        (output-file (error ":output-file required")))
   "Compile Python source file into FASL. Source file must exist.
 Caller is responsible for deciding if recompiling is really necessary."
+  (check-type mod-name string)
   (check-type filename pathname)
+  (check-type output-file pathname)
   (assert (cached-probe-file filename) (filename)
     "Python source file ~A does not exist" filename)
   (compile-py-source-file :filename filename :mod-name mod-name :output-file output-file)
