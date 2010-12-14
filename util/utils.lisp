@@ -93,12 +93,10 @@ If the stream length can not be determined (e.g. for standard input), all availa
                                              '(unsigned-byte 8))
                                             (t (error "Unexpected stream element type: expected CHARACTER ~
                                                        or (UNSIGNED-BYTE <=8), got: ~A." stream-type))))
-                  (stream-length (handler-case (file-length stream)
-                                   (type-error () 
-                                     ;; CLHS: "not a stream associated with a file"
-                                     nil)))
+                  (stream-length (when (typep stream 'file-stream)
+                                   (file-length stream)))
                   (vec (if stream-length
-                           (let* ((vec (make-array (file-length stream) :element-type array-element-type))
+                           (let* ((vec (make-array stream-length :element-type array-element-type))
                                   (num-read (read-sequence vec stream)))
                              (adjust-array vec num-read))
                          (prog1 (coerce (loop for ch = (read-char-no-hang stream nil nil) while ch collect ch)
