@@ -389,3 +389,7 @@ output to a string does not start with a newline."
 
 (defun parse-and-print (str)
   (py-pprint (parse str)))
+
+(defmacro with-python-pprinter (() &body body)
+  `(let ((*print-pprint-dispatch* *py-pprint-dispatch*))
+     ,@body))
