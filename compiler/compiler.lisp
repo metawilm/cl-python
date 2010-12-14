@@ -73,15 +73,17 @@
       (with-noisy-compiler-warnings-muffled
           (with-proper-compiler-settings
               (clpython.parser:with-source-locations
-                  (call-with-python-code-reader
-                   `((in-package :clpython)
-                     #+(or)(in-module :name ',mod-name
-                                      :src-pathname ',filename
-                                      :bin-pathname ',output-file))
-                   (lambda ()
-                     (compile-file filename
-                                   :output-file output-file
-                                   :verbose *import-compile-verbose*)))))))))
+                  
+                  (let ((*package* #.(find-package :clpython))) ;; Package during compilation
+                    (call-with-python-code-reader ;; .. must be equal to
+                     `((in-package :clpython) ;; .. package while loading (CLHS 3.2.4.4)
+                       #+(or)(in-module :name ',mod-name
+                                        :src-pathname ',filename
+                                        :bin-pathname ',output-file))
+                     (lambda ()
+                       (compile-file filename
+                                     :output-file output-file
+                                     :verbose *import-compile-verbose*))))))))))
 
 #+(or) ;; intended as high-level interface for users
 (defun compile-py-file (fname &key (verbose t) source-information)
