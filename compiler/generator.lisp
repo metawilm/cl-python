@@ -732,6 +732,12 @@ former requires that this form is executed within RECEIVE-YIELDED-VALUE."
     `(let ((,after-yield-k ,%current-continuation))
        (with-cps-conversion (,val ,e-val)
          ,(%store-continuation `(lambda (x) (funcall ,after-yield-k (parse-generator-input x))))
+         
+         ;; XXX There seems to be a bug in LW 6.0.1 on linux-x86, where E-VAL is suddenly unbound
+         ;; in the YIELD-VALUE call. This seems to work around the issue for now:
+         #+lispworks
+         (funcall (lambda (x) (yield-value (car x))) (list ,e-val))
+         #-lispworks
          (yield-value ,e-val)))))
     
 (def-cps-macro [yield-stmt] (&optional value &environment e)
