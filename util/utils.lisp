@@ -344,3 +344,8 @@ See function ALIST-VS-HT.")
     (if (member (aref true-string (1- (length true-string))) '(#\\ #\/))
         true-string
       (concatenate 'string true-string "/"))))
+
+(defun careful-probe-file (pathspec)
+  "Like PROBE-FILE, but this function never signals FILE-ERROR: that is mapped to NIL."
+  (handler-case (probe-file pathspec)
+    (file-error () nil)))

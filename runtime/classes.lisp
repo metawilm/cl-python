@@ -1466,13 +1466,13 @@ but the latter two classes are not in CPython.")
   (with-slots (name src-pathname src-file-write-date bin-pathname bin-file-write-date)
       m
     (when (and src-pathname (not src-file-write-date))
-      (if (probe-file src-pathname)
+      (if (careful-probe-file src-pathname)
           (setf src-file-write-date (file-write-date src-pathname))
         (warn "Cannot set module SRC-FILE-WRITE-DATE: probe-file ~S failed, for module ~A"
               src-pathname m)))
     (when (and bin-pathname (not bin-file-write-date))
       (unless (string-equal (namestring bin-pathname) "__main__") ;; XXX ugly
-        (assert (probe-file (probe-file bin-pathname)))
+        (assert (careful-probe-file bin-pathname))
         (setf bin-file-write-date (file-write-date bin-pathname))))
     (when (string= name "__main__")
       (setf name (pathname-name (or src-pathname bin-pathname)))))

@@ -93,7 +93,7 @@ In particular, asdf-binary-locations is used if available.")
                 (error "No temporary-file functionality defined for this implementation.")))))
       (dotimes (i 1000)
         (let ((fname (get-temp-file-name i)))
-          (unless (probe-file fname)
+          (unless (careful-probe-file fname)
             (when (file-writable-p fname)
               (return-from get-temporary-fasl-file
                 (setf (gethash hash-key *temp-fasl-file-map*) (pathname fname)))))))))
@@ -275,14 +275,14 @@ operation on the same path again and again during one import action.")
 
 (defun cached-probe-file (name &optional update-cache)
   (unless *import-probe-file-cache*
-    (return-from cached-probe-file (probe-file name)))
+    (return-from cached-probe-file (careful-probe-file name)))
   (unless update-cache
     (multiple-value-bind (value found-p)
         (gethash name *import-probe-file-cache*)
       (when found-p
         (return-from cached-probe-file value))))
   (setf (gethash name *import-probe-file-cache*)
-    (probe-file name)))
+    (careful-probe-file name)))
 
 (defparameter *__main__-module-name* "__main__")
 
@@ -437,11 +437,8 @@ Otherwise raises ImportError."
                                          (file-error ()
                                            ;; happens on SBCL, fasl might still be in use
                                            ))
-                                       #+ccl
-                                       (when (probe-file bin-file)
-                                         ;; CCL issue: probe-file still ok after delete-file -> T ?!
-                                         ;; Does not matter here, but it's strange.
-                                         )
+                                       ;; In some implementations PROBE-FILE on the bin-file succeeds
+                                       ;; See e.g. http://trac.clozure.com/ccl/ticket/633
                                        
                                        ;; Delete fasl from caches
                                        (remhash bin-file *import-recompiled-files*)
