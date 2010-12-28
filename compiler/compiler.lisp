@@ -17,10 +17,6 @@
 (defparameter *current-module-name* *__main__-module-name*
   "The name of the module now being compiled; module.__name__ is set to it.")
 
-(defparameter *current-module-path* nil
-  ;; XXX remove, use *load-truename*
-  "The path of the Python file being compiled; saved in module's `filepath' slot.")
-
 (defparameter *import-compile-verbose* #+sbcl nil #-sbcl t)
 (defparameter *import-load-verbose*    t)
 
@@ -67,8 +63,7 @@
 
 (defun compile-py-source-file (&key filename mod-name output-file)
   (assert (and filename mod-name output-file))
-  (let ((*current-module-path* filename) ;; used by compiler
-        (*current-module-name* mod-name))
+  (let ((*current-module-name* mod-name))  ;; used by compiler
     (with-auto-mode-recompile (:verbose *import-compile-verbose* :filename filename)
       (with-noisy-compiler-warnings-muffled
           (with-proper-compiler-settings
