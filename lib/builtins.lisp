@@ -394,13 +394,9 @@ None, use identity function (multiple sequences -> list of tuples)."
     (or res
 	(py-raise '{TypeError} "reduce() of empty sequence with no initial value"))))
 
-(defun {reload} (m &optional (verbose 1))
-  ;; VERBOSE is not a CPython argument
+(defun {reload} (m)
   ;; XXX Not sure these are the right semantics.
   (let* ((*import-force-reload* t)
-         (v (py-val->lisp-bool verbose))
-         (*import-compile-verbose* v)
-         (*import-load-verbose*    v)
          (mod-name-as-symbol-list (list (py-string-val->symbol (slot-value m 'name))))) ;; XXX only works for toplevel modules
     ;; XXX should recompile certain pathname, not modulename
     (let ((new-mod (funcall 'py-import mod-name-as-symbol-list)))

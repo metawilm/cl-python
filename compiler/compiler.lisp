@@ -17,9 +17,6 @@
 (defparameter *current-module-name* *__main__-module-name*
   "The name of the module now being compiled; module.__name__ is set to it.")
 
-(defparameter *import-compile-verbose* #+sbcl nil #-sbcl t)
-(defparameter *import-load-verbose*    t)
-
 (defun call-with-python-code-reader (initial-forms func)
   "Let the Python parser handle all reading."
   (with-sane-debugging ("Error occured while reading input with the Python readtable:~%  ~A")
@@ -64,7 +61,7 @@
 (defun compile-py-source-file (&key filename mod-name output-file)
   (assert (and filename mod-name output-file))
   (let ((*current-module-name* mod-name))  ;; used by compiler
-    (with-auto-mode-recompile (:verbose *import-compile-verbose* :filename filename)
+    (with-auto-mode-recompile (:filename filename)
       (with-noisy-compiler-warnings-muffled
           (with-proper-compiler-settings
               (clpython.parser:with-source-locations
@@ -77,16 +74,14 @@
                                         :bin-pathname ',output-file))
                      (lambda ()
                        (compile-file filename
-                                     :output-file output-file
-                                     :verbose *import-compile-verbose*))))))))))
+                                     :output-file output-file))))))))))
 
 #+(or) ;; intended as high-level interface for users
 (defun compile-py-file (fname &key (verbose t) source-information)
   (let* ((module (pathname-name fname))
          (fasl-file (compiled-file-name :module module fname))
-         (*import-force-recompile* t)
-         (*import-compile-verbose* verbose))
-    (declare (special *import-force-recompile* *import-compile-verbose*))
+         (*import-force-recompile* t))
+    (declare (special *import-force-recompile*))
     (flet ((do-compile ()
              (%compile-py-file fname :mod-name module :output-file fasl-file)))
       (if source-information
@@ -122,11 +117,11 @@ or NIL on error (e.g. when the underlying LOAD failed and was aborted by the use
                              (when pre-import-hook
                                (funcall pre-import-hook (mip.module c)))))))
            
-           (with-auto-mode-recompile (:filename bin-filename :verbose *import-load-verbose*
+           (with-auto-mode-recompile (:filename bin-filename
                                                 :restart-name delete-fasl-try-again)
              (unless (let (#+lispworks
                            (system:*binary-file-type* (string-downcase *py-compiled-file-type*)))
-                       (load bin-filename :verbose *import-load-verbose*))
+                       (load bin-filename))
                ;; Might happen if loading errs and there is a restart that lets LOAD return NIL.
                (return-from load-py-fasl-file nil))))
          (values . #1#)))

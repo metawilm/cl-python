@@ -10,12 +10,11 @@
 (in-package :clpython.util)
 
 (defmacro with-auto-mode-recompile
-    ((&key verbose
-           (restart-name #+allegro 'excl::recompile-due-to-incompatible-fasl #-allegro nil)
+    ((&key (restart-name #+allegro 'excl::recompile-due-to-incompatible-fasl #-allegro nil)
            filename)
      &body body)
   "Automatically recompile when FASL is apparently intended for another implementation"
-  (declare (ignorable restart-name verbose))
+  (declare (ignorable restart-name))
   `(flet ((.invoke-recompile-restart (&optional c)
             (declare (ignore c))
             ,(when restart-name
