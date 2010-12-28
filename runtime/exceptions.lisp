@@ -18,10 +18,6 @@
 #+clpython-exceptions-are-python-objects
 (progn
 
-  (defun py-raise (exc-type string &rest format-args)
-    "Raise a Python exception with given format string"
-    (error exc-type :args (cons string format-args)))
-
   (defclass {Exception} (object error)
     ((args :initarg :args :initform nil :documentation "Arguments as Lisp list"
            :accessor exception-args))
@@ -48,11 +44,7 @@
                   :metaclass 'py-type)))
 
 #-clpython-exceptions-are-python-objects
-(progn 
-
-  (defun py-raise (exc-type string &rest format-args)
-    "Raise a Python exception with given format string"
-    (error exc-type :args (cons string format-args)))
+(progn
 
   (define-condition {Exception} (error)
     ((args :initarg :args :initform nil :documentation "Arguments as Lisp list"
@@ -61,8 +53,12 @@
   (defun define-exception-subclass (exc-name &rest supers)
     (eval `(define-condition ,exc-name ,supers nil))))
 
+
+;;; Create, print
 
-;; Works in #+/#- either case
+(defun py-raise (exc-type string &rest format-args)
+  "Raise a Python exception with given format string"
+  (error exc-type :args (cons string format-args)))
 
 (defmethod print-object ((x {Exception}) stream)
   (format stream "~A" (class-name (class-of x)))
@@ -71,7 +67,12 @@
         args
       (format stream ": ~@<~@;~A~:>" (if format-args (apply #'format nil string format-args) string)))))
 
+(defun make-exception (class-name &rest args)
+  (#+clpython-exceptions-are-python-objects make-instance
+   #-clpython-exceptions-are-python-objects make-condition 
+   class-name :args args))
 
+
 (defparameter *exception-tree* ;; XXX CPython has explanation string for every exception
     `({SystemExit}
       {StopIteration}
@@ -130,12 +131,11 @@
 
 (def-python-exceptions)
 
-(defparameter *cached-StopIteration*
-    #+clpython-exceptions-are-python-objects
-  (make-instance '{StopIteration} :args (list "Iterator has finished"))
-  #-clpython-exceptions-are-python-objects
-  (make-condition '{StopIteration})
-  "Shared instance of this commonly used exception")
+
+;; Cache an often-used exception
+
+(defparameter *cached-StopIteration* 
+    (make-exception '{StopIteration} "Iterator has finished."))
 
 (defun raise-StopIteration ()
   (error *cached-StopIteration*))

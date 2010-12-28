@@ -132,7 +132,7 @@
   (multiple-value-bind (line eof-p)
       (py-file.readline f)
     (if eof-p
-	(funcall 'raise-StopIteration)
+	(py-raise '{StopIteration} "File reading finished.")
       line)))
 
 (def-py-method py-file.read (f^ &optional size^)

@@ -3302,14 +3302,12 @@ finished; F will then not be called again."
 (defun py-func-iterator.next-or-send (fi &rest args)
   (declare (dynamic-extent args))
   (with-slots (stopped-yet func) fi
-    (tagbody
-      (when stopped-yet (go stop))
+    (loop (when stopped-yet
+            (funcall 'raise-StopIteration))
       (let ((val (apply func args)))
-        (when val
-          (return-from py-func-iterator.next-or-send val)))
-      (setf stopped-yet t)
-     stop
-      (funcall 'raise-StopIteration))))
+        (if val
+            (return-from py-func-iterator.next-or-send val)
+          (setf stopped-yet t))))))
 
 (def-py-method py-func-iterator-sendable.send (fi val)
   (py-func-iterator.next-or-send fi val))
