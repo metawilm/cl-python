@@ -12,10 +12,7 @@
 
 ;;;; Python compiler
 
-;;; Compiler State
-
-(defparameter *current-module-name* *__main__-module-name*
-  "The name of the module now being compiled; module.__name__ is set to it.")
+;;; Compilation context macros: reader, host compiler settings
 
 (defun call-with-python-code-reader (initial-forms func)
   "Let the Python parser handle all reading."
@@ -51,6 +48,12 @@
          
          (funcall func))))
 
+
+;;; Compiling Python source files, and loading their fasls
+
+(defparameter *current-module-name* *__main__-module-name*
+  "The name of the module now being compiled; module.__name__ is set to it.")
+
 (defun compile-py-source-file (&key filename mod-name output-file)
   (assert (and filename mod-name output-file))
   (let ((*current-module-name* mod-name))  ;; used by compiler
@@ -85,7 +88,9 @@
                                pre-import-hook)
   "Loads given compiled Python file.
 Returns MODULE, NEW-MODULE-P, SOURCE-FUNC, SOURCE
-or NIL on error (e.g. when the underlying LOAD failed and was aborted by the user)"
+or NIL on error (e.g. when the underlying LOAD failed and was aborted by the user).
+
+Callers can intercept the condition MODULE-IMPORT-PRE to override default loading behaviour."
   (assert (and bin-filename))
   (let #1=(module new-module-p source-func source)
          (handler-bind ((module-import-pre
