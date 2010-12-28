@@ -508,9 +508,7 @@ It must be delimited at the right by a space, closing bracket, or EOF."
                                                                      :incl-builtins t)))))
       (declare (special clpython:*habitat* clpython::*module-namespace*))
       (let ((*readtable* *lisp-standard-readtable*))
-        (clpython:run-python-ast form
-                                 :module-globals *lispy-package*
-                                 :compile-quiet t)))))
+        (clpython:run-python-ast form :module-globals *lispy-package*)))))
 
 #||
 Bugs:

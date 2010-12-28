@@ -129,7 +129,6 @@ Callers can intercept the condition MODULE-IMPORT-PRE to override default loadin
 (defun run-python-ast (ast &key (habitat *habitat*)
                                 (compile *compile-python-ast-before-running*)
                                 (module-globals (make-eq-hash-table "run-python-ast"))
-                                compile-quiet
                                 time
                                 args)
   "Run Python AST in freshly bound habitat.
@@ -145,11 +144,9 @@ ARGS are the command-line args, available as `sys.argv'; can be a string or a li
       (let* ((*habitat* habitat)
              (get-module-f `(lambda () ,ast))
              (fc (if compile
-                     (let ((*compile-print* (if compile-quiet nil *compile-print*))
-                           (*compile-verbose* (if compile-quiet nil *compile-verbose*)))
-                       ;; Same context as for importing a module
-                       (with-proper-compiler-settings
-                           (compile nil get-module-f)))
+                     ;; Same context as for importing a module
+                     (with-proper-compiler-settings
+                         (compile nil get-module-f))
                    (coerce get-module-f 'function))))
         (unless *habitat* (setf *habitat* (make-habitat)))
         (when (or args (null (habitat-cmd-line-args *habitat*)))
