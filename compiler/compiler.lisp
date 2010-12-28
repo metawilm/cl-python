@@ -308,8 +308,6 @@ like .join (string.join), .sort (list.sort), etc")
 (defvar *exec-stmt-compile-before-run* t
   "Whether the code for `exec' statements is compiled before being run.")
 
-(defvar *exec-stmt-result-handler* nil)
-
 ;;; Compiler Progress Messages
 
 (defvar *signal-compiler-messages* nil
@@ -600,57 +598,55 @@ an assigment statement. This changes at least the returned 'store' form.")
   t)
 
 (defun exec-stmt-ast (ast globals locals)
-  ;; XXX *exec-stmt-result-handler*
-  (multiple-value-bind (globals-ns globals-param)
-      (typecase globals
-        (symbol-hash-table (break "never"))
-        (eq-hash-table     (values (make-hash-table-ns
-                                     :dict-form '%exec-globals-ns
-                                     :scope :exec-globals
-                                     :parent (make-builtins-namespace))
-                                   globals))
-        (t                 (values (make-mapping-ns
-                                     :mapping-form '%exec-globals-ns
-                                     :scope :exec-globals
-                                     :parent (make-builtins-namespace))
-                                   globals)))
-    (let ((locals-excluded-names  (multiple-value-bind (locals new-locals globals)
-                                      (suite-globals-locals (second ast) nil nil)
-                                    (declare (ignore locals new-locals))
-                                    globals)))
-      (multiple-value-bind (locals-ns locals-param)
-          (typecase locals
-            (symbol-hash-table (break "never"))
-            (eq-hash-table     (values (make-hash-table-w/excl-ns
-                                         :dict-form '%exec-locals-ns
-                                         :excluded-names locals-excluded-names
-                                         :parent globals-ns
-                                         :scope :exec-locals)
-                                       locals))
-            (t                 (values (make-mapping-w/excl-ns
-                                         :mapping-form '%exec-locals-ns
-                                         :excluded-names locals-excluded-names
-                                         :parent globals-ns
-                                         :scope :exec-locals)
-                                       locals)))
+  (with-matching (ast ([module-stmt] ?suite))
+    (multiple-value-bind (globals-ns globals-param)
+        (typecase globals
+          (symbol-hash-table (break "never"))
+          (eq-hash-table     (values (make-hash-table-ns
+                                      :dict-form '%exec-globals-ns
+                                      :scope :exec-globals
+                                      :parent (make-builtins-namespace))
+                                     globals))
+          (t                 (values (make-mapping-ns
+                                      :mapping-form '%exec-globals-ns
+                                      :scope :exec-globals
+                                      :parent (make-builtins-namespace))
+                                     globals)))
+      (let ((locals-excluded-names  (multiple-value-bind (locals new-locals globals)
+                                        (suite-globals-locals ?suite nil nil)
+                                      (declare (ignore locals new-locals))
+                                      globals)))
+        (multiple-value-bind (locals-ns locals-param)
+            (typecase locals
+              (symbol-hash-table (break "never"))
+              (eq-hash-table     (values (make-hash-table-w/excl-ns
+                                          :dict-form '%exec-locals-ns
+                                          :excluded-names locals-excluded-names
+                                          :parent globals-ns
+                                          :scope :exec-locals)
+                                         locals))
+              (t                 (values (make-mapping-w/excl-ns
+                                          :mapping-form '%exec-locals-ns
+                                          :excluded-names locals-excluded-names
+                                          :parent globals-ns
+                                          :scope :exec-locals)
+                                         locals)))
         
-        (let ((lambda-expr `(lambda (%exec-globals-ns %exec-locals-ns)
-                              (with-pydecl ((:context-type-stack (:module)))
-                                (with-namespace (,globals-ns)
-                                  (with-namespace (,locals-ns)
-                                    (let ((.res ,(second ast)))
-                                      (when *exec-stmt-result-handler*
-                                        (funcall *exec-stmt-result-handler* .res)))))))))
-          (with-compiler-generated-syntax-errors ()
-            ;; WITH-COMPILER-GENERATED-SYNTAX-ERRORS is needed for e.g. making sure
-            ;; SyntaxError gets raised about the misplaced "yield" in:
-            ;;    exec 'yield 1'
-            ;; which might occur either during compilation (macroexpand) or runtime
-            ;; (if interpreted).
-            (let ((func (if *exec-stmt-compile-before-run*
-                            (compile nil lambda-expr)
-                          (coerce lambda-expr 'function))))
-              (funcall func globals-param locals-param))))))))
+          (let ((lambda-expr `(lambda (%exec-globals-ns %exec-locals-ns)
+                                (with-pydecl ((:context-type-stack (:module)))
+                                  (with-namespace (,globals-ns)
+                                    (with-namespace (,locals-ns)
+                                      ,?suite))))))
+            (with-compiler-generated-syntax-errors ()
+              ;; WITH-COMPILER-GENERATED-SYNTAX-ERRORS is needed for e.g. making sure
+              ;; SyntaxError gets raised about the misplaced "yield" in:
+              ;;    exec 'yield 1'
+              ;; which might occur either during compilation (macroexpand) or runtime
+              ;; (if interpreted).
+              (let ((func (if *exec-stmt-compile-before-run*
+                              (compile nil lambda-expr)
+                            (coerce lambda-expr 'function))))
+                (funcall func globals-param locals-param)))))))))
 
 ;;; `Call' expression
 
@@ -725,13 +721,8 @@ an assigment statement. This changes at least the returned 'store' form.")
   (let* ((string (pop pos-args))
 	 (glob-d (or (pop pos-args) globals-dict))
 	 (loc-d  (or (pop pos-args) locals-dict)))
-    
-    ;; Make it an EXEC stmt, but be sure to save the result.
-    (let* ((res nil)
-	   (*exec-stmt-result-handler* (lambda (val) (setf res val))))
-      (declare (special *exec-stmt-result-handler*))
-      ([exec-stmt] string glob-d loc-d :allowed-stmts ([module-stmt] [suite-stmt]))
-      res)))
+    ;; Make it an EXEC stmt which returns the value of the expression
+    ([exec-stmt] string glob-d loc-d :allowed-stmts ([module-stmt] [suite-stmt]))))
 
 (defmacro call-expr-1 (primary pos-args kwd-args *-arg **-arg)
   (let ((kw-args (loop for ((i-e key) val) in kwd-args
