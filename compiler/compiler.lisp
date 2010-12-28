@@ -240,11 +240,6 @@ or not to include the assertion code.")
 (defconstant-once +standard-module-globals+ '({__name__} {__debug__})
   "Names of global variables automatically created for every module")
 
-;;; Compiler warnings
-
-(defvar *warn-bogus-global-declarations* t
-  "Signal warnings for bogus `global' declarations at toplevel.")
-
 ;;; Compiler optimizations
 
 (defvar *inline-number-arithmetic* t
@@ -1190,10 +1185,9 @@ LOCALS shares share tail structure with input arg locals."
        
 (defmacro [global-stmt] (names &environment e)
   ;; GLOBAL statements are already determined and used at the moment a
-  ;; FUNCDEF-STMT is handled.
+  ;; FUNCDEF-STMT/CLASSDEF-STMT/EXEC-STMT is handled.
   (declare (ignore names))
-  (when (and *warn-bogus-global-declarations*
-             (null (intersection '(:function :class) (get-pydecl :context-type-stack e))))
+  (unless (intersection '(:function :class) (get-pydecl :context-type-stack e))
     (warn "Bogus `global' statement found at top-level.")))
 
 (defparameter *debug-assume-variables-bound* nil

@@ -299,7 +299,7 @@
            ;; execution
 	   #:run #:run-python-ast #:*compile-python-ast-before-running*
            ;; compiler
-	   #:+standard-module-globals+ #:*warn-bogus-global-declarations*
+	   #:+standard-module-globals+
            ;; abstract syntax tree utils
            #:*ast-readtable* #:*user-readtable* #:*ast-user-readtable*
            #:with-ast-user-readtable #:with-ast-user-pprinter))
