@@ -32,21 +32,6 @@
 
 (defun call-with-proper-compiler-settings (func)
   "The idea is to save as much debug information as possible."
-  #+clpython-source-level-debugging
-  (let ((compiler:save-source-level-debug-info-switch t)
-        (compiler:save-local-names-switch t)
-        (compiler:tail-call-self-merge-switch nil)
-        (compiler:tail-call-non-self-merge-switch nil)
-        #+(or) ;; also?
-        (excl::*record-source-file-info* t))
-    (funcall func))
-  #-clpython-source-level-debugging
-  (funcall func))
-
-(defmacro with-noisy-compiler-warnings-muffled (&body body)
-  `(call-with-noisy-compiler-warnings-muffled (lambda () ,@body)))
-
-(defun call-with-noisy-compiler-warnings-muffled (func)
   (handler-bind (#+sbcl (sb-int:simple-compiler-note #'muffle-warning)
                  #+allegro (warning (lambda (c)
                                       (when (loop for arg in (slot-value c 'excl::format-arguments)
@@ -56,25 +41,32 @@
                                         ;; When arg is not a number, like for:  if x != 'a'
                                         ;; this warning will come. Spurious because of the (numberp etc) guard.
                                         (muffle-warning c)))))
-    (funcall func)))
+    (let #+clpython-source-level-debugging ((compiler:save-source-level-debug-info-switch t)
+                                            (compiler:save-local-names-switch t)
+                                            (compiler:tail-call-self-merge-switch nil)
+                                            (compiler:tail-call-non-self-merge-switch nil)
+                                            #+(or) ;; also?
+                                            (excl::*record-source-file-info* t))
+         #-clpython-source-level-debugging ()
+         
+         (funcall func))))
 
 (defun compile-py-source-file (&key filename mod-name output-file)
   (assert (and filename mod-name output-file))
   (let ((*current-module-name* mod-name))  ;; used by compiler
     (with-auto-mode-recompile (:filename filename)
-      (with-noisy-compiler-warnings-muffled
-          (with-proper-compiler-settings
-              (clpython.parser:with-source-locations
-                  
-                  (let ((*package* #.(find-package :clpython))) ;; Package during compilation
-                    (call-with-python-code-reader ;; .. must be equal to
-                     `((in-package :clpython) ;; .. package while loading (CLHS 3.2.4.4)
-                       #+(or)(in-module :name ',mod-name
-                                        :src-pathname ',filename
-                                        :bin-pathname ',output-file))
-                     (lambda ()
-                       (compile-file filename
-                                     :output-file output-file))))))))))
+      (with-proper-compiler-settings
+          (clpython.parser:with-source-locations
+              
+              (let ((*package* #.(find-package :clpython))) ;; Package during compilation
+                (call-with-python-code-reader ;; .. must be equal to
+                 `((in-package :clpython) ;; .. package while loading (CLHS 3.2.4.4)
+                   #+(or)(in-module :name ',mod-name
+                                    :src-pathname ',filename
+                                    :bin-pathname ',output-file))
+                 (lambda ()
+                   (compile-file filename
+                                 :output-file output-file)))))))))
 
 #+(or) ;; intended as high-level interface for users
 (defun compile-py-file (fname &key (verbose t) source-information)
@@ -152,8 +144,7 @@ ARGS are the command-line args, available as `sys.argv'; can be a string or a li
                            (*compile-verbose* (if compile-quiet nil *compile-verbose*)))
                        ;; Same context as for importing a module
                        (with-proper-compiler-settings
-                           (with-noisy-compiler-warnings-muffled
-                               (compile nil get-module-f))))
+                           (compile nil get-module-f)))
                    (coerce get-module-f 'function))))
         (unless *habitat* (setf *habitat* (make-habitat)))
         (when (or args (null (habitat-cmd-line-args *habitat*)))
