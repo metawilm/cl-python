@@ -266,10 +266,38 @@
 (defmethod py->  ((x fixnum) (y fixnum)) (py-bool (>  x y)))
 (defmethod py->= ((x fixnum) (y fixnum)) (py-bool (>= x y)))
 
-(defmethod py-<  ((x float) (y float)) (py-bool (<  x y)))
-(defmethod py-<= ((x float) (y float)) (py-bool (<= x y)))
-(defmethod py->  ((x float) (y float)) (py-bool (>  x y)))
-(defmethod py->= ((x float) (y float)) (py-bool (>= x y)))
+(defmethod py-<  ((x float) (y float)) (declare #.+optimize-fastest+) (py-bool (<  x y)))
+(defmethod py-<= ((x float) (y float)) (declare #.+optimize-fastest+) (py-bool (<= x y)))
+(defmethod py->  ((x float) (y float)) (declare #.+optimize-fastest+) (py-bool (>  x y)))
+(defmethod py->= ((x float) (y float)) (declare #.+optimize-fastest+) (py-bool (>= x y)))
+
+(defmethod py-<= ((x single-float) (y fixnum)) (declare #.+optimize-fastest+) (py-bool (<= x y)))
+(defmethod py-<= ((x double-float) (y fixnum)) (declare #.+optimize-fastest+) (py-bool (<= x y)))
+(defmethod py-<= ((x fixnum) (y single-float)) (declare #.+optimize-fastest+) (py-bool (<= x y)))
+(defmethod py-<= ((x fixnum) (y double-float)) (declare #.+optimize-fastest+) (py-bool (<= x y)))
+
+(defmethod py->= ((x single-float) (y fixnum)) (declare #.+optimize-fastest+) (py-bool (>= x y)))
+(defmethod py->= ((x double-float) (y fixnum)) (declare #.+optimize-fastest+) (py-bool (>= x y)))
+(defmethod py->= ((x fixnum) (y single-float)) (declare #.+optimize-fastest+) (py-bool (>= x y)))
+(defmethod py->= ((x fixnum) (y double-float)) (declare #.+optimize-fastest+) (py-bool (>= x y)))
+
+(defmethod py-< ((x single-float) (y fixnum)) (declare #.+optimize-fastest+) (py-bool (< x y)))
+(defmethod py-< ((x double-float) (y fixnum)) (declare #.+optimize-fastest+) (py-bool (< x y)))
+(defmethod py-< ((x fixnum) (y single-float)) (declare #.+optimize-fastest+) (py-bool (< x y)))
+(defmethod py-< ((x fixnum) (y double-float)) (declare #.+optimize-fastest+) (py-bool (< x y)))
+
+(defmethod py-> ((x single-float) (y fixnum))
+  (declare #.+optimize-fastest+ #+(or)(:explain :boxing))
+  ;; Prevent Allegro from converting a float into ratio if comparison can be done without.
+  ;; XXX check this optimization for other methods and in other implementations.
+  (let ((xf (floor x)))
+    (py-bool (cond ((> xf y) t)
+                   ((< (1+ xf) y) nil)
+                   (t (> x y))))))
+
+(defmethod py-> ((x double-float) (y fixnum)) (declare #.+optimize-fastest+) (py-bool (> x y)))
+(defmethod py-> ((x fixnum) (y single-float)) (declare #.+optimize-fastest+) (py-bool (> x y)))
+(defmethod py-> ((x fixnum) (y double-float)) (declare #.+optimize-fastest+) (py-bool (> x y)))
 
 (defmethod py-<  ((x number) (y number)) (py-bool (<  x y)))
 (defmethod py-<= ((x number) (y number)) (py-bool (<= x y)))
@@ -577,4 +605,3 @@
       #+(or)(warn "py-call cm res: ~A" res)
       (return-from py-call res)))
   whole)
-
