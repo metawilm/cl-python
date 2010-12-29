@@ -910,7 +910,6 @@ an assigment statement. This changes at least the returned 'store' form.")
              do (locally (declare #.+optimize-std+)
                   ,@body))))))
 
-#-sbcl ;; bracketed (target source) triggers lambda list parsing error in SBCL
 (define-compiler-macro with-iterator (&whole whole (target source) &body body &environment e)
   "Optimize some common iteration patterns."
   (unless (get-pydecl :may-inline-iteration e) ;; Can't declare a macro as (not)inline
