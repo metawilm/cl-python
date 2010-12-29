@@ -118,8 +118,6 @@ CLASSDEF, FUNCDEF or LAMBDA."
   (defmethod make-load-form ((x ast-walker-node-arg) &optional env)
     (make-load-form-saving-slots x :environment env))
   
-  (defparameter *allowed-node-keys* '(second cdr))
-  
   (defparameter *allowed-node-tg/val* '(+normal-value+ +normal-target+ +suite+
                                         +namespace-suite+ +global-decl-target+
                                         +augassign-target/value+ +delete-target+))
@@ -147,9 +145,8 @@ CLASSDEF, FUNCDEF or LAMBDA."
                         (when (eq (car x) '&key) ;; key
                           (pop x)
                           (setf key (or (pop x) (malformed)))
-                          (unless (member key *allowed-node-keys*)
-                            (malformed (format nil "key ~A not allowed; should be one of ~A"
-                                               key *allowed-node-keys*))))
+                          (unless (eq key 'second)
+                            (malformed (format nil "key ~A not allowed; should be: ~S" key 'second))))
                         (unless (= (length x) 1) ;; target/value
                           (malformed))
                         (if (member (car x) *allowed-node-tg/val*)
@@ -171,8 +168,8 @@ CLASSDEF, FUNCDEF or LAMBDA."
     (let ((structs (loop for a in args and i from 0
                        collect (parse-clause a i) into s
                        finally (return (sort s #'< :key #'awna-prio))))
-          (targetable (loop for o in options when (and (listp o) (eq (car o) :targetable)) return (second o)))
-          (subtargetable (loop for o in options when (and (listp o) (eq (car o) :subtargetable)) return (second o))))
+          (targetable (second (assoc :targetable options)))
+          (subtargetable (second (assoc :subtargetable options))))
       `(setf (gethash ',node *ast-node-walk-structs*)
          ,(make-ast-walker-node :arg-structs structs
                                 :targetable targetable
@@ -302,8 +299,7 @@ CLASSDEF, FUNCDEF or LAMBDA."
                 (rec-item (funcall f item :value +normal-value+)))
            `(,(car ast) ,rec-item ,rec-clauses)))))
     
-    ([if-stmt] (destructuring-bind
-                   (clauses else-suite) (cdr ast)
+    ([if-stmt] (destructuring-bind (clauses else-suite) (cdr ast)
                  `([if-stmt] ,(loop for (test suite) in clauses
                                   collect (list (funcall f test :value +normal-value+)
                                                 (funcall f suite)))
@@ -316,8 +312,7 @@ CLASSDEF, FUNCDEF or LAMBDA."
      (loop with items = (second ast)
          for (mod-name-as-list bind-name) in items
          for id-sym = (or bind-name (car mod-name-as-list))
-         for id-expr = (progn (check-type id-sym symbol)
-                              `([identifier-expr] ,id-sym))
+         for id-expr = `([identifier-expr] ,id-sym)
          do (funcall f id-expr :target +normal-target+))
      (values ast t)) ;; No possibility to modify AST: original is returned.
     
@@ -331,15 +326,13 @@ CLASSDEF, FUNCDEF or LAMBDA."
               )
              (t (loop for (item bindname) in items
                     for id-sym = (or bindname item)
-                                       for id-expr = (progn (check-type id-sym symbol)
-                                                            `([identifier-expr] ,id-sym))
+                    for id-expr = `([identifier-expr] ,id-sym)
                     do (funcall f id-expr :target +normal-target+)))))
      ;; No possibility to modify AST: original is returned.
      (values ast t))
     
     ([lambda-expr]
-     (destructuring-bind
-         ((pos-a key-a *-a **-a) expr) (cdr ast)
+     (destructuring-bind ((pos-a key-a *-a **-a) expr) (cdr ast)
        `([lambda-expr] (,pos-a
                         ,(mapcar (lambda (kv) 
                                    (funcall f (second kv) :value +normal-value+))
@@ -473,60 +466,3 @@ CLASSDEF, FUNCDEF or LAMBDA."
              (terpri)))
   (:method ((ast string) &rest walk-options)
            (apply #'walk-print (parse ast) walk-options)))
-
-
-#||
-(eval-when (:compile-toplevel :load-toplevel :execute)
-  (defparameter *ast-forms* ;; TODO combine with DEF-AST-NODE
-    '(([assert-stmt] test raise-arg)
-      ([assign-stmt] value targets)
-      ([attributeref-expr] item attr)
-      ([augassign-stmt] op place val)
-      ([backticks-expr] item)
-      ([binary-expr] op left right)
-      ([binary-lazy-expr] op left right)
-      ([bracketed-expr] expr)
-      ([break-stmt])
-      ([call-expr] primary pos key *a **a)
-      ([classdef-stmt] name inheritance suite)
-      ([comparison-expr] cmp left right)
-      ([continue-stmt])
-      ([del-stmt] item)
-      ([dict-expr] alist)
-      ([exec-stmt] code globals locals)
-      ([for-in-stmt] target source suite else-suite)
-      ([funcdef-stmt] decorators fname args suite)
-      ([generator-expr] item for-in/if-clauses)
-      ([global-stmt] names)
-      ([identifier-expr] name)
-      ([if-expr] condition then else)
-      ([if-stmt] if-clauses else-clause)
-      ([import-stmt] items)
-      ([import-from-stmt] mod-name-as-list items)
-      ([lambda-expr] args expr)
-      ([listcompr-expr] item for-in/if-clauses)
-      ([list-expr] items)
-      ([literal-expr] kind value)
-      ([module-stmt] suite)
-      ([pass-stmt] )
-      ([print-stmt] dest items comma?)
-      ([raise-stmt] exc var tb)
-      ([return-stmt] val)
-      ([slice-expr] start stop step)
-      ([subscription-expr] item subs)
-      ([suite-stmt] stmts)
-      ([try-except-stmt] suite except-clauses else-suite)
-      ([try-finally-stmt] try-suite finally-suite)
-      ([tuple-expr] items)
-      ([unary-expr] op item)
-      ([while-stmt] test suite else-suite)
-      ([with-stmt] test var suite)
-      ([yield-expr] val)
-      ([yield-stmt] val))))
-
-#.`(progn ,@(loop for x in (mapcar #'car *ast-forms*)
-                for fname = (intern (format nil "~A-p" (string-downcase x)) :clpython.ast.node-p)
-                collect `(defun ,fname (x)
-                           (and (listp x) (eq (car x) ',x)))))
-
-||#
