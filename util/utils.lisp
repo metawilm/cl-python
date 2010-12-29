@@ -176,7 +176,7 @@ If the stream length can not be determined (e.g. for standard input), all availa
 
 ;;; Alist versus hashtable performance for symbol keys
 
-(defconstant +dict-alist-to-hashtable-threshold+ 100
+(defconstant +dict-alist-to-hashtable-threshold+ 8
   "When #items <= threashold, represent attributes as alist, otherwise switch to eq hash table.
 Value is somewhat arbitrary, as relative performance depends on how many lookups fail.
 See function ALIST-VS-HT.")
@@ -191,7 +191,7 @@ See function ALIST-VS-HT.")
                   (let ((.stop (get-internal-run-time)))
                     (format t "  ~3A=~4D " .msg (- .stop .start))))))
     (loop with iter-repeat = 100000
-        with fail-factor = 10 ;; only 1 in FAIL-FACTOR lookups succeeds
+        with fail-factor = 3 ;; only 1 in FAIL-FACTOR lookups succeeds
         for num-items from 0 to 30
         do (let ((alist (loop for i from 0 below num-items collect (cons i (1+ i))))
                  (hash-table (let ((ht (make-hash-table :test 'eq)))
