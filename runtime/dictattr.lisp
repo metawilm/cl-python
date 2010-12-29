@@ -10,9 +10,11 @@
 (in-package :clpython)
 (in-syntax *user-readtable*)
 
+
 ;;; Funky dict: alist or hashtable
 
 (defun funky-dict-get (dict attr)
+  (declare (optimize (speed 3) (safety 0) (debug 0)))
   (if (hash-table-p dict)
       (gethash attr dict)
     (cdr (assoc attr dict :test #'eq))))
@@ -35,6 +37,7 @@
                            (return ht)))))))
 
 (defun funky-dict-del (dict attr)
+  (declare (optimize (speed 3) (safety 0) (debug 0)))
   (if (hash-table-p dict)
       (values dict (remhash attr dict))
     (alist-remove-prop dict attr)))
@@ -44,7 +47,9 @@
       (maphash func dict)
     (loop for (k . v) in dict do (funcall func k v))))
 
-;;; Class dict handling
+
+;;; Accessing the dict of classes
+;;; Slot access is optimized using MOP:STANDARD-INSTANCE-ACCESS.
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (defun class-slot-ix (name &rest classes)
@@ -103,41 +108,48 @@ for this implementation"))
     #-lispworks 'closer-mop:standard-instance-access))
 
 (defun class.raw-dict (class)
+  "Given a class, return its dict. Only intended for classes corresponding to Python (meta)types."
   (#.+standard-instance-access-func+ class +py-class-dict-slot-index+))
 
 (define-compiler-macro class.raw-dict (class)
   `(#.+standard-instance-access-func+ ,class +py-class-dict-slot-index+))
 
 (defun class.raw-classname (class)
+  "Given a class, return its classname. Only intended for classes corresponding to Python (meta)types."
   (#.+standard-instance-access-func+ class +py-class-classname-slot-index+))
 
 (define-compiler-macro class.raw-classname (class)
   `(#.+standard-instance-access-func+ ,class +py-class-classname-slot-index+))
 
 (defun (setf class.raw-dict) (new-val class)
+  "Replace the dict of the given class. Only intended for classes corresponding to Python (meta)types."
   #+clpython-use-standard-instance-access-setf
   (setf (#.+standard-instance-access-func+ class +py-class-dict-slot-index+) new-val)
   #-clpython-use-standard-instance-access-setf
   (setf (slot-value class 'dict) new-val))
 
+
+;;; Raw access to the attribute value in a class dict.
 
 (defun class.raw-attr-get (class attr)
-  ;(declare (optimize (speed 3) (safety 0) (debug 0)))
+  "Get the attribute from the class dict"
+  (declare (optimize (speed 3) (safety 0) (debug 0)))
   (let ((dict (class.raw-dict class)))
     (funky-dict-get dict attr)))
 
 (defun class.raw-attr-set (class attr val)
-  ;(declare (optimize (speed 3) (safety 1) (debug 0)))
-  (clear-ca-cache)
+  "Set the attribute in the class dict"
+  (declare (optimize (speed 3) (safety 0) (debug 0)))
+  (clear-ca-cache class attr)
   (let* ((dict (class.raw-dict class))
          (dict2 (funky-dict-set dict attr val)))
     (unless (eq dict dict2)
       (setf (class.raw-dict class) dict2))))
 
 (defun class.raw-attr-del (class attr)
-  "Returns whether existed."
-  ;(declare (optimize (speed 3) (safety 1) (debug 0)))
-  (clear-ca-cache)
+  "Remove the attribute from the class dict. Returns whether it previously existed."
+  (declare (optimize (speed 3) (safety 0) (debug 0)))
+  (clear-ca-cache class attr)
   (let ((dict (class.raw-dict class)))
     (multiple-value-bind (dict2 found)
         (funky-dict-del dict attr)
@@ -146,35 +158,43 @@ for this implementation"))
       found)))
 
 (defun class.raw-attr-map (class func)
+  "Map the function over all dict key-value pairs."
   (let ((dict (class.raw-dict class)))
     (funky-dict-map dict func)))
 
+
 ;;; Class attribute cache
 
+;; Given that class attributes don't change often, it's efficient to
+;; cache where the attribute value can be found: in the class itself,
+;; in a superclass, in the instance, or whether __getattribute__ or
+;; __getattr__ should be called.
+;; 
+;; Attributes are cached in two places: in the *CA-CACHE* hash table,
+;; and in the symbol that names the class. The last lookup is the
+;; fastest.
+
 (defstruct (class-attr (:conc-name ca.))
-  getattribute class-val-dd getattr class-val-non-dd class-val-class)
+  getattribute class-val-dd getattr class-val-non-dd class-val-class is-metaclass)
 
 (defparameter *ca-cache* (make-hash-table :test 'equal)
-  "Mapping from (class, attr) to class-attr struct.")
+  "Mapping from (CLASS . ATTR) cons to CLASS-ATTR struct.")
 
 (defun get-ca (class attr)
-  (declare (optimize (speed 3) (safety 0) (debug 0)) #+(or)(class class))
-  (let ((cn #+(or)(class-name class)
-            (class.raw-classname class)))
-    (let ((plist (symbol-plist cn)))
-      (loop 
-        (when (eq (pop plist) attr)
-          (return-from get-ca (car plist)))
-        (setf plist (cdr plist))
-        (unless plist
-          (return-from get-ca (setf (get cn attr) (get-ca-1 class attr))))))
-    #+(or)
-    (or (get cn attr)
-        (setf (get cn attr) (get-ca-1 class attr)))))
+  "Wrapper around GET-CA-1 which caches CLASS-ATTR structs as property of the classname symbol."
+  (declare (optimize (speed 3) (safety 0) (debug 0)))
+  (let* ((cn (class.raw-classname class))
+         (plist (symbol-plist cn)))
+    (loop 
+      (when (eq (pop plist) attr)
+        (return-from get-ca (car plist)))
+      (setf plist (cdr plist))
+      (unless plist
+        (return-from get-ca (setf (get cn attr) (ensure-ca class attr)))))))
 
-(defun get-ca-1 (class attr)
-  "Retrieve CLASS-ATTR."
-  ;(declare (optimize (speed 3) (safety 0) (debug 0)))
+(defun ensure-ca (class attr)
+  "Ensure the CLASS-ATTR struct for given CLASS and ATTR is present in *CA-CACHE*."
+  (declare (optimize (speed 3) (safety 0) (debug 0)))
   (let ((key (cons class attr)))
     (declare (dynamic-extent key))
     (or (gethash key *ca-cache*)
@@ -188,6 +208,8 @@ for this implementation"))
        ,@body)))
 
 (defun calculate-ca (class attr)
+  "Every kind of CLASS is accepted, but the result will only be valuable if CLASS
+is a Python (meta)class."
   ;; There are two modes for retrieving an attribute, characterized by whether the
   ;; special methods __getattr__ and __getattribute__ are taken into account.
   ;; Here we create a struct for caching that can be used for both.
@@ -220,15 +242,28 @@ for this implementation"))
                      :getattr __getattr__
                      :class-val-dd (when attr-is-dd attr-val)
                      :class-val-non-dd (when (not attr-is-dd) attr-val)
-                     :class-val-class attr-val-class)))
+                     :class-val-class attr-val-class
+                     :is-metaclass (subtypep class 'py-meta-type))))
 
-(defun clear-ca-cache ()
-  ;; TODO: only remove what's outdated, e.g. a class and its sublasses.
-  (loop for (class . attr) being the hash-key in *ca-cache*
-      do (remprop (class-name class) attr))
-  (clrhash *ca-cache*))
+(defun clear-ca-cache (class attr)
+  "Remove the cached value for CLASS attribute ATTR."
+  (maphash (lambda (k v)
+             (declare (ignore v))
+             (destructuring-bind (class2 . attr2) k
+               (when (eq attr attr2)
+                 (multiple-value-bind (subtype-p valid-p)
+                     (subtypep class2 class)
+                   (when (or subtype-p (not valid-p))
+                     (remprop (class-name class) attr)            
+                     (remhash k *ca-cache*))))))
+           *ca-cache*))
 
+
 ;;; Attribute lookup
+
+;; The NO-MAGIC functions only return the value if the attribute
+;; really exists in the dictionary, skipping __getattribute__ and
+;; __getattr__.
 
 (progn
   (defun class.attr-no-magic (class attr)
@@ -245,25 +280,17 @@ for this implementation"))
          #1#))))
 
 (defun x.class-attr-no-magic.bind (x attr)
+  (declare (optimize (speed 3) (safety 0) (debug 0)))
   (let ((x.cls (py-class-of x)))
     (whereas ((m (class.attr-no-magic x.cls attr)))
       (bind-val m x x.cls)))) 
 
 (defun instance.attr-no-magic (inst attr)
+  (declare (optimize (speed 3) (safety 0) (debug 0)))
   (funky-dict-get (dict inst) attr))
 
 (define-compiler-macro instance.attr-no-magic (inst attr)
   `(funky-dict-get (dict ,inst) ,attr))
-
-(defun instance.attr-get (x attr)
-  "Retrieve attribute from instance dict, skipping magic hooks. Instance may be a class."
-  (declare (optimize (speed 3) (safety 0) (debug 0)))
-  ;;(check-type attr symbol)
-  (cond ((my-classp-1 x)
-         (class.attr-no-magic x attr))
-        ((has-dict x)
-         #+(or)(funky-dict-get (closer-mop:standard-instance-access x +dicted-object-dict-index+) attr)
-         (funky-dict-get (dict x) attr))))
 
 (defun attr (x attr)
   "Retrieve attribute value x.attr using all the magic hooks.
@@ -291,7 +318,9 @@ Returns NIL if not found."
                (functionp x))
       (return-from attr (function-name x)))
     ;; instance dict
-    (whereas ((v (instance.attr-get x attr)))
+    (whereas ((v (if (ca.is-metaclass ca)    
+                     (class.attr-no-magic x attr)
+                   (instance.attr-no-magic x attr))))
       (return-from attr v))
     ;; class non-data-descriptor
     (whereas ((v (ca.class-val-non-dd ca)))
@@ -330,7 +359,7 @@ Returns NIL if not found."
               (return-from attr (py-call v x)))) ;; XXX check args
           ;; XXX check del of __dict__ / __class__ ?
           ;; 3. Instance dict
-          (if (my-classp-1 x)
+          (if (typep x 'class)
               (when (class.raw-attr-del x attr)
                 (return-from attr))
             (whereas ((d (dict x)))
@@ -365,7 +394,7 @@ Returns NIL if not found."
                            (clpython.user::py-function.__name__-writer x val)
                            (return-from attr)))))
         ;; 4. Dict
-        (when (my-classp-1 x)
+        (when (typep x 'class)
           (class.raw-attr-set x attr val)
           (return-from attr))
         (when (has-dict x)

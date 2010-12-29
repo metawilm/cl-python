@@ -73,12 +73,6 @@
     (declare (ignorable class superclass))
     t)
 
-
-(defgeneric my-classp-1 (x)
-  (:method ((x py-type)) t)
-  (:method ((x py-meta-type)) t)
-  (:method (x) (declare (ignore x)) nil))
-
 ;;; Instance dicts
 
 (defun eq-hash-table-p (x)
