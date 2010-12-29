@@ -12,7 +12,22 @@
 
 ;;;; Running Python code
 
-(defun run (thing &rest args)
+(defgeneric run (thing &rest args))
+
+;; These :AROUND methods are for the compiler, e.g. used to make
+;; "import" of files next to the one currently run works.
+
+(defmethod run :around ((thing file-stream) &rest args)
+  (declare (ignore args))
+  (let* ((*compile-file-pathname* (namestring thing))
+         (*compile-file-truename* (truename *compile-file-pathname*)))
+    (call-next-method)))
+  
+(defmethod run :around ((thing pathname) &rest args)
+  (declare (ignore args))
+  (let* ((*compile-file-pathname* thing)
+         (*compile-file-truename* (truename thing)))
+    (call-next-method)))
+
+(defmethod run (thing &rest args)
   (apply #'run-python-ast (parse thing) args))
-
-
