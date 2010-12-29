@@ -28,8 +28,7 @@
                     dict))
             ((< (length dict) +dict-alist-to-hashtable-threshold+)
              (acons attr val dict))
-            (t (loop with ht = (make-eq-hash-table (format nil "dict #keys > ~A [~A]"
-                                                           +dict-alist-to-hashtable-threshold+ dict))
+            (t (loop with ht = (make-eq-hash-table)
                    for (k . v) in dict
                    do (setf (gethash k ht) v)
                    finally (setf (gethash attr ht) val)

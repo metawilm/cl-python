@@ -246,7 +246,7 @@
                                                  collect (ns.read-form ns name)))))
 
 (defun make-locals-dict (name-list value-list)
-  (loop with ht = (make-eq-hash-table "locals-dict")
+  (loop with ht = (make-eq-hash-table)
       for name in name-list
       for val in value-list
       unless (null val) ;; unbound var

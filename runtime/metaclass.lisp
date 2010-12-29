@@ -95,9 +95,7 @@
 (deftype py-hash-table ()
   `(satisfies py-hash-table-p))
 
-(defun make-eq-hash-table (why)
-  (declare (ignore why))
-  #+(or)(warn "Make-eq-hash-table: ~A" why)
+(defun make-eq-hash-table ()
   (make-hash-table :test 'eq))
 
 (defun py-==->lisp-val (x y)

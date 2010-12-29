@@ -128,7 +128,7 @@ Callers can intercept the condition MODULE-IMPORT-PRE to override default loadin
 
 (defun run-python-ast (ast &key (habitat *habitat*)
                                 (compile *compile-python-ast-before-running*)
-                                (module-globals (make-eq-hash-table "run-python-ast"))
+                                (module-globals (make-eq-hash-table))
                                 time
                                 args)
   "Run Python AST in freshly bound habitat.
@@ -796,7 +796,7 @@ an assigment statement. This changes at least the returned 'store' form.")
       `(multiple-value-bind (namespace-ht cls-dict.__metaclass__)
            ;; Need a nested LET, as +cls-namespace+ may not be set when the ASSIGN-STMT
            ;; below is executed, as otherwise nested classes don't work.
-           (let ((%class-namespace (make-eq-hash-table "class-namespace")))
+           (let ((%class-namespace (make-eq-hash-table)))
              (with-namespace (,(make-hash-table-w/excl-ns
                                  :dict-form '%class-namespace
                                  :excluded-names class-cumul-declared-globals

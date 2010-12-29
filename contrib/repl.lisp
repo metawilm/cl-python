@@ -177,7 +177,7 @@ KIND can be :ptime, :time, :space, :pspace or NIL."
 (defvar *repl-module-globals*)
 
 (defun repl-1 (&key cmd-args lisp-exit)
-  (let* ((*repl-module-globals* (clpython::make-eq-hash-table "repl module"))
+  (let* ((*repl-module-globals* (clpython::make-eq-hash-table))
          (mod-namespace (clpython::make-hash-table-ns
                           :dict-form '*repl-module-globals*
                           :scope :module

@@ -724,7 +724,7 @@ otherwise work well.")
     (when (typep val 'symbol-hash-table)
       (setf val (sht-ht val)))
     (check-type val hash-table)
-    (let ((ht (make-eq-hash-table "function __dict__ setattr")))
+    (let ((ht (make-eq-hash-table)))
       (loop for key being the hash-key in val
           using (hash-value value)
           for key.sym = (typecase key
@@ -743,11 +743,11 @@ otherwise work well.")
                           (when (typep meth 'py-writable-attribute-method)
                             (return-from py-function.__setattr__
                               (py-writable-attribute-method.__set__ meth func val))))
-                        (let ((d (or (dict func) (setf (dict func) (make-eq-hash-table "func dict")))))
+                        (let ((d (or (dict func) (setf (dict func) (make-eq-hash-table)))))
                           (setf (gethash attr d) val))))
     (function (let ((ht (whereas ((data (gethash func *simple-function-data*)))
                           (or (sfd-attributes data)
-                              (setf (sfd-attributes data) (make-eq-hash-table "func dict"))))))
+                              (setf (sfd-attributes data) (make-eq-hash-table))))))
                 (unless ht
                   (py-raise '{AttributeError} "Cannot set attribute on function ~A." func))
                 (setf (gethash attr ht) val)))))
@@ -762,14 +762,14 @@ otherwise work well.")
   (or (etypecase func
         (py-function (whereas ((d (or (dict func)
                                       (and (eq attr '{__dict__})
-                                           (setf (dict func) (make-eq-hash-table "func dict"))))))
+                                           (setf (dict func) (make-eq-hash-table))))))
                        (if (eq attr '{__dict__})
                            (make-symbol-hash-table d)
                          (values (gethash attr d)))))
         (function (whereas ((data (gethash func *simple-function-data*))
                             (ht (or (sfd-attributes data)
                                     (and (eq attr '{__dict__})
-                                         (setf (sfd-attributes data) (make-eq-hash-table "func dict"))))))
+                                         (setf (sfd-attributes data) (make-eq-hash-table))))))
                     (if (eq attr '{__dict__})
                         (make-symbol-hash-table ht)
                       (values (gethash attr ht))))))
@@ -1431,7 +1431,7 @@ but the latter two classes are not in CPython.")
 ;;; Module
 
 (defclass module (dicted-object)
-  ((namespace-ht   :initarg :namespace-ht :accessor module-ht :initform (make-eq-hash-table "module"))
+  ((namespace-ht   :initarg :namespace-ht :accessor module-ht :initform (make-eq-hash-table))
    (name           :initarg :name           
 		   :type string
 		   :initform (error "module name required")
