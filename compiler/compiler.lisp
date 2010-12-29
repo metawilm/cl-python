@@ -296,26 +296,6 @@ like .join (string.join), .sort (list.sort), etc")
 (defvar *exec-stmt-compile-before-run* t
   "Whether the code for `exec' statements is compiled before being run.")
 
-;;; Compiler Progress Messages
-
-(defvar *signal-compiler-messages* nil
-  "Whether the compiler signals certain states and decision.
-Disabled by default, to not confuse the test suite.")
-
-(define-condition compiler-message ()
-  ())
-
-(defun comp-msg (string &rest args)
-  (when *signal-compiler-messages*
-    (signal (make-condition 'compiler-message
-              :format-control string
-              :format-arguments args))))
-
-(defmacro with-compiler-messages (&body body)
-  `(let ((*signal-compiler-messages* t))
-     (handler-bind ((compiler-message
-                     (lambda (c) (format t ";; Compiler message: ~A~%" c))))
-       ,@body)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; Setf expansion
@@ -756,7 +736,6 @@ an assigment statement. This changes at least the returned 'store' form.")
                             ([call-expr] ([attributeref-expr] ?obj ([identifier-expr] ?attr-name))
                                          ?pos-args () nil nil))
       (when (inlineable-method-p ?attr-name (length ?pos-args))
-        (comp-msg "Inlining call to builtin method `~A'." ?attr-name)
         (return-from [call-expr]
           (inlined-method-code ?obj ?attr-name ?pos-args)))))
           
@@ -766,7 +745,6 @@ an assigment statement. This changes at least the returned 'store' form.")
                                    ([call-expr] ?id-getattr (?obj ?attr) () nil nil)
                                    ?pos-args () nil nil))
       (with-perhaps-matching (?id-getattr ([identifier-expr] {getattr}))
-        (comp-msg "Optimizing \"getattr(x,y)(...)\" call, skipping bound method.")
         (return-from [call-expr]
           `(if (eq ,?id-getattr (symbol-function '{getattr}))
                (multiple-value-bind (.a .b .c)
@@ -1602,11 +1580,7 @@ LOCALS shares share tail structure with input arg locals."
                                             (assert (not (member v (get-pydecl :lexically-declared-globals e))) 
                                                 () "Bug: variable ~A both lexicaly-visible and lexically-global." v)
                                             (unless (member v (get-pydecl :safe-lex-visible-vars e))
-                                              (push v new-safe-vars)
-                                              (comp-msg "New safe-lev-vars in ~A, after assignment \"~A\": ~A."
-                                                                (get-pydecl :context-type-stack e)
-                                                                (clpython.parser:py-pprint ass-stmt)
-                                                                v)))))))
+                                              (push v new-safe-vars)))))))
                         ([suite-stmt] ,after-stmts))))))))) ;; recursive, but 1 assign-stmt less
 
 (defvar *last-raised-exception* nil)
