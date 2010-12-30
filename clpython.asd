@@ -251,13 +251,16 @@
 
 (defun show-clpython-quick-start ()
   (format t "~%CLPython quick start guide:~%")
-  (format t "  Run a string of Python code:           (~S \"for i in range(4): print i\")~%" (find-symbol (string '#:run) :clpython))
-  (format t "  Run a Python file:                     (~S #p\"~~/example/foo.py\")~%" (find-symbol (string '#:run) :clpython))
-  (format t "  Start the Python \"interpreter\" (REPL): (~S)~%" (find-symbol (string '#:repl) :clpython.app.repl))
-  (format t "  To start mixed Python/Lisp input mode: (~S)~%" (find-symbol (string '#:enter-mixed-lisp-python-syntax) :clpython.parser))
-  (format t "  Run the test suite:                    ~S~%~%" '(asdf:operate 'asdf:test-op :clpython)))
+  (format t "  Run a string of Python code:           (~S \"for i in range(4): print i\")~%" 
+          (find-symbol (string '#:run) :clpython))
+  (format t "  Run a Python file:                     (~S #p\"~~/example/foo.py\")~%"
+          (find-symbol (string '#:run) :clpython))
+  (format t "  Start the Python \"interpreter\" (REPL): (~S)~%"
+          (find-symbol (string '#:repl) :clpython.app.repl))
+  (format t "  To start mixed Python/Lisp input mode: (~S)~%"
+          (find-symbol (string '#:enter-mixed-lisp-python-syntax) :clpython))
+  (format t "  Run the test suite:                    ~S~%~%"
+          '(asdf:operate 'asdf:test-op :clpython)))
 
 (defmethod asdf:perform :after ((op asdf:load-op) (c (eql (asdf:find-system :clpython))))
   (show-clpython-quick-start))
-
-
