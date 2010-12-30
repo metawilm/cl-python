@@ -111,7 +111,7 @@ to retrieve value for :key1."
          (etypecase env
            (null t)
            (sys::augmentable-environment
-            (ecase (sys::augmentable-environment-kind env)
+            (case (sys::augmentable-environment-kind env)
               (:interpreter
                ;; If excl::*note-interpreted-declarations* is set, things are fine.
                ;; That switch was introduced later than :new-environments in *features*.
@@ -119,7 +119,7 @@ to retrieve value for :key1."
                  (if sym
                      (not (symbol-value sym))
                    t)))
-              (:compiler nil)
+              ((:compiler :compilation) nil)
               (t (break "New kind of environment found: ~A."
                         (sys::augmentable-environment-kind env))))))))
   
