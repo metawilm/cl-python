@@ -39,7 +39,7 @@
 
 (defmethod print-object ((x %parse.base) stream)
   (print-unreadable-object (x stream :type t :identity t)
-    (format stream " :language ~A" (%p.language x))))
+    (format stream ":language ~A" (%p.language x))))
 
 (defmethod print-object ((x %parse.collect-form) stream)
   (print-unreadable-object (x stream :type t :identity t)
@@ -62,8 +62,8 @@
   ;; as the invalid Lisp form (,) that leads to a syntax error (comma not inside backquote).
   ;; The comma in the source should make the input unambiguously Pythonic, but that fact gets lost during parsing.
   (or
-   ;; (foo)
-   (match-p ast '([module-stmt] ([suite-stmt] (([bracketed-expr] ([identifier-expr] ?name))))))
+   ;; (foo), (foo-bar), (foo-23), (foo-bar-baz%2)
+   (match-p ast '([module-stmt] ([suite-stmt] (([bracketed-expr] ?expr)))))
    ;; () or (,)
    (match-p ast '([module-stmt] ([suite-stmt] (([tuple-expr] nil)))))
    ;; 123
@@ -393,21 +393,37 @@ It must be delimited at the right by a space, closing bracket, or EOF."
 (defvar *eval-inside-mixed-mode* nil
   "T during evaluation of (Python/Lisp) forms controlled by the mixed mode readtable")
 
-(defun mixed-readtable-reader (stream lisp-readtable)
-  `(let ((*eval-inside-mixed-mode* t))
-     (multiple-value-prog1
-         (values ,@(loop for (lang form)
-                       in (read-toplevel-forms stream :lisp-readtable lisp-readtable)
-                       collect `(unwind-protect
-                                    (eval-language-form ,lang ',form)
-                                  (check-exit-mixed-mode)))))))
+(define-condition exit-mixed-mode ()
+  ((reason :initarg :reason :reader emm.reason)
+   (new-readtable :initarg :new-readtable :reader emm.new-readtable)))
 
-(defun check-exit-mixed-mode ()
-  (when (eq *eval-inside-mixed-mode* :exit-mixed-mode)
-    (setf *readtable* *lisp-standard-readtable*)
+(defun mixed-readtable-reader (stream lisp-readtable)
+  `(let ((*eval-inside-mixed-mode* t)
+         (exit-reason nil))
+     (handler-bind ((exit-mixed-mode (lambda (c)
+                                       (setf exit-reason c))))
+       (unwind-protect
+           ;; Arbitrary choice: the return values of the evaluation are
+           ;; the return values of the last evaluated form.
+           (progn ,@(loop for (lang form)
+                        in (read-toplevel-forms stream :lisp-readtable lisp-readtable)
+                        collect `(eval-language-form ,lang ',form)))
+         (when exit-reason
+           (do-exit-mixed-mode exit-reason))))))
+
+(defun do-exit-mixed-mode (c)
+  (multiple-value-bind (message new-rt)
+      (ecase (emm.reason c)
+        (:readtable-change (values "The *readtable* has been changed by user code.~@
+                                    Therefore exiting the mixed Lisp/Python syntax mode."
+                                   (emm.new-readtable c)))
+        (:exit-mode-requested (values "Exiting mixed Lisp/Python syntax mode.~@
+                                       Standard Lisp *readtable* is now set."
+                                      *lisp-standard-readtable*)))
+
+    (setf *readtable* new-rt)
     (with-line-prefixed-output (";; ")
-      (format t "Exiting mixed Lisp/Python syntax mode.~@
-                 Standard Lisp *readtable* is now active.")))
+      (format t message)))
   (values))
 
 (defun create-mixed-readtable (lisp-readtable)
@@ -421,11 +437,14 @@ It must be delimited at the right by a space, closing bracket, or EOF."
 (defparameter *mixed-readtable* (create-mixed-readtable *lisp-readtable*)
   "Readtable where Python and Lisp top-level forms can be mixed. Lisp forms are read in *LISP-READTABLE*")
 
-(defmacro enter-mixed-lisp-python-syntax ()
+(defmacro enter-mixed-lisp-python-syntax (&rest args)
   `(eval-when (:compile-toplevel :load-toplevel :execute)
-     (enter-mixed-lisp-python-syntax-1)))
+     (enter-mixed-lisp-python-syntax-1 ,@args)))
 
-(defun enter-mixed-lisp-python-syntax-1 ()
+(defparameter *lispy-package* (find-package :cl-user)
+  "Lisp package that acts as the Python module for Lispy Python code.") 
+
+(defun enter-mixed-lisp-python-syntax-1 (&key package)
   (cond ((and *eval-inside-mixed-mode*
               (or *compile-file-truename* *load-truename*))
          (with-line-prefixed-output (";; ")
@@ -435,13 +454,17 @@ It must be delimited at the right by a space, closing bracket, or EOF."
         (*eval-inside-mixed-mode*
          (with-line-prefixed-output (";; ")
            (format t "The mixed Lisp/Python syntax mode is already active.~@
-                      To exit the mixed mode: ~S" '(exit-mixed-lisp-python-syntax))))
+                      Python variables are interned in the ~A. ~@
+                      To exit the mixed mode: ~S" *lispy-package* '(exit-mixed-lisp-python-syntax))))
         (t
+         (when package
+           (setf *lispy-package* (or (find-package package)
+                                     (error "Package not found: ~S." package))))
          (setf *readtable* *mixed-readtable*)
          (with-line-prefixed-output (";; ")
            (format t "The mixed Lisp/Python syntax mode is now active: custom *readtable* is set. ~@
-                      This readtable will also used by functions like READ and COMPILE-FILE. ~@
-                      To exit the mixed mode: ~S" '(exit-mixed-lisp-python-syntax)))))
+                      Python variables will be interned in the ~A. ~@
+                      To exit the mixed mode: ~S" *lispy-package* '(exit-mixed-lisp-python-syntax)))))
   (values))
 
 (defmacro exit-mixed-lisp-python-syntax ()
@@ -450,7 +473,7 @@ It must be delimited at the right by a space, closing bracket, or EOF."
 
 (defun exit-mixed-lisp-python-syntax-1 ()
   (if *eval-inside-mixed-mode*
-      (progn (setf *eval-inside-mixed-mode* :exit-mixed-mode) (values))
+      (signal 'exit-mixed-mode :reason :exit-mode-requested)
     (with-line-prefixed-output (";; ")
       (format t "The mixed Lisp/Python syntax mode was not active.")))
   (values))
@@ -483,20 +506,22 @@ It must be delimited at the right by a space, closing bracket, or EOF."
   ;; XXX args not supported yet; should only be done when source is interactive input.
   ;; `(tpl:do-command ,form))
   (let ((*readtable* *lisp-standard-readtable*)) ;; so compile-file etc don't go through mixed mode
-    (eval form)))
+    (unwind-protect 
+        (eval form)
+      (unless (eq *readtable* *lisp-standard-readtable*)
+        (signal 'exit-mixed-mode :reason :readtable-change :new-readtable *readtable*)))))
 
 (defpackage :clpython.lispy.stuff)
 
 (defparameter *lispy-habitat* nil
   "Habitat in which the Lispy code is executed")
 
-(defparameter *lispy-package* (find-package :cl-user)
-  "Lisp package that acts as the Python module for Lispy Python code.") 
-
 (defparameter *lispy-namespace* nil
   "Namespace corresponding to *LISPY-MODULE-GLOBALS*")
 
 (defmethod eval-language-form ((language (eql :python)) form)
+  (when (match-p form '([module-stmt] ([suite-stmt] (([identifier-expr] {None})))))
+    (return-from eval-language-form (values)))
   (with-sane-debugging ("Error occured in Python/Lisp input mode, while handling a Python form.")
     (let ((clpython:*habitat* (or *lispy-habitat*
                                   (setf *lispy-habitat* (funcall 'clpython:make-habitat))))
@@ -532,5 +557,7 @@ for item in x:
 ;;   if x > 8:"
 ;;  parser :lisp signals: Package "x" not found. [file position = 14]
 ;;  parser :python signals: SyntaxError: At line 1, parser got unexpected token: clpython.ast.punctuation:|:|
+
+(symbol-value 'h)
 
 ||#
