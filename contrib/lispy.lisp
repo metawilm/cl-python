@@ -560,4 +560,12 @@ for item in x:
 
 (symbol-value 'h)
 
+
+def f(x, *y):
+  if x > 1
+    return 1
+  else:
+    return 2
+# missing colon: not switch in middle of one line from python to lisp
+
 ||#
