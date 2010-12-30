@@ -81,6 +81,7 @@ Therefore need to convert TOKEN-KIND to the corresponding TOKEN-CODE before pass
                   (last-newline-in-source (second (assoc :last-newline-in-source pos)))
                   (token (maybe-unwrap-literal-value (excl.yacc:grammar-parse-error-token c)))
                   (encl-error (excl.yacc::grammar-parse-error-enclosed-error c)))
+
              (cond (encl-error ;; Error in one of our grammar rules
                     (when clpython:*exceptions-loaded*
                       (assert (not (typep encl-error '{SyntaxError}))
@@ -91,10 +92,9 @@ Therefore need to convert TOKEN-KIND to the corresponding TOKEN-CODE before pass
                      (format nil "Parse error at line ~A~@[, at token `~S'~].~%[Internal error: ~A~_(caught due to ~S)]"
                              line token encl-error '*catch-yacc-conditions*)))
                    
-                   ((and token
-                         (not (eq token (lexer-eof-token yacc-version)))
-                         (not (and (eq token '[newline]) (not last-newline-in-source))))
-                    (raise-syntax-error (format nil "At line ~A, parser got unexpected token: ~S" line token)))
+                   ((or (eq token (lexer-eof-token yacc-version))
+                        (and (eq token '[newline]) (not last-newline-in-source)))
+                    (raise-unexpected-eof))
                    
                    (t
-                    (raise-unexpected-eof))))))))
+                    (raise-syntax-error (format nil "At line ~A, parser got unexpected token: ~S" line token)))))))))

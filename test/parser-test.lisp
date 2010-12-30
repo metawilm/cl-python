@@ -220,6 +220,12 @@ def f(): pass" t))
       (test :unexp-eof-error (try-parse "'") :fail-info "(EOF in Lexer)")
       (test :unexp-eof-error (try-parse "def")
 	    :fail-info "Unexpected EOF in grammar")
+      (test :syntax-error (try-parse "def f(x):
+  if x > 1
+    return 3
+  else:
+    return 1")) ;; missing colon after "x > 1"
+
       (test :unexp-eof-error (try-parse "def f():") :fail-info "(EOF in grammar)")
       (test :syntax-error    (try-parse "def def") :fail-info "(Incorrect grammar)")
       (test :syntax-error    (try-parse " 42") :fail-info "(Leading whitespace)"))

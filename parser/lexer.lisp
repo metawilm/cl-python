@@ -100,7 +100,7 @@ where TOKEN-KIND is a symbol like '[identifier]"
    (bracket-level :accessor ls-bracket-level :initform 0  :type fixnum)
    (open-deco                                :initform nil)
    (return-count                             :initform 0)
-   (last-newline-in-source :reader ls-last-newline-in-source :initform nil))
+   (last-newline-in-source :reader ls-last-newline-in-source :initform :unknown))
   (:metaclass closer-mop:funcallable-standard-class))
 
 (defmethod print-object ((lexer lexer) stream)
@@ -142,8 +142,8 @@ On EOF returns: eof-token, eof-token."
 
 (defmethod call-lexer (yacc-version (lexer lexer) (op (eql nil)))
   (declare (ignorable yacc-version op))
-  (with-slots (last-read-char-ix curr-line-no yacc-version tokens-todo
-               indent-stack bracket-level open-deco return-count last-newline-in-source) lexer
+  (with-slots (last-read-char-ix curr-line-no yacc-version tokens-todo indent-stack
+               bracket-level open-deco return-count last-newline-in-source eof-returned-already) lexer
     (when (= last-read-char-ix -1)
       ;; Check leading whitespace. This will go unnoticed by the lexer otherwise.
       (destructuring-bind (newline-p new-indent eof-p)
@@ -166,6 +166,8 @@ On EOF returns: eof-token, eof-token."
       (loop 
         (let ((c (lex-read-char :eof-error nil)))
           (cond ((not c)
+                 (when (eq last-newline-in-source :unknown)
+                   (setf last-newline-in-source nil))
                  (when (zerop return-count) ;; grammar does not like empty files, so dummy content
                    (lex-return '[identifier] '{None} nil))
                  (when *lex-fake-eof-after-toplevel-form*
@@ -243,8 +245,8 @@ On EOF returns: eof-token, eof-token."
                  (lex-unread-char c)
                  (destructuring-bind (newline-p new-indent eof-p)
                      (read-kind :whitespace c)
-                   (when (and eof-p newline-p)
-                     (setf last-newline-in-source t))
+                   (when eof-p
+                     (setf last-newline-in-source newline-p))
                    (when (and (not eof-p) newline-p (zerop bracket-level))
                      ;; Queue eof before dedents as todo.
                      (when (and (zerop new-indent)

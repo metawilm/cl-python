@@ -29,7 +29,7 @@ Most important options:
   (:method ((x string) &rest options &key (yacc-version *default-yacc-version*) one-expr record-source-location tab-width)
            (declare (ignore one-expr record-source-location tab-width))
            (let ((lexer (apply #'make-lexer yacc-version x (sans options :one-expr :record-source-location))))
-             (apply #'parse-module-with-yacc yacc-version lexer (sans options :tab-width))))
+             (apply #'parse-module-with-yacc yacc-version lexer (sans options :tab-width :yacc-version))))
   
   (:method ((x pathname) &rest options)
            (apply #'parse (slurp-file x) options))

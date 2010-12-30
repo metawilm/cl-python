@@ -60,11 +60,12 @@
                 (value (maybe-unwrap-literal-value (yacc:yacc-parse-error-value c)))
                 (expected-tokens (yacc:yacc-parse-error-expected-terminals c)))
            
-           (cond ((and (not (eq token (lexer-eof-token yacc-version)))
-                       (not (and (eq token '[newline]) (not last-newline-in-source))))
+           (cond ((or (eq token (lexer-eof-token yacc-version))
+                      (and (eq token '[newline]) (not last-newline-in-source)))
+                  (raise-unexpected-eof))
+                 
+                 (t
                   (raise-syntax-error
                    (format nil "At line ~A, parser got unexpected token: ~S. ~
                                 ~_Expected one of: ~{`~A'~^ ~}."
-                           line value expected-tokens)))
-                 (t
-                  (raise-unexpected-eof)))))))
+                           line value expected-tokens))))))))

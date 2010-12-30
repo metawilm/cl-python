@@ -119,10 +119,17 @@ seems to give implementations some freedom here. (In practice: Allegro=NIL, LisW
     (test-false (seq-member 'a #(b)))
     (test-false (seq-member 'a '(b)))))
 
+(defmacro with-all-parser-versions (&body body)
+  `(dolist (.yacc-version (append (when (asdf:find-system :yacc nil) (list :cl-yacc))
+                                    #+allegro '(:allegro-yacc)))
+     (let ((clpython.parser::*default-yacc-version* .yacc-version))
+       ,@body)))
+
 (defun run-tests ()
   (with-subtest (:name "CLPython")
     (test-comp-testfunc)
-    (run-parser-test)
+    (with-all-parser-versions 
+        (run-parser-test))
     #+(or)(run-lispy-test)
     (run-compiler-test)
     (run-code-walker-test)
