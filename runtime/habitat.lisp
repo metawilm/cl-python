@@ -21,6 +21,13 @@
    (search-paths   :initform (make-py-list-from-list (list ".")) :accessor habitat-search-paths))
   (:documentation "Python execution context"))
 
+(defmethod print-object ((habitat habitat) stream)
+  (with-slots (stdin stdout stderr loaded-mods cmd-line-args search-paths)
+    habitat
+    (print-unreadable-object (habitat stream :type t :identity t)
+      (format stream "stdin=~A stdout=~A stderr=~A #loaded-modules=~A cmd-line-args=~A search-paths=~S"
+              stdin stdout stderr (length loaded-mods) cmd-line-args search-paths))))
+
 (defgeneric habitat-stdin (habitat))
 (defmethod habitat-stdin ((x habitat))
   (or (%habitat-stdin x) *standard-input*))
