@@ -332,7 +332,7 @@
            (gethash name ,(ns.dict-form ns)) val)))
        
 (defmethod ns.del-form ((ns hash-table-ns) (s symbol))
-  `(progn #+clpython-optimize-namespaces (remprop s ,(ns.dict-form ns))
+  `(progn #+clpython-optimize-namespaces (remprop ',s ,(ns.dict-form ns))
           (remhash ',s ,(ns.dict-form ns))))
 
 (defmethod ns.locals-form ((ns hash-table-ns))
