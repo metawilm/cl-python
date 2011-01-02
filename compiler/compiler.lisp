@@ -126,47 +126,51 @@ Callers can intercept the condition MODULE-IMPORT-PRE to override default loadin
 (defparameter *compile-python-ast-before-running* nil
   "Whether to compile an AST before running it.")
 
+(defparameter *run-module-globals* nil
+  "The module namespace in which RUN forms are evaluated.")
+
 (defun run-python-ast (ast &key (habitat *habitat*)
                                 (compile *compile-python-ast-before-running*)
-                                (module-globals (make-eq-hash-table))
+                                (module-globals *run-module-globals*)
                                 time
-                                args)
+                                (args nil args-p))
   "Run Python AST in freshly bound habitat.
 HABITAT is the execution environment; a fresh one will be used otherwie.
 If COMPILE is true, the AST is compiled into a function before running.
 MODULE-RUN-ARGS is a list with options passed on to the module-function; e.g. %module-globals, module-name, src-module-path.
-ARGS are the command-line args, available as `sys.argv'; can be a string or a list of strings."
+ARGS are the command-line args, available as `sys.argv'; can be a string (which will be splitted on spaces) or a list of strings."
   ;; At the moment there are only hashtable or package module namespaces:
-  (check-type module-globals (or hash-table package))
   (with-compiler-generated-syntax-errors ()
     (handler-bind (#+sbcl
                    (sb-kernel:redefinition-with-defun #'muffle-warning))
-      (let* ((*habitat* habitat)
-             (get-module-f `(lambda () ,ast))
+      (let* ((get-module-f `(lambda () ,ast))
              (fc (if compile
                      ;; Same context as for importing a module
                      (with-proper-compiler-settings
                          (compile nil get-module-f))
-                   (coerce get-module-f 'function))))
-        (unless *habitat* (setf *habitat* (make-habitat)))
-        (when (or args (null (habitat-cmd-line-args *habitat*)))
-          (setf (habitat-cmd-line-args *habitat*) args))
-        (let (module-init-func module-run-tlv-func result)
-          (handler-bind ((module-import-pre (lambda (c)
-                                              ;; This handler just saves the relevant functions,
-                                              ;; unwinding the import state with restarts like
-                                              ;; continue-loading, abort-loading, so the user is not
-                                              ;; bothered by these restarts.
-                                              (setf module-init-func (mip.init-func c)
-                                                    module-run-tlv-func (mip.run-tlv-func c))
-                                              (invoke-restart 'abort-loading))))
-            (funcall fc))
-          (assert (and module-init-func module-run-tlv-func) () "Unexpected module import behaviour")
+                   (coerce get-module-f 'function)))
+             module-init-func module-run-tlv-func result)
+        (handler-bind ((module-import-pre (lambda (c)
+                                            ;; This handler just saves the relevant functions,
+                                            ;; unwinding the import state with restarts like
+                                            ;; continue-loading, abort-loading, so the user is not
+                                            ;; bothered by these restarts.
+                                            (setf module-init-func (mip.init-func c)
+                                                  module-run-tlv-func (mip.run-tlv-func c))
+                                            (invoke-restart 'abort-loading))))
+          (funcall fc))
+        (assert (and module-init-func module-run-tlv-func) () "Unexpected module import behaviour")
+        (let ((*habitat* (or habitat (make-habitat))))
+          (unless module-globals
+            (setf module-globals (make-eq-hash-table)))
+          (check-type module-globals (or hash-table package))
+          (when args-p
+            (setf (habitat-cmd-line-args *habitat*) args))
           (flet ((run ()
                    (funcall module-init-func module-globals) ;; always set __name__, __debug__
                    (setf result (funcall module-run-tlv-func module-globals))))
-            (if time (time (run)) (run)))
-          result)))))
+            (if time (time (run)) (run))))
+        result))))
 
 
 ;;; Python source files are compiled to fasl files. A way is needed to mark

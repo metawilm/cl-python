@@ -18,7 +18,8 @@
    (stderr         :initform nil :initarg :stderr :accessor %habitat-stderr)
    (loaded-mods    :initform () :initarg :loaded-mods   :accessor habitat-loaded-mods)
    (cmd-line-args  :initform () :initarg :cmd-line-args :accessor %habitat-cmd-line-args)
-   (search-paths   :initform (make-py-list-from-list (list ".")) :accessor habitat-search-paths))
+   (search-paths   :initform (make-py-list-from-list (list ".")) :accessor habitat-search-paths)
+   (module-globals :initform (make-eq-hash-table) :reader habitat-module-globals))
   (:documentation "Python execution context"))
 
 (defmethod print-object ((habitat habitat) stream)
@@ -54,11 +55,15 @@
 
 (defgeneric (setf habitat-cmd-line-args) (val habitat))
 (defmethod (setf habitat-cmd-line-args) (val (x habitat))
-  (setf (%habitat-cmd-line-args x)
-    (typecase val
-      (string (py-string.split val " "))
-      (list (make-py-list-from-list val))
-      (t val))))
+  (let ((old-val (%habitat-cmd-line-args x))
+        (new-val (typecase val
+                   (string (py-string.split val " "))
+                   (list (make-py-list-from-list val))
+                   (t val))))
+    (unless (equalp old-val new-val)
+      (warn "Changing habitat command-line-args for ~A~%from:~%  ~S~%to:~%  ~S"
+            x old-val new-val))
+    (setf (%habitat-cmd-line-args x) new-val)))
 (defgeneric habitat-cmd-line-args (habitat))
 (defmethod habitat-cmd-line-args ((x habitat))
   (or (%habitat-cmd-line-args x)
