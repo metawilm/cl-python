@@ -817,6 +817,7 @@ otherwise work well.")
     (excl::dump-lisp-source x)))
 
 (defmethod py-function-name ((x function))
+  (declare (ignorable x))
   #+allegro (format nil "~A" (excl::func_name x))
   #-allegro (call-next-method))
 
@@ -3171,27 +3172,32 @@ invocation form.\"")
 (defgeneric py-class-of (x)
   
   ;; Lisp objects lead to their proxy class
-  (:method ((x hash-table)) (ltv-find-class 'dict))
-  (:method ((x integer)) (ltv-find-class 'py-int    ))
-  (:method ((x real))    (ltv-find-class 'py-float  ))
-  (:method ((x complex)) (ltv-find-class 'py-complex))
-  (:method ((x string))  (ltv-find-class 'py-string ))
-  (:method ((x vector))  (ltv-find-class 'py-list   ))
+  (:method ((x hash-table)) (declare (ignorable x)) (ltv-find-class 'dict))
+  (:method ((x integer)) (declare (ignorable x)) (ltv-find-class 'py-int    ))
+  (:method ((x real))    (declare (ignorable x)) (ltv-find-class 'py-float  ))
+  (:method ((x complex)) (declare (ignorable x)) (ltv-find-class 'py-complex))
+  (:method ((x string))  (declare (ignorable x)) (ltv-find-class 'py-string ))
+  (:method ((x vector))  (declare (ignorable x)) (ltv-find-class 'py-list   ))
   (:method ((x list))    (cond ((null x)
                                 (break "PY-CLASS-OF of NIL"))
                                ((and (listp (car x)) (symbolp (caar x)))
                                 (ltv-find-class 'py-alist))
                                (t
                                 (ltv-find-class 'py-tuple))))
-  (:method ((x symbol))  (ltv-find-class 'py-symbol ))
-  (:method ((x function))    (ltv-find-class 'py-function))
-  (:method ((x py-function)) (ltv-find-class 'py-function))
-  (:method ((x package)) (ltv-find-class 'lisp-package))
+  (:method ((x symbol))  (declare (ignorable x))
+                         (ltv-find-class 'py-symbol ))
+  (:method ((x function))    (declare (ignorable x))
+                             (ltv-find-class 'py-function))
+  (:method ((x py-function)) (declare (ignorable x))
+                             (ltv-find-class 'py-function))
+  (:method ((x package))     (declare (ignorable x))
+                             (ltv-find-class 'lisp-package))
   
   #+(or)(:method ((x py-type)) (ltv-find-class 'py-type))
     
   (:method ((x py-meta-type)) ;; metatypes (including `type')
                               ;;  fake being of type `type'
+                              (declare (ignorable x))
                               (ltv-find-class 'py-type))
   
   (:method ((x py-type)) (class-of x))
@@ -3341,12 +3347,12 @@ finished; F will then not be called again."
   ;; XXX Speed up slot value lookup by using
   ;; MOP:SLOT-DEFINITION-LOCATION, MOP:STANDARD-INSTANCE-ACCESS.
   (:method ((f null) &rest args)
-           (declare (ignore args) (dynamic-extent args))
+           (declare (ignore args) (ignorable f) (dynamic-extent args))
 	   (error "PY-CALL of NIL"))
   
   (:method ((f class) &rest args)
            (declare (dynamic-extent args)
-                    (ignorable args)
+                    (ignorable f args)
                     (optimize (speed 3) (safety 0) (debug 0)))
            #-clpython-exceptions-are-python-objects
            (when (subtypep f '{Exception})
@@ -4025,6 +4031,7 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
         (setf (get x 'py-hash) hash))))
 
 (defmethod py-repr ((x (eql nil)))
+  (declare (ignorable x))
   "#<the symbol NIL>")
 
 #|| 

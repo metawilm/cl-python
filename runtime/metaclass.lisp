@@ -27,7 +27,7 @@
   nil)
 
 (defgeneric has-dict (x)
-  (:method ((x dict-mixin)) t)
+  (:method ((x dict-mixin)) (declare (ignorable x)) t)
   (:method (x)              (declare (ignore x)) nil))
 
 (defclass py-meta-type (dict-mixin standard-class)

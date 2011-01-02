@@ -68,19 +68,25 @@
   #+allegro 'excl::name
   #+ccl 'ccl::name
   #+cmu 'pcl::name
+  #+ecl 'clos::name
   #+lispworks 'clos::name
   #+sbcl 'sb-pcl::name
-  #-(or allegro ccl cmu lispworks sbcl) 
+  #-(or allegro ccl cmu ecl lispworks sbcl) 
   (break "Define slot name containing class name, for this implementation."))
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
+
+  (defconstant +use-standard-instance-access+
+    #+ #1=ecl nil
+    #+ #2=(or allegro ccl cmu lispworks sbcl) t
+    #- (or #1# #2#) (break "Define +use-standard-instance-access+"))
+
+  (register-feature :clpython-use-standard-instance-access +use-standard-instance-access+)
+
   (defconstant +use-standard-instance-access-setf+
-    #+allegro t
-    #+ccl t
-    #+cmu nil ;; CMUCL lacks (SETF PCL:STANDARD-INSTANCE-ACCESS)
-    #+lispworks t
-    #+sbcl t
-    #-(or allegro ccl cmu lispworks sbcl) (error "Define +use-standard-instance-access-setf+ ~
+    #+(or allegro ccl lispworks sbcl) t
+    #+(or cmu ecl) nil ;; these lack (SETF STANDARD-INSTANCE-ACCESS)
+    #-(or allegro ccl cmu ecl lispworks sbcl) (break "Define +use-standard-instance-access-setf+ ~
 for this implementation"))
 
   (register-feature :clpython-use-standard-instance-access-setf +use-standard-instance-access-setf+))
@@ -109,15 +115,23 @@ for this implementation"))
 
 (defun class.raw-dict (class)
   "Given a class, return its dict. Only intended for classes corresponding to Python (meta)types."
-  (#.+standard-instance-access-func+ class +py-class-dict-slot-index+))
+  #+clpython-use-standard-instance-access
+  (#.+standard-instance-access-func+ class +py-class-dict-slot-index+)
+  #-clpython-use-standard-instance-access
+  (slot-value class 'dict))
 
+#+clpython-use-standard-instance-access
 (define-compiler-macro class.raw-dict (class)
   `(#.+standard-instance-access-func+ ,class +py-class-dict-slot-index+))
 
 (defun class.raw-classname (class)
   "Given a class, return its classname. Only intended for classes corresponding to Python (meta)types."
-  (#.+standard-instance-access-func+ class +py-class-classname-slot-index+))
+  #+clpython-use-standard-instance-access
+  (#.+standard-instance-access-func+ class +py-class-classname-slot-index+)
+  #-clpython-use-standard-instance-access
+  (slot-value class +py-class-classname-slot-name+))
 
+#+clpython-use-standard-instance-access
 (define-compiler-macro class.raw-classname (class)
   `(#.+standard-instance-access-func+ ,class +py-class-classname-slot-index+))
 
