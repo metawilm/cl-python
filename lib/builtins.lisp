@@ -44,14 +44,7 @@
       do (setf (symbol-value sym) (if (eq cls-name *the-notimplemented*)
                                       *the-notimplemented*
                                     (find-class cls-name)))))
-
 (def-builtin-types)
-
-(defun def-builtin-exceptions ()
-  `(loop for sym in *exception-classes*
-       do (setf (symbol-value sym) (find-class sym))))
-
-(def-builtin-exceptions)
 
 ) ;; eval-when
 
