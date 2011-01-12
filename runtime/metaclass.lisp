@@ -99,17 +99,26 @@
 
 ;;; Python dicts are hash tables with custom equality (py-==) and hash functions (py-hash).
 
-#+sbcl
-(sb-ext:define-hash-table-test py-==->lisp-val py-hash)
-#+cmu
-(extensions:define-hash-table-test 'py-hash-table-test #'py-==->lisp-val #'py-hash)
-
-(defun make-py-hash-table ()
-  (or #+(or allegro ccl lispworks) (make-hash-table :test 'py-==->lisp-val :hash-function 'py-hash)
-      #+cmu (make-hash-table :test 'py-hash-table-test)
-      #+sbcl (make-hash-table :test 'py-==->lisp-val)
-      #-(or allegro ccl lispworks cmu sbcl) (error "Creating python dict not suported in this environment.")))
-
+(checking-reader-conditionals
+ #+(or allegro ccl lispworks)
+ (defun make-py-hash-table ()
+   (make-hash-table :test 'py-==->lisp-val :hash-function 'py-hash))
+ 
+ #+cmu
+ (progn
+   (extensions:define-hash-table-test 'py-hash-table-test #'py-==->lisp-val #'py-hash)
+   (defun make-py-hash-table ()
+     (make-hash-table :test 'py-hash-table-test)))
+ 
+ #+ecl
+ (cl-custom-hash-table:define-custom-hash-table-constructor
+     make-py-hash-table :test py-==->lisp-val :hash-function py-hash)
+ 
+ #+sbcl
+ (progn 
+   (sb-ext:define-hash-table-test py-==->lisp-val py-hash)
+   (defun make-py-hash-table ()
+     (make-hash-table :test 'py-==->lisp-val))))
 
 ;; None and NotImplemented are here, so that other modules like classes can use the compiler macros.
 

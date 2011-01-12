@@ -69,7 +69,7 @@
 
 (asdf:defsystem :clpython.runtime
     :description "Python runtime environment"
-    :depends-on (:clpython.basic :closer-mop)
+    :depends-on (:clpython.basic :closer-mop #+ecl :cl-custom-hash-table)
     :components ((:module "runtime"
                           :serial t
                           :components ((:file "rsetup"       )
@@ -202,7 +202,14 @@
                               Please check it out from the darcs repo: ~
                               \"darcs get http://www.pps.jussieu.fr/~~jch/software/repos/cl-yacc\" ~
                               or download the latest release from: ~
-                              http://www.pps.jussieu.fr/~~jch/software/files/"))
+                              http://www.pps.jussieu.fr/~~jch/software/files/")
+                            #+ecl
+                            (:cl-custom-hash-table
+                             "CL-Python requires library \"CL-CUSTOM-HASH-TABLE\". ~
+                              Please check it out from the git repo: ~
+                              \"git clone git://github.com/metawilm/cl-custom-hash-table.git\" ~
+                              or download the latest release from: ~
+                              https://github.com/metawilm/cl-custom-hash-table/zipball/master"))
 			   (call-next-method)))
   
   #-allegro
