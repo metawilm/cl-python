@@ -134,7 +134,11 @@
 
 ;; getitem
 
-(defmethod py-subs ((x vector) (item fixnum))
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (defconstant +fixnum-is-a-class+ (not (null (find-class 'fixnum nil))))
+  (register-feature :clpython-fixnum-is-a-class +fixnum-is-a-class+))
+
+(defmethod py-subs ((x vector) (item #+clpython-fixnum-is-a-class fixnum #-clpython-fixnum-is-a-class integer))
   (declare (optimize (speed 3) (safety 0) (debug 0)))
   (let* ((x.len (length x))
          (item2 (if (minusp item)
@@ -156,7 +160,7 @@
       (py-string.__getitem__ x item)
     (py-list.__getitem__ x item)))
       
-(defmethod py-subs ((x string) (item fixnum))
+(defmethod py-subs ((x string) (item #+clpython-fixnum-is-a-class fixnum #-clpython-fixnum-is-a-class integer))
   (declare (optimize (speed 3) (safety 0) (debug 0)))
   (let* ((x.len (length x))
 	 (i2 (if (< item 0) (+ item x.len) item)))
@@ -164,7 +168,7 @@
 	(py-string-from-char (char x i2))
       (py-string.__getitem__ x item))))
 
-(defmethod py-subs ((x list) (item fixnum)) ;; tuple
+(defmethod py-subs ((x list) (item #+clpython-fixnum-is-a-class fixnum #-clpython-fixnum-is-a-class integer)) ;; tuple
   (when (< item 0)
     (setf x    (nthcdr (- item) x)
 	  item 0))
@@ -184,7 +188,7 @@
           (return-from py-subs *the-none*)))))
   (call-next-method))
                
-(defmethod (setf py-subs) (val (x vector) (item fixnum))
+(defmethod (setf py-subs) (val (x vector) (item #+clpython-fixnum-is-a-class fixnum #-clpython-fixnum-is-a-class integer))
   (declare (optimize (speed 3) (safety 0) (debug 0)))
   (when (stringp x)
     (py-raise '{TypeError} "Cannot assign to string items."))
@@ -251,6 +255,7 @@
 	     (py-!= .x .y))))
     whole))
 
+#+clpython-fixnum-is-a-class
 (defmethod py-== ((x fixnum) (y fixnum)) (py-bool (= x y)))
 (defmethod py-== ((x string) (y string)) (py-bool (string= x y)))
 ;; (py-== string symbol) and (py-== symbol string) are defined in classes.lisp already
@@ -258,46 +263,49 @@
 (defmethod py-== ((x vector) (y vector)) (py-list.__eq__ x y))
 (defmethod py-== ((x list)   (y list))   (py-tuple.__eq__ x y))
 
+#+clpython-fixnum-is-a-class
 (defmethod py-!= ((x fixnum) (y fixnum)) (py-bool (/= x y)))
 (defmethod py-!= ((x string) (y string)) (py-bool (string/= x y)))
 
-(defmethod py-<  ((x fixnum) (y fixnum)) (py-bool (<  x y)))
-(defmethod py-<= ((x fixnum) (y fixnum)) (py-bool (<= x y)))
-(defmethod py->  ((x fixnum) (y fixnum)) (py-bool (>  x y)))
-(defmethod py->= ((x fixnum) (y fixnum)) (py-bool (>= x y)))
+#+clpython-fixnum-is-a-class
+(progn (defmethod py-<  ((x fixnum) (y fixnum)) (py-bool (<  x y)))
+       (defmethod py-<= ((x fixnum) (y fixnum)) (py-bool (<= x y)))
+       (defmethod py->  ((x fixnum) (y fixnum)) (py-bool (>  x y)))
+       (defmethod py->= ((x fixnum) (y fixnum)) (py-bool (>= x y))))
 
 (defmethod py-<  ((x float) (y float)) (declare #.+optimize-fastest+) (py-bool (<  x y)))
 (defmethod py-<= ((x float) (y float)) (declare #.+optimize-fastest+) (py-bool (<= x y)))
 (defmethod py->  ((x float) (y float)) (declare #.+optimize-fastest+) (py-bool (>  x y)))
 (defmethod py->= ((x float) (y float)) (declare #.+optimize-fastest+) (py-bool (>= x y)))
 
-(defmethod py-<= ((x single-float) (y fixnum)) (declare #.+optimize-fastest+) (py-bool (<= x y)))
-(defmethod py-<= ((x double-float) (y fixnum)) (declare #.+optimize-fastest+) (py-bool (<= x y)))
-(defmethod py-<= ((x fixnum) (y single-float)) (declare #.+optimize-fastest+) (py-bool (<= x y)))
-(defmethod py-<= ((x fixnum) (y double-float)) (declare #.+optimize-fastest+) (py-bool (<= x y)))
+#+clpython-fixnum-is-a-class
+(progn (defmethod py-<= ((x single-float) (y fixnum)) (declare #.+optimize-fastest+) (py-bool (<= x y)))
+       (defmethod py-<= ((x double-float) (y fixnum)) (declare #.+optimize-fastest+) (py-bool (<= x y)))
+       (defmethod py-<= ((x fixnum) (y single-float)) (declare #.+optimize-fastest+) (py-bool (<= x y)))
+       (defmethod py-<= ((x fixnum) (y double-float)) (declare #.+optimize-fastest+) (py-bool (<= x y)))
 
-(defmethod py->= ((x single-float) (y fixnum)) (declare #.+optimize-fastest+) (py-bool (>= x y)))
-(defmethod py->= ((x double-float) (y fixnum)) (declare #.+optimize-fastest+) (py-bool (>= x y)))
-(defmethod py->= ((x fixnum) (y single-float)) (declare #.+optimize-fastest+) (py-bool (>= x y)))
-(defmethod py->= ((x fixnum) (y double-float)) (declare #.+optimize-fastest+) (py-bool (>= x y)))
+       (defmethod py->= ((x single-float) (y fixnum)) (declare #.+optimize-fastest+) (py-bool (>= x y)))
+       (defmethod py->= ((x double-float) (y fixnum)) (declare #.+optimize-fastest+) (py-bool (>= x y)))
+       (defmethod py->= ((x fixnum) (y single-float)) (declare #.+optimize-fastest+) (py-bool (>= x y)))
+       (defmethod py->= ((x fixnum) (y double-float)) (declare #.+optimize-fastest+) (py-bool (>= x y)))
 
-(defmethod py-< ((x single-float) (y fixnum)) (declare #.+optimize-fastest+) (py-bool (< x y)))
-(defmethod py-< ((x double-float) (y fixnum)) (declare #.+optimize-fastest+) (py-bool (< x y)))
-(defmethod py-< ((x fixnum) (y single-float)) (declare #.+optimize-fastest+) (py-bool (< x y)))
-(defmethod py-< ((x fixnum) (y double-float)) (declare #.+optimize-fastest+) (py-bool (< x y)))
+       (defmethod py-< ((x single-float) (y fixnum)) (declare #.+optimize-fastest+) (py-bool (< x y)))
+       (defmethod py-< ((x double-float) (y fixnum)) (declare #.+optimize-fastest+) (py-bool (< x y)))
+       (defmethod py-< ((x fixnum) (y single-float)) (declare #.+optimize-fastest+) (py-bool (< x y)))
+       (defmethod py-< ((x fixnum) (y double-float)) (declare #.+optimize-fastest+) (py-bool (< x y)))
 
-(defmethod py-> ((x single-float) (y fixnum))
-  (declare #.+optimize-fastest+ #+(or)(:explain :boxing))
-  ;; Prevent Allegro from converting a float into ratio if comparison can be done without.
-  ;; XXX check this optimization for other methods and in other implementations.
-  (let ((xf (floor x)))
-    (py-bool (cond ((> xf y) t)
-                   ((< (1+ xf) y) nil)
-                   (t (> x y))))))
+       (defmethod py-> ((x single-float) (y fixnum))
+         (declare #.+optimize-fastest+ #+(or)(:explain :boxing))
+         ;; Prevent Allegro from converting a float into ratio if comparison can be done without.
+         ;; XXX check this optimization for other methods and in other implementations.
+         (let ((xf (floor x)))
+           (py-bool (cond ((> xf y) t)
+                          ((< (1+ xf) y) nil)
+                          (t (> x y))))))
 
-(defmethod py-> ((x double-float) (y fixnum)) (declare #.+optimize-fastest+) (py-bool (> x y)))
-(defmethod py-> ((x fixnum) (y single-float)) (declare #.+optimize-fastest+) (py-bool (> x y)))
-(defmethod py-> ((x fixnum) (y double-float)) (declare #.+optimize-fastest+) (py-bool (> x y)))
+       (defmethod py-> ((x double-float) (y fixnum)) (declare #.+optimize-fastest+) (py-bool (> x y)))
+       (defmethod py-> ((x fixnum) (y single-float)) (declare #.+optimize-fastest+) (py-bool (> x y)))
+       (defmethod py-> ((x fixnum) (y double-float)) (declare #.+optimize-fastest+) (py-bool (> x y))))
 
 (defmethod py-<  ((x number) (y number)) (py-bool (<  x y)))
 (defmethod py-<= ((x number) (y number)) (py-bool (<= x y)))
@@ -390,6 +398,7 @@
                 (py-% .x .y)))))
         (t whole)))
 
+#+clpython-fixnum-is-a-class
 (defmethod py-% ((x fixnum) (y fixnum)) (mod x y))
 (defmethod py-% ((x string) y) (py-string.__mod__ x y))
 (defmethod py-% ((x integer) (y integer)) (mod x y))
@@ -546,6 +555,7 @@
 
 ;; Not
 
+#+clpython-fixnum-is-a-class
 (defmethod py-not ((x fixnum)) (py-bool (zerop x)))
 
 (defmethod py-not ((x py-none)) +the-true+)
@@ -559,6 +569,7 @@
 (defmethod py-str ((x string)) x)
 (defmethod py-str ((x vector)) (py-list.__str__ x))
 (defmethod py-str ((x list))   (py-tuple.__str__ x))
+#+clpython-fixnum-is-a-class
 (defmethod py-str ((x fixnum)) (if (<= 0 x 100)
 				   (svref (load-time-value
 					   (coerce (loop for i from 0 to 100
@@ -572,6 +583,7 @@
 
 (defmethod py-repr ((x vector)) (py-list.__repr__ x))
 (defmethod py-repr ((x list))   (py-tuple.__repr__ x))
+#+clpython-fixnum-is-a-class
 (defmethod py-repr ((x fixnum)) (format nil "~D" x))
 
 
