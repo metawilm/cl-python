@@ -19,21 +19,25 @@
   #+sbcl (terpri)
   (format t ";;; Compiling Python grammar for CL-Yacc...~%"))
 
-#.`(yacc:define-parser *cl-yacc-python-parser*
-       (:terminals ,*terminals*)
-     (:precedence ,(nreverse (get-precedence-and-associativity :left :right :nonassoc)))
-     (:start-symbol python-grammar)
-     
-     ,@(loop for name being each hash-key in *python-prods*
-           using (hash-value rules)
-           collect `(,name ,@(loop for (terms outcome) in rules
-                                 for args = (loop for i from 1 to (length terms)
-                                                collect (intern (format nil "$~A" i) :clpython.parser))
-                                 for func = `(lambda ,args
-                                               (declare (ignorable ,@args))
-                                               ,outcome)
-                                 collect `(,@(or terms `(())) ;; splice terms or insert () 
-                                             ,func)))))
+#.(let ((parser-form
+         `(yacc:define-parser *cl-yacc-python-parser*
+              (:terminals ,*terminals*)
+            (:precedence ,(nreverse (get-precedence-and-associativity :left :right :nonassoc)))
+            (:start-symbol python-grammar)
+            
+            ,@(loop for name being each hash-key in *python-prods*
+                  using (hash-value rules)
+                  collect `(,name ,@(loop for (terms outcome) in rules
+                                        for args = (loop for i from 1 to (length terms)
+                                                       collect (intern (format nil "$~A" i) :clpython.parser))
+                                        for func = `(lambda ,args
+                                                      (declare (ignorable ,@args))
+                                                      ,outcome)
+                                        collect `(,@(or terms `(())) ;; splice terms or insert () 
+                                                    ,func)))))))
+    ;; Prevent out of memory during compilation in ECL
+    #+ecl `(eval ',parser-form)
+    #-ecl parser-form)
 
 ;;; Lexer
 
