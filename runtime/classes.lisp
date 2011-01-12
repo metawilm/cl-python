@@ -414,11 +414,12 @@
   (make-instance cls))
 
 (defun classp (x)
-  #+allegro (excl::classp x)
-  #+cmu (pcl::classp x)
-  #+lispworks (clos::classp x)
-  #+sbcl (sb-pcl::classp x)
-  #-(or allegro cmu lispworks sbcl) (typep x 'class))
+  (checking-reader-conditionals
+   #+allegro (excl::classp x)
+   #+cmu (pcl::classp x)
+   #+lispworks (clos::classp x)
+   #+sbcl (sb-pcl::classp x)
+   #-(or allegro cmu lispworks sbcl) (typep x 'class)))
   
 (def-py-method py-class-method.__get__ (x inst class)
   (let ((arg (if (classp inst) inst (py-class-of inst))))
@@ -613,10 +614,11 @@
 ;; where instantiating a py-function leads to strange errors.
 ;; See <http://common-lisp.net/pipermail/clpython-devel/2008-May/000048.html>
 (defparameter *create-simple-lambdas-for-python-functions*
-    #+(or allegro lispworks) nil
-    #+sbcl t
-    #-(or allegro lispworks sbcl) t
-    "Whether Python function are real CLOS funcallable instances, or just normal lambdas.
+    (checking-reader-conditionals
+     #+(or allegro lispworks) nil
+     #+sbcl t
+     #-(or allegro lispworks sbcl) t)
+     "Whether Python function are real CLOS funcallable instances, or just normal lambdas.
 Note that in the latter case, functions miss their name and attribute dict, but should
 otherwise work well.")
 
@@ -2252,11 +2254,12 @@ But if RELATIVE-TO package name is given, result may contains dots."
        collect (make-tuple-from-list (list k v)))))
 
 (defparameter *hash-table-iterator-indefinite-extent*
-    #+allegro t
-    #+lispworks nil
-    #+sbcl t
-    #-(or allegro lispworks sbcl) nil
-    "Whether the iterator created by WITH-HASH-TABLE-ITERATOR has indefinite extent.
+    (checking-reader-conditionals
+     #+allegro t
+     #+lispworks nil
+     #+sbcl t
+     #-(or allegro lispworks sbcl) nil)
+     "Whether the iterator created by WITH-HASH-TABLE-ITERATOR has indefinite extent.
 ANSI states for WITH-HASH-TABLE-ITERATOR:  \"It is unspecified what happens if any
 of the implicit interior state of an iteration is returned outside the dynamic extent
 of the with-hash-table-iterator form such as by returning some closure over the
@@ -3804,13 +3807,13 @@ finished; F will then not be called again."
   "Return pointer address. This might change during the life time of the object,
 e.g. due to moving by the GC. Python has reference counting, and guarantees a
 fixed id during the object's lifetime."
-  (declare (ignorable x))
-  #+allegro (excl:lispval-to-address x)
-  #+ccl (ccl:%address-of x)
-  #+cmu (kernel:get-lisp-obj-address x)
-  #+lispworks (system:object-address x)
-  #+sbcl (sb-kernel:get-lisp-obj-address x)
-  #-(or allegro ccl cmu lispworks sbcl) (error "TODO: id() not implemented for this Lisp implementation"))
+  (checking-reader-conditionals
+   #+allegro (excl:lispval-to-address x)
+   #+ccl (ccl:%address-of x)
+   #+cmu (kernel:get-lisp-obj-address x)
+   #+ecl (error "py-id not implemented in :ecl")
+   #+lispworks (system:object-address x)
+   #+sbcl (sb-kernel:get-lisp-obj-address x)))
 
 (defgeneric py-cmp (x y)
   (:documentation
@@ -4083,9 +4086,10 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
 ;;; Printing with circle (recursion) detection
 
 (defvar *circle-detection-mechanism*
-    #+allegro :hash-table
-    #+(or cmu sbcl lispworks) :level
-    #-(or allegro cmu lispworks sbcl) :level)
+    (checking-reader-conditionals
+     #+allegro :hash-table
+     #+(or cmu sbcl lispworks) :level
+     #-(or allegro cmu lispworks sbcl) :level))
 
 (defvar *circle-print-abbrev* "...")
 

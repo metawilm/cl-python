@@ -204,6 +204,7 @@
            #:alist-remove-prop #:+dict-alist-to-hashtable-threshold+
            #:+max-char-code+ #:char-code-type
            #:derive-pathname #:ensure-path-is-directory #:careful-probe-file
+           #:checking-reader-conditionals
            ;; finalization
            #:schedule-finalization #:unschedule-finalization
            ;; strings

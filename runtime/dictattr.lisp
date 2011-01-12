@@ -65,29 +65,28 @@
     (class-slot-ix 'dict 'py-type 'py-meta-type))
 
 (defconstant-once +py-class-classname-slot-name+
-  #+allegro 'excl::name
-  #+ccl 'ccl::name
-  #+cmu 'pcl::name
-  #+ecl 'clos::name
-  #+lispworks 'clos::name
-  #+sbcl 'sb-pcl::name
-  #-(or allegro ccl cmu ecl lispworks sbcl) 
-  (break "Define slot name containing class name, for this implementation."))
+    (checking-reader-conditionals
+     #+allegro 'excl::name
+     #+ccl 'ccl::name
+     #+cmu 'pcl::name
+     #+ecl 'clos::name
+     #+lispworks 'clos::name
+     #+sbcl 'sb-pcl::name))
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
 
   (defconstant +use-standard-instance-access+
-    #+ #1=ecl nil
-    #+ #2=(or allegro ccl cmu lispworks sbcl) t
-    #- (or #1# #2#) (break "Define +use-standard-instance-access+"))
+      (checking-reader-conditionals
+       #+ecl nil
+       #+(or allegro ccl cmu lispworks sbcl) t))
 
   (register-feature :clpython-use-standard-instance-access +use-standard-instance-access+)
 
   (defconstant +use-standard-instance-access-setf+
-    #+(or allegro ccl lispworks sbcl) t
-    #+(or cmu ecl) nil ;; these lack (SETF STANDARD-INSTANCE-ACCESS)
-    #-(or allegro ccl cmu ecl lispworks sbcl) (break "Define +use-standard-instance-access-setf+ ~
-for this implementation"))
+      (checking-reader-conditionals
+       #+(or allegro ccl lispworks sbcl) t
+       #+(or cmu ecl) nil ;; these lack (SETF STANDARD-INSTANCE-ACCESS)
+       ))
 
   (register-feature :clpython-use-standard-instance-access-setf +use-standard-instance-access-setf+))
 

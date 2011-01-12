@@ -106,12 +106,20 @@ If the stream length can not be determined (e.g. for standard input), all availa
                    ((equal array-element-type '(unsigned-byte 8))
                     (map 'string #'code-char vec))))))
 
+(defmacro checking-reader-conditionals (&whole whole &body body)
+  "Break unless the body contains exactly one form. Based on idea from Steve Haflich."
+  (let ((num (length body)))
+    (unless (= num 1)
+      (break "A CHECKING-READER-CONDITIONALS expression returned ~r forms: ~s" num whole))
+    (car body)))
+
 (defmacro named-function (name lambda-form)
   (declare (ignorable name))
   (assert (eq (car lambda-form) 'lambda))
-  #+allegro `(excl:named-function ,name ,lambda-form)
-  #+sbcl `(sb-int:named-lambda ,name ,@(cdr lambda-form)) ;; skip 'lambda symbol
-  #-(or allegro sbcl) lambda-form)
+  (checking-reader-conditionals
+   #+allegro `(excl:named-function ,name ,lambda-form)
+   #+sbcl `(sb-int:named-lambda ,name ,@(cdr lambda-form)) ;; skip 'lambda symbol
+   #-(or allegro sbcl) lambda-form))
 
 (defmacro with-stack-list ((name &rest items) &body body)
   (check-type name symbol)
@@ -124,11 +132,12 @@ If the stream length can not be determined (e.g. for standard input), all availa
      ,@body))
 
 (defmacro without-redefinition-warnings (&body body)
-  #+allegro `(excl:without-redefinition-warnings ,@body)
-  #+lispworks `(system::without-warning-on-redefinition ,@body)
-  #+sbcl `(handler-bind ((sb-kernel:redefinition-warning #'muffle-warning))
-            ,@body)
-  #-(or allegro lispworks sbcl) `(progn ,@body))
+  (checking-reader-conditionals
+   #+allegro `(excl:without-redefinition-warnings ,@body)
+   #+lispworks `(system::without-warning-on-redefinition ,@body)
+   #+sbcl `(handler-bind ((sb-kernel:redefinition-warning #'muffle-warning))
+             ,@body)
+   #-(or allegro lispworks sbcl) `(progn ,@body)))
 
 (defmacro fast (&body body)
   `(locally (declare (optimize (speed 3)))
@@ -142,11 +151,12 @@ If the stream length can not be determined (e.g. for standard input), all availa
 
 
 (defconstant-once +max-char-code+
-    ;; On Allegro CHAR-CODE-LIMIT is the largest value across all
-    ;; implementations, while EXCL:REAL-CHAR-CODE-LIMIT. is "a better estimate".
-    ;; http://www.franz.com/support/documentation/8.1/doc/variables/excl/real-char-code-limit.htm
-    #+allegro (progn (assert (<= excl:real-char-code-limit char-code-limit))
-                     excl:real-char-code-limit)
+    #+allegro (progn
+                ;; On Allegro CHAR-CODE-LIMIT is the largest value across all
+                ;; implementations, while EXCL:REAL-CHAR-CODE-LIMIT. is "a better estimate".
+                ;; http://www.franz.com/support/documentation/8.1/doc/variables/excl/real-char-code-limit.htm
+                (assert (<= excl:real-char-code-limit char-code-limit))
+                excl:real-char-code-limit)
     #-allegro char-code-limit
     "Like CHAR-CODE-LIMIT, but possible lower.")
 
@@ -235,26 +245,17 @@ See function ALIST-VS-HT.")
   ;; Adapted from Rob Warnock's post "How to programmatically exit?"
   ;;  http://groups.google.nl/group/comp.lang.lisp/msg/94c9a579608dcd9a
   (declare (ignorable code))
-  #+allegro (excl:exit code :quiet t) ;; added (:quiet t) -WB
-  #+clisp (#+lisp=cl ext:quit #-lisp=cl lisp:quit code)
-  #+cmu (ext:quit code)
-  #+cormanlisp (win32:exitprocess code)
-  #+gcl (lisp:bye code)                 ; XXX Or is it LISP::QUIT?
-  #+lispworks (lw:quit :status code)
-  #+lucid (lcl:quit code)
-  #+sbcl (sb-ext:quit
-          :unix-status (typecase code (number code)
-                                 (null 0)
-                                 (t 1)))
-  #+kcl (lisp::bye)                     ; XXX Does this take an arg?
-  #+scl (ext:quit code)                 ; XXX Pretty sure this *does*.
-  #+(or openmcl mcl) (ccl::quit)
-  #+abcl (cl-user::quit)
-  #+ecl (si:quit)
-  #+poplog (poplog::bye)                ; XXX Does this take an arg?
-  #-(or allegro clisp cmu cormanlisp gcl lispworks lucid sbcl
-        kcl scl openmcl mcl abcl ecl poplog)
-  (error "QUIT not-implemented in this implementation"))
+  (checking-reader-conditionals
+   #+allegro (excl:exit code :quiet t)
+   #+cmu (ext:quit code)
+   #+lispworks (lw:quit :status code)
+   #+sbcl (sb-ext:quit :unix-status (typecase code (number code)
+                                              (null 0)
+                                              (t 1)))
+   #+(or openmcl mcl) (ccl::quit)
+   #+abcl (cl-user::quit)
+   #+ecl (si:quit)
+   ))
 
 (defun abbreviate-to-one-line (string)
   (loop for i from 0
@@ -287,10 +288,10 @@ See function ALIST-VS-HT.")
 #+(or)
 (defun directory-p (pathname)
   (check-type pathname pathname)
-  #+allegro (excl:file-directory-p pathname)
-  #+lispworks (lispworks:file-directory-p pathname)
-  #+(or cmu sbcl) (null (pathname-type pathname))
-  #-(or allegro cmu lispworks sbcl) (error "TODO: No DIRECTORY-P for this implementation."))
+  (checking-reader-conditionals
+   #+allegro (excl:file-directory-p pathname)
+   #+lispworks (lispworks:file-directory-p pathname)
+   #+(or cmu sbcl) (null (pathname-type pathname))))
 
 (defmacro with-line-prefixed-output ((prefix) &body body)
   (check-type prefix string)

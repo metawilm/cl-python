@@ -274,10 +274,11 @@ STREAM can be an interactive (REPL) stream"
                  (when ch (unread-char ch stream)))))
            (should-unread-last-newline ()
              ;; In some implementations, leaving the #\Newline triggers printing new prompt.
-             #+allegro nil
-             #+ccl nil
-             #+sbcl t
-             #-(or allegro ccl sbcl) nil)
+             (checking-reader-conditionals
+              #+allegro nil
+              #+ccl nil
+              #+sbcl t
+              #-(or allegro ccl sbcl) nil))
            
            (read-complete-input ()
              (check-type stream concatenated-stream) ;; as created by omnivore readtable

@@ -363,12 +363,13 @@ KIND can be :ptime, :time, :space, :pspace or NIL."
             (locally (declare (special *stdout-softspace*))
               (setf *stdout-softspace* (py-bool nil)))
             
-            (unless #+(or allegro sbcl) (input-available-p)
-                    #-(or allegro sbcl) nil
-                    ;; When copy-pasting multiple lines of Python source code into the REPL,
-                    ;; prevent several prompts being printed below the copied code.
-                    (format t (nth (if acc 1 0) *prompts*))
-                    (force-output *standard-output*)) ;; stream T would mean *terminal-io*
+            (unless (checking-reader-conditionals
+                     #+(or allegro sbcl) (input-available-p)
+                     #-(or allegro sbcl) nil)
+              ;; When copy-pasting multiple lines of Python source code into the REPL,
+              ;; prevent several prompts being printed below the copied code.
+              (format t (nth (if acc 1 0) *prompts*))
+              (force-output *standard-output*)) ;; stream T would mean *terminal-io*
 
             (let ((x (read-line *standard-input* nil 'eof)))
               ;; XXX Let future debugger interface use *debug-io*?
