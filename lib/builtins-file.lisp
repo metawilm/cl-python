@@ -152,8 +152,8 @@
 	 (check-size-p (>= size 0))
 	 (chars (loop
 		    for i from 0
-		    while (or (null check-size-p) (< i size))
-		    for ch = (read-char (py-file-stream f) nil nil)
+		    for not-at-limit = (or (null check-size-p) (< i size))
+		    for ch = (and not-at-limit (read-char (py-file-stream f) nil nil))
 		    while ch 
 		    collect ch)))
     (coerce chars 'string)))
