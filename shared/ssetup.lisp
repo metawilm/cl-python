@@ -20,8 +20,8 @@
 ;;; Allegro's Source level debugging
 
 (defparameter *source-level-debugging*
-  #+ #1=(and allegro allegro-version>= (version>= 8 2)) nil ;; disable while in development
-  #- #1# nil)
+  #+ (and allegro allegro-version>= (version>= 8 2)) nil ;; disable while in development
+  #- (and allegro allegro-version>= (version>= 8 2)) nil)
 
 (register-feature :clpython-source-level-debugging *source-level-debugging*)
 
