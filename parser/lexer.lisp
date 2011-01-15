@@ -595,9 +595,12 @@ Used by compiler to generate 'forbidden' identfiers.")
 Returns character or NIL."
   (when (plusp (length python-name))
     (let* ((division-char (checking-reader-conditionals 
-                           #+(or allegro ccl sbcl) #\_
-                           #+lispworks #\- ))
-           (lisp-char-name (substitute division-char #\Space python-name)))
+			   #+(or allegro ccl sbcl) #\_
+                           #+ecl nil
+			   #+lispworks #\- ))
+           (lisp-char-name (if division-char
+                               (substitute division-char #\Space python-name)
+                             python-name)))
       (name-char lisp-char-name))))
 
 ;; This would be a DEFTYPE if SBCL supported that;
