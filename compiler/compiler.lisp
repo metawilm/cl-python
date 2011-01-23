@@ -68,8 +68,9 @@
                                     :src-pathname ',filename
                                     :bin-pathname ',output-file))
                  (lambda ()
-                   (compile-file filename
-                                 :output-file output-file)))))))))
+                   (let (#+ecl (c::*debug-compiler* t))
+                     (compile-file filename
+                                   :output-file output-file))))))))))
 
 #+(or) ;; intended as high-level interface for users
 (defun compile-py-file (fname &key (verbose t) source-information)

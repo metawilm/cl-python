@@ -2181,16 +2181,34 @@ But if RELATIVE-TO package name is given, result may contains dots."
                          items)))))
 
 (def-py-method dict.__delitem__ (dict k)
-  (or (remhash k dict)
+  (or #-clpython-custom-hash-table-fallback (remhash k dict)
+      #+clpython-custom-hash-table-fallback (clpython.custom-hash-table:remhash k dict)
       (py-raise '{KeyError} "Dict ~A has no such key: ~A." dict k)))
 
 (def-py-method dict.__eq__ (dict1 dict2)
-  (py-bool (cond ((eq dict1 dict2) t)
-                 ((not (hash-table-p dict2)) nil)
-                 ((/= (hash-table-count dict1) (hash-table-count dict2)) nil)
-                 (t (loop for k being each hash-key in dict1
-                        using (hash-value v)
-                        always (py-==->lisp-val (gethash k dict2) v))))))
+  #-clpython-custom-hash-table-fallback
+  (py-bool (cond ((eq dict1 dict2)
+                  t)
+                 ((not (hash-table-p dict2))
+                  nil)
+                 ((/= (hash-table-count dict1) (hash-table-count dict2))
+                  nil)
+                 (t 
+                  (loop for k being each hash-key in dict1
+                      using (hash-value v)
+                      always (py-==->lisp-val (gethash k dict2) v)))))
+  #+clpython-custom-hash-table-fallback
+  (py-bool (cond ((eq dict1 dict2)
+                  t)
+                 ((not (clpython.custom-hash-table:custom-hash-table-p dict2)) 
+                  nil)
+                 ((/= (clpython.custom-hash-table:hash-table-count dict1)
+                      (clpython.custom-hash-table:hash-table-count dict2))
+                  nil)
+                 (t 
+                  (with-keys-values (k v dict1 t)
+                    (unless (py-==->lisp-val (clpython.custom-hash-table:gethash k dict2) v)
+                      (return-from with-keys-values nil)))))))
 
 (def-py-method dict.__getitem__ (dict k)
   "KEY may be symbol (converted to string)"
