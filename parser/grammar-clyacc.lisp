@@ -47,15 +47,19 @@
   (call-next-method))
 
 (defmethod lexer-eof-token ((yacc-version (eql :cl-yacc)))
+  (declare (ignorable yacc-version))
   nil)
 
 
 ;;; Parser
 
 (defmethod parse-form-with-yacc ((yacc-version (eql :cl-yacc)) lexer)
+  (declare (ignorable yacc-version)
+           #+ecl (special *cl-yacc-python-parser*))
   (yacc:parse-with-lexer lexer *cl-yacc-python-parser*))
 
 (defmethod handle-parser-condition ((yacc-version (eql :cl-yacc)) c lexer)
+  (declare (ignorable yacc-version))
   (cond ((typep c 'yacc:yacc-parse-error)
          (let* ((pos (funcall lexer :report-location))
                 (line (second (assoc :line-no pos)))

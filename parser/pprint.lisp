@@ -320,16 +320,20 @@ output to a string does not start with a newline."
     (call-next-method)))
 
 (defmethod py-pprint-literal (stream (kind (eql :number)) (x integer))
+  (declare (ignorable kind))
   (format stream "~D" x))
 
 (defmethod py-pprint-literal (stream (kind (eql :number)) (x complex))
+  (declare (ignorable kind))
   (assert (= 0 (realpart x)))
   (format stream "~Gj" (imagpart x)))
 
 (defmethod py-pprint-literal (stream (kind (eql :number)) (x float))
+  (declare (ignorable kind))
   (format stream "~G" x))
 
 (defmethod py-pprint-literal (stream (kind (eql :bytes)) (x vector))
+  (declare (ignorable kind))
   (write-string "b'" stream)
   (loop for item across x
       do (when (characterp item)
@@ -339,6 +343,7 @@ output to a string does not start with a newline."
   (write-string "'" stream))
 
 (defmethod py-pprint-literal (stream (kind (eql :string)) (x string))
+  (declare (ignorable kind))
   (multiple-value-bind (delim-quote other-quote unicode?)
       (loop for ch of-type character across x
 	  counting (char= ch #\') into single-qs
@@ -383,6 +388,7 @@ output to a string does not start with a newline."
     (write-char delim-quote stream))) ;; closing quote
 
 (defmethod py-pprint-literal (stream (kind (eql :lisp)) x)
+  (declare (ignorable kind))
   (format stream "~A" x))
 
 ;; Utils

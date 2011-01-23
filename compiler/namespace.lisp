@@ -446,6 +446,7 @@
   (make-builtins-ns :scope :builtins))
 
 (defmethod ns.read-form ((ns builtins-ns) (s symbol))
+  (declare (ignorable ns))
   (when (builtin-value s)
     `(load-time-value (builtin-value ',s))))
 

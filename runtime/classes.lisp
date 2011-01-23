@@ -3258,6 +3258,7 @@ invocation form.\"")
   
   (:method ((x (eql (find-class 'py-meta-type))))
            ;; the metatypes is posing as `type'
+           (declare (ignorable x))
            (ltv-find-class 'py-type))
 
   (:method ((x t))       (class-of x)))
@@ -3858,11 +3859,12 @@ finished; F will then not be called again."
   "Return pointer address. This might change during the life time of the object,
 e.g. due to moving by the GC. Python has reference counting, and guarantees a
 fixed id during the object's lifetime."
+  #+ecl (declare (ignore x))
   (checking-reader-conditionals
    #+allegro (excl:lispval-to-address x)
    #+ccl (ccl:%address-of x)
    #+cmu (kernel:get-lisp-obj-address x)
-   #+ecl (error "py-id not implemented in :ecl")
+   #+ecl (error "py-id not implemented yet for ECL")
    #+lispworks (system:object-address x)
    #+sbcl (sb-kernel:get-lisp-obj-address x)))
 

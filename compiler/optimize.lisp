@@ -421,27 +421,27 @@
 ;; Augmented assignment
 
 (defmethod py-+= ((x string) y) 
-  (declare (ignore y))
+  (declare (ignorable x) (ignore y))
   nil)
 
 (defmethod py-+= ((x number) y) 
-  (declare (ignore y))
+  (declare (ignorable x) (ignore y))
   nil)
 
 (defmethod py--= ((x number) y) 
-  (declare (ignore y))
+  (declare (ignorable x) (ignore y))
   nil)
 
 (defmethod py-*= ((x number) y) 
-  (declare (ignore y))
+  (declare (ignorable x) (ignore y))
   nil)
 
 (defmethod py-/= ((x number) y)
-  (declare (ignore y))
+  (declare (ignorable x) (ignore y))
   nil)
 
 (defmethod py-//= ((x number) y)
-  (declare (ignore y))
+  (declare (ignorable x) (ignore y))
   nil)
 
 (defmethod py-** ((x float) (y float) &optional z)
@@ -556,11 +556,15 @@
 ;; Not
 
 #+clpython-fixnum-is-a-class
-(defmethod py-not ((x fixnum)) (py-bool (zerop x)))
+(defmethod py-not ((x fixnum))
+  (py-bool (zerop x)))
 
-(defmethod py-not ((x py-none)) +the-true+)
+(defmethod py-not ((x py-none))
+  (declare (ignorable x))
+  +the-true+)
 
-(defmethod py-not ((x py-tuple)) (py-bool (eq x *the-empty-tuple*)))
+(defmethod py-not ((x py-tuple))
+  (py-bool (eq x *the-empty-tuple*)))
 (defmethod py-not ((x list)) ;; a tuple
   (py-bool (null x)))
 

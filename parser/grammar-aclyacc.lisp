@@ -39,7 +39,7 @@
 (defmethod make-lexer ((yacc-version (eql :allegro-yacc)) (string string) &rest options)
   "Allegro grammar expects lexer to return two values: TOKEN-CODE (as integer), TOKEN.
 Therefore need to convert TOKEN-KIND to the corresponding TOKEN-CODE before passing it on."
-  (declare (ignore options))
+  (declare (ignorable yacc-version string) (ignore options))
   (let ((f (call-next-method))
         (grammar-class (find-class 'python-grammar)))
     (lambda (grammar &optional op)
@@ -57,12 +57,14 @@ Therefore need to convert TOKEN-KIND to the corresponding TOKEN-CODE before pass
                            (values token val)))))))))
 
 (defmethod lexer-eof-token ((yacc-version (eql :allegro-yacc)))
+  (declare (ignorable yacc-version))
   'excl.yacc:eof)
 
 
 ;;; Parser
 
 (defmethod parse-form-with-yacc ((yacc-version (eql :allegro-yacc)) lexer)
+  (declare (ignorable yacc-version))
   (let ((grammar (make-instance 'python-grammar :lexer lexer)))
     (excl.yacc:parse grammar)))
 
@@ -70,6 +72,7 @@ Therefore need to convert TOKEN-KIND to the corresponding TOKEN-CODE before pass
   ;; When a SyntaxError is thrown by us in the lexer, the parser
   ;; first signals the SyntaxError, then it raises a GRAMMAR-PARSE-ERROR.
   (declare (special clpython:*exceptions-loaded* *include-line-numbers*)
+           (ignorable yacc-version)
            (ignore lexer))
   (cond ((and clpython:*exceptions-loaded* (typep c '{SyntaxError}))
 	 (error c)) ;; Converting SIGNAL to ERROR

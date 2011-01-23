@@ -295,7 +295,7 @@ On EOF returns: eof-token, eof-token."
   "Called when Allegro CL Yacc is about to signal a GRAMMAR-PARSE-ERROR.
 Also called by CLPython in case of CL-YACC.
 In Allegro, result ends up being stored in the condition slot EXCL.YACC:GRAMMAR-PARSE-ERROR-POSITION"
-  (declare (ignore yacc-version))
+  (declare (ignore yacc-version) (ignorable op))
   (with-slots (curr-line-no last-newline-in-source) lexer
     `((:line-no ,curr-line-no)
       (:last-newline-in-source ,last-newline-in-source))))
@@ -377,6 +377,8 @@ Used by compiler to generate 'forbidden' identfiers.")
 
 (defun lex-substring (start end)
   (assert (<= start end) () "Lex-substring: start=~A which is not <= end=~A" start end)
+  ;;#+ecl ;; workaround compiler bug: https://sourceforge.net/tracker/?func=detail&aid=3164373&group_id=30035&atid=398053
+  ;;(subseq %lex-string% start (1+ end))
   (make-array (1+ (- end start))
               :element-type (array-element-type %lex-string%)
               :displaced-to %lex-string%
@@ -401,7 +403,7 @@ Used by compiler to generate 'forbidden' identfiers.")
 
 (defmethod read-kind ((kind (eql :identifier)) c1 &rest args)
   "Returns the identifier (which might be a reserved word) as symbol."
-  (declare (optimize speed))
+  (declare (ignorable kind) (optimize speed))
   (assert (identifier-char1-p c1))
   (assert (null args))
   (let* ((start %lex-last-read-char-ix%)
@@ -417,6 +419,7 @@ Used by compiler to generate 'forbidden' identfiers.")
 ;; String
 
 (defmethod read-kind ((kind (eql :string)) ch1 &key raw unicode)
+  (declare (ignorable kind))
   (assert (char-member ch1 '( #\' #\" )))
   
   (labels ((read-unicode-char (uch s s.ix num-hex-digits)
@@ -552,7 +555,6 @@ Used by compiler to generate 'forbidden' identfiers.")
                           (check-type ch.b character)
                           (vector-push-extend ch.b res))
                         (incf s.ix))))))
-    
     (let* ((ch2 (lex-read-char))
            (ch3 (lex-read-char :eof-error nil))
            (string (cond ((and ch3 (char= ch1 ch2 ch3)) ;; string delimiter is """ or '''
@@ -572,7 +574,7 @@ Used by compiler to generate 'forbidden' identfiers.")
                                (char= ch1 ch3)
                                (char/= ch2 #\\))
                           (return-from read-kind (lex-substring (1- %lex-last-read-char-ix%) 
-                                                                  (1- %lex-last-read-char-ix%))))
+                                                                (1- %lex-last-read-char-ix%))))
                          
                          (t (let* ((start (- %lex-last-read-char-ix% 1))
                                    (end   (loop with x = (lex-read-char)
@@ -685,7 +687,7 @@ Coercion from float to int must be confirmed by the user.")
     (long-float   "l")))
 
 (defmethod read-kind ((kind (eql :number)) c1 &rest args)
-  (declare (dynamic-extent args))
+  (declare (ignorable kind) (dynamic-extent args))
   (assert (digit-char-p c1 10))
   (assert (null args))
   (flet ((read-int (base)
@@ -790,7 +792,7 @@ Coercion from float to int must be confirmed by the user.")
 
 (defmethod read-kind ((kind (eql :punctuation)) c1 &rest args)
   "Returns puncutation as symbol."
-  (declare (dynamic-extent args))
+  (declare (ignorable kind) (dynamic-extent args))
   (assert (or (punct-char1-p c1)
 	      (punct-char-not-punct-char1-p c1)))
   (assert (null args))
@@ -894,7 +896,7 @@ Coercion from float to int must be confirmed by the user.")
 (defmethod read-kind ((kind (eql :whitespace)) c1 &rest args)
   "Reads all whitespace and comments, until first non-whitespace character.
 Returns NEWLINE-P, NEW-INDENT, EOF-P."
-  (declare (dynamic-extent args))
+  (declare (ignorable kind) (dynamic-extent args))
   (assert (null args))
   (loop with newline-p = nil and n-spaces = 0 and n-tabs = 0
       for c = c1 then (lex-read-char :eof-error nil)
@@ -922,7 +924,7 @@ Returns NEWLINE-P, NEW-INDENT, EOF-P."
 
 (defmethod read-kind ((kind (eql :comment-line)) c &rest args)
   "Read until the end of the line, leaving the last #\Newline in the source."
-  (declare (dynamic-extent args))
+  (declare (ignorable kind) (dynamic-extent args))
   (assert (null args))
   (assert (char= c #\#))
   (loop for c = (lex-read-char :eof-error nil)

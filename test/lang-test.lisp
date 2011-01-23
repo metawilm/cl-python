@@ -57,6 +57,7 @@
     (call-next-method)))
 
 (defmethod test-lang ((kind (eql :assert-stmt)))
+  (declare (ignorable kind))
   (run-error        "assert 0" {AssertionError} )
   (run-no-error     "assert 1")
   (run-error "assert \"\"" {AssertionError})
@@ -79,6 +80,7 @@
                                   clpython:*exceptions-are-python-objects*))))
 
 (defmethod test-lang ((kind (eql :assign-stmt)))
+  (declare (ignorable kind))
   (run-test 3 "a = 3; a")
   (run-test 3 "a, = 3,; a")
   (run-test 3 "[a] = [3]; a")
@@ -98,6 +100,7 @@ f()
 assert g == 2"))
 
 (defmethod test-lang ((kind (eql :attributeref-expr)))
+  (declare (ignorable kind))
   (run-no-error "class C: pass
 x = C()
 C.a = 3
@@ -110,6 +113,7 @@ del C.a
 assert not hasattr(C, 'a')"))
 
 (defmethod test-lang ((kind (eql :augassign-stmt)))
+  (declare (ignorable kind))
   (run-no-error "x = 3; x+= 2; assert x == 5")
   (run-no-error "x = 3; x*= 2; assert x == 6")
   (run-no-error "x = [1,2]; x[1] -= 2; assert x[1] == 0")
@@ -117,6 +121,7 @@ assert not hasattr(C, 'a')"))
   (run-no-error "x = 3; x **= 3; assert x == 27"))
 
 (defmethod test-lang ((kind (eql :backticks-expr)))
+  (declare (ignorable kind))
   (run-no-error "x = `3`; assert x == '3'")
   (run-no-error "x = `(1,3)`; assert x == '(1, 3)'")
   (run-no-error "
@@ -127,6 +132,7 @@ x = C()
 assert `x` == 'r'"))
 
 (defmethod test-lang ((kind (eql :binary-expr)))
+  (declare (ignorable kind))
   (run-no-error "assert 1 + 2 == 3")
   (run-no-error "assert 1 - 2 * 3 == -5")
   (run-no-error "assert 1 ^ 3 == 2")
@@ -162,6 +168,7 @@ assert a * b == 12"
   (run-no-error "(1,2,3) * 2 == (1,2,3,1,2,3)"))
 
 (defmethod test-lang ((kind (eql :binary-lazy-expr)))
+  (declare (ignorable kind))
   (run-no-error "assert not (0 or 0)")
   (run-no-error "assert not (0 and 0)")
   (run-no-error "1 or 3 / 0")
@@ -175,6 +182,7 @@ assert a * b == 12"
   (run-no-error "assert (1 and []) == []"))
 
 (defmethod test-lang ((kind (eql :break-stmt)))
+  (declare (ignorable kind))
   (run-error "break" {SyntaxError})
   (run-no-error "
 for i in [1,2]:
@@ -182,6 +190,7 @@ for i in [1,2]:
 assert i == 1"))
 
 (defmethod test-lang ((kind (eql :call-expr)))
+  (declare (ignorable kind))
   (run-no-error "def f(x,y,z=3,*arg,**kw): return x,y,z,arg,kw
 assert (1,2,3,(),{}) == f(1,2)")
   (run-no-error "
@@ -192,6 +201,7 @@ x = C()
 x(1,2,3) == (1,2,3)"))
 
 (defmethod test-lang ((kind (eql :classdef-stmt)))
+  (declare (ignorable kind))
   (run-no-error "
 class C:
   def m(self): return 'C.m'
@@ -267,6 +277,7 @@ class C:
   assert locals()['a'] == 3"))
 
 (defmethod test-lang ((kind (eql :comparison-expr)))
+  (declare (ignorable kind))
   ;; Ensure py-list.__eq__ can handle non-lists, etc.
   (run-no-error "assert [] != ()")
   (run-no-error "assert () != []")
@@ -308,6 +319,7 @@ assert (x <= y) == []
 assert le > 0" :known-failure t :fail-info "<= should use __le__, not __cmp__."))
 
 (defmethod test-lang ((kind (eql :continue-stmt)))
+  (declare (ignorable kind))
   (run-error "break" {SyntaxError})
   (run-no-error "for i in []: continue")
   (run-no-error "
@@ -329,6 +341,7 @@ assert sum == 1 + 2 + 3
 assert i == 3"))
 
 (defmethod test-lang ((kind (eql :del-stmt)))
+  (declare (ignorable kind))
   (run-error "del x" {NameError})
   (run-no-error "x = 3; del x")
   (run-error "x = 3; del x; x" {NameError})
@@ -361,6 +374,7 @@ del x[-1:-6:-2]
 assert x == [0, 1, 2, 3, 4, 6, 8]"))
 
 (defmethod test-lang ((kind (eql :dict-expr)))
+  (declare (ignorable kind))
   (run-no-error "{}")
   (run-no-error "{1: 3}")
   (run-no-error "{1+2: 3+4}")
@@ -389,6 +403,7 @@ assert d['b'] == 42")
   (run-no-error "assert {None: 3}[None] == 3"))
 
 (defmethod test-lang ((kind (eql :exec-stmt)))
+  (declare (ignorable kind))
   (run-no-error "
 def f():
   x = (1,2)
@@ -438,6 +453,7 @@ a = eval('2+3')
 assert a == 5"))
 
 (defmethod test-lang ((kind (eql :for-in-stmt)))
+  (declare (ignorable kind))
   (run-no-error "for i in []: 1/0")
   (run-no-error "for i in '': 1/0")
   (run-no-error "
@@ -484,6 +500,7 @@ res = [x for x in f()]
 assert res == [1,2]"))
 
 (defmethod test-lang ((kind (eql :funcdef-stmt)))
+  (declare (ignorable kind))
   ;; *-arg, **-arg
   (run-no-error "
 def f(a, b, c=13, d=14, *e, **f): return [a,b,c,d,e,f]
@@ -517,9 +534,11 @@ assert f.__name__ == 'g'"))
 
 
 (defmethod test-lang ((kind (eql :generator-expr)))
+  (declare (ignorable kind))
   )
 
 (defmethod test-lang ((kind (eql :global-stmt)))
+  (declare (ignorable kind))
   (test-some-warning (run "global x")) ;; useless at toplevel
   (run-error "
 def f():
@@ -593,6 +612,7 @@ f()
 assert x == 1"))
 
 (defmethod test-lang ((kind (eql :identifier-expr)))
+  (declare (ignorable kind))
   (run-no-error "
 def f():
    x = 3
@@ -629,6 +649,7 @@ class C:
 assert ok == 'xy'"))
 
 (defmethod test-lang ((kind (eql :if-expr)))
+  (declare (ignorable kind))
   (run-no-error "x = (1 if True else 0); assert x == 1")
   (run-no-error "x = 1 if True else 0; assert x == 1")
   (run-no-error "x = 1 if False else 0; assert x == 0")
@@ -652,10 +673,12 @@ assert b(-2) == -1")
     (run-error "[f for f in 1, lambda x: x if x >= 0 else -1]" {SyntaxError})))
 
 (defmethod test-lang ((kind (eql :if-stmt)))
+  (declare (ignorable kind))
   (run-no-error "def f(): pass
 if f(): pass" :fail-info "Functions inherit __nonzero__ from object."))
 
 (defmethod test-lang ((kind (eql :import-stmt)))
+  (declare (ignorable kind))
   #.(progn (unless (string= (pathname-name (or *compile-file-truename*
                                                *load-truename*))
                             "lang-test")
@@ -713,9 +736,11 @@ for i in xrange(3):
   print '5b'"))))))
 
 (defmethod test-lang ((kind (eql :import-from-stmt)))
+  (declare (ignorable kind))
   (run-no-error "from sys import path; path.append('/foo'); del path[-1]"))
 
 (defmethod test-lang ((kind (eql :lambda-expr)))
+  (declare (ignorable kind))
   (run-no-error "lambda: None")
   (run-no-error "lambda: 3*x")
   (run-error "(lambda: 3*x)()" {NameError})
@@ -733,10 +758,12 @@ assert f(1, lambda: 2) == 1 + 2")
   (run-no-error "assert (lambda x, y: x+y)(x=3, y=4) == 7"))
 
 (defmethod test-lang ((kind (eql :listcompr-expr)))
+  (declare (ignorable kind))
   (run-no-error "assert [x for x in [1,2] if x > 1] == [2]")
   (run-no-error "assert [(x,y) for x in [1,2] for y in [x]] == [(1,1), (2,2)]"))
 
 (defmethod test-lang ((kind (eql :list-expr)))
+  (declare (ignorable kind))
   (run-no-error "
 x = []
 y = x
@@ -749,12 +776,15 @@ x += '12'
 assert x == ['1', '2']"))
 
 (defmethod test-lang ((kind (eql :module-stmt)))
+  (declare (ignorable kind))
   )
 
 (defmethod test-lang ((kind (eql :print-stmt)))
+  (declare (ignorable kind))
   )
 
 (defmethod test-lang ((kind (eql :return-stmt)))
+  (declare (ignorable kind))
   (run-error "
 def f():
  class C:
@@ -762,6 +792,7 @@ def f():
 f()" {SyntaxError} :fail-info "return outside function"))
 
 (defmethod test-lang ((kind (eql :slice-expr)))
+  (declare (ignorable kind))
   (run-no-error "
 x = range(10)
 x[1:10:2] = [0,0,0,0,0]
@@ -776,18 +807,19 @@ x[:0] = 'abc'
 assert x == ['a', 'b', 'c', 1, 2]"))
 
 (defmethod test-lang ((kind (eql :subscription-expr)))
-  )
+  (declare (ignorable kind)))
 
 (defmethod test-lang ((kind (eql :suite-stmt)))
-  )
+  (declare (ignorable kind)))
 
 (defmethod test-lang ((kind (eql :raise-stmt)))
-  )
+  (declare (ignorable kind)))
 
 (defmethod test-lang ((kind (eql :try-except-stmt)))
-  )
+  (declare (ignorable kind)))
 
 (defmethod test-lang ((kind (eql :try-finally-stmt)))
+  (declare (ignorable kind))
   (progn 
     ;; These two test cases taken from Mike Stall,
     ;;  http://blogs.msdn.com/jmstall/archive/2007/12/16/return-vs-finally-2.aspx
@@ -807,9 +839,11 @@ def f2():
 assert f2() == 5")))
 
 (defmethod test-lang ((kind (eql :tuple-expr)))
+  (declare (ignorable kind))
   (run-no-error "assert (1,2,3)[0:1] == (1,)"))
 
 (defmethod test-lang ((kind (eql :unary-expr)))
+  (declare (ignorable kind))
   (run-no-error "x = 3; +x; -x")
   (run-no-error "assert +3 == 3")
   (run-no-error "x = 3; assert +x == 3")
@@ -819,6 +853,7 @@ assert f2() == 5")))
   )
 
 (defmethod test-lang ((kind (eql :while-stmt)))
+  (declare (ignorable kind))
   (run-no-error "while 0: 1/0")
   (run-no-error "while 1: break")
   (run-no-error "
@@ -869,6 +904,7 @@ g = f()
 assert g.next() == 42"))
 
 (defmethod test-lang ((kind (eql :with-stmt)))
+  (declare (ignorable kind))
   (run-no-error "
 x = []
 class C:
@@ -1177,6 +1213,7 @@ MAX is a safey limit, in case the code erroneously goes into an endless loop."
       (nreverse yielded))))
 
 (defmethod test-lang ((kind (eql :yield-expr)))
+  (declare (ignorable kind))
   (loop for (src expected) in *cps-tests*
       do (eval `(test-equal (make-test-gen ',src :debug nil) ',expected)))
   (run-no-error "
@@ -1436,6 +1473,7 @@ def f():
 list(f())" {SyntaxError} :fail-info "Yield outside function"))
   
 (defmethod test-lang ((kind (eql :yield-stmt)))
+  (declare (ignorable kind))
   (run-no-error "
 def f():
   return
@@ -1524,6 +1562,7 @@ g = f([1,2,3])
 list(g) == [1,2,3]"))
 
 (defmethod test-lang ((kind (eql :attribute-semantics)))
+  (declare (ignorable kind))  
   (run-no-error "
 class C: pass
 x = C()
@@ -1541,6 +1580,7 @@ except TypeError:
 "))
 
 (defmethod test-lang ((kind (eql :number-method-lookups)))
+  (declare (ignorable kind))
   (run-no-error "
 # http://bugs.jython.org/issue1159
 class DummyNumber(object):
@@ -1631,6 +1671,7 @@ print f1_1**f1_1"
                 :fail-info "__pow__ lookup goes wrong somewhere"))
 
 (defmethod test-lang ((kind (eql :getitem-methods)))
+  (declare (ignorable kind))
   (run "
 class C:
   def __getslice__(x, frm, to):

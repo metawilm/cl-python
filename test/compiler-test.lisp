@@ -59,6 +59,7 @@
     (call-next-method)))
 
 (defmethod test-comp-decl ((kind (eql :context-type-stack)))
+  (declare (ignorable kind))
   (run-code-test "TEST"               (test :module #1=(car (pydecl :context-type-stack))))
   (run-code-test "def foo(x,y): TEST" (test :function #1#))
   (run-code-test "class C(D): TEST"   (test :class #1#))
@@ -72,6 +73,7 @@ def f():
     TEST"                             (test :class    #1#)))
 
 (defmethod test-comp-decl ((kind (eql :context-name-stack)))
+  (declare (ignorable kind))
   (run-code-test "TEST"            (test-equal ()     #1=(pydecl :context-name-stack)))
   (run-code-test "def f(): TEST"   (test-equal '({f}) #1#))
   (run-code-test "class C: TEST"   (test-equal '({C}) #1#))
@@ -87,6 +89,7 @@ def f():
     lambda x: TEST"                (test-equal '(:lambda {C} {f}) #1#)))
 
 (defmethod test-comp-decl ((kind (eql :inside-loop-p)))
+  (declare (ignorable kind))
   (run-code-test "TEST"              (test-false #1=(pydecl :inside-loop-p)))
   (run-code-test "while foo(): TEST" (test-true  #1#))
   (run-code-test "
@@ -103,10 +106,12 @@ for x in y:
  TEST" (test-true #1#)))
 
 (defmethod test-comp-decl ((kind (eql :mod-futures)))
+  (declare (ignorable kind))
   ":MOD-FUTURES"
   :todo)
 
 (defmethod test-comp-decl ((kind (eql :mod-globals-names)))
+  (declare (ignorable kind))
   (run-code-test "TEST" (test-true (typep #1=(pydecl :mod-globals-names) 'vector)))
   (run-code-test "TEST" (test-true (seq-equal #1# +standard-module-globals+)))
   (run-code-test "TEST"        (test-false (seq-member '{a} #1#)))
@@ -180,6 +185,7 @@ def f():
                          :fail-info #100#)))
 
 (defmethod test-comp-decl ((kind (eql :lexically-visible-vars)))
+  (declare (ignorable kind))
   (run-code-test "TEST"        (test-equal () #1=(pydecl :lexically-visible-vars)))
   (run-code-test "a = 3; TEST" (test-equal () #1#))
   (run-code-test "TEST; a = 3" (test-equal () #1#))
@@ -253,6 +259,7 @@ class C(D):
   )
 
 (defmethod test-comp-decl ((kind (eql :lexically-declared-globals)))
+  (declare (ignorable kind))
   (run-code-test "TEST"             (test-equal () #1=(pydecl :lexically-declared-globals)))
   (run-code-test "a = 3; TEST"      (test-equal () #1#))
   (run-code-test "
@@ -266,6 +273,7 @@ def f():
   b = x"		 (test-true (seq-equal '({b}) #1#))))
 
 (defmethod test-comp-decl ((kind (eql :inside-function-p)))
+  (declare (ignorable kind))
   (run-code-test "TEST"             (test-false #1=(let ((ctx-stack  (pydecl :context-type-stack)))
                                                      (format t "[ctx-stack = ~A]" ctx-stack)
                                                      (member :function ctx-stack))))

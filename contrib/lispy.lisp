@@ -86,7 +86,9 @@ Ends by signalling one of: %PARSE.FINISHED, %PARSE.SWITCH-LANGUAGE, %PARSE.UNEXP
 
 (defvar *lisp-readtable*)
 
-(defmethod read-language-forms ((language (eql :python)) (string string) (start-ix integer) &key &allow-other-keys)
+(defmethod read-language-forms ((language (eql :python)) (string string) (start-ix integer)
+                                &key &allow-other-keys)
+  (declare (ignorable language))
   (flet ((valid-lisp-form-here-p (start-ix)
            (ignore-errors (let ((*readtable* *lisp-readtable*))
                             (read-from-string string t nil :start start-ix)
@@ -136,9 +138,10 @@ Ends by signalling one of: %PARSE.FINISHED, %PARSE.SWITCH-LANGUAGE, %PARSE.UNEXP
         (error '%parse.switch-language :language :python :start-ix start-ix :reason c))))
   (error '%parse.finished :language :python))
 
-(defmethod read-language-forms ((language (eql :lisp)) (string string) (start-ix integer) &key lisp-readtable &allow-other-keys)
+(defmethod read-language-forms ((language (eql :lisp)) (string string) (start-ix integer)
+                                &key lisp-readtable &allow-other-keys)
   ;; XXX introduce Lisp package parameter? bind read-eval?
-  (declare (ignorable lisp-readtable))
+  (declare (ignorable language lisp-readtable))
   (handler-case
       (let ((*readtable* lisp-readtable)) ;; avoid infinite recursion
         (loop
@@ -506,6 +509,7 @@ It must be delimited at the right by a space, closing bracket, or EOF."
   ;; A toplevel command like :exit 
   ;; XXX args not supported yet; should only be done when source is interactive input.
   ;; `(tpl:do-command ,form))
+  (declare (ignorable language))
   (let ((*readtable* *lisp-standard-readtable*)) ;; so compile-file etc don't go through mixed mode
     (unwind-protect 
         (eval form)
@@ -521,6 +525,7 @@ It must be delimited at the right by a space, closing bracket, or EOF."
   "Namespace corresponding to *LISPY-MODULE-GLOBALS*")
 
 (defmethod eval-language-form ((language (eql :python)) form)
+  (declare (ignorable language))
   (when (match-p form '([module-stmt] ([suite-stmt] (([identifier-expr] {None})))))
     (return-from eval-language-form (values)))
   (with-sane-debugging ("Error occured in Python/Lisp input mode, while handling a Python form.")
