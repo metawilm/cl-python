@@ -173,18 +173,18 @@
      (%cps-convert ,ast (lambda (,value) ,@body) :nil-allowed ,nil-allowed)))
 
 (defmacro make-generator-state (suite &key sub-generator &environment e)
+  (assert (match-p suite '([suite-stmt] ?stmts)))
   `(let ((%stored-k-cons (cons nil nil)))
      ,(%store-continuation `(lambda (&optional x)
                               (parse-generator-input x :initial t)
                               (with-pydecl ((:context-type-stack
                                              ,(cons :function (get-pydecl :context-type-stack e)))
                                             (:in-sub-generator ,sub-generator))
-                                ,(with-matching (suite ([suite-stmt] ?stmts))
-                                   `(with-cps-conversion (,suite val)
-                                      (declare (ignore val))
-                                      ,(if sub-generator
-                                           `(yield-value :implicit-return)
-                                         (%mark-generator-finished)))))))
+                                (with-cps-conversion (,suite val)
+                                  (declare (ignore val))
+                                  ,(if sub-generator
+                                       `(yield-value :implicit-return)
+                                     (%mark-generator-finished))))))
      %stored-k-cons))
 
 (defmacro make-generator (suite &key sub-generator)
