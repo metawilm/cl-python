@@ -725,7 +725,7 @@ otherwise work well.")
   (when (eq attr '{__dict__})
     (when (typep val 'symbol-hash-table)
       (setf val (sht-ht val)))
-    (check-type val hash-table)
+    (check-type val hash-table) ;; XXX or custom ht
     (let ((ht (make-eq-hash-table)))
       (loop for key being the hash-key in val
           using (hash-value value)
@@ -1479,7 +1479,7 @@ but the latter two classes are not in CPython.")
         (setf bin-file-write-date (file-write-date bin-pathname))))
     (when (string= name "__main__")
       (setf name (pathname-name (or src-pathname bin-pathname)))))
-  (check-type (module-ht m) hash-table)
+  (check-type (module-ht m) hash-table) ;; XXX or custom ht
   (setf (gethash m *all-modules*) t))
 
 (defun find-module-fuzzy (x)
@@ -2181,101 +2181,110 @@ But if RELATIVE-TO package name is given, result may contains dots."
                          items)))))
 
 (def-py-method dict.__delitem__ (dict k)
-  (or #-clpython-custom-hash-table-fallback (remhash k dict)
-      #+clpython-custom-hash-table-fallback (clpython.custom-hash-table:remhash k dict)
-      (py-raise '{KeyError} "Dict ~A has no such key: ~A." dict k)))
+  (with-py-dict 
+      (or (remhash k dict)
+          (py-raise '{KeyError} "Dict ~A has no such key: ~A." dict k))))
 
 (def-py-method dict.__eq__ (dict1 dict2)
-  #-clpython-custom-hash-table-fallback
-  (py-bool (cond ((eq dict1 dict2)
-                  t)
-                 ((not (hash-table-p dict2))
-                  nil)
-                 ((/= (hash-table-count dict1) (hash-table-count dict2))
-                  nil)
-                 (t 
-                  (loop for k being each hash-key in dict1
-                      using (hash-value v)
-                      always (py-==->lisp-val (gethash k dict2) v)))))
-  #+clpython-custom-hash-table-fallback
-  (py-bool (cond ((eq dict1 dict2)
-                  t)
-                 ((not (clpython.custom-hash-table:custom-hash-table-p dict2)) 
-                  nil)
-                 ((/= (clpython.custom-hash-table:hash-table-count dict1)
-                      (clpython.custom-hash-table:hash-table-count dict2))
-                  nil)
-                 (t 
-                  (with-keys-values (k v dict1 t)
-                    (unless (py-==->lisp-val (clpython.custom-hash-table:gethash k dict2) v)
-                      (return-from with-keys-values nil)))))))
+  (with-py-dict 
+      (py-bool (cond ((eq dict1 dict2)
+                      t)
+                     ((not (hash-table-p dict2))
+                      nil)
+                     ((/= (hash-table-count dict1) (hash-table-count dict2))
+                      nil)
+                     (t 
+                      (with-hash-table-iterator (next dict1)
+                        (loop named iter
+                            do (multiple-value-bind (entry-p k v) (next)
+                                 (cond ((not entry-p)
+                                        (return-from iter t))
+                                       ((not (py-==->lisp-val (gethash k dict2) v))
+                                        (return-from iter nil)))))))))))
 
 (def-py-method dict.__getitem__ (dict k)
   "KEY may be symbol (converted to string)"
-  (or (gethash k dict)
-      (py-raise '{KeyError} "Dict ~A has no such key: ~A." dict k)))
+  (with-py-dict
+      (or (gethash k dict)
+          (py-raise '{KeyError} "Dict ~A has no such key: ~A." dict k))))
 
 (def-py-method dict.__iter__ (dict)
   (dict.iterkeys dict))
 
 (def-py-method dict.__len__ (dict)
-  (hash-table-count dict))
+  (with-py-dict
+      (hash-table-count dict)))
 
 (def-py-method dict.__nonzero__ (dict)
-  (py-bool (plusp (hash-table-count dict))))
+  (with-py-dict
+      (py-bool (plusp (hash-table-count dict)))))
 
 (def-py-method dict.__repr__ (x)
-  (with-output-to-string (s)
-    (write-char #\{ s)
-    (loop with hc = (hash-table-count x)
-        for key being each hash-key in x
-        using (hash-value val)
-        for i from 1
-        do (repr-fmt s key)
-           (write-string ": " s)
-           (repr-fmt s val)
-           (unless (= i hc)
-             (write-string ", " s)))
-    (write-char #\} s)))
+  (with-py-dict
+      (with-output-to-string (s)
+        (write-char #\{ s)
+        (with-hash-table-iterator (next x)
+          (loop named iter
+              with first = t
+              do (multiple-value-bind (entry-p key val) (next)
+                   (cond ((not entry-p) (return-from iter))
+                         (t (cond (first (setf first nil))
+                                  (t (write-string ", " s)))
+                            (repr-fmt s key)
+                            (write-string ": " s)
+                            (repr-fmt s val))))))
+        (write-char #\} s))))
 
 (def-py-method dict.__setitem__ (x key val)
-  (setf (gethash key x) val))
+  (with-py-dict
+      (setf (gethash key x) val)))
 
 (def-py-method dict.clear (d^)
-  (clrhash d))
+  (with-py-dict (clrhash d)))
 
 (def-py-method dict.copy (d1)
-  (loop with d2 = (make-py-hash-table)
-      for k being each hash-key in d1
-      using (hash-value v)
-      do (setf (gethash k d2) v)
-      finally (return d2)))
+  (with-hash-table-iterator (next d1)
+    (loop named iter
+        with d2 = (make-py-hash-table)
+        do (multiple-value-bind (entry-p k v) (next)
+             (cond ((not entry-p) (return-from iter d2))
+                   (t (setf (gethash k d2) v)))))))
 
 (def-py-method dict.fromkeys :static (seq &optional (val (load-time-value *the-none*)))
-  (let ((d (make-py-hash-table)))
-    (map-over-object (lambda (key) (setf (gethash key d) val)) seq)
-    d))
+  (with-py-dict
+      (let ((d (make-py-hash-table)))
+        (map-over-object (lambda (key) (setf (gethash key d) val)) seq)
+        d)))
 
 (def-py-method dict.get (x k &optional (default (load-time-value *the-none*)))
-  (or (gethash k x) default))
+  (with-py-dict
+      (or (gethash k x) default)))
       
 (def-py-method dict.has_key (x k)
-  (multiple-value-bind (val presentp)
-      (gethash k x)
-    (declare (ignore val))
-    (py-bool presentp)))
+  (with-py-dict
+      (multiple-value-bind (val presentp)
+          (gethash k x)
+        (declare (ignore val))
+        (py-bool presentp))))
 
 (def-py-method dict.items (x)
-  (make-py-list-from-list 
-   (loop for k being each hash-key in x using (hash-value v)
-       collect (make-tuple-from-list (list k v)))))
+  (with-py-dict
+      (with-hash-table-iterator (next x)
+        (loop named iter
+            with tuples
+            do (multiple-value-bind (entry-p k v) (next)
+                 (cond ((not entry-p)
+                        (return-from iter (make-py-list-from-list tuples)))
+                       (t
+                        (push (make-tuple-from-list (list k v)) tuples))))))))
 
 (defparameter *hash-table-iterator-indefinite-extent*
     (checking-reader-conditionals
      #+allegro t
+     #+ecl t
      #+lispworks nil
      #+sbcl t
-     #-(or allegro lispworks sbcl) nil)
+     #-(or allegro ecl lispworks sbcl) nil)
      "Whether the iterator created by WITH-HASH-TABLE-ITERATOR has indefinite extent.
 ANSI states for WITH-HASH-TABLE-ITERATOR:  \"It is unspecified what happens if any
 of the implicit interior state of an iteration is returned outside the dynamic extent
@@ -2288,23 +2297,27 @@ invocation form.\"")
         (make-iterator-from-function
          :func (lambda () (multiple-value-bind (ok key val) (next-fn)
                             (when ok (funcall func key val))))))
-    (let ((vec (loop with vec = (make-array (* 2 (hash-table-count hash-table)))
-                   with i = -1
-                   for key being each hash-key in hash-table
-                   using (hash-value val)
-                   do (setf (svref vec (incf i)) key
-                            (svref vec (incf i)) val)
-                   finally (return vec)))
-          (i 0)
-          (count (* 2 (hash-table-count hash-table))))
-      (make-iterator-from-function
-       :func (lambda ()
-               (when (< i count)
-                 (let ((key (svref vec i))
-                       (val (svref vec (incf i))))
-                   (declare (ignorable key val))
-                   (prog1 (funcall func key val)
-                     (incf i)))))))))
+    (progn
+      #+custom-hash-table-fallback ;; from library CL-CUSTOM-HASH-TABLE
+      (error "This LOOP is not supported by CUSTOM-HASH-TABLE-FALLBACK") 
+      (let ((vec 
+             (loop with vec = (make-array (* 2 (hash-table-count hash-table)))
+                 with i = -1
+                 for key being each hash-key in hash-table
+                 using (hash-value val)
+                 do (setf (svref vec (incf i)) key
+                          (svref vec (incf i)) val)
+                 finally (return vec)))
+            (i 0)
+            (count (* 2 (hash-table-count hash-table))))
+        (make-iterator-from-function
+         :func (lambda ()
+                 (when (< i count)
+                   (let ((key (svref vec i))
+                         (val (svref vec (incf i))))
+                     (declare (ignorable key val))
+                     (prog1 (funcall func key val)
+                       (incf i))))))))))
 
 (def-py-method dict.iteritems (x)
   (make-dict-iterator x (lambda (k v) (make-tuple-from-list (list k v)))))
@@ -2316,44 +2329,61 @@ invocation form.\"")
   (make-dict-iterator x (lambda (k v) (declare (ignore k)) v)))
 
 (def-py-method dict.keys (x)
-  (make-py-list-from-list (loop for key being each hash-key in x collect key)))
+  (with-py-dict
+      (with-hash-table-iterator (next x)
+        (loop with keys
+            do (multiple-value-bind (entry-p k v) (next)
+                 (declare (ignore v))
+                 (cond ((not entry-p)
+                        (return-from dict.keys (make-py-list-from-list keys)))
+                       (t
+                        (push k keys))))))))
 
 (def-py-method dict.pop (x key &optional default)
-  (let ((val (gethash key x)))
-    (if val
-        (prog1 val (remhash key x))
-      (or default (py-raise '{KeyError} "Dict has no key `~A' to pop()." key)))))
+  (with-py-dict
+      (let ((val (gethash key x)))
+        (if val
+            (prog1 val (remhash key x))
+          (or default (py-raise '{KeyError} "Dict has no key `~A' to pop()." key))))))
 
 (def-py-method dict.popitem (x)
-  (loop for k being each hash-key in x
-      using (hash-value v)
-      do (remhash k x)
-         (return (make-tuple-from-list (list k v)))
-      finally (py-raise '{KeyError} "Dict is empty, can not popitem().")))
+  (with-py-dict
+      (maphash (lambda (k v)
+                 (remhash k x)
+                 (return-from dict.popitem 
+                   (make-tuple-from-list (list k v))))
+               x))
+  (py-raise '{KeyError} "Dict is empty, can not popitem()."))
 
 (def-py-method dict.setdefault (x key &optional default)
-  (or (gethash key x)
-      (setf (gethash key x) default)))
+  (with-py-dict
+      (or (gethash key x)
+          (setf (gethash key x) default))))
 
 (def-py-method dict.update (x y &rest kv-items)
-  (when (or (keywordp y) (and kv-items (not (keywordp (car kv-items)))))
-    (py-raise '{ValueError} "Invalid arguments to dict.update: expected (x, k=v, k2=v2, ..)."))
-  (if (hash-table-p y)
-      (maphash (lambda (k v) (setf (gethash k x) v)) y)
-    (loop for entry in (py-iterate->lisp-list y)
-        for subentries = (py-iterate->lisp-list entry)
-        do (unless (= (length subentries) 2)
-             (py-raise '{ValueError} "Invalid update subentry: expected (k, v), got: ~A." (py-repr-string subentries)))
-           (destructuring-bind (key val)
-               subentries
-             (setf (gethash key x) val))))
-  (assert (evenp (length kv-items)))
-  (loop for (key val) on kv-items by #'cddr
-      do (setf (gethash (symbol-name key) x) val))
+  (with-py-dict
+      (when (or (keywordp y) (and kv-items (not (keywordp (car kv-items)))))
+        (py-raise '{ValueError}
+                  "Invalid arguments to dict.update: expected (x, k=v, k2=v2, ..)."))
+    (if (hash-table-p y)
+        (maphash (lambda (k v) (setf (gethash k x) v)) y)
+      (loop for entry in (py-iterate->lisp-list y)
+          for subentries = (py-iterate->lisp-list entry)
+          do (unless (= (length subentries) 2)
+               (py-raise '{ValueError} "Invalid update subentry: expected (k, v), got: ~A."
+                         (py-repr-string subentries)))
+             (destructuring-bind (key val)
+                 subentries
+               (setf (gethash key x) val))))
+    (assert (evenp (length kv-items)))
+    (loop for (key val) on kv-items by #'cddr
+        do (setf (gethash (symbol-name key) x) val)))
   *the-none*)
    
 (def-py-method dict.values (x)
-  (make-py-list-from-list (loop for v being the hash-value in x collect v)))
+  ;; XXX should err in ECL
+  (with-py-dict
+      (make-py-list-from-list (loop for v being the hash-value in x collect v))))
 
 ;; Dicts used for namespaces
 
@@ -2365,10 +2395,10 @@ invocation form.\"")
 ;; Is there a reason to make the mapping unique?
 
 (defun make-symbol-hash-table (ht)
-  (check-type ht hash-table)
-  (or (gethash ht *ht->symbol-hash-table*)
-      (setf (gethash ht *ht->symbol-hash-table*)
-        (make-instance 'symbol-hash-table :hash-table ht))))
+  (with-py-dict 
+      (or (gethash ht *ht->symbol-hash-table*)
+          (setf (gethash ht *ht->symbol-hash-table*)
+            (make-instance 'symbol-hash-table :hash-table ht)))))
 
 (def-py-method symbol-hash-table.__setitem__ (d key val)
   (let ((key.sym (py-string-val->symbol key)))
@@ -3200,6 +3230,10 @@ invocation form.\"")
   (:method ((x vector))  (declare (ignorable x)) (ltv-find-class 'py-list   ))
   (:method ((x list))    (cond ((null x)
                                 (break "PY-CLASS-OF of NIL"))
+                               #+ecl
+                               ((eq (car x) :custom-hash-table)
+                                ;; XXX ugly: cl-custom-hash-table impl detail
+                                (ltv-find-class 'dict))
                                ((and (listp (car x)) (symbolp (caar x)))
                                 (ltv-find-class 'py-alist))
                                (t

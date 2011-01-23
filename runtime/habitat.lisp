@@ -97,14 +97,16 @@
   (check-type habitat habitat)
   (remove-loaded-module module habitat)
   (push module (habitat-loaded-mods habitat))
-  (setf (gethash (module-name module) (get-sys.modules)) module))
+  (with-py-dict
+      (setf (gethash (module-name module) (get-sys.modules)) module)))
 
 (defun remove-loaded-module (module habitat)
   (setf (habitat-loaded-mods habitat)
     (remove (module-bin-pathname module) (habitat-loaded-mods habitat)
             :key #'module-bin-pathname
             :test #'pathname-considered-equal))
-  (remhash (module-name module) (get-sys.modules)))
+  (with-py-dict
+      (remhash (module-name module) (get-sys.modules))))
 
 (defun pathname-considered-equal (x y)
   (check-type x pathname)

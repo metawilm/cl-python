@@ -164,7 +164,7 @@ ARGS are the command-line args, available as `sys.argv'; can be a string (which 
         (let ((*habitat* (or habitat (make-habitat))))
           (unless module-globals
             (setf module-globals (make-eq-hash-table)))
-          (check-type module-globals (or hash-table package))
+          (check-type module-globals (or hash-table package #+ecl cl-custom-hash-table::custom-hash-table))
           (when args-p
             (setf (habitat-cmd-line-args *habitat*) args))
           (flet ((run ()
@@ -871,10 +871,11 @@ an assigment statement. This changes at least the returned 'store' form.")
        ,del-form)))
 
 (defun init-dict (vk-list)
-  (let ((dict (make-py-hash-table)))
-    (loop for (v k) on vk-list by #'cddr
-        do (setf (gethash k dict) v))
-    dict))
+  (with-py-dict 
+      (let ((dict (make-py-hash-table)))
+        (loop for (v k) on vk-list by #'cddr
+            do (setf (gethash k dict) v))
+        dict)))
 
 (defmacro [dict-expr] (vk-list)
   (with-gensyms (list)
@@ -1417,7 +1418,7 @@ LOCALS shares share tail structure with input arg locals."
   (multiple-value-bind (module module-new-p)
       (ensure-module :src-pathname src-pathname :bin-pathname bin-pathname :name current-module-name)
     (let ((%module-globals (module-ht module)))
-      (check-type %module-globals hash-table)
+      (check-type %module-globals (or hash-table #+ecl cl-custom-hash-table::custom-hash-table))
       (flet ((init-module (&optional (module-globals %module-globals))
                (init-module-namespace module-globals current-module-name))
              (run-top-level-forms (&optional (module-globals %module-globals))
@@ -1452,7 +1453,7 @@ LOCALS shares share tail structure with input arg locals."
                                    :run-tlv t
                                    :globals %module-globals))
           (continue-loading (&key (init t) (run-tlv t) (globals %module-globals))
-            (check-type globals hash-table)
+            (check-type globals (or hash-table #+ecl cl-custom-hash-table::custom-hash-table))
             (setf %module-globals globals)
             (when init
               (init-module))
@@ -2313,10 +2314,11 @@ Non-negative integer denoting the number of args otherwise."
     ;; Create ** arg
     (when (fa-**-arg fa)
       (setf (svref arg-val-vec (1+ (the fixnum (fa-num-pos-key-args fa))))
-        (loop with d = (make-py-hash-table)
-            for (k . v) in for-** 
-            do (setf (gethash (symbol-name k) d) v)
-            finally (return d)))))
+        (with-py-dict
+            (loop with d = (make-py-hash-table)
+                for (k . v) in for-** 
+                do (setf (gethash (symbol-name k) d) v)
+                finally (return d))))))
   (values))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;

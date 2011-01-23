@@ -306,34 +306,36 @@
 (register-feature :clpython-optimize-namespaces *optimize-namespaces*)
 
 (defmethod ns.read-form ((ns hash-table-ns) (s symbol))
-  `(or #+clpython-optimize-namespaces
-       #1=(get ',s ,(ns.dict-form ns))
-       (let ((val (gethash ',s ,(ns.dict-form ns))))
-         #+clpython-optimize-namespaces
-         (when val
-           (setf #1# val))
-         val)
-       ,(when (ns.parent ns)
-          (ns.read-form (ns.parent ns) s))))
+  `(with-py-dict
+       (or #+clpython-optimize-namespaces
+           #1=(get ',s ,(ns.dict-form ns))
+           (let ((val (gethash ',s ,(ns.dict-form ns))))
+             #+clpython-optimize-namespaces
+             (when val
+               (setf #1# val))
+             val)
+           ,(when (ns.parent ns)
+              (ns.read-form (ns.parent ns) s)))))
 
 (defmethod ns.write-form ((ns hash-table-ns) (s symbol) val-form)
-  #+clpython-optimize-namespaces
-  `(let ((val ,val-form))
-     (setf (get ',s ,(ns.dict-form ns)) val
-           (gethash ',s ,(ns.dict-form ns)) val))
-  #-clpython-optimize-namespaces
-  `(setf (gethash ',s ,(ns.dict-form ns)) ,val-form))
+  `(with-py-dict
+       #+clpython-optimize-namespaces (let ((val ,val-form))
+                                        (setf (get ',s ,(ns.dict-form ns)) val
+                                              (gethash ',s ,(ns.dict-form ns)) val))
+       #-clpython-optimize-namespaces (setf (gethash ',s ,(ns.dict-form ns)) ,val-form)))
 
 (defmethod ns.write-runtime-form ((ns hash-table-ns) name-form val-form)
-  `(let* ((name ,name-form)
-          (val ,val-form))
-     (setf #+clpython-optimize-namespaces #+clpython-optimize-namespaces
-           (get name ,(ns.dict-form ns)) val
-           (gethash name ,(ns.dict-form ns)) val)))
+  `(with-py-dict
+       (let* ((name ,name-form)
+              (val ,val-form))
+         (setf #+clpython-optimize-namespaces #+clpython-optimize-namespaces
+               (get name ,(ns.dict-form ns)) val
+               (gethash name ,(ns.dict-form ns)) val))))
        
 (defmethod ns.del-form ((ns hash-table-ns) (s symbol))
   `(progn #+clpython-optimize-namespaces (remprop ',s ,(ns.dict-form ns))
-          (remhash ',s ,(ns.dict-form ns))))
+          (with-py-dict
+              (remhash ',s ,(ns.dict-form ns)))))
 
 (defmethod ns.locals-form ((ns hash-table-ns))
   (ns.dict-form ns))

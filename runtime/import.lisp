@@ -324,7 +324,7 @@ Otherwise raises ImportError."
         ;; XXX this should not happen for e.g. module "dist", as that is in either "distutils.dist" or "setuptools.dist".
         ;; Need to figure out the exact rule; use this dot check for now.
         (unless force-reload
-          (whereas ((mod (gethash dotted-name (find-symbol-value '#:|modules| :clpython.module.sys))))
+          (whereas ((mod (with-py-dict (gethash dotted-name (find-symbol-value '#:|modules| :clpython.module.sys)))))
             (return-from py-import (values mod :sys.modules))))
            
         ;; In case of a dotted import ("import a.b.c"), recursively import the parent "a.b"
@@ -501,5 +501,6 @@ Otherwise raises ImportError."
     (check-type clpython::*all-modules* hash-table)
     (clrhash clpython::*all-modules*))
   (whereas ((ht (symbol-value (find-symbol (symbol-name '#:|modules|) :clpython.module.sys))))
-    (check-type ht hash-table)
-    (clrhash ht)))
+    (check-type ht (or hash-table #+ecl cl-custom-hash-table::custom-hash-table))
+    (with-py-dict
+        (clrhash ht))))

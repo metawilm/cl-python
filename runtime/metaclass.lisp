@@ -120,6 +120,10 @@
    (defun make-py-hash-table ()
      (make-hash-table :test 'py-==->lisp-val))))
 
+(defmacro with-py-dict (&body body)
+  #+ecl `(cl-custom-hash-table:with-custom-hash-table ,@body)
+  #-ecl `(progn ,@body))
+
 ;; None and NotImplemented are here, so that other modules like classes can use the compiler macros.
 
 (defclass py-none (object) () (:metaclass py-type))

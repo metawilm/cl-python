@@ -354,7 +354,8 @@ former requires that this form is executed within RECEIVE-YIELDED-VALUE."
                        ;; First 1st val is evaluated, then 1st key, then 2nd, etc.
                        `(with-cps-conversion (,v ,val)
                           (with-cps-conversion (,k ,key)
-                            (setf (gethash ,key .dict) ,val)
+                            (with-py-dict
+                                (setf (gethash ,key .dict) ,val))
                             ,res)))))
     `(let ((.dict (make-py-hash-table)))
        ,res)))
