@@ -2150,7 +2150,6 @@ But if RELATIVE-TO package name is given, result may contains dots."
       (make-instance cls :lisp-object ht))))
 
 (def-py-method dict.__init__ (x &rest kwargs)
-  #+(or)(declare (dynamic-extent kwargs)) ;; ends up in wrong place
   (when kwargs
     (if (cadr kwargs)
         (loop with setitem-meth = 
