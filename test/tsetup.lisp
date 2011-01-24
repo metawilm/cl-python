@@ -27,6 +27,7 @@
   ;; Prevent warnings and compiler notes from failing a test.
   `(handler-bind ((warning #'muffle-warning)
                   #+sbcl (sb-int:simple-compiler-note #'muffle-warning)
+                  #+ecl (c:compiler-note #'muffle-warning)
                   ;; Allegro's excl::compiler-note does not come with a muffle restart, unfortunately.
                   ;; e.g. "Closure .. will be stack allocated." interferes with test-no-error...
                   )
