@@ -3873,6 +3873,13 @@ fixed id during the object's lifetime."
    "Compare two objects, of which at least one is a user-defined-object.
 Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
   
+  (:method ((x class) (y class))
+           ;; Added, perhaps not in CPython. Invalid for sufficiently hairy metaclasses.
+           ;; Without this method, the method (x t) (y t) tries to compare IDs
+           (cond ((eq x y) 0)
+                 ((string< (class-name x) (class-name y)) -1)
+                 (t 1)))
+  
   (:method ((x t) (y t))
 	   #+(or)(warn "cmp ~S ~S" x y)
 	   ;; This function is used in comparisons like <, <=, ==.
