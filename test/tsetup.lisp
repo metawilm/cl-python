@@ -82,7 +82,9 @@ seems to give implementations some freedom here. (In practice: Allegro=NIL, LisW
   `(flet ((run-body () ,@body))
      (if *test-active*
 	 (progn (format t "~%[subtest: ~A]~%" ,(getf options :name))
-		(run-body))
+		(unwind-protect 
+                    (run-body)
+                  (format t "~%[end of subtest: ~A]~%" ,(getf options :name))))
        (let ((*test-active* t)
              (*announce-test* t))
 	 (with-tests ,options (run-body))))))
