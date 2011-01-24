@@ -88,6 +88,7 @@ to retrieve value for :key1."
     `(symbol-macrolet ((,state-name
                            ,(nconc (copy-list pairs)
                              (get-decl-state decl-name state-name env))))
+       #-ecl ;; work around compiler bug
        (declare (ignorable ,state-name))
        ,@body)))
 
