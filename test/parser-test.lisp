@@ -292,15 +292,17 @@ if 1 > \\
     (test-error (ps "\\1" t) :condition-type '{SyntaxError})
     ;; unicode
     
+    #-ecl
     (test-equal (ps (concatenate 'string "u'\\N{" #1="Latin Small Letter Y With Acute" "}'") t)
                 `([literal-expr] :string
                                  ,(coerce (list (or (clpython.parser::lisp-char-by-python-name #1#)
                                                     (error "Unicode char ~A not available in this Lisp?" #1#)))
                                           'string)))
-    #-lispworks ;; Lispworks has no names for chars > 255
+    #-(or ecl lispworks) ;; Lispworks has no names for chars > 255
     (test-equal (ps "u'\\N{latin capital letter l with stroke}'" t)
                 `([literal-expr] :string
                                  ,(coerce (list (name-char "latin_capital_letter_l_with_stroke")) 'string)))
+    #-ecl
     (test-equal (ps "u'\\u0141 \\U00000141'" t)
                 `([literal-expr] :string
                                  ,(coerce (list (code-char #x0141)
@@ -327,6 +329,7 @@ if 1 > \\
     (test-error (ps "'\\xG'" t) :condition-type '{SyntaxError})
     
     ;; octal code, non-escaping backslash
+    #-ecl
     (test-equal (ps "'\\5019\\z'" t)
                 `([literal-expr] :string ,(coerce (list (code-char #x0141) #\9 #\\ #\z)
                                                   clpython.parser::+unicode-capable-string-type+)))
