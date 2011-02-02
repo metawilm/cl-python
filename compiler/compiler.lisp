@@ -163,7 +163,7 @@ ARGS are the command-line args, available as `sys.argv'; can be a string (which 
         (assert (and module-init-func module-run-tlv-func) () "Unexpected module import behaviour")
         (let ((*habitat* (or habitat (make-habitat))))
           (unless module-globals
-            (setf module-globals (make-eq-hash-table)))
+            (setf module-globals (habitat-module-globals *habitat*)))
           (check-type module-globals (or hash-table package #+ecl cl-custom-hash-table::custom-hash-table))
           (when args-p
             (setf (habitat-cmd-line-args *habitat*) args))
