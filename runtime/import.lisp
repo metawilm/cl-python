@@ -10,6 +10,9 @@
 (in-package :clpython)
 (in-syntax *user-readtable*)
 
+(defvar *compile-for-import* nil
+  "Whether source files are compiled before being run")
+    
 (defvar *py-compiled-file-type* "FASL"
   "File types of compiled Python files, in :common pathname case")
 
@@ -125,7 +128,7 @@ As for case: both MODNAME's own name its upper-case variant are tried."
                                      (string (package-name :clpython.module)) "." v))))
         (return-from lisp-package-as-py-module pkg)))))
 
-(defun find-py-file (name search-paths)
+(defun find-py-file (name search-paths &key (allow-bin t))
   "Finds for source or fasl file in SEARCH-PATHS, returning earliest match.
 Returns values KIND SRC-PATH BIN-PATH FIND-PATH, or NIL if not found,
 with KIND one of :module, :package
@@ -144,9 +147,9 @@ with KIND one of :module, :package
     
     (loop for path in search-paths
         for src-path = (find-if #'probe-src (source-file-names :module name path))
-        for bin-path = (find-if #'probe-bin (list (compiled-file-name :module name path)))
+        for bin-path = (and allow-bin (find-if #'probe-bin (list (compiled-file-name :module name path))))
         for pkg-src-path = (find-if #'probe-src (source-file-names :package name path))
-        for pkg-bin-path = (find-if #'probe-bin (list (compiled-file-name :package name path)))
+        for pkg-bin-path = (and allow-bin (find-if #'probe-bin (list (compiled-file-name :package name path))))
 			 
         if (or src-path bin-path)
         return (values :module
@@ -174,6 +177,28 @@ Caller is responsible for deciding if recompiling is really necessary."
   (compile-py-source-file :filename filename :mod-name mod-name :output-file output-file)
   (cached-probe-file output-file t))
 
+(defun %load-source-python-file (lisp-filename &key (mod-name (error ":mod-name required"))
+                                                   (habitat (error "habitat required")))
+  (check-type lisp-filename pathname)
+  (check-type mod-name (or symbol string))
+
+  (let #1=(module new-module-p success source-func source)
+       (unwind-protect
+           (progn 
+             (multiple-value-setq #1#
+               (load-py-fasl-file :filename lisp-filename
+                                  :pre-import-hook (lambda (module) (add-loaded-module module habitat))))
+             (module-import-post . #1#))
+         
+         ;; clean-up:
+         (unless success
+           (when new-module-p
+             ;; It's a hack that there are two places:
+             (remove-loaded-module module habitat)
+             (remhash module *all-modules*))))
+       (setf success t)
+       module))
+
 (defun %load-compiled-python-file (bin-filename
                                    &key (mod-name (error ":mod-name required"))
                                         (context-mod-name mod-name)
@@ -196,7 +221,7 @@ LOAD failed and was aborted by the user)."
        (unwind-protect
            (progn 
              (multiple-value-setq #1#
-               (load-py-fasl-file :bin-filename bin-filename
+               (load-py-fasl-file :filename bin-filename
                                   :pre-import-hook (lambda (module) (add-loaded-module module habitat))))
              (module-import-post . #1#))
          
@@ -364,7 +389,7 @@ Otherwise raises ImportError."
       
           ;; Find the source or fasl file somewhere in the collection of search paths
           (multiple-value-bind (kind src-file bin-file find-path)
-              (find-py-file just-mod-name find-paths)
+              (find-py-file just-mod-name find-paths :allow-bin *compile-for-import*)
             (unless kind
               (when if-not-found-p
                 (return-from py-import (values if-not-found-value :not-found-value)))
@@ -384,7 +409,9 @@ Otherwise raises ImportError."
                         within-mod-path))
         
             (assert (member kind '(:module :package)))
-            (assert (or src-file bin-file))
+            (if *compile-for-import*
+                (assert (or src-file bin-file))
+              (assert src-file))
             (assert find-path)
         
             ;; If we have a source file, then recompile fasl if outdated.
@@ -400,17 +427,25 @@ Otherwise raises ImportError."
                              (file-write-date src-file)))
                   ;; This would be a good place for a "try recompiling" restart,
                   ;; but implementations tend to provide that already.
-                  (%compile-py-file src-file
-                                    :mod-name (if (and within-mod-name
-                                                       (not (string= within-mod-name "__main__")))
-                                                  (concatenate 'string within-mod-name "." dotted-name)
-                                                dotted-name)
-                                    :output-file bin-file)
-                  (setf (gethash bin-file *import-recompiled-files*) t))))
-        
-            ;; Now we have an up-to-date fasl file.
-            (assert (and bin-file (cached-probe-file bin-file t)))
-            (when src-file (assert (>= (file-write-date bin-file) (file-write-date src-file))))
+                  (cond (*compile-for-import*
+                         (%compile-py-file src-file
+                                           :mod-name #100=(if (and within-mod-name
+                                                                   (not (string= within-mod-name "__main__")))
+                                                              (concatenate 'string within-mod-name "." dotted-name)
+                                                            dotted-name)
+                                           :output-file bin-file)
+                         (setf (gethash bin-file *import-recompiled-files*) t))
+                        (t
+                         (setf bin-file (pathname (concatenate 'string (namestring src-file) ".lisp")))
+                         (format t ";; Parsing ~S into ~S~%" src-file bin-file)
+                         (compile-py-source-file-to-lisp-source :filename src-file 
+                                                                :output-file bin-file))))))
+            
+            (when *compile-for-import*
+              ;; Now we have an up-to-date fasl file.
+              (assert (and bin-file (cached-probe-file bin-file t)))
+              (when src-file
+                (assert (>= (file-write-date bin-file) (file-write-date src-file)))))
         
             ;; If current fasl file was already imported, then return its module.
             (unless force-reload
@@ -462,9 +497,14 @@ Otherwise raises ImportError."
                                        (lambda (s) (format s "Recompile and re-import module `~A' ~
                                                               from file ~A" dotted-name src-file))))
                     (setf new-module
-                      (%load-compiled-python-file bin-file
-                                                  :mod-name new-mod-dotted-name
-                                                  :habitat habitat)))
+                      (if *compile-for-import*
+                          (%load-compiled-python-file bin-file
+                                                      :mod-name new-mod-dotted-name
+                                                      :habitat habitat)
+                        (let ((*current-module-name* #100#)) ;; used by compiler
+                          (%load-source-python-file bin-file
+                                                    :mod-name new-mod-dotted-name
+                                                    :habitat habitat)))))
                 ;; Cleanup form:
                 (flet ((log-abort (error-p)
                          (let ((args (list "Loading of module `~A' was aborted. ~

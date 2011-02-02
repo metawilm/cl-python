@@ -54,6 +54,18 @@
 (defparameter *current-module-name* *__main__-module-name*
   "The name of the module now being compiled; module.__name__ is set to it.")
 
+(defun compile-py-source-file-to-lisp-source (&key filename output-file)
+  (call-with-python-code-reader
+   `((in-package :clpython))
+   (lambda ()
+     (let (#+ecl (c::*debug-compiler* t))
+       (with-open-file (in filename :direction :input)
+         (with-open-file (out output-file :direction :output :element-type 'character :if-exists :supersede)
+           (loop for form = (read in nil 'eof)
+               until (eq form 'eof)
+               do (write form :stream out)
+                  (write-char #\Newline out))))))))
+
 (defun compile-py-source-file (&key filename mod-name output-file)
   (assert (and filename mod-name output-file))
   (let ((*current-module-name* mod-name))  ;; used by compiler
@@ -85,14 +97,14 @@
               (do-compile))
         (do-compile)))))
 
-(defun load-py-fasl-file (&key bin-filename 
-                               pre-import-hook)
+(defun load-py-fasl-file (&key filename pre-import-hook)
   "Loads given compiled Python file.
+FILENAME can actually be either source or fasl file.
 Returns MODULE, NEW-MODULE-P, SOURCE-FUNC, SOURCE
 or NIL on error (e.g. when the underlying LOAD failed and was aborted by the user).
 
 Callers can intercept the condition MODULE-IMPORT-PRE to override default loading behaviour."
-  (assert (and bin-filename))
+  (assert filename)
   (let #1=(module new-module-p source-func source)
          (handler-bind ((module-import-pre
                          (lambda (c)
@@ -103,10 +115,11 @@ Callers can intercept the condition MODULE-IMPORT-PRE to override default loadin
                              ;; otherwise infinite recursion if two modules import
                              ;; each other.
                              (unless (fasl-matches-compiler-p (mip.compiler-id c))
-                               (whereas ((r (find-restart 'delete-fasl-try-again)))
-                                 (format t "~&;; Recompiling obsolete Python fasl file.~%")
-                                 (invoke-restart r))
-                               (fasl-mismatch-cerror bin-filename))
+                               (when (mip.is-compiled c)
+                                 (whereas ((r (find-restart 'delete-fasl-try-again)))
+                                   (format t "~&;; Recompiling obsolete Python fasl file.~%")
+                                   (invoke-restart r)))
+                               (fasl-mismatch-cerror filename))
                              (setf module (mip.module c)
                                    new-module-p (mip.module-new-p c)
                                    source-func (mip.source-func c)
@@ -115,11 +128,11 @@ Callers can intercept the condition MODULE-IMPORT-PRE to override default loadin
                              (when pre-import-hook
                                (funcall pre-import-hook (mip.module c)))))))
            
-           (with-auto-mode-recompile (:filename bin-filename
+           (with-auto-mode-recompile (:filename filename
                                                 :restart-name delete-fasl-try-again)
              (unless (let (#+lispworks
                            (system:*binary-file-type* (string-downcase *py-compiled-file-type*)))
-                       (load bin-filename))
+                       (load filename))
                ;; Might happen if loading errs and there is a restart that lets LOAD return NIL.
                (return-from load-py-fasl-file nil))))
          (values . #1#)))
@@ -1348,7 +1361,8 @@ LOCALS shares share tail structure with input arg locals."
    (source-func :initarg :source-func :accessor mip.source-func)
    (init-func :initarg :init-func :accessor mip.init-func)
    (run-tlv-func :initarg :run-tlv-func :accessor mip.run-tlv-func)
-   (muffled :initform nil :accessor mip.muffled)))
+   (muffled :initform nil :accessor mip.muffled)
+   (is-compiled :initarg :is-compiled :reader mip.is-compiled)))
 
 (defmethod print-object ((x module-import-pre) stream)
   (print-unreadable-object (x stream :type t)
@@ -1414,7 +1428,8 @@ LOCALS shares share tail structure with input arg locals."
 
 (defun module-init (&key src-pathname bin-pathname current-module-name
                          defun-wrappers source source-func
-                         (compiler-id (error "compiler-id is required")))
+                         (compiler-id (error "compiler-id is required"))
+                         is-compiled)
   (multiple-value-bind (module module-new-p)
       (ensure-module :src-pathname src-pathname :bin-pathname bin-pathname :name current-module-name)
     (let ((%module-globals (module-ht module)))
@@ -1444,7 +1459,8 @@ LOCALS shares share tail structure with input arg locals."
                            :source source
                            :source-func source-func
                            :init-func #'init-module
-                           :run-tlv-func #'run-top-level-forms)
+                           :run-tlv-func #'run-top-level-forms
+                           :is-compiled is-compiled)
                    ;; If not overruled, take the normal loading steps:
                    (unless (fasl-matches-compiler-p compiler-id)
                      (fasl-mismatch-cerror bin-pathname))
@@ -1510,7 +1526,8 @@ LOCALS shares share tail structure with input arg locals."
                         :source ,(when *compile-file-truename*
                                    (slurp-file (derive-pathname *compile-file-truename*)))
                         :source-func ',module-function-name
-                        :compiler-id ,*clpython-compiler-version-id*)) 
+                        :compiler-id ,*clpython-compiler-version-id*
+                        :is-compiled ,(not (null *compile-file-truename*))))
          
          ;; suppress spurious warning about undefined function, by going via symbol-function
          (funcall (symbol-function ',module-function-name))))))
