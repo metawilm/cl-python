@@ -1917,7 +1917,7 @@ finally:
   ;;     We catch errors while the called function parses its args.
   (let* ((items-meth (or (x.class-attr-no-magic.bind **-arg '{items})
 			 (py-raise '{TypeError}
-				   "The ** arg in call must be mapping, ~
+				   "The ** arg in a call must be a mapping, ~
                                    supporting 'items' (got: ~S)" **-arg)))
 	 (items-list (py-iterate->lisp-list (py-call items-meth))))
     (loop with res = ()

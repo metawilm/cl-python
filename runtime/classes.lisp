@@ -82,6 +82,11 @@
 (defun make-writable-attribute (reader writer)
   (make-instance 'py-writable-attribute-method :func reader :writer writer))
 
+(defmethod print-object ((x py-writable-attribute-method) stream)
+  (print-unreadable-object (x stream)
+    (with-slots (func write-func) x
+      (format stream ":func ~S :write-func ~S" func write-func))))
+
 (defclass py-static-method (py-method)
   ()
   (:metaclass py-type))
@@ -2185,6 +2190,11 @@ But if RELATIVE-TO package name is given, result may contains dots."
       (or (remhash k dict)
           (py-raise '{KeyError} "Dict ~A has no such key: ~A." dict k))))
 
+(def-py-method dict.__cmp__ (dict1 dict2)
+  (if (dict.__eq__ dict1 dict2)
+      0
+    -1)) ;; XXX arbitrary: fix later
+
 (def-py-method dict.__eq__ (dict1 dict2)
   (with-py-dict 
       (py-bool (cond ((eq dict1 dict2)
@@ -2293,10 +2303,11 @@ invocation form.\"")
 
 (defun make-dict-iterator (hash-table func)
   (if *hash-table-iterator-indefinite-extent*
-      (with-hash-table-iterator (next-fn hash-table)
-        (make-iterator-from-function
-         :func (lambda () (multiple-value-bind (ok key val) (next-fn)
-                            (when ok (funcall func key val))))))
+      (with-py-dict
+          (with-hash-table-iterator (next-fn hash-table)
+            (make-iterator-from-function
+             :func (lambda () (multiple-value-bind (ok key val) (next-fn)
+                                (when ok (funcall func key val)))))))
     (progn
       #+custom-hash-table-fallback ;; from library CL-CUSTOM-HASH-TABLE
       (error "This LOOP is not supported by CUSTOM-HASH-TABLE-FALLBACK") 
@@ -3228,12 +3239,14 @@ invocation form.\"")
   (:method ((x complex)) (declare (ignorable x)) (ltv-find-class 'py-complex))
   (:method ((x string))  (declare (ignorable x)) (ltv-find-class 'py-string ))
   (:method ((x vector))  (declare (ignorable x)) (ltv-find-class 'py-list   ))
+  
+  #+ecl
+  (:method ((x cl-custom-hash-table:custom-hash-table))
+           (declare (ignorable x))
+           (ltv-find-class 'dict))
+                               
   (:method ((x list))    (cond ((null x)
                                 (break "PY-CLASS-OF of NIL"))
-                               #+ecl
-                               ((eq (car x) :custom-hash-table)
-                                ;; XXX ugly: cl-custom-hash-table impl detail
-                                (ltv-find-class 'dict))
                                ((and (listp (car x)) (symbolp (caar x)))
                                 (ltv-find-class 'py-alist))
                                (t
@@ -3855,16 +3868,19 @@ finished; F will then not be called again."
 		       +the-false+)))
 	  (setf (gethash ',syntax *binary-comparison-funcs-ht*) ',func)))
 
+#+ecl
+(defvar *py-id-entries* (make-weak-key-hash-table))
+
 (defun py-id (x)
   "Return pointer address. This might change during the life time of the object,
 e.g. due to moving by the GC. Python has reference counting, and guarantees a
 fixed id during the object's lifetime."
-  #+ecl (declare (ignore x))
   (checking-reader-conditionals
    #+allegro (excl:lispval-to-address x)
    #+ccl (ccl:%address-of x)
    #+cmu (kernel:get-lisp-obj-address x)
-   #+ecl (error "py-id not implemented yet for ECL")
+   #+ecl (or #1=(gethash x *py-id-entries*)
+             (setf #1# (hash-table-count *py-id-entries*)))
    #+lispworks (system:object-address x)
    #+sbcl (sb-kernel:get-lisp-obj-address x)))
 

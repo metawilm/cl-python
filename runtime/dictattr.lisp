@@ -188,7 +188,7 @@
 ;; fastest.
 
 (defstruct (class-attr (:conc-name ca.))
-  getattribute class-val-dd getattr class-val-non-dd class-val-class is-metaclass)
+  getattribute class-val-dd getattr class-val-non-dd class-val-class is-metaclass debug)
 
 (defparameter *ca-cache* (make-hash-table :test 'equal)
   "Mapping from (CLASS . ATTR) cons to CLASS-ATTR struct.")
@@ -196,9 +196,12 @@
 (defun get-ca (class attr)
   "Wrapper around GET-CA-1 which caches CLASS-ATTR structs as property of the classname symbol."
   (declare (optimize (speed 3) (safety 0) (debug 0)))
+  #+(or)(check-type attr symbol)
   (let* ((cn (class.raw-classname class))
          (plist (symbol-plist cn)))
+    #+(or)(check-type cn symbol)
     (loop 
+      #+(or)(check-type (car plist) symbol)
       (when (eq (pop plist) attr)
         (return-from get-ca (car plist)))
       (setf plist (cdr plist))
@@ -256,7 +259,8 @@ is a Python (meta)class."
                      :class-val-dd (when attr-is-dd attr-val)
                      :class-val-non-dd (when (not attr-is-dd) attr-val)
                      :class-val-class attr-val-class
-                     :is-metaclass (subtypep class 'py-meta-type))))
+                     :is-metaclass (subtypep class 'py-meta-type)
+                     :debug (cons class attr))))
 
 (defun clear-ca-cache (class attr)
   "Remove the cached value for CLASS attribute ATTR."
