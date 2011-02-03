@@ -126,8 +126,8 @@ Value should be a (weak) EQ hash table: (make-weak-key-hash-table :test 'eq).")
              (setf (gethash outcome *python-form->source-location*) loc))
             (existing
              (unless (<= start (getf existing :start) (getf existing :end) end)
-               "Duplicate location for ~A, and new [~A, ~A] does not overlap old [~A, ~A]"
-               outcome start end (getf existing :start) (getf existing :end)))))))
+               (error "Duplicate location for ~A, and new [~A, ~A] does not overlap old [~A, ~A]"
+                      outcome start end (getf existing :start) (getf existing :end))))))))
 
 (defun contour-source-location (terms)
   (when *python-form->source-location*
