@@ -332,6 +332,10 @@ Otherwise raises ImportError."
            (optimize (debug 3)))
   (check-type mod-name-as-list list)
   (check-type habitat habitat)
+  (unless (string= within-mod-name *__main__-module-name*)
+    (assert (eq (null within-mod-path) (null within-mod-name))
+        () "Supply both or neither: within-mod-path=~S within-mod-name=~S eqMain=~S"
+        within-mod-path within-mod-name))
   (loop
     (catch 'py-import-retry
 
@@ -501,7 +505,9 @@ Otherwise raises ImportError."
                           (%load-compiled-python-file bin-file
                                                       :mod-name new-mod-dotted-name
                                                       :habitat habitat)
-                        (let ((*current-module-name* #100#)) ;; used by compiler
+                        (let ((*current-module-name* #100#)  ;; used by compiler
+                              (*compile-file-truename* src-file)) ;; needed for import stmts
+                          (declare (special *current-module-name*))
                           (%load-source-python-file bin-file
                                                     :mod-name new-mod-dotted-name
                                                     :habitat habitat)))))
