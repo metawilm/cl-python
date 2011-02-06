@@ -2191,9 +2191,9 @@ But if RELATIVE-TO package name is given, result may contains dots."
           (py-raise '{KeyError} "Dict ~A has no such key: ~A." dict k))))
 
 (def-py-method dict.__cmp__ (dict1 dict2)
-  (if (dict.__eq__ dict1 dict2)
+  (if (py-val->lisp-bool (dict.__eq__ dict1 dict2))
       0
-    -1)) ;; XXX arbitrary: fix later
+    -1)) ;; XXX -1/+1 now arbitrary: fix later
 
 (def-py-method dict.__eq__ (dict1 dict2)
   (with-py-dict 
