@@ -556,6 +556,9 @@ an assigment statement. This changes at least the returned 'store' form.")
     (exec-stmt-check-ast code-string ast allowed-stmts)
     (exec-stmt-ast ast globals locals)))
 
+#-ecl
+;; Test case "x = 3; exec 'assert x == 3'" goes wrong:
+;; HANDLE-PARSER-CONDITION called for NEXT-EOF-FAKE-AFTER-TOPLEVEL-FORM with garbled arguments.
 (define-compiler-macro exec-stmt-string (&whole whole code-string globals locals allowed-stmts)
   (assert (or (eq allowed-stmts t)
               (and (listp allowed-stmts)
