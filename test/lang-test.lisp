@@ -161,7 +161,6 @@ class AnotherDoubler(Doubler):
 a = Doubler(2)
 b = AnotherDoubler(3)
 assert a * b == 12"
-                :known-failure t
                 :fail-info "Wrong lookup logic for __r...__ methods"
                 )
   (run-no-error "[1,2,3] * 2 == [1,2,3,1,2,3]")
