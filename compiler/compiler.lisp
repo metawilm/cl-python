@@ -158,12 +158,26 @@ ARGS are the command-line args, available as `sys.argv'; can be a string (which 
     (handler-bind (#+sbcl
                    (sb-kernel:redefinition-with-defun #'muffle-warning))
       (let* ((get-module-f `(lambda () ,ast))
-             (fc (if compile
-                     ;; Same context as for importing a module
-                     (with-proper-compiler-settings
-                         (compile nil get-module-f))
-                   (coerce get-module-f 'function)))
-             module-init-func module-run-tlv-func result)
+             fc module-init-func module-run-tlv-func result)
+        ;; Set FC
+        (when compile
+          ;; Same context as for importing a module
+          (with-proper-compiler-settings
+              (multiple-value-bind (func warnings-p failure-p)
+                  (handler-case
+                      (compile nil get-module-f)
+                    #+ecl ((or c:compiler-error c:compiler-internal-error) (c)
+                            (warn "Compilation failed: ~S" c)
+                            (values nil nil t)))
+                (declare (ignore warnings-p))
+                (cond ((and func (not failure-p))
+                       (setf fc func))
+                      (t
+                       (warn "CLPython detected a compilation failure, possibly indicating a bug in the Lisp compiler.")
+                       (warn "The Python code will be run interpreted instead."))))))
+        (unless fc
+          (setf fc (coerce get-module-f 'function)))
+        (assert fc)
         (handler-bind ((module-import-pre (lambda (c)
                                             ;; This handler just saves the relevant functions,
                                             ;; unwinding the import state with restarts like
