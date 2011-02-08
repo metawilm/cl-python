@@ -528,6 +528,34 @@ It must be delimited at the right by a space, closing bracket, or EOF."
   (declare (ignorable language))
   (when (match-p form '([module-stmt] ([suite-stmt] (([identifier-expr] {None})))))
     (return-from eval-language-form (values)))
+  
+  ;; Wrap Python names like FOO_BAR in a restart that tries Lisp variable FOO-BAR on NameError.
+  (setf form
+    (walk-py-ast form (lambda (ast &key value target)
+                        (block wrap
+                          (when (and (listp ast)
+                                     (eq (car ast) '[identifier-expr])
+                                     value
+                                     (not target))
+                            (let ((name (second ast)))
+                              (check-type name symbol)
+                              (when (position #\_ (symbol-name name))
+                                (let ((dash-name (substitute #\- #\_ (symbol-name name))))
+                                  ;; Determining whether symbol is bound happens at compile time already
+                                  (return-from wrap
+                                    (values 
+                                     `(let ((clpython::*signal-unbound-variable-errors* t))
+                                        (handler-bind ((cl:unbound-variable
+                                                        (lambda (c)
+                                                          (assert (eq (cell-error-name c) ',name)) 
+                                                          (whereas ((sym (find-symbol ,dash-name *package*))
+                                                                    (val (clpython::bound-in-some-way sym)))
+                                                            (use-value val)))))
+                                          ,ast))
+                                     t))))))
+                          (return-from wrap (values ast nil))))
+                 :into-nested-namespaces t))
+  
   (with-sane-debugging ("Error occured in Python/Lisp input mode, while handling a Python form.")
     (let ((clpython:*habitat* (or *lispy-habitat*
                                   (setf *lispy-habitat* (funcall 'clpython:make-habitat))))
