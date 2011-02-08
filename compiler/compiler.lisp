@@ -1333,23 +1333,28 @@ LOCALS shares share tail structure with input arg locals."
 
 (defvar *module-preload-hook*)
 
+(defvar *signal-unbound-variable-errors* nil
+  "Whether to signal UNBOUND-VARIABLE when a Python variable is unbound, before a NameError is raised.")
+
 (defun unbound-variable-error (name &key (expect-value t))
   (declare (special *py-signal-conditions*))
   (if expect-value
       (restart-case
-	  (py-raise '{NameError} "Variable `~A' is unbound." name)
+          (progn (when *signal-unbound-variable-errors*
+                   (signal 'unbound-variable :name name))
+                 (py-raise '{NameError} "Variable `~A' is unbound." name))
         (cl:use-value (val)
-	    :report (lambda (stream)
-		      (format stream "Enter a Lisp value to use for `~A'." name))
-	    :interactive (lambda () 
-			   (format t "Enter new Lisp value for `~A': " name)
-			   (multiple-value-list (eval (read))))
-	  (return-from unbound-variable-error val))
+            :report (lambda (stream)
+                      (format stream "Enter a Lisp value to use for `~A'." name))
+            :interactive (lambda () 
+                           (format t "Enter new Lisp value for `~A': " name)
+                           (multiple-value-list (eval (read))))
+          (return-from unbound-variable-error val))
         (import (val)
-          :report (lambda (stream) (format stream "Use the built-in module named `~A'." name))
-          :test (lambda (c)
-                  (declare (ignore c))
-                  (not (null (lisp-package-as-py-module name))))
+            :report (lambda (stream) (format stream "Use the built-in module named `~A'." name))
+            :test (lambda (c)
+                    (declare (ignore c))
+                    (not (null (lisp-package-as-py-module name))))
           :interactive (lambda () (list (lisp-package-as-py-module name)))
           (return-from unbound-variable-error val)))
     (with-simple-restart (continue "Continue as if `~A' is currently bound." name)
