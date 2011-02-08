@@ -1578,7 +1578,8 @@ but the latter two classes are not in CPython.")
   (find-symbol (string x) (load-time-value (find-package :clpython.user.builtin))))
 
 (defun builtin-value (x)
-  (bound-in-some-way (builtin-name-p x)))
+  (whereas ((builtin-sym (builtin-name-p x)))
+    (bound-in-some-way builtin-sym)))
 
 ;;;
 
