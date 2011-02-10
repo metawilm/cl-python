@@ -164,11 +164,13 @@ ARGS are the command-line args, available as `sys.argv'; can be a string (which 
           ;; Same context as for importing a module
           (with-proper-compiler-settings
               (multiple-value-bind (func warnings-p failure-p)
-                  (handler-case
-                      (compile nil get-module-f)
-                    #+ecl ((or c:compiler-error c:compiler-internal-error) (c)
-                            (warn "Compilation failed: ~S" c)
-                            (values nil nil t)))
+		  (block compilation
+		    (handler-bind (#+ecl 
+				   ((or c:compiler-error c:compiler-internal-error simple-error)
+                                    (lambda (c)
+                                      (warn "Compilation failed: ~S" c)
+                                      (return-from compilation (values nil nil t)))))
+                      (compile nil get-module-f)))
                 (declare (ignore warnings-p))
                 (cond ((and func (not failure-p))
                        (setf fc func))
