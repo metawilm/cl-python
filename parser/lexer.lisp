@@ -604,7 +604,7 @@ Returns character or NIL."
   (when (plusp (length python-name))
     (let* ((division-char (checking-reader-conditionals 
 			   #+(or allegro ccl sbcl) #\_
-                           #+ecl nil
+                           #+(or ecl cmu) nil
 			   #+lispworks #\- ))
            (lisp-char-name (if division-char
                                (substitute division-char #\Space python-name)
