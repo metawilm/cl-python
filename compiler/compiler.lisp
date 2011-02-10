@@ -1649,12 +1649,12 @@ LOCALS shares share tail structure with input arg locals."
         
         ((and exc var)
          (etypecase exc
-           (class  (error (make-instance exc :args (list var))))
+           (class  (error (make-exception exc var)))
            (error  (progn (warn "RAISE: ignored arg, as exc was already an instance, not a class")
                           (error exc)))))
         (exc
          (etypecase exc
-           (class    (error (make-instance exc)))
+           (class    (error (make-exception exc)))
            (error    (error exc))))
         
         (t

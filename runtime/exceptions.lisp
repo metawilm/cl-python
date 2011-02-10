@@ -68,6 +68,9 @@
       (format stream ": ~@<~@;~A~:>" (if format-args (apply #'format nil string format-args) string)))))
 
 (defun make-exception (class-name &rest args)
+  #+cmu ;; Work around bug that :args initarg is not accepted by make-condition if first arg is a class object
+  (when (typep class-name 'class)
+    (setf class-name (class-name class-name)))
   (#+clpython-exceptions-are-python-objects make-instance
    #-clpython-exceptions-are-python-objects make-condition 
    class-name :args args))
