@@ -128,17 +128,23 @@ where TOKEN-KIND is a symbol like '[identifier]"
 (defgeneric call-lexer (yacc-version lexer op)
   (:documentation "Returns either the eof-token, or two values: TOKEN-KIND, TOKEN-VALUE"))
 
-(defun make-lexer-3 (string &rest options &key yacc-version &allow-other-keys)
-  "Return a lexer for the given string of Python code.
+;; Work around CMUCL bug: http://article.gmane.org/gmane.lisp.cmucl.devel/11052
+#.(let ((form 
+	 '(defun make-lexer-3 (string &rest options &key yacc-version &allow-other-keys)
+	    "Return a lexer for the given string of Python code.
 Will return two value each time: TYPE, VALUE.
 On EOF returns: eof-token, eof-token."
-  (check-type string string)
-  (let ((lexer (apply #'make-instance 'lexer :string string options)))
-    (flet ((call-lexer-forwarder (&optional op)
-             (let ((*lex-state* lexer))
-               (call-lexer yacc-version lexer op))))
-      (closer-mop:set-funcallable-instance-function lexer #'call-lexer-forwarder)
-      lexer)))
+	    (check-type string string)
+	    (let ((lexer (apply #'make-instance 'lexer :string string options)))
+	      (flet ((call-lexer-forwarder (&optional op)
+					   (let ((*lex-state* lexer))
+					     (call-lexer yacc-version lexer op))))
+		(closer-mop:set-funcallable-instance-function lexer #'call-lexer-forwarder)
+		lexer)))))
+    #+cmu
+    `(eval ',form)
+    #-cmu
+    form)
 
 (defmethod call-lexer (yacc-version (lexer lexer) (op (eql nil)))
   (declare (ignorable yacc-version op))
