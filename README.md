@@ -13,17 +13,19 @@ Requirements
 
 CLPython runs successfully on each of the following platforms:
 
-* [Allegro CL 8.1](http://franz.com/products/allegrocl/)
-* [Clozure CL 1.3](http://clozure.com/clozurecl.html)
-* [CMUCL 19E (2009-01)](http://www.cons.org/cmucl/)
-* [LispWorks 5.1](http://www.lispworks.com/)
-* [SBCL 1.0.29](http://sbcl.sourceforge.net/)
+* [Allegro CL 8.2 (ANSI and Modern)](http://franz.com/products/allegrocl/)
+* [Clozure CL 1.5-r13651](http://clozure.com/clozurecl.html)
+* [CMUCL 20b-pre2](http://www.cons.org/cmucl/)
+* [ECL (git: 2011.02.11)](http://ecls.sourceforge.net/)
+* [LispWorks 6.0](http://www.lispworks.com/)
+* [SBCL 1.0.45](http://sbcl.sourceforge.net/)
 
 There are dependencies on:
 
-* [CL-Yacc](http://www.pps.jussieu.fr/~jch/software/cl-yacc/)
+* [CL-Yacc](http://www.pps.jussieu.fr/~jch/software/cl-yacc/) (not for Allegro CL)
 * [Closer to MOP](http://common-lisp.net/project/closer/closer-mop.html)
-* [ptester](http://www.cliki.net/ptester)
+* [CL-Custom-Hash-Table](https://github.com/metawilm/cl-custom-hash-table) (only for ECL)
+* [ptester](http://www.cliki.net/ptester) (not for Allegro CL)
 
 Install
 -------
