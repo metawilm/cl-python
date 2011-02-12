@@ -8,6 +8,12 @@ in Lisp are available to Python code, and Python libraries can be accessed by Li
 CLPython is developed by Willem Broekema and is released as open source under the
 [LLGPL](http://opensource.franz.com/preamble.html).
 
+Documentation
+-------------
+
+Please see the [Introduction](http://common-lisp.net/project/clpython/index.html) and
+[Manual](http://common-lisp.net/project/clpython/manual.html) on *common-lisp.net*.
+
 Requirements
 ------------
 
