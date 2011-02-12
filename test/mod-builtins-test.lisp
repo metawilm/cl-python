@@ -23,7 +23,7 @@
     (call-next-method)))
 
 (defmethod test-builtin ((x (eql :globals)))
-  (declare (ignore x))
+  (declare (ignorable x))
   (run-no-error "
 g = globals()
 g['x'] = 3
@@ -38,7 +38,7 @@ a = 3
 assert g['a'] == 3"))
 
 (defmethod test-builtin ((x (eql :hash)))
-  (declare (ignore x))
+  (declare (ignorable x))
   ;; Inspired by test case in email from Michael Foord to IronPython mailing list
   ;; 28 Feb 2008, <47C72FBC.5070300@voidspace.org.uk>
   "[IronPython] Hashing in IronPython"
@@ -52,7 +52,7 @@ assert len(hashes) > ~A
                 :fail-info "Ensure tuple hashes nicely distributed."))
 
 (defmethod test-builtin ((x (eql :int)))
-  (declare (ignore x))
+  (declare (ignorable x))
   (run-no-error "assert int(3) == 3")
   (run-no-error "assert int('3') == 3")
   (run-no-error "assert int('03') == 3")
@@ -67,13 +67,13 @@ class C:
 assert int(C()) == 42"))
   
 (defmethod test-builtin ((x (eql :isinstance)))
-  (declare (ignore x))
+  (declare (ignorable x))
   (run-no-error "assert isinstance(3, int)")
   (run-no-error "assert isinstance(3, (float, int))")
   (run-no-error "assert isinstance(3, (int, float))"))
 
 (defmethod test-builtin ((x (eql :list)))
-  (declare (ignore x))
+  (declare (ignorable x))
   (run-no-error "
 x = []
 x.insert(1, 10)
@@ -84,18 +84,18 @@ x.insert(12, 12)
 assert x == [10, 11, 12]"))
 
 (defmethod test-builtin ((x (eql :map)))
-  (declare (ignore x))
+  (declare (ignorable x))
   (run-no-error "assert map(lambda x,y: x+y, [1,2,3], [4,5,6]) == [5, 7, 9]"))
 
 (defmethod test-builtin ((x (eql :range)))
-  (declare (ignore x))
+  (declare (ignorable x))
   (run-no-error "assert range(3) == list(xrange(3)) == [0,1,2]")
   (run-no-error "assert range(1,3) == list(xrange(1,3)) == [1,2]")
   (run-no-error "assert range(1,10,2) == list(xrange(1,10,2)) == [1,3,5,7,9]")
   (run-no-error "assert range(10,1,-2) == list(xrange(10,1,-2)) == [10,8,6,4,2]"))
 
 (defmethod test-builtin ((x (eql :type)))
-  (declare (ignore x))
+  (declare (ignorable x))
   (run-no-error "
 def f(): pass
 g = lambda: 42
