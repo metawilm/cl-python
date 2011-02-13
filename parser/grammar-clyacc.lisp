@@ -69,7 +69,8 @@
                 (expected-tokens (yacc:yacc-parse-error-expected-terminals c)))
            
            (cond ((or (eq token (lexer-eof-token yacc-version))
-                      (and (eq token '[newline]) (not last-newline-in-source)))
+                      (and (eq token '[newline]) (not last-newline-in-source))
+                      (and (eq token '[dedent]) (not (eq last-newline-in-source :unknown))))
                   (raise-unexpected-eof))
                  
                  (t

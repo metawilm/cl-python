@@ -225,6 +225,10 @@ def f(): pass" t))
     return 3
   else:
     return 1")) ;; missing colon after "x > 1"
+      (test :unexp-eof-error (try-parse "
+def f():
+  def __init__(self):
+")) ;; lexer returns dedent before newline
 
       (test :unexp-eof-error (try-parse "def f():") :fail-info "(EOF in grammar)")
       (test :syntax-error    (try-parse "def def") :fail-info "(Incorrect grammar)")
