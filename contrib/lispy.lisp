@@ -149,15 +149,21 @@ Ends by signalling one of: %PARSE.FINISHED, %PARSE.SWITCH-LANGUAGE, %PARSE.UNEXP
       (let ((*readtable* lisp-readtable)) ;; avoid infinite recursion
         (loop
           (multiple-value-bind (form end-ix)
-              (read-from-string string t nil :start start-ix)
-            (signal '%parse.collect-form
-                    :language :lisp
-                    :start-ix start-ix :end-ix end-ix
-                    :form form)
-            (setf start-ix end-ix))))
-    (end-of-file ()
-      (error '%parse.finished :language :python))
+              (read-from-string string nil string :start start-ix)
+            (if (eq form string)
+                (error '%parse.finished :language :lisp)
+              (progn (signal '%parse.collect-form
+                             :language :lisp
+                             :start-ix start-ix :end-ix end-ix
+                             :form form)
+                     (setf start-ix end-ix))))))
+    (end-of-file (c)
+      (when *lispy-debug*
+        (format t "~&READ-LANGUAGE-FORMS :LISP says: end-of-file: ~S" c))
+      (error '%parse.unexpected-eof :start-ix start-ix :language :lisp :reason c))
     (reader-error (c)
+      (when *lispy-debug*
+        (format t "~&READ-LANGUAGE-FORMS :LISP says: reader-error: ~S" c))
       (error '%parse.switch-language :language :lisp :start-ix start-ix :reason c)))
   (break "never"))
 
@@ -289,62 +295,75 @@ STREAM can be an interactive (REPL) stream"
               #-(or allegro ccl sbcl) nil))
            
            (read-complete-input ()
-             (check-type stream concatenated-stream) ;; as created by omnivore readtable
-             (assert (= 2 (length (concatenated-stream-streams stream))))
-             (let ((string-stream-1 (car (concatenated-stream-streams stream))))
-               (check-type string-stream-1 (and string-stream (satisfies input-stream-p)))
-               (let ((input-string (normalize-input (string (read-char string-stream-1)))))
-                 (assert (null (read-char string-stream-1 nil nil)) () "String input stream should be clear now")
-                 (peek-char nil stream) ;; String-stream will be dropped from the concatenated streams
-                 (assert (= 1 (length (concatenated-stream-streams stream))) () "Concat stream should have one stream now")
-                 (setf stream (car (concatenated-stream-streams stream))) ;; and forget about the wrapper
-
-                 ;; Rules:
-                 ;;  - read at least one line, i.e. upto newline (interactive) or eof (file-stream)
-                 ;;  - if the line is a valid, complete Python form: treat as Python (regardless content of next lines)
-                 ;;  - if the line is valid Python, but incomplete: keep reading until either:
-                 ;;     1) result is not valid Python anymore: read it all like a Lisp form instead
-                 ;;     2) valid Python, and \n\n reached (empty line marks end of input): parse as Python
-                 ;;  - if line is invalid Python: read a Lisp form
-                 
-                 (let ((interactive-p (interactive-stream-p stream))
-                       (eof-reached nil))
-                   (setf input-string (normalize-input (concatenate 'string input-string (slurp-file stream))))
-                   (flet ((enough-input-p ()
-                            "Read at least one line of interactive input, or an entire file"
-                            (cond ((input-pending-p stream) nil)
-                                  (eof-reached              t)
-                                  (interactive-p            (input-ends-with-newline input-string))
-                                  (t                        nil)))
-                          (read-one-char ()
-                            (let ((next-char (read-char stream nil nil)))
-                              (if next-char
-                                  (setf input-string (concatenate 'string input-string (string next-char)))
-                                (setf eof-reached t))
-                              next-char)))
-                     (loop until (enough-input-p) do (read-one-char))
-                     ;; Parse what we have
-                     (loop 
-                       (let* ((parsed-input (read-mixed-source-string input-string
-                                                                      :lisp-readtable lisp-readtable
-                                                                      :interactive-p interactive-p))
-                              (parsed-incomplete (member :incomplete (mapcar #'second parsed-input))))
-                         (assert (not (and interactive-p eof-reached)) ()
+             (let (input-string)
+               (let ((got-concatenated-stream (typep stream 'concatenated-stream)))
+                 (if got-concatenated-stream ;; as created by omnivore readtable
+                     (progn (assert (= 2 (length (concatenated-stream-streams stream))))
+                            (let ((string-stream-1 (car (concatenated-stream-streams stream))))
+                              (check-type string-stream-1 (and string-stream (satisfies input-stream-p)))
+                              (setf input-string (normalize-input (string (read-char string-stream-1))))
+                              (assert (null (read-char string-stream-1 nil nil)) () "String input stream should be clear now")
+                              (peek-char nil stream) ;; String-stream will be dropped from the concatenated streams
+                              (assert (= 1 (length (concatenated-stream-streams stream))) () "Concat stream should have one stream now")
+                              (setf stream (car (concatenated-stream-streams stream))))) ;; and forget about the wrapper
+                   (setf input-string (normalize-input (string (read-char stream))))))
+               
+               ;; Rules:
+               ;;  - read at least one line, i.e. upto newline (interactive) or eof (file-stream)
+               ;;  - if the line is a valid, complete Python form: treat as Python (regardless content of next lines)
+               ;;  - if the line is valid Python, but incomplete: keep reading until either:
+               ;;     1) result is not valid Python anymore: read it all like a Lisp form instead
+               ;;     2) valid Python, and \n\n reached (empty line marks end of input): parse as Python
+               ;;  - if line is invalid Python: read a Lisp form
+               
+               (let ((interactive-p (or force-interactive-p (clpython.util:interactive-stream-p-recursive stream)))
+                     (eof-reached nil))
+                 (setf input-string (normalize-input (concatenate 'string input-string (slurp-file stream))))
+                 (flet ((enough-input-p ()
+                          "Read at least one line of interactive input, or an entire file"
+                          (cond ((input-pending-p stream) nil)
+                                (eof-reached              t)
+                                (interactive-p            (input-ends-with-newline input-string))
+                                (t                        nil)))
+                        (read-one-char ()
+                          (let ((next-char (read-char stream nil nil)))
+                            (if next-char
+                                (setf input-string (concatenate 'string input-string (string next-char)))
+                              (progn (when *lispy-debug*
+                                       (format t "~& Input EOF reached~%")
+                                       (setf eof-reached t))
+                                     (when (and interactive-p (not (input-ends-with-newline input-string)))
+                                       (break "READ-CHAR on interactive steam failed unexpectedly: last char was ~S but expected ~S."
+                                              (when (plusp (length input-string))
+                                                (aref input-string (1- (length input-string))))
+                                              #\Newline))))
+                            next-char)))
+                   (loop until (enough-input-p) do (read-one-char))
+                   ;; Parse what we have
+                   (loop 
+                     (let* ((parsed-input (read-mixed-source-string input-string
+                                                                    :lisp-readtable lisp-readtable
+                                                                    :interactive-p interactive-p))
+                            (parsed-incomplete (member :incomplete (mapcar #'second parsed-input))))
+                       (when (and interactive-p eof-reached)
+                         ;; Should hold only during debugging of interactive parsing rules, e.g. by passing
+                         ;; STRING-INPUT-STREAM but forcing :INTERACTIVE-P to T
+                         (unless *lispy-debug*
                            (break "Unexpected: parsed-incomplete=~A interactive-p=~A eof-reached=~A"
-                                  parsed-incomplete interactive-p eof-reached))
-                         (cond (parsed-incomplete
-                                (if interactive-p
-                                    (read-one-char)
-                                  (error "Reading toplevel form failed: incomplete input:~%  ~S" input-string)))
-                               ((and interactive-p 
-                                     (not (cond ((= (count #\Newline input-string) 1)
-                                                 (input-ends-with-newline input-string))
-                                                ((> (count #\Newline input-string) 1)
-                                                 (input-ends-with-newline input-string 2)))))
-                                (read-one-char))
-                               (t
-                                (return-from read-complete-input
-                                  (values input-string parsed-input))))))))))))
+                                  parsed-incomplete interactive-p eof-reached)))
+                       (cond (parsed-incomplete
+                              (if (and interactive-p (not eof-reached))
+                                  (read-one-char)
+                                (error "Reading toplevel form failed: incomplete input:~%  ~S" input-string)))
+                             ((and interactive-p 
+                                   (not (cond ((= (count #\Newline input-string) 1)
+                                               (input-ends-with-newline input-string))
+                                              ((> (count #\Newline input-string) 1)
+                                               (input-ends-with-newline input-string 2)))))
+                              (read-one-char))
+                             (t
+                              (return-from read-complete-input
+                                (values input-string parsed-input)))))))))))
     
     (multiple-value-bind (input-string parsed-input)
         (read-complete-input)
