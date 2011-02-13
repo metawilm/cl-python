@@ -80,6 +80,7 @@ Ends by signalling one of: %PARSE.FINISHED, %PARSE.SWITCH-LANGUAGE, %PARSE.UNEXP
   (declare (ignore language string start-ix))
   (let ((*debug-recursion-count* (1+ *debug-recursion-count*)))
     (when (>= *debug-recursion-count* 10)
+      (check-type *lisp-standard-readtable* readtable)
       (setf *readtable* *lisp-standard-readtable*)
       (break "READ-LANGUAGE-FORMS: Too much recursion; *readtable* reset"))
     (call-next-method)))
@@ -90,8 +91,9 @@ Ends by signalling one of: %PARSE.FINISHED, %PARSE.SWITCH-LANGUAGE, %PARSE.UNEXP
                                 &key &allow-other-keys)
   (declare (ignorable language))
   (flet ((valid-lisp-form-here-p (start-ix)
-           (ignore-errors (let ((*readtable* *lisp-readtable*))
-                            (read-from-string string t nil :start start-ix)
+           (check-type *lisp-readtable* readtable)
+           (let ((*readtable* *lisp-readtable*))
+             (ignore-errors (read-from-string string t nil :start start-ix)
                             t))))
     (when (and (char= (aref string start-ix) #\#)
                (valid-lisp-form-here-p start-ix))
@@ -142,6 +144,7 @@ Ends by signalling one of: %PARSE.FINISHED, %PARSE.SWITCH-LANGUAGE, %PARSE.UNEXP
                                 &key lisp-readtable &allow-other-keys)
   ;; XXX introduce Lisp package parameter? bind read-eval?
   (declare (ignorable language lisp-readtable))
+  (check-type lisp-readtable readtable)
   (handler-case
       (let ((*readtable* lisp-readtable)) ;; avoid infinite recursion
         (loop
@@ -162,6 +165,7 @@ Ends by signalling one of: %PARSE.FINISHED, %PARSE.SWITCH-LANGUAGE, %PARSE.UNEXP
   "Returns a list of Python and Lisp source elements, like: ((:lang form) (:lang2 form2) ..)
 If INTERACTIVE-P then the last item is possibly (:lang :incomplete)"
   (check-type string string)
+  (check-type lisp-readtable readtable)
   (let ((start-ix 0)
         (switch-ix 0)
         (switch-requests ()) ;; ((:lang . reason) ..)
@@ -250,12 +254,13 @@ If INTERACTIVE-P then the last item is possibly (:lang :incomplete)"
   (with-open-file (stream pathname)
     (apply #'read-toplevel-forms stream options)))
 
-(defmethod read-toplevel-forms ((stream stream) &key lisp-readtable)
+(defmethod read-toplevel-forms ((stream stream) &key lisp-readtable force-interactive-p)
   "Returns ((:language form) (l2 form2) ..) where last item might be (:langN :INCOMPLETE)
 STREAM can be an interactive (REPL) stream"
   ;; It's a bit tricky to make this work fine in the REPLs of the different implementations,
   ;; due to differences in at what moments the REPL passes input to the readtable function
   ;; (after a char, or after a line) and whether newline is included.
+  (check-type lisp-readtable readtable)
   (labels ((normalize-input (str)
 	     (cond ((and (= 1 (length str))
                          (member (aref str 0) '(#\Newline ;; Allegro, SBCL
@@ -402,6 +407,8 @@ It must be delimited at the right by a space, closing bracket, or EOF."
    (new-readtable :initarg :new-readtable :reader emm.new-readtable)))
 
 (defun mixed-readtable-reader (stream lisp-readtable)
+  (check-type stream stream)
+  (check-type lisp-readtable readtable)
   `(let ((*eval-inside-mixed-mode* t)
          (exit-reason nil))
      (handler-bind ((exit-mixed-mode (lambda (c)
@@ -424,13 +431,14 @@ It must be delimited at the right by a space, closing bracket, or EOF."
         (:exit-mode-requested (values "Exiting mixed Lisp/Python syntax mode.~@
                                        Standard Lisp *readtable* is now set."
                                       *lisp-standard-readtable*)))
-
+    (check-type new-rt readtable)
     (setf *readtable* new-rt)
     (with-line-prefixed-output (";; ")
       (format t message)))
   (values))
 
 (defun create-mixed-readtable (lisp-readtable)
+  (check-type lisp-readtable readtable) 
   (setup-omnivore-readmacro
    :function (lambda (stream) (mixed-readtable-reader stream lisp-readtable))
    :readtable (copy-readtable nil)))
@@ -464,6 +472,7 @@ It must be delimited at the right by a space, closing bracket, or EOF."
          (when package
            (setf *lispy-package* (or (find-package package)
                                      (error "Package not found: ~S." package))))
+         (check-type *mixed-readtable* readtable)
          (setf *readtable* *mixed-readtable*)
          (with-line-prefixed-output (";; ")
            (format t "The mixed Lisp/Python syntax mode is now active: custom *readtable* is set. ~@
@@ -484,20 +493,23 @@ It must be delimited at the right by a space, closing bracket, or EOF."
 
 (defmacro with-mixed-lisp-python-syntax (&body body)
   (with-gensyms (old-readtable)
-    `(let* ((,old-readtable *readtable*)
-            (*readtable* *mixed-readtable*))
-       (handler-bind ((serious-condition (lambda (c)
-                                           ;; Give outer handlers a chance
-                                           (signal c)
-                                           ;; No transfer of control: we'll end up in the debugger
-                                           (with-standard-io-syntax
-                                             (setf *readtable* ,old-readtable)
-                                             (with-line-prefixed-output (";; ")
-                                               (format t "Serious condition occured inside WITH-MIXED-LISP-PYTHON-SYNTAX:~% ~A~%" c)
-                                               (format t "To enable debugging *readtable* has been reset to its previous value."))
-                                             (format t "~%~%")
-                                             (error c)))))
-         ,@body))))
+    `(let ((,old-readtable *readtable*))
+       (check-type old-readtable readtable)
+       (check-type *mixed-readtable* readtable)
+       (let ((*readtable* *mixed-readtable*))
+         (handler-bind ((serious-condition (lambda (c)
+                                             ;; Give outer handlers a chance
+                                             (signal c)
+                                             ;; No transfer of control: we'll end up in the debugger
+                                             (with-standard-io-syntax
+                                               
+                                               (setf *readtable* ,old-readtable)
+                                               (with-line-prefixed-output (";; ")
+                                                 (format t "Serious condition occured inside WITH-MIXED-LISP-PYTHON-SYNTAX:~% ~A~%" c)
+                                                 (format t "To enable debugging *readtable* has been reset to its previous value."))
+                                               (format t "~%~%")
+                                               (error c)))))
+           ,@body)))))
 
 
 ;;; Evaluation of the mixed source forms
@@ -510,10 +522,12 @@ It must be delimited at the right by a space, closing bracket, or EOF."
   ;; XXX args not supported yet; should only be done when source is interactive input.
   ;; `(tpl:do-command ,form))
   (declare (ignorable language))
+  (check-type *lisp-standard-readtable* readtable)
   (let ((*readtable* *lisp-standard-readtable*)) ;; so compile-file etc don't go through mixed mode
     (unwind-protect 
         (eval form)
       (unless (eq *readtable* *lisp-standard-readtable*)
+        (check-type *readtable* readtable)
         (signal 'exit-mixed-mode :reason :readtable-change :new-readtable *readtable*)))))
 
 (defpackage :clpython.lispy.stuff)
@@ -566,6 +580,7 @@ It must be delimited at the right by a space, closing bracket, or EOF."
                                                                      :parent (clpython::make-builtins-namespace)
                                                                      :incl-builtins t)))))
       (declare (special clpython:*habitat* clpython::*module-namespace*))
+      (check-type *lisp-standard-readtable* readtable)
       (let ((*readtable* *lisp-standard-readtable*))
         (clpython:run-python-ast form :module-globals *lispy-package*)))))
 
