@@ -86,10 +86,10 @@
     :description "Python module library"
     :depends-on (:clpython.basic :clpython.runtime :clpython.compiler #| TODO: remove compiler dep |#)
     :components ((:module "lib"
-                          :components ((:file "builtins-file")
+                          :components ((:file "lsetup")
+                                       (:file "builtins-file")
                                        (:file "builtins-set")
                                        (:file "builtins" :depends-on ("builtins-file" "builtins-set"))
-                                       (:file "lsetup")
                                        (:file "array" :depends-on ("lsetup"))
                                        (:file "binascii" :depends-on ("lsetup"))
                                        (:file "cStringIO" :depends-on ("lsetup"))
