@@ -343,7 +343,7 @@ None, use identity function (multiple sequences -> list of tuples)."
 
 (defun {open} (name &optional mode buffering)
   (declare (ignore buffering)) ;; todo
-  (funcall (find-symbol (symbol-name '#:open) 'clpython.module.posix) name nil mode))
+  (funcall (find-symbol (symbol-name '#:|open|) 'clpython.module.posix) name nil mode))
 
 (defun {ord} (s)
   (let ((s2 (deproxy s)))
