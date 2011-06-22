@@ -65,12 +65,17 @@ the fasl file satisfies CLHS 3.2.4.4 \"Additional Constraints on Externalizable 
   (check-type function function)
   (check-type readtable readtable)
   (flet ((omnivore-read-func (stream char)
-           ;; In Allegro CL, is stream is the RPEL stream, unreading the first char fails.
+           ;; In Allegro CL, is stream is the REPL stream, unreading the first char fails.
            ;; Therefore below a concatenated-stream is created.
+           ;; On SBCL a concatenated stream reports EOF too soon
+           ;; but unreading the first char seems to work (https://bugs.launchpad.net/sbcl/+bug/690408)
            (let ((res `(progn ,@initial-forms
-                              ,(let ((prefixed-stream (make-concatenated-stream
-                                                       (make-string-input-stream (string char))
-                                                       stream)))
+                              ,(let ((prefixed-stream
+                                      #+sbcl (progn (unread-char char stream)
+                                                    stream)
+                                      #-sbcl (make-concatenated-stream
+                                              (make-string-input-stream (string char))
+                                              stream)))
                                  (funcall function prefixed-stream)))))
              (when *omnivore-debug*
                (format t "~&OMNIVORE-READ-FUNC result:~%  ~S~%" res))
