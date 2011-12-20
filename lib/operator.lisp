@@ -29,7 +29,7 @@
     (let ((name (format nil "~A-~A=" '#:py op)))
       (or (find-symbol name :clpython)
           (break "No such symbol in pkg clpython: ~A" name))))
-  
+
   (defmacro def-magic-twins (name params &body body)
     `(progn (defun ,name ,params ,@body)
             (defun ,(magicify name) ,params (,name ,@params))
@@ -66,7 +66,7 @@
 
 ;; Unary, magic
 
-#.`(progn ,@(loop for (meth op) in 
+#.`(progn ,@(loop for (meth op) in
                   '((abs     abs)
                     (not     not)
                     (inv     unary-~)
@@ -149,7 +149,7 @@
 ;;   x += y
 ;; is equivalent to
 ;;   x = iadd(x, y).
-;; 
+;;
 ;; Another way to put it is to say that
 ;;   z = iadd(x, y) is equivalent to
 ;; the compound statement
@@ -173,7 +173,7 @@
                     (ixor ^))
                 collect `(def-magic-twins ,name (x y) (or (,(sym->iop op) x y)
                                                           (,(sym->op op) x y)))))
- 
+
 
 ;;; Not-very-reliable "duck type" tests:
 

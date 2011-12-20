@@ -16,7 +16,7 @@
   "Implementation of locks: either :gate or :process-lock."
   ;; For shootout benchmark chameneos-redux, :process-lock turned out to be faster.
   )
- 
+
 (defclass |lock| (object)
   ((id       :initarg :id       :accessor lock-id)
    (wait-msg :initarg :wait-msg :accessor lock-wait-msg))
@@ -40,7 +40,7 @@
   (let* ((id (incf *lock-counter*))
          (wait-msg (format nil "waiting for lock ~A" id)))
     (declare (ignorable wait-msg))
-    #+allegro 
+    #+allegro
     (multiple-value-bind (type args)
         (ecase *lock-implementation*
           (:gate (values 'allegro-gate-lock
@@ -70,7 +70,7 @@
           (mp:process-wait (lock-wait-msg lock) 'mp:gate-open-p g)
         (return-from lock-acquire nil)))))
 
-#+allegro 
+#+allegro
 (defmethod lock-acquire ((lock allegro-process-lock) wait-p)
   (let* ((pl (lock-process-lock lock))
          (wait-msg (lock-wait-msg lock))
@@ -113,7 +113,7 @@
 (defclass |thread| (object)
   ((internal-thread :initarg :internal-thread :accessor internal-thread))
   (:metaclass py-type))
-  
+
 (defun |start_new_thread| (func args &optional kwargs)
   "Return identifier of new thread. Thread exits silently, or prints stack trace upon exception."
   (flet ((start-thread (func args)

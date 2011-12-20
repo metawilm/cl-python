@@ -18,13 +18,13 @@
   `(flet ((.invoke-recompile-restart (&optional c)
             (declare (ignore c))
             ,(when restart-name
-               `(progn 
+               `(progn
                   (whereas ((r (find-restart ',restart-name)))
                     (format t "~&; Recompiling ~A due to wrong fasl format.~%"
                             (or ,filename *load-pathname* *compile-file-truename* "fasl file"))
                     (invoke-restart r))
                   (break "No expected restart named ~A" ',restart-name)))))
-     
+
      (handler-bind (#+allegro
                     ((or excl::file-incompatible-fasl-error excl::fasl-casemode-mismatch)
                      #'.invoke-recompile-restart)

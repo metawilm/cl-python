@@ -100,7 +100,7 @@ while foo():
 while foo():
  bar
 TEST" (test-false #1#))
-    
+
   (run-code-test "
 for x in y:
  TEST" (test-true #1#)))
@@ -167,7 +167,7 @@ def f():
     global x
     x = 3"    (test-true (seq-equal #1# '({f} {x}) :ignore +standard-module-globals+)
                          :fail-info "Nested `global' not detected."))
-  
+
   (run-code-test "
 TEST
 class C:
@@ -189,13 +189,13 @@ def f():
   (run-code-test "TEST"        (test-equal () #1=(pydecl :lexically-visible-vars)))
   (run-code-test "a = 3; TEST" (test-equal () #1#))
   (run-code-test "TEST; a = 3" (test-equal () #1#))
-  
+
   (run-code-test "def f(): TEST"             (test-true (seq-equal '() #1#)))
   (run-code-test "def f(x): TEST"            (test-true (seq-equal '({x}) #1#)))
   (run-code-test "def f(x,y,z=3): TEST"      (test-true (seq-equal '({x} {y} {z}) #1#)))
   (run-code-test "def f(x,*y,**z): TEST"     (test-true (seq-equal '({x} {y} {z}) #1#)))
   (run-code-test "def f( (x,y,z), *a): TEST" (test-true (seq-equal '({x} {y} {z} {a}) #1#)))
-  
+
   (run-code-test "
 def f( (x,y) ):
   def g(a,**b):
@@ -213,7 +213,7 @@ def f( (x,y) ):
     pass
   TEST"        (test-true (seq-equal '({x} {y} {g}) #1#)
                           :fail-info "G is a local variable in F."))
-  
+
   (run-code-test "
 class C(D):
   TEST"
@@ -284,9 +284,9 @@ def f():
   class C:
     TEST"                           (test-true  #1#))
   (run-code-test "
-class C: 
+class C:
   TEST"                             (test-false #1#))
   (run-code-test "
-class C: 
+class C:
   def m(x):
     TEST"                           (test-true #1#)))

@@ -48,7 +48,7 @@
           (format stream "~A~%" subform))))))
 
 (defun msi-for-source-file (file &key error)
-  "When ERROR, returns value must be MSI."  
+  "When ERROR, returns value must be MSI."
   (check-type file pathname)
   (loop for py-file being the hash-key in *module->source-positions*
       using (hash-value msi)
@@ -59,7 +59,7 @@
 
 (defvar *lisp-function->subforms* (make-hash-table :test 'eq)
   "Mapping from Lisp fuction to list of SUBFORMS.
-Subforms are ordered from outer to inner, so parent ASTs go before children. 
+Subforms are ordered from outer to inner, so parent ASTs go before children.
 This is the same order as provided by Allegro CL.")
 
 (defstruct (subform
@@ -79,7 +79,7 @@ This is the same order as provided by Allegro CL.")
             (subform.bp-own subform))))
 
 (defun subform.pc-range (subform)
-  "Returns VALID-P, PC, NEXT-PC, PC-RANGE 
+  "Returns VALID-P, PC, NEXT-PC, PC-RANGE
 If subform corresponds to non-empty range of pc offsets, and returned values are:
  T, PC, NEXT-PC, (NEXT-PC - PC)
 If invalid:
@@ -224,16 +224,16 @@ The :PYTHON records are thus a subset of the :LISP records."
         for record across (function-source-records func :python)
         for ldb-code.src = (excl::ldb-code-source record)
         do (dolist (subform (msi.subforms msi))
-             
+
              ;; The core step in linking together the Lisp and Python source information:
              (when (eq (subform.form subform) ldb-code.src)
-               
+
                (if (subform.bp-pc subform)
                    (warn "Assembly information already set in subform ~A" subform)
                  (let* ((curr-func (loop for i from (excl::ldb-code-index record) downto 0
                                        when (excl::ldb-code-func (aref vec i))
                                        return it
-                                       finally 
+                                       finally
                                                ;;; XXX is this always correct, if no function is set at all?
                                          (return func)))
                         (start-pc (or (excl::ldb-code-pc record)
@@ -251,7 +251,7 @@ The :PYTHON records are thus a subset of the :LISP records."
                    ;; Ensure the subforms are stored from outer to inner.
                    (setf (gethash curr-func *lisp-function->subforms*)
                      (nconc (gethash curr-func *lisp-function->subforms*) (list subform)))
-                   
+
                    (setf (gethash (cons curr-func start-pc) assigned-bps) t)
                    #+(or) ;; debug
                    (format t "Python source fragment chars [~A, ~A]:~_  ~A~_maps to asm offsets [~A, ~A] in func ~S.~%"
@@ -288,7 +288,7 @@ The :PYTHON records are thus a subset of the :LISP records."
                         ((< pc pc-next) (push (cons pc pc-next) result))
                         (t              (push pc result)
                                         (push (cons pc-next pc-next) result)))
-               finally 
+               finally
                  (flet ((sort-them (res)
                           (sort res #'< :key (lambda (x) (if (consp x) (- (car x) 0.5) x)))))
                    (let ((res (sort-them (remove-duplicates result :test 'equal))))
@@ -317,8 +317,8 @@ The :PYTHON records are thus a subset of the :LISP records."
           for record across (function-source-records func :python)
           do (dolist (subform (msi.subforms msi))
                (when (eq (subform.form subform) (excl::ldb-code-source record))
-                 (format t "~&~%Python source form [chars ~A~@[-~A~]]: ~A~%" 
-                         (subform.start-char subform) 
+                 (format t "~&~%Python source form [chars ~A~@[-~A~]]: ~A~%"
+                         (subform.start-char subform)
                          (let ((end (subform.end-char subform)))
                            (when (/= end (subform.start-char subform))
                              end))
@@ -330,7 +330,7 @@ The :PYTHON records are thus a subset of the :LISP records."
                        (src #2=(when record (excl::ldb-code-source record)) #2#))
                      ((not record))
                    #+(or)(format t "Lisp func: ~S~%" (find-func-for-pc vec (excl::ldb-code-index record)))
-                   (format t "Lisp (#~A) [asm ~A~@[-~A~]]: ~S~%" 
+                   (format t "Lisp (#~A) [asm ~A~@[-~A~]]: ~S~%"
                            (excl::ldb-code-index record)
                            (excl::ldb-code-pc record)
                            (let ((next (excl::ldb-code-next-pc record)))
@@ -456,16 +456,16 @@ The :PYTHON records are thus a subset of the :LISP records."
                             (excl::breakpoint-next-pc bpt)))
         (*inside-python-set-breakpoint* t))
     ;;              ......command........................
-    ;; branch-type  return  cont           into 
+    ;; branch-type  return  cont           into
     ;; -----------  ------- -------------- --------------
-    ;;  jmp         rl=tmp 
+    ;;  jmp         rl=tmp
     ;;  call        rl=tmp  nxt=rat;cl=rat nxt=tmp;cl=tmp
     ;;  bcc         rl=tmp  nxt=rat;br=rat nxt=tmp;br=tmp
     ;;  ret         rl=tmp  nxt=rat;rl=rat nxt=tmp;rl=tmp
     ;;  no-stop     rl=tmp  nxt=rat        nxt=tmp
     ;;  case        rl=tmp  nxt=rat;br=rat nxt=tmp;br=tmp
     ;;  nil         rl=tmp  nxt=rat        nxt=tmp
-    
+
     ;; Try to set the next-pc breakpoint, if appropriate
     (when (bpt.call-p bpt)
       (when (or (command.continue-p command) (command.into-p command))
@@ -476,7 +476,7 @@ The :PYTHON records are thus a subset of the :LISP records."
 
     (when next-pc-valid
       (excl::add-breakpoint func next-pc-valid temporary-kind nil language))
-    
+
     ;; Now set branch-pc breakpoints, if any
     (unless (command.return-p command)
       (whereas ((branch (excl::breakpoint-branch-pc bpt)))
@@ -521,7 +521,7 @@ The :PYTHON records are thus a subset of the :LISP records."
            (let ((subform (subform-for-func-pc (excl::breakpoint-func bpt) (excl::breakpoint-pc bpt)))
                  (into-mode (eq *current-step-mode* :into))
                  (user-set-bp (not (excl::breakpoint-temporary bpt))))
-    
+
              (when (and subform (or into-mode user-set-bp))
                (ldb-python-print-subform subform)
                (loop for str = (read-line *standard-input* nil nil)
@@ -543,7 +543,7 @@ The :PYTHON records are thus a subset of the :LISP records."
                  (when (member (excl::breakpoint-func bpt) *not-into-functions*)
                    #+(or)(format t "~&SKIPPED: stepping over ~A~%" (excl::breakpoint-func bpt))
                    (return-from ldb-python.prompt-loop :over))))
-             
+
              (return-from ldb-python.prompt-loop *current-step-mode*))))
 
 (defun ldb-python.list-exits (bpt sliding)
@@ -559,11 +559,11 @@ The :PYTHON records are thus a subset of the :LISP records."
   (setf excl::*ldb-languages* (remove :python excl::*ldb-languages* :key #'excl::ldb-language-name))
   (excl::add-ldb-language :python
                           :predicate (constantly t) ;; also handle PCs in the middle of Python forms, for :step-into
-                          
+
                           ;; breakpoint behaviour:
                           :find-pc #'ldb-python.find-pc
                           :print-pc #'ldb-python.print-pc
-                          
+
                           ;; stepper behaviour:
                           :prompt-loop #'ldb-python.prompt-loop
                           :set-next #'ldb-python.set-next
@@ -579,7 +579,7 @@ The :PYTHON records are thus a subset of the :LISP records."
 
 ;;; Defining the LDB backend, which does the user interaction after a breakpoint is hit.
 ;;;
-;;; For example, it deals with "presenting" messages to the user, which does 
+;;; For example, it deals with "presenting" messages to the user, which does
 ;;; not necessarily mean printing them to stdout.
 
 (defgeneric python-backend.format (kind &rest args)
@@ -592,7 +592,7 @@ The :PYTHON records are thus a subset of the :LISP records."
                                (py-pprint (subform.form subform) t)
                                (multiple-value-bind (line pos)
                                    (subform.source-line-offset subform)
-                                 (format t "~&;; File ~A at line ~A, char ~A~%" 
+                                 (format t "~&;; File ~A at line ~A, char ~A~%"
                                          (msi.original-filename msi) line pos)
                                  #+(or)(subform.start-char subform)))))
              (:deleting (apply #'format t args))
@@ -761,7 +761,7 @@ The (new) breakpoint is enabled and returned."
                                      (subform.source-line-offset subform)
                                      #+(or)(subform.start-char subform))
                              (subform.form subform)))
-        
+
         (whereas ((bp (let ((*inside-python-set-breakpoint* t)) ;; consistency check hack
                         (ldb-python.find-pc func pc nil)))
                   (src (excl::breakpoint-source bp))
@@ -770,13 +770,13 @@ The (new) breakpoint is enabled and returned."
                              (symbolp (car src))
                              (clpython.parser::stmt-or-expr-node-p (car src)))))
           (found-python-expr "?" src))
-        
+
         ;; XXX Ugly but useful special-cases
         (cond ((eq func #'run-python-ast) ;; interactive input (repl)
                (loop for i from 0 below (debugger:frame-number-vars frame)
                    when (eq (debugger:frame-var-name frame i) 'ast)
                    do (found-python-expr "Interactive input:" (debugger:frame-var-value frame i))))
-              
+
               ((eq func #'(method py-call (function))) ;; calling function without source info (e.g. entered in repl)
                (loop with func
                    for i from 0 below (debugger:frame-number-vars frame)

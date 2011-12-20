@@ -65,7 +65,7 @@ assert len(hashes) > ~A
 class C:
   def __int__(self): return 42
 assert int(C()) == 42"))
-  
+
 (defmethod test-builtin ((x (eql :isinstance)))
   (declare (ignorable x))
   (run-no-error "assert isinstance(3, int)")

@@ -15,7 +15,7 @@
   (check-type data string)
   (flet ((to-hex (x)
            (check-type x (integer 0 15))
-           (schar "0123456789abcdef" x))) 
+           (schar "0123456789abcdef" x)))
   (loop with res = (make-string (* 2 (length data)))
       for ch across data
       for ch.code = (char-code ch)
@@ -23,4 +23,3 @@
       do (setf (schar res i)      (to-hex (ash ch.code -4))
                (schar res (1+ i)) (to-hex (logand ch.code 15)))
       finally (return res))))
-  

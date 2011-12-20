@@ -1,5 +1,5 @@
 ;; -*- package: clpython; readtable: py-user-readtable -*-
-;; 
+;;
 ;; This software is Copyright (c) Franz Inc. and Willem Broekema.
 ;; Franz Inc. and Willem Broekema grant you the rights to
 ;; distribute and use this software as governed by the terms
@@ -11,7 +11,7 @@
 (in-syntax *user-readtable*)
 
 ;;; Optimizations:
-;;; 
+;;;
 ;;; Decrease execution speed by means of compiler macros and
 ;;; specialized methods.
 
@@ -79,7 +79,7 @@
 
 (defmethod get-py-iterate-fun ((x list)) ;; tuple
   (lambda () (pop x)))
-  
+
 (defmethod get-py-iterate-fun ((x py-func-iterator))
   (lambda ()
     (handler-case (funcall (slot-value x 'func))
@@ -102,7 +102,7 @@
        (when (< i (length x))
 	 (prog1 (aref x i)
 	   (incf i)))))))
-	  
+
 
 ;; Membership test
 
@@ -110,14 +110,14 @@
   (if (eq (class-of d) (ltv-find-class 'dict))
       (py-bool (gethash x (deproxy d)))
     (call-next-method)))
-    
+
 (defmethod py-in ((item string) (seq string))
   ;; XXX 'ab' in 'abc' -> ??
   (if (= (length item) 1)
-      
+
       (let ((ch (char item 0)))
 	(py-bool (and (position ch seq) t)))
-    
+
     (progn (warn "py-in on two non-char strings: ~S ~S" item seq)
 	   (py-bool nil))))
 
@@ -159,7 +159,7 @@
   (if (stringp x)
       (py-string.__getitem__ x item)
     (py-list.__getitem__ x item)))
-      
+
 (defmethod py-subs ((x string) (item #+clpython-fixnum-is-a-class fixnum #-clpython-fixnum-is-a-class integer))
   (declare (optimize (speed 3) (safety 0) (debug 0)))
   (let* ((x.len (length x))
@@ -187,7 +187,7 @@
               do (setf (aref x x-i) (aref val val-i)))
           (return-from py-subs *the-none*)))))
   (call-next-method))
-               
+
 (defmethod (setf py-subs) (val (x vector) (item #+clpython-fixnum-is-a-class fixnum #-clpython-fixnum-is-a-class integer))
   (declare (optimize (speed 3) (safety 0) (debug 0)))
   (when (stringp x)
@@ -333,7 +333,7 @@
 (generate-cmp-cm py->=)
 
 ;(py-<= 1 2)
-    
+
 ;;; Arithmetic: + * // etc
 
 (define-compiler-macro py-+ (&whole whole x y)
@@ -417,22 +417,22 @@
 
 (defmethod py-/ ((x integer) (y integer)) (careful-floor-1ret x y))
 (defmethod py-/ ((x float) (y float)) (/ x y))
-                                           
+
 ;; Augmented assignment
 
-(defmethod py-+= ((x string) y) 
+(defmethod py-+= ((x string) y)
   (declare (ignorable x) (ignore y))
   nil)
 
-(defmethod py-+= ((x number) y) 
+(defmethod py-+= ((x number) y)
   (declare (ignorable x) (ignore y))
   nil)
 
-(defmethod py--= ((x number) y) 
+(defmethod py--= ((x number) y)
   (declare (ignorable x) (ignore y))
   nil)
 
-(defmethod py-*= ((x number) y) 
+(defmethod py-*= ((x number) y)
   (declare (ignorable x) (ignore y))
   nil)
 
@@ -509,25 +509,25 @@
            (null dest)
 	   (listp items)
 	   (eq (car items) 'list))
-      
+
       `(let ((stdout (fast *standard-output*))) ;; XXX use sys.stdout (add check?)
 	 (declare (ignorable stdout))
-	 ,@(loop 
+	 ,@(loop
 	       with num-items = (length (cdr items))
 	       for x in (cdr items)
 	       for i from 0
-	       collect `(progn 
+	       collect `(progn
 			  ;; Spaces before first item (perhaps), always between items
 			  ,(if (= i 0)
 			       `(when (py-val->lisp-bool (fast *stdout-softspace*))
 				  (fast-write-char #\Space stdout))
                              `(fast-write-char #\Space stdout))
-                          
+
                           ;; Print item
 			  ,(if (< i (1- num-items))
 			       `(py-print-cmhelper ,x stdout)
-			     
-			     `(progn 
+
+			     `(progn
 				;; Set new softspace value
 				(let ((last-char-written (py-print-cmhelper ,x stdout)))
 				  (declare (ignorable last-char-written))
@@ -543,10 +543,10 @@
 	    `(progn (fast-write-char #\Newline stdout)
 		    #+(or)(force-output stdout) ;; hurts performance
                     ))
-	 
+
 	 ;; Return value:
 	 nil)
-    
+
     whole))
 
 

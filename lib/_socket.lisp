@@ -29,7 +29,7 @@
          (ip-addr-list (clpython:make-py-list-from-list (list #+allegro (socket:ipaddr-to-dotted (socket:lookup-hostname hostname))
                                                      #-allegro (break "todo")))))
     (make-tuple-from-list (list hostname alias-list ip-addr-list)))
-        
+
   #-allegro (break "todo"))
 
 

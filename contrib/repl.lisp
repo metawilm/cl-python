@@ -7,7 +7,7 @@
 ;; (http://opensource.franz.com/preamble.html),
 ;; known as the LLGPL.
 
-;;;; Read-Eval-Print loop 
+;;;; Read-Eval-Print loop
 
 (in-package :clpython.app.repl)
 (in-syntax *ast-user-readtable*)
@@ -19,7 +19,7 @@
   (defparameter *repl-restart-aliases*
       '(("pt" . return-python-toplevel)
         ("re" . retry-repl-eval)))
-  
+
   #+allegro
   (defun abbrev-for-restart (r &optional fmt)
     (let ((str (or (car (rassoc r *repl-restart-aliases*))
@@ -80,10 +80,10 @@ Keyboard commands in this Python interpreter:
 Restart shortcuts in the Lisp debugger:
      :~A            => back to Python top level
      :~A            => retry evaluation of the last Python command
-" 
+"
                              (abbrev-for-restart 'return-python-toplevel)
                              (abbrev-for-restart 'retry-repl-eval))
-                     
+
                      (format nil "
 Relevant Lisp variables (exported from package ~A):
    *repl-compile*   => whether source code is compiled into assembly
@@ -97,7 +97,7 @@ Relevant Lisp variables (exported from package ~A):
                          nil      = no profiling
 "
                              #.(package-name *package*)
-                             *repl-compile*          
+                             *repl-compile*
                              *repl-prof*)))
 
 (defvar *repl-mod* nil "The REPL module (for debugging)")
@@ -129,7 +129,7 @@ KIND can be :ptime, :time, :space, :pspace or NIL."
 (defmacro maybe-with-ldb-backend (&body body)
   #+clpython-source-level-debugging
   `(unwind-protect (excl::with-ldb-backend (:python) ,@body)
-     
+
      ;; Delete all temp breakpoints upon quitting the REPL to ease debugging.
      ;; XXXX This removes also all non-Python breakpoints.
      (excl::delete-temp-breakpoints-except))
@@ -143,7 +143,7 @@ KIND can be :ptime, :time, :space, :pspace or NIL."
   ;; don't really record source location information.
   (let (#+allegro (excl:*load-xref-info* nil)
         #+allegro (excl:*record-xref-info* nil))
-  
+
     (format t "Welcome to CLPython, an implementation of Python in Common Lisp.~%")
     (format t "Running on: ~A ~A~%" (lisp-implementation-type) (lisp-implementation-version))
     (format t "REPL shortcuts: `:q' = quit, `:h' = help.~%")
@@ -221,7 +221,7 @@ KIND can be :ptime, :time, :space, :pspace or NIL."
                (with-matching (ast ([module-stmt] ?suite))
 		 (assert (ast-p ?suite '[suite-stmt]))
 		 (let ((vals (multiple-value-list
-                              (block :val 
+                              (block :val
                                 (loop (let ((helper-func (run-ast-func ast)))
                                         (loop (with-simple-restart
                                                   (retry-repl-eval (concatenate 'string "Retry the expression: \"~A\"" #+allegro " ~A.")
@@ -233,7 +233,7 @@ KIND can be :ptime, :time, :space, :pspace or NIL."
                      (remember-value (car vals))
                      (block repr
                        (unless (and (null (cdr vals))
-                                    (clpython::none-p (car vals))) 
+                                    (clpython::none-p (car vals)))
                          (loop
                            (with-simple-restart
                                (:continue "Retry printing the object.")
@@ -253,23 +253,23 @@ KIND can be :ptime, :time, :space, :pspace or NIL."
 	     (handle-as-python-code (total &key print-error (ast-finished :maybe))
                ;; Return T if this succeeded somehow, i.e. parsing as Lisp
                ;; should not be attempted.
-               
+
                ;; When first char is a space, always treat it as Lisp code
                (when (or (zerop (length total))
                          (char= (char total 0) #\Space))
                  (return-from handle-as-python-code nil))
-               
+
                (flet ((return-syntax-error (err)
                         (when print-error
                           (format t ";; Python parse failed:  ~A~%" err))
                         (return-from handle-as-python-code :syntax-error)))
-                 
+
                  (let ((ast (handler-case (parse total)
-                              ;; Try to parse input into AST 
+                              ;; Try to parse input into AST
                               ;;  - If that fails due to unexpected EOF, we still intend to parse
                               ;;    as Python code, therefore return T.
                               ;;  - If that fails due to syntax error, we give up.
-                              ;; 
+                              ;;
                               ;; If lines start with (copied) `>>>'/`...', then parsing is tried
                               ;; after removing those.
                               ({UnexpectedEofError} (c)
@@ -315,21 +315,21 @@ KIND can be :ptime, :time, :space, :pspace or NIL."
                         (when print-error
                           (format t ";; Lisp parse failed:  ~A~%" error))
                         nil)
-                       
+
 		       ((or (null lisp-form)
                             (and (symbolp lisp-form)
                                  (member lisp-form (mapcar #'second clpython.parser::*multi-line-statements*)
                                          :test 'string=)))
                         ;; Start of a multi-line Python form
                         nil)
-                       
+
 		       ((and (symbolp lisp-form)
 			     (> (length (symbol-name lisp-form)) 1)
 			     (char= (aref (symbol-name lisp-form) 0) #\@))
                         ;; Reading function decorator
                         nil)
-		       
-		       (t (multiple-value-bind (res err) 
+
+		       (t (multiple-value-bind (res err)
 			      (ignore-errors (multiple-value-list (eval lisp-form)))
 			    (if (and (null res)
 				     (typep err 'condition))
@@ -354,15 +354,15 @@ KIND can be :ptime, :time, :space, :pspace or NIL."
                    (clpython.util:quit)
                  (return-from repl-1 (values)))))
       (clear-history)
-      (loop 
+      (loop
         (with-simple-restart (return-python-toplevel
                               (concatenate 'string "Return to Python top level" #+allegro " ~A.")
                               #+allegro (abbrev-for-restart 'return-python-toplevel "(:~A)"))
           (setf acc ())
-          (loop 
+          (loop
             (locally (declare (special *stdout-softspace*))
               (setf *stdout-softspace* (py-bool nil)))
-            
+
             (unless (checking-reader-conditionals
                      #+(or allegro sbcl) (input-available-p)
                      #-(or allegro sbcl) nil)
@@ -395,7 +395,7 @@ KIND can be :ptime, :time, :space, :pspace or NIL."
                               (format t ";; Set profiling to ~A.~%" cmd))))
                     (t
                      (warn "Unknown command: ~S" cmd)))))
-               
+
                ((and (string= x "") #+allegro (not (input-available-p)))
                 (let ((total (apply #'concatenate 'string (nreverse acc))))
                   (setf acc ())
@@ -406,12 +406,12 @@ KIND can be :ptime, :time, :space, :pspace or NIL."
                                (return))
                       (try-parse-again ()
                           :report "Parse string again into AST")))))
-               
+
                ((and (> (length x) 0)
                      (char= (aref x 0) #\#))
                 ;; skip comment line
                 )
-               
+
                (t (push (concatenate 'string x (string #\Newline)) acc)
                   (let* ((total (apply #'concatenate 'string (reverse acc))))
                     (ecase (handle-as-python-code total)

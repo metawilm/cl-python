@@ -38,9 +38,9 @@
 (defmethod closer-mop:validate-superclass ((class py-meta-type) superclass)
   (declare (ignorable class superclass))
   t)
-  
+
 (defclass py-type (dict-mixin standard-class)
-  ()      
+  ()
   (:metaclass py-meta-type))
 
 (closer-mop:finalize-inheritance (find-class 'py-type))
@@ -68,7 +68,7 @@
   (defmethod closer-mop:validate-superclass (class (superclass py-meta-type))
     (declare (ignorable class superclass))
     t)
-  
+
   (defmethod closer-mop:validate-superclass ((class standard-class) (superclass py-meta-type))
     (declare (ignorable class superclass))
     t)
@@ -103,19 +103,19 @@
  #+(or allegro ccl lispworks)
  (defun make-py-hash-table ()
    (make-hash-table :test 'py-==->lisp-val :hash-function 'py-hash))
- 
+
  #+cmu
  (progn
    (extensions:define-hash-table-test 'py-hash-table-test #'py-==->lisp-val #'py-hash)
    (defun make-py-hash-table ()
      (make-hash-table :test 'py-hash-table-test)))
- 
+
  #+ecl
  (cl-custom-hash-table:define-custom-hash-table-constructor
      make-py-hash-table :test py-==->lisp-val :hash-function py-hash)
- 
+
  #+sbcl
- (progn 
+ (progn
    (sb-ext:define-hash-table-test py-==->lisp-val py-hash)
    (defun make-py-hash-table ()
      (make-hash-table :test 'py-==->lisp-val))))

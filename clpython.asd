@@ -15,10 +15,10 @@
   (error "This ASDF file should be run interpreted."))
 
 
-;;; CL-Python is split into several ASDF systems, to make it possible to load 
+;;; CL-Python is split into several ASDF systems, to make it possible to load
 ;;; specific components -- in particular, to load the compiler or parser without
 ;;; the runtime environment.
-;;; 
+;;;
 ;;; The main system :CLPYTHON is the sum of all components, including contributions.
 
 (asdf:defsystem :clpython.basic
@@ -40,7 +40,7 @@
 
 (asdf:defsystem :clpython.parser
     :description "Python parser, code walker, and pretty printer"
-    :depends-on 
+    :depends-on
     #.`(:clpython.basic :closer-mop
         #-allegro :yacc
         #+allegro ,@(when (asdf:find-system :yacc nil) `(:yacc)))
@@ -64,7 +64,7 @@
                                        (:file "pydecl"       )
                                        (:file "namespace"    )
                                        (:file "compiler"     )
-                                       (:file "generator"    )                                       
+                                       (:file "generator"    )
                                        (:file "optimize"     )))))
 
 (asdf:defsystem :clpython.runtime
@@ -157,18 +157,18 @@
 
 (let* ((parser-mod (let ((sys (asdf:find-system :clpython.parser)))
                      (car (asdf:module-components sys)))))
-  
+
   #+allegro
   (let ((cl-yacc-grammar (asdf:find-component parser-mod "grammar-clyacc")))
-    
+
     (defmethod asdf:perform :around ((op asdf:load-op) (c (eql cl-yacc-grammar)))
       (when (asdf:find-system :yacc nil)
         (call-next-method)))
-    
+
     (defmethod asdf:perform :around ((op asdf:compile-op) (c (eql cl-yacc-grammar)))
       (when (asdf:find-system :yacc nil)
         (call-next-method))))
-  
+
   #-allegro
   (let ((allegro-yacc-grammar (asdf:find-component parser-mod "grammar-aclyacc")))
     (defmethod asdf:perform :around ((op asdf:load-op) (c (eql allegro-yacc-grammar)))
@@ -188,7 +188,7 @@
      ,@body))
 
 (let ((clpython (asdf:find-system :clpython)))
-  
+
   (defmethod asdf::traverse :around ((op asdf:compile-op) (system (eql clpython)))
     (with-missing-dep-help ((:closer-mop
 			     "CL-Python requires library \"Closer to MOP\". ~
@@ -211,7 +211,7 @@
                               or download the latest release from: ~
                               https://github.com/metawilm/cl-custom-hash-table/zipball/master"))
 			   (call-next-method)))
-  
+
   #-allegro
   (defmethod asdf::traverse :around ((op asdf:test-op) (system (eql clpython)))
     (with-missing-dep-help ((:ptester
@@ -221,10 +221,10 @@
       (call-next-method))))
 
 
-;;; Suppress some warnings about package trickery 
+;;; Suppress some warnings about package trickery
 
 (defmacro suppress-package-warnings (&body body)
-  `(handler-bind (#+sbcl 
+  `(handler-bind (#+sbcl
 		  (sb-int:package-at-variance #'muffle-warning)
 		  #+lispworks
 		  (simple-warning (lambda (c)
@@ -232,7 +232,7 @@
 				      (when (search "Using DEFPACKAGE" fmt)
 					(muffle-warning c))))))
 		 ,@body))
-      
+
 (let* ((package-file (let ((sys (asdf:find-system :clpython.basic)))
 		       (car (asdf:module-components sys))))
        (lib-mod (let ((sys (asdf:find-system :clpython.lib)))
@@ -244,11 +244,11 @@
    #-allegro progn
 
    (dolist (pkg-file pkg-files)
-     
+
      (defmethod asdf:perform :around ((op asdf:compile-op) (c (eql pkg-file)))
        (suppress-package-warnings
 	(call-next-method)))
-     
+
      (defmethod asdf:perform :around ((op asdf:load-op) (c (eql pkg-file)))
        (suppress-package-warnings
 	(call-next-method))))))
@@ -258,7 +258,7 @@
 
 (defun show-clpython-quick-start ()
   (format t "~%CLPython quick start guide:~%")
-  (format t "  Run a string of Python code:           (~S \"for i in range(4): print i\")~%" 
+  (format t "  Run a string of Python code:           (~S \"for i in range(4): print i\")~%"
           (find-symbol (string '#:run) :clpython))
   (format t "  Run a Python file:                     (~S #p\"~~/example/foo.py\")~%"
           (find-symbol (string '#:run) :clpython))

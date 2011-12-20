@@ -43,7 +43,7 @@
 							   ,(second clause) ,(third clause) ,res nil))
 					([if-clause]     `([if-stmt] ((,(second clause) ,res)) nil))))
 				 finally (return res))))
-        `([call-expr] 
+        `([call-expr]
 	  ([funcdef-stmt] nil ([identifier-expr] :generator-expr-helper-func)
 			  ((([identifier-expr] ,first-source)) nil nil nil)
 			  ([suite-stmt]
@@ -132,7 +132,7 @@
                   ,@body)))
             (setf (gethash ',node *cps-macro-functions*) ',fname))))
 
-(defun raise-stop-iteration () 
+(defun raise-stop-iteration ()
   (py-raise '{StopIteration} "Generator is finished."))
 
 #+(or) ;; Should be done by implementations already.
@@ -314,7 +314,7 @@ former requires that this form is executed within RECEIVE-YIELDED-VALUE."
   (let ((cmp-res (funcall comp-func left right)))
     (when (or last-p (not (py-val->lisp-bool cmp-res)))
       (funcall comparison-k cmp-res))))
-         
+
 (def-cps-macro [comparison-expr] (cmp left right)
   (multiple-value-bind (args cmp-func-names)
       (apply-comparison-brackets `([comparison-expr] ,cmp ,left ,right))
@@ -366,7 +366,7 @@ former requires that this form is executed within RECEIVE-YIELDED-VALUE."
 
 (def-cps-macro [for-in-stmt] (target source suite else-suite &environment e)
   (with-gensyms (e-source it-fun for-cont for-break-cont else-cont ignore for-in-stmt-k)
-    `(let ((,for-in-stmt-k ,%current-continuation)) 
+    `(let ((,for-in-stmt-k ,%current-continuation))
        (with-cps-conversion (,source ,e-source)
          (let* ((,it-fun (get-py-iterate-fun ,e-source)))
            (labels (,@(when (contains-continue-stmt-p suite e)
@@ -398,7 +398,7 @@ former requires that this form is executed within RECEIVE-YIELDED-VALUE."
                                fname (pos-args key-args *-arg **-arg)
                                suite)
   ;; Deal with yield in two places: in decorators, and in keyword argument default values,
-  ;; in that evaluation order. 
+  ;; in that evaluation order.
   (let* ((decorator-gensyms (loop repeat (length decorators) collect (gensym "deco")))
          (kwd-val-gensyms (loop repeat (length key-args) collect (gensym "kwarg-default")))
          (new-key-args (loop for (name nil) in key-args and gensym in kwd-val-gensyms
@@ -432,7 +432,7 @@ former requires that this form is executed within RECEIVE-YIELDED-VALUE."
   (with-gensyms (if-stmt-k)
     `(let ((,if-stmt-k ,%current-continuation))
        (declare (ignorable ,if-stmt-k))
-       ,(let ((res (if else-clause 
+       ,(let ((res (if else-clause
                        `(%cps-convert ,else-clause ,if-stmt-k)
                      `(funcall ,if-stmt-k nil))))
           (loop for (cond body) in (reverse if-clauses)
@@ -501,7 +501,7 @@ former requires that this form is executed within RECEIVE-YIELDED-VALUE."
                       ,(%call-continuation))))
     (loop for it in (reverse items) and gensym in (reverse item-gensyms)
         do (setf res `(with-cps-conversion (,it ,gensym) ,res)))
-    (setf res (if dest 
+    (setf res (if dest
                   `(with-cps-conversion (,dest ,dest-gensym) ,res)
                 `(let ((,dest-gensym ,dest))
                    ,res)))
@@ -512,16 +512,16 @@ former requires that this form is executed within RECEIVE-YIELDED-VALUE."
     `(with-cps-conversion (,exc ,e-exc :nil-allowed t)
        (with-cps-conversion (,tb ,e-tb :nil-allowed t)
          (raise-stmt-1 ,e-exc ,var ,e-tb)))))
-  
+
 (def-cps-macro [return-stmt] (&optional value &environment e)
   ;; VALUE can be given, if this is inside a generator.
   (cond (value
-         (raise-syntax-error 
+         (raise-syntax-error
           "Generator ~A may not `return' with a value."
           (format nil "~{~A~^.~}" (reverse (get-pydecl :context-name-stack e)))))
         ((get-pydecl :in-sub-generator e)
          `(yield-value :explicit-return))
-        (t 
+        (t
          (%mark-generator-finished))))
 
 (def-cps-macro [slice-expr] (start stop step)
@@ -531,7 +531,7 @@ former requires that this form is executed within RECEIVE-YIELDED-VALUE."
          (with-cps-conversion (,step ,e-step :nil-allowed t)
            ,(%call-continuation
              `([slice-expr] ,e-start ,e-stop ,e-step))))))) ;; No CPS
-    
+
 (def-cps-macro [subscription-expr] (item subs)
   (with-gensyms (e-subs e-item)
     `(with-cps-conversion (,item ,e-item)
@@ -559,7 +559,7 @@ former requires that this form is executed within RECEIVE-YIELDED-VALUE."
               ,(loop with res = `(error .c)
                    for (exc var handler-suite) in (reverse except-clauses)
                    do (setf res `(with-cps-conversion (,exc ,e-exc :nil-allowed t)
-                                   (let ((applicable (typecase ,e-exc 
+                                   (let ((applicable (typecase ,e-exc
                                                        ;; exception class, or typle of exception classes
                                                        (null t) ;; blank "except:" catches all
                                                        (list (loop for x in ,e-exc thereis (typep .c x)))
@@ -700,7 +700,7 @@ former requires that this form is executed within RECEIVE-YIELDED-VALUE."
       `(,with-namespace ,namespace
          (%cps-convert ,suite ,%current-continuation)))))
 
-#||  
+#||
   (with-gensyms (mgr exit value no-exc exc-details c)
     `(with-cps-conversion (,expr ,mgr)
        (let* ((,exit (attr ,mgr '{__exit__}))
@@ -725,7 +725,7 @@ former requires that this form is executed within RECEIVE-YIELDED-VALUE."
                              (yield-value val)))))))
            (next-suite-value *the-none*)))
 ||#
-         
+
 (def-cps-macro [yield-expr] (val &environment e)
   (unless (eq :function (car (get-pydecl :context-type-stack e)))
     (raise-syntax-error "Expression `yield' was found outside function."))
@@ -733,14 +733,14 @@ former requires that this form is executed within RECEIVE-YIELDED-VALUE."
     `(let ((,after-yield-k ,%current-continuation))
        (with-cps-conversion (,val ,e-val)
          ,(%store-continuation `(lambda (x) (funcall ,after-yield-k (parse-generator-input x))))
-         
+
          ;; XXX There seems to be a bug in LW 6.0.1 on linux-x86, where E-VAL is suddenly unbound
          ;; in the YIELD-VALUE call. This seems to work around the issue for now:
          #+lispworks
          (funcall (lambda (x) (yield-value (car x))) (list ,e-val))
          #-lispworks
          (yield-value ,e-val)))))
-    
+
 (def-cps-macro [yield-stmt] (&optional value &environment e)
   ;; A yield statement is a yield expression whose value is not used.
   (unless (eq :function (car (get-pydecl :context-type-stack e)))

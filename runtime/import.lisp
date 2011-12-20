@@ -1,5 +1,5 @@
 ;; -*- package: clpython; readtable: py-user-readtable -*-
-;; 
+;;
 ;; This software is Copyright (c) Franz Inc. and Willem Broekema.
 ;; Franz Inc. and Willem Broekema grant you the rights to
 ;; distribute and use this software as governed by the terms
@@ -12,7 +12,7 @@
 
 (defvar *compile-for-import* nil
   "Whether source files are compiled before being run")
-    
+
 (defvar *py-compiled-file-type* "FASL"
   "File types of compiled Python files, in :common pathname case")
 
@@ -36,7 +36,7 @@
                (derive-pathname filepath
                                 :type type
                                 :name *package-indicator-filename*)))))
-  
+
 (defun source-file-names (kind modname filepath)
   (check-type modname string)
   (mapcar (lambda (type)
@@ -67,7 +67,7 @@ In particular, asdf-binary-locations is used if available.")
                (whereas ((temp-file (get-temporary-fasl-file kind modname filepath)))
                  (setf result-path temp-file)))
              result-path))
-  
+
   (:method (kind modname filepath)
            (%get-py-file-name kind modname filepath *py-compiled-file-type*)))
 
@@ -85,7 +85,7 @@ In particular, asdf-binary-locations is used if available.")
              (declare (ignorable i))
              (let ((random-n (random 1000000)))
                (declare (ignorable random-n))
-               (or 
+               (or
                 #+allegro
                 (let* ((temp-dir (sys:temporary-directory)))
                   ;; temp-dir might contain ~ as in C:\DOCUME~1\.. so careful with FORMAT
@@ -133,7 +133,7 @@ As for case: both MODNAME's own name its upper-case variant are tried."
 Returns values KIND SRC-PATH BIN-PATH FIND-PATH, or NIL if not found,
 with KIND one of :module, :package
       SRC-PATH, BIN-PATH the truenames of the existing files."
-  (flet ((probe-src (fname) 
+  (flet ((probe-src (fname)
            (cached-probe-file fname))
          (probe-bin (fname)
            (whereas ((path (cached-probe-file fname)))
@@ -144,13 +144,13 @@ with KIND one of :module, :package
 
     ;; Add missing directory slashes at the end
     (map-into search-paths #'ensure-path-is-directory search-paths)
-    
+
     (loop for path in search-paths
         for src-path = (find-if #'probe-src (source-file-names :module name path))
         for bin-path = (and allow-bin (find-if #'probe-bin (list (compiled-file-name :module name path))))
         for pkg-src-path = (find-if #'probe-src (source-file-names :package name path))
         for pkg-bin-path = (and allow-bin (find-if #'probe-bin (list (compiled-file-name :package name path))))
-			 
+
         if (or src-path bin-path)
         return (values :module
                        (when src-path (probe-src src-path))
@@ -184,12 +184,12 @@ Caller is responsible for deciding if recompiling is really necessary."
 
   (let #1=(module new-module-p success source-func source)
        (unwind-protect
-           (progn 
+           (progn
              (multiple-value-setq #1#
                (load-py-fasl-file :filename lisp-filename
                                   :pre-import-hook (lambda (module) (add-loaded-module module habitat))))
              (module-import-post . #1#))
-         
+
          ;; clean-up:
          (unless success
            (when new-module-p
@@ -216,15 +216,15 @@ LOAD failed and was aborted by the user)."
   (when (string= (pathname-type bin-filename) *py-compiled-file-type*)
     (setf bin-filename
       (merge-pathnames (make-pathname :type (string-downcase *py-compiled-file-type*)) bin-filename)))
-  
+
   (let #1=(module new-module-p success source-func source)
        (unwind-protect
-           (progn 
+           (progn
              (multiple-value-setq #1#
                (load-py-fasl-file :filename bin-filename
                                   :pre-import-hook (lambda (module) (add-loaded-module module habitat))))
              (module-import-post . #1#))
-         
+
          ;; clean-up:
          (unless success
            (when new-module-p
@@ -261,7 +261,7 @@ LOAD failed and was aborted by the user)."
      "Default search paths for imported modules. Should at least contain the location
 of the Python stanard libraries. (This variable is in the CL-USER package to allow
 it being set before CLPython is loaded, e.g. in a Lisp configuration file.)")))
-  
+
 (defun maybe-warn-set-search-paths (at-error)
   (cond ((or (not (boundp 'cl-user::*clpython-module-search-paths*))
              (not cl-user::*clpython-module-search-paths*))
@@ -311,7 +311,7 @@ operation on the same path again and again during one import action.")
 
 (defparameter *__main__-module-name* "__main__")
 
-(defun py-import (mod-name-as-list 
+(defun py-import (mod-name-as-list
 		  &rest options
 		  &key (habitat (or *habitat* (error "PY-IMPORT called without habitat")))
                        (force-reload *import-force-reload*)
@@ -344,10 +344,10 @@ Otherwise raises ImportError."
       (when (= (length mod-name-as-list) 1)
         (whereas ((pkg (lisp-package-as-py-module (car mod-name-as-list))))
           (return-from py-import (values pkg :lisp-package))))
-  
+
       (let* ((just-mod-name (string (car (last mod-name-as-list))))
              (dotted-name (module-dotted-name mod-name-as-list)) )
-    
+
         ;; If name already registered in sys.modules, return it.
         ;; (Example: os.py sets the "os.path" entry)
         ;; XXX this should not happen for e.g. module "dist", as that is in either "distutils.dist" or "setuptools.dist".
@@ -355,7 +355,7 @@ Otherwise raises ImportError."
         (unless force-reload
           (whereas ((mod (with-py-dict (gethash dotted-name (find-symbol-value '#:|modules| :clpython.module.sys)))))
             (return-from py-import (values mod :sys.modules))))
-           
+
         ;; In case of a dotted import ("import a.b.c"), recursively import the parent "a.b"
         ;; and set the search path to only the location of that package.
         (when (> (length mod-name-as-list) 1)
@@ -384,26 +384,26 @@ Otherwise raises ImportError."
              it is pointing somewhere else: ~A." parent *package-indicator-filename* parent-path)
               (setf search-paths
                 (list (derive-pathname parent-path :type nil :name nil :version nil))))))
-    
+
         (let ((find-paths search-paths))
           (when within-mod-path
             (let ((parent-directory (derive-pathname within-mod-path :type nil :name nil :version nil)))
               (push (truename parent-directory) find-paths)))
           (setf find-paths (remove-duplicates find-paths :test 'equal))
-      
+
           ;; Find the source or fasl file somewhere in the collection of search paths
           (multiple-value-bind (kind src-file bin-file find-path)
               (find-py-file just-mod-name find-paths :allow-bin *compile-for-import*)
             (unless kind
               (when if-not-found-p
                 (return-from py-import (values if-not-found-value :not-found-value)))
-          
+
               ;; For "import XYZ", if XYZ names a package, import it. Note that a file named XYZ.py
               ;; on the search path takes precedence.
               (when (= (length mod-name-as-list) 1)
                 (whereas ((pkg (find-package (symbol-name (car mod-name-as-list)))))
                   (return-from py-import (values pkg :lisp-package))))
-          
+
               (maybe-warn-set-search-paths t)
               (py-raise '{ImportError}
                         "Could not find module `~A'. ~:@_Search paths tried: ~{~S~^, ~_~}~@[ ~:@_Import ~
@@ -411,13 +411,13 @@ Otherwise raises ImportError."
                         just-mod-name search-paths
                         (when within-mod-path (module-dotted-name %outer-mod-name-as-list))
                         within-mod-path))
-        
+
             (assert (member kind '(:module :package)))
             (if *compile-for-import*
                 (assert (or src-file bin-file))
               (assert src-file))
             (assert find-path)
-        
+
             ;; If we have a source file, then recompile fasl if outdated.
             (when (and force-recompile (not src-file))
               (warn "Requested recompilation of ~A can not be performed: no source file available."
@@ -442,22 +442,22 @@ Otherwise raises ImportError."
                         (t
                          (setf bin-file (pathname (concatenate 'string (namestring src-file) ".lisp")))
                          (format t ";; Parsing ~S into ~S~%" src-file bin-file)
-                         (compile-py-source-file-to-lisp-source :filename src-file 
+                         (compile-py-source-file-to-lisp-source :filename src-file
                                                                 :output-file bin-file))))))
-            
+
             (when *compile-for-import*
               ;; Now we have an up-to-date fasl file.
               (assert (and bin-file (cached-probe-file bin-file t)))
               (when src-file
                 (assert (>= (file-write-date bin-file) (file-write-date src-file)))))
-        
+
             ;; If current fasl file was already imported, then return its module.
             (unless force-reload
               (whereas ((m (get-loaded-module :bin-pathname bin-file
                                               :bin-file-write-date (file-write-date bin-file)
                                               :habitat habitat)))
                 (return-from py-import (values m :already-imported-not-force-reload))))
-        
+
             (let ((new-mod-dotted-name (if (and within-mod-path (eq find-path within-mod-path))
                                            (progn (assert (and (stringp within-mod-name)
                                                                (string/= within-mod-name *__main__-module-name*)))
@@ -470,7 +470,7 @@ Otherwise raises ImportError."
                                        (declare (ignore c))
                                        (setf new-module 'recompiling-fasl)
                                        (setf force-recompile t)
-                                       
+
                                        ;; Try to delete the fasl file, to ensure it won't be reused
                                        (handler-case (delete-file bin-file)
                                          (file-error ()
@@ -478,18 +478,18 @@ Otherwise raises ImportError."
                                            ))
                                        ;; In some implementations PROBE-FILE on the bin-file succeeds
                                        ;; See e.g. http://trac.clozure.com/ccl/ticket/633
-                                       
+
                                        ;; Delete fasl from caches
                                        (remhash bin-file *import-recompiled-files*)
                                        (cached-probe-file bin-file t)
-                                       
+
                                        ;; Restart the py-import call.
                                        ;; This used to recursively callpy-import instead of throw,
                                        ;; but that is wrong: e.g. %load-compiled-python-file relies
                                        ;; on immediate unwinding on failure, to keep loaded modules
                                        ;; consistent.
                                        (throw 'py-import-retry nil))
-                                   
+
                                      :test-function (lambda
                                                         #+allegro (&optional c) ;; ACL bug: C not supplied
                                                         #-allegro (c)
@@ -538,7 +538,7 @@ Otherwise raises ImportError."
   (check-type attr string)
   (let* ((pkg-name (concatenate 'string (package-name :clpython.module) "." (symbol-name module)))
          (package (or (find-package pkg-name)
-                      (error "Builtin Python module (Lisp package) ~A not found." pkg-name)))) 
+                      (error "Builtin Python module (Lisp package) ~A not found." pkg-name))))
     (symbol-value (find-symbol attr package))))
 
 (defun %reset-import-state ()

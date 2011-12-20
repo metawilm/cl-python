@@ -40,7 +40,7 @@
 (defmacro test-error (form &rest args)
   `(#+allegro util.test:test-error #-allegro ptester:test-error
     ,(form-without-compiler-warnings form) ,@args))
-    
+
 (defmacro test-true (val &rest options)
   "Only tests first value returned"
   `(test t (not (null ,val)) ,@options))
@@ -73,7 +73,7 @@ seems to give implementations some freedom here. (In practice: Allegro=NIL, LisW
                  :fail-info (format nil "~S = ~S"
                                     '+compilation-warnings-muffled-by-compiler+
                                     +compilation-warnings-muffled-by-compiler+)))
-  
+
 (defvar *test-active* nil)
 
 (defmacro with-subtest (options &body body)
@@ -82,7 +82,7 @@ seems to give implementations some freedom here. (In practice: Allegro=NIL, LisW
   `(flet ((run-body () ,@body))
      (if *test-active*
 	 (progn (format t "~%[subtest: ~A]~%" ,(getf options :name))
-		(unwind-protect 
+		(unwind-protect
                     (run-body)
                   (format t "~%[end of subtest: ~A]~%" ,(getf options :name))))
        (let ((*test-active* t)
@@ -131,7 +131,7 @@ seems to give implementations some freedom here. (In practice: Allegro=NIL, LisW
 (defun run-tests ()
   (with-subtest (:name "CLPython")
     (test-comp-testfunc)
-    (with-all-parser-versions 
+    (with-all-parser-versions
         (run-parser-test))
     #+(or)(run-lispy-test)
     (run-compiler-test)

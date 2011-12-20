@@ -23,7 +23,7 @@
 (defvar |byteorder| :n/a "Byte order of implementation: 'big' or 'little'")
 (set-impl-status '|byteorder| :n/a "Byte order is hidden in Lisp implementation.")
 
-;; Not implemented, and no intention to: 
+;; Not implemented, and no intention to:
 ;;  subversion, _current_frames, dllhandle, exc_type, exc_value, exc_traceback,
 ;;  getrefcount, _getframe, settscdump, winver
 ;;
@@ -34,7 +34,7 @@
 
 (defun |exc_info| ()
   (declare (special *last-raised-exception*))
-  (clpython:make-tuple-from-list 
+  (clpython:make-tuple-from-list
    (if *last-raised-exception*
        (list (clpython:py-class-of *last-raised-exception*)
 	     *last-raised-exception*
@@ -50,7 +50,7 @@
   "Identifier for implementation-specific path behaviour. Must be one of: 'mac', 'posix', 'nt', 'os2', 'c2', 'riscos'.
 The corresponding module must be defined as package, e.g. :clpython.module.posix")
 
-(defvar |builtin_module_names| 
+(defvar |builtin_module_names|
     (make-tuple-from-list (list *implementation*)))
 
 (set-impl-status '|builtin_module_names| t)
@@ -80,7 +80,7 @@ The corresponding module must be defined as package, e.g. :clpython.module.posix
 (set-impl-status '|exitfunc| :todo "Currently never called.")
 
 ;;; Command-line args, read-only
-(defparameter |flags| 
+(defparameter |flags|
     (copy-tree '((:bytes-warning 1) ;; 2=error, 1=default, 0=ignore ?
                  (:debug nil)
                  (:py3k-warning nil)
@@ -114,18 +114,18 @@ The corresponding module must be defined as package, e.g. :clpython.module.posix
 (set-impl-status '|getdefaultencoding| :todo)
 
 (defun |setdefaultencoding| (val)
-  (declare (ignore val)) 
+  (declare (ignore val))
   :todo)
 (set-impl-status '|setdefaultencoding| :todo)
 
-(defun |getfilesystemencoding| () 
+(defun |getfilesystemencoding| ()
   :todo)
 (set-impl-status '|getfilesystemencoding| :todo)
 
 (let ((rec-limit 42))
   (defun |getrecursionlimit| ()    rec-limit)
   (defun |setrecursionlimit| (val) (setf rec-limit val))
-  
+
   (set-impl-status '(|getrecursionlimit| |setrecursionlimit|)
 		   :todo "Currently not taken into account."))
 
@@ -178,7 +178,7 @@ supported (not zip files etc).")
 (defvar |version_info| :filled-later "Tuple like (2, 0, 0, 'final', 0)")
 (defvar |version|      :filled-later "String like '1.5.2 (#0 Apr 13 1999, 10:51:12) [MSC 32 bit (Intel)]'")
 
-(let ((py-version (clpython:make-tuple-from-list '(2 5 0 "alpha" 0)))) 
+(let ((py-version (clpython:make-tuple-from-list '(2 5 0 "alpha" 0))))
   ;; XXX figure out which we resemble
   (setf |version_info| py-version)
   (setf |version|      (format nil "CLPython 2.5.0 alpha (~A ~A)"

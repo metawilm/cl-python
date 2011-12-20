@@ -65,7 +65,7 @@
 (defun |stat| (path)
   (declare (ignorable path))
   #-allegro (error "TODO")
-  #+allegro 
+  #+allegro
   (let ((stat (handler-case (excl.osi:stat path)
                 (excl.osi:syscall-error (c)
                   (py-raise '{OSError} (format nil "~A" c))))))

@@ -14,7 +14,7 @@
 ;; catches that or passes it on outwards. CLHS on COMPILE: "compile is
 ;; permitted, but not required, to establish a handler for conditions
 ;; of type error."
-;; 
+;;
 ;; In our case, certain syntax errors are detected during
 ;; macroexpansion. By using non-ERROR conditions, as suggested by
 ;; Nikodemus Siivola, we can communicate that event portably to an

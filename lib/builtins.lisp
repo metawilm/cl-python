@@ -51,7 +51,7 @@
 
 ;; The functions below are in the same order as
 ;; http://www.python.org/doc/current/lib/built-in-funcs.html#built-in-funcs
-;; 
+;;
 ;; These function will always return a Python value (never a
 ;; Lisp generalized boolean etc).
 
@@ -68,7 +68,7 @@ Raises AttributeError when there is no `__abs__' method."
 (defun {all} (x)
   (let ((iter-fun (get-py-iterate-fun x)))
     (loop (let ((item (funcall iter-fun)))
-            (cond ((null item) 
+            (cond ((null item)
                    (return-from {all} +the-true+))
                   ((not (py-val->lisp-bool item))
                    (return-from {all} +the-false+)))))))
@@ -76,18 +76,18 @@ Raises AttributeError when there is no `__abs__' method."
 (defun {any} (x)
   (let ((iter-fun (get-py-iterate-fun x)))
     (loop (let ((item (funcall iter-fun)))
-            (cond ((null item) 
+            (cond ((null item)
                    (return-from {any} +the-false+))
                   ((py-val->lisp-bool item)
                    (return-from {any} +the-true+)))))))
 
 (defun {apply} (function &optional pos-args kw-dict)
   "Apply FUNCTION (a callable object) to given args.
-POS-ARGS is any iterable object; KW-DICT must be of type DICT." 
-  
+POS-ARGS is any iterable object; KW-DICT must be of type DICT."
+
   (warn "Function 'apply' is deprecated; use extended call ~@
          syntax instead:  f(*args, **kwargs)")
-  
+
   (let* ((pos-args (py-iterate->lisp-list (deproxy pos-args)))
 	 (kw-dict  (deproxy kw-dict))
 	 (kw-list  (progn (unless (typep kw-dict 'hash-table)
@@ -142,7 +142,7 @@ POS-ARGS is any iterable object; KW-DICT must be of type DICT."
     (when x (loop for (k . nil) in (dir-items x :use-all nil)
                 do (push k res)))
     (make-py-list-from-list (sort res #'string<))))
-  
+
 (defun {divmod} (x y)
   "Return (x/y, x%y) as tuple"
   (py-divmod x y))
@@ -157,7 +157,7 @@ POS-ARGS is any iterable object; KW-DICT must be of type DICT."
    to GLOBALS) and GLOBALS (defaulting to scope in which `execfile' ~@
    is called) as local and global variables. Returns value of None."
   (declare (ignore filename globals locals))
-  
+
   (error "todo: execfile"))
 
 (defun {filter} (func iterable)
@@ -166,17 +166,17 @@ POS-ARGS is any iterable object; KW-DICT must be of type DICT."
          If list is a string or a tuple, the result also has that type,
          otherwise it is always a list.
    FUNC: if None, identity function is assumed"
-  
+
   (when (eq func *the-none*)
     (setf func #'identity))
-  
+
   (make-py-list-from-list (loop for x in (py-iterate->lisp-list iterable)
 			   when (py-val->lisp-bool (py-call func x))
 			   collect x)))
 
 (defun {getattr} (x attr &optional default)
   ;; Exceptions raised during py-attr are not caught.
-  ;; 
+  ;;
   ;; This interns the ATTR in the :clpython.user package - probably a
   ;; small price to pay for using symbols in attribute lookup everywhere
   ;; else.
@@ -226,7 +226,7 @@ POS-ARGS is any iterable object; KW-DICT must be of type DICT."
 (defun {id} (x)
   ;; In contrast to CPython, in Allegro the `id' (memory location) of
   ;; Python objects can change during their lifetime.
-  (py-id x))  
+  (py-id x))
 
 (defun {input} (&rest args)
   (declare (ignore args))
@@ -275,7 +275,7 @@ until the value returned is equal to Y."
     (make-iterator-from-function
      :func (if y
                (let ((iterf (get-py-iterate-fun x)))
-                 (lambda () 
+                 (lambda ()
                    (let ((val (funcall iterf)))
                      (if (py-== val y)
                          nil
@@ -332,12 +332,12 @@ None, use identity function (multiple sequences -> list of tuples)."
     (map-over-object (lambda (k)
 			  (when (or (null res) (py-val->lisp-bool (funcall cmpfunc k res)))
 			    (setf res k)))
-			
-			(if (null items) 
+
+			(if (null items)
 			    item
 			  (cons item items)))
     res))
-    
+
 (defun {oct} (n)
   (py-oct n))
 
@@ -376,11 +376,11 @@ None, use identity function (multiple sequences -> list of tuples)."
 (defun {reduce} (func seq &optional initial)
   (let ((res nil))
     (if initial
-	
+
 	(progn (setf res initial)
 	       (map-over-object (lambda (x) (setf res (py-call func res x)))
 				   seq))
-      
+
       (map-over-object (lambda (x) (cond ((null res) (setf res x))
 					    (t (setf res (py-call func res x)))))
 			  seq))
@@ -403,20 +403,20 @@ None, use identity function (multiple sequences -> list of tuples)."
   "Round number X to a precision with NDIGITS decimal digits (default: 0).
    Returns float. Precision may be negative"
   (setf ndigits (py-val->integer ndigits))
-  
+
   ;; implementation taken from: bltinmodule.c - builtin_round()
   ;; idea: round(12.3456, 2) ->
   ;;       12.3456 * 10**2 = 1234.56  ->  1235  ->  1235 / 10**2 = 12.35
-  
+
   (let ((f (expt 10 (abs ndigits))))
-    (let* ((x-int (if (< ndigits 0) 
+    (let* ((x-int (if (< ndigits 0)
 		      (/ x f)
 		    (* x f )))
 	   (x-int-rounded (round x-int))
 	   (x-rounded (if (< ndigits 0)
 			  (* x-int-rounded f)
 			(/ x-int-rounded f))))
-      
+
       ;; By only coercing here at the end, the result could be more
       ;; exact than what CPython gives.
       (coerce x-rounded 'double-float))))
@@ -462,10 +462,10 @@ None, use identity function (multiple sequences -> list of tuples)."
 
   ;; CPython looks up __len__, __iter__, __getitem__ attributes here
   ;; need to make an iterator for each sequence first, then call the iterators
-  
+
   (unless sequences
     (py-raise '{TypeError} "zip(): must have at least one sequence"))
-  
+
   (loop with iters = (mapcar #'get-py-iterate-fun sequences)
       for tup = (loop for iter in iters
 		      if (funcall iter)
