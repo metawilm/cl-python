@@ -1,5 +1,5 @@
 ;; -*- Mode: LISP; Syntax: COMMON-LISP; Package: CLPYTHON.PARSER; Readtable: PY-AST-READTABLE -*-
-;; 
+;;
 ;; This software is Copyright (c) Franz Inc. and Willem Broekema.
 ;; Franz Inc. and Willem Broekema grant you the rights to
 ;; distribute and use this software as governed by the terms
@@ -57,7 +57,7 @@ first value is considered final: it will not be walked into, but will be
 included as-is in the new AST to be returned. (When F return NIL as first
 value, the second value must be true.)
 
-The initial form AST is considered an expression used for its value iff 
+The initial form AST is considered an expression used for its value iff
 VALUE is true; it is considered an assignment target iff TARGET is true.
 
 When build-result is false, no new AST will be returned, so F is only
@@ -72,35 +72,35 @@ CLASSDEF, FUNCDEF or LAMBDA."
 
   (labels ((walk-py-ast-1 (ast &key value target)
 	     (declare (optimize (debug 3)))
-             
+
              (when *walk-debug*
                (warn "w> ~A" ast))
              (unless ast
                (break "Attempt to WALK-PY-AST into an AST that is NIL"))
-             
+
              ;; Call user function on whole form. The returned values
 	     ;; control how we proceed.
-             (multiple-value-bind (ret-ast final-p) 
+             (multiple-value-bind (ret-ast final-p)
 		 (funcall f ast :value value :target target)
-               
+
                (when final-p
 		 (return-from walk-py-ast-1 ret-ast))
-               
+
                (assert ret-ast ()
 		 "User AST func returned NIL (for AST: ~S); that is only allowed ~
                 when second value (final-p) is True, but second value was: ~S" ast final-p)
-	       
+
                (return-from walk-py-ast-1
                  (ast-recurse-fun (lambda (ast &key value target)
                                     (walk-py-ast-1 ast :value value :target target))
                                   ret-ast
                                   :value value
                                   :target target)))))
-    
+
     (let ((*walk-build-result* build-result)
 	  (*walk-into-nested-namespaces* into-nested-namespaces)
 	  (*walk-warn-unknown-form* warn-unknown-form))
-      
+
       (walk-py-ast-1 ast :value value :target target))))
 
 (defparameter *ast-node-walk-structs* (make-hash-table :test 'eq))
@@ -108,16 +108,16 @@ CLASSDEF, FUNCDEF or LAMBDA."
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (defstruct (ast-walker-node (:conc-name awn-))
     arg-structs targetable subtargetable)
-  
+
   (defmethod make-load-form ((x ast-walker-node) &optional env)
     (make-load-form-saving-slots x :environment env))
-  
+
   (defstruct (ast-walker-node-arg (:conc-name awna-))
     var ix prio walk optional-p rest-p key tg/val)
-  
+
   (defmethod make-load-form ((x ast-walker-node-arg) &optional env)
     (make-load-form-saving-slots x :environment env))
-  
+
   (defparameter *allowed-node-tg/val* '(+normal-value+ +normal-target+ +suite+
                                         +namespace-suite+ +global-decl-target+
                                         +augassign-target/value+ +delete-target+))
@@ -125,7 +125,7 @@ CLASSDEF, FUNCDEF or LAMBDA."
 
 (defmacro def-ast-node (node args &rest options)
   (flet ((parse-clause (x ix)
-           (flet ((malformed (&optional msg) 
+           (flet ((malformed (&optional msg)
                     (error "Malformed clause for ~A~@[ (~A)~]: ~S." node msg args)))
              (let ((prio (+ 1000 ix))
                    (walk t)
@@ -252,21 +252,21 @@ CLASSDEF, FUNCDEF or LAMBDA."
 
 
 (defun ast-recurse-fun (f ast &key value target)
-  (when (null ast) 
+  (when (null ast)
     (break "AST-RECURSE-FUN got NIL"))
-  
+
   (unless (consp ast)
     (return-from ast-recurse-fun ast))
-  
+
   (case (car ast)
-    
-    ([classdef-stmt] 
+
+    ([classdef-stmt]
      (destructuring-bind (cname inheritance suite) (cdr ast)
        (assert (eq (car inheritance) '[tuple-expr]))
        `([classdef-stmt] ,(funcall f cname :target +normal-target+)
                          ,(funcall f inheritance :value +normal-value+)
                          ,(if *walk-into-nested-namespaces* (funcall f suite) suite))))
-    
+
     ([funcdef-stmt] (destructuring-bind (decorators fname (pos-args key-args *-arg **-arg) suite)
                         (cdr ast)
                       `([funcdef-stmt] ,(loop for deco in decorators
@@ -280,7 +280,7 @@ CLASSDEF, FUNCDEF or LAMBDA."
                                         ,*-arg
                                         ,**-arg)
                                        ,(if *walk-into-nested-namespaces* (funcall f suite) suite))))
-    
+
     (([generator-expr] [listcompr-expr])
      (destructuring-bind (item for-in/if-clauses) (cdr ast)
        ;; The order of walking subforms is important: if we started
@@ -298,13 +298,13 @@ CLASSDEF, FUNCDEF or LAMBDA."
          (let* ((rec-clauses (mapcar #'clause-handler for-in/if-clauses))
                 (rec-item (funcall f item :value +normal-value+)))
            `(,(car ast) ,rec-item ,rec-clauses)))))
-    
+
     ([if-stmt] (destructuring-bind (clauses else-suite) (cdr ast)
                  `([if-stmt] ,(loop for (test suite) in clauses
                                   collect (list (funcall f test :value +normal-value+)
                                                 (funcall f suite)))
                              ,(when else-suite (funcall f else-suite)))))
-    
+
     ([import-stmt]
      ;; A bit tricky: this statement binds names, but does not contain identifier-expr. (Maybe it should contain.)
      ;;   "import ... as foo" binds "foo"
@@ -315,7 +315,7 @@ CLASSDEF, FUNCDEF or LAMBDA."
          for id-expr = `([identifier-expr] ,id-sym)
          do (funcall f id-expr :target +normal-target+))
      (values ast t)) ;; No possibility to modify AST: original is returned.
-    
+
     ([import-from-stmt]
      ;; A bit tricky: the module from which items are imported is not a variable reference.
      ;; Also, "from foo import *" imports all items of foo that exist at runtime... which we don't know now.
@@ -330,11 +330,11 @@ CLASSDEF, FUNCDEF or LAMBDA."
                     do (funcall f id-expr :target +normal-target+)))))
      ;; No possibility to modify AST: original is returned.
      (values ast t))
-    
+
     ([lambda-expr]
      (destructuring-bind ((pos-a key-a *-a **-a) expr) (cdr ast)
        `([lambda-expr] (,pos-a
-                        ,(mapcar (lambda (kv) 
+                        ,(mapcar (lambda (kv)
                                    (funcall f (second kv) :value +normal-value+))
                                  key-a)
                         ,*-a
@@ -342,22 +342,22 @@ CLASSDEF, FUNCDEF or LAMBDA."
                        ,(if *walk-into-nested-namespaces*
                             (funcall f expr :value +normal-value+)
                           expr))))
-    
-    ([literal-expr] 
+
+    ([literal-expr]
      (values ast t))
-    
+
     ([try-except-stmt]
      (destructuring-bind (suite except-clauses else-suite) (cdr ast)
        `([try-except-stmt]
          ,(funcall f suite)
-         (,@(loop for (exc var handler-form) in except-clauses 
+         (,@(loop for (exc var handler-form) in except-clauses
                 collect `(,(when exc (funcall f exc :value +normal-value+))
                              ,(when var (funcall f var :target +normal-target+))
                            ,(funcall f handler-form))))
          ,(when else-suite
             (funcall f else-suite)))))
-    
-    (t 
+
+    (t
      (cond ((and (symbolp (car ast))
                  (eq (car ast) (find-symbol (symbol-name (car ast)) :clpython.ast.node)))
             (ast-recurse-fun-with-structs f ast :value value :target target))
@@ -375,7 +375,7 @@ CLASSDEF, FUNCDEF or LAMBDA."
         (gethash node *ast-node-walk-structs*)
       (unless present-p
         (error "No walker structs defined for node ~S." node))
-      
+
       (flet ((walk-arg (ast awna subtargetable)
                #+(or)(warn "walk-arg: ~A  rest=~A key=~A" ast (awna-rest-p awna) (awna-key awna))
                #+(or)(setf ast (copy-tree ast))
@@ -389,7 +389,7 @@ CLASSDEF, FUNCDEF or LAMBDA."
                  (return-from walk-arg (funcall f ast)))
                (multiple-value-bind (value target)
                    (if (and subtargetable target)
-                       (values nil target) ;; overrule +normal-value+ (e.g. list expr) 
+                       (values nil target) ;; overrule +normal-value+ (e.g. list expr)
                      (case (awna-tg/val awna)
                        (+normal-value+              (values +normal-value+ nil))
                        (+normal-target+             (values nil +normal-target+))
@@ -398,7 +398,7 @@ CLASSDEF, FUNCDEF or LAMBDA."
                        (+augassign-target/value+    (values +augassign-value+ +augassign-target+))
                        (+delete-target+             (values nil +delete-target+))
                        (t                           (values value target)))) ;; as passed to ast-recurse-fun
-                 
+
                  (setf ast (cond ((and (awna-rest-p awna) (awna-key awna))
                                   (check-type (awna-key awna) (eql second))
                                   (loop for x in ast do (assert (= (length x) 2)))
@@ -413,7 +413,7 @@ CLASSDEF, FUNCDEF or LAMBDA."
                                  (t
                                   (funcall f ast :value value :target target)))))
                ast))
-        
+
         (loop with ast-copy = (copy-tree ast)
             for s in (awn-arg-structs walker-node)
             for ix = (awna-ix s)
@@ -430,12 +430,12 @@ CLASSDEF, FUNCDEF or LAMBDA."
 ;; Handy functions for dealing with ASTs
 
 (defmacro with-py-ast ((subform ast &rest options)
-					  ;; key value target 
+					  ;; key value target
 					  ;; into-nested-namespaces
 		       &body body)
   ;; (with-sub-ast ((form &key value target) ast)
   ;;    ... form ... value ... target ...)
-  ;; 
+  ;;
   ;; (with-sub-ast (form ast)
   ;;   ... form...)
   (let (context)

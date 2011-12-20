@@ -35,7 +35,7 @@
 
 (def-py-method |array.__new__| :static (cls typecode &optional initializer)
   ;; Both creation and initialization, as array size is dependent on initializer.
-  (assert (eq cls (find-class '|array|)) () "Subclassing ARRAY not yet supported...") 
+  (assert (eq cls (find-class '|array|)) () "Subclassing ARRAY not yet supported...")
   (let* ((type-code (let ((s (py-val->string typecode)))
 		      (if (= (length s) 1)
 			  (aref typecode 0)

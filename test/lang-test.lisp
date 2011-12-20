@@ -70,8 +70,8 @@
   (run-no-error     "assert not False")
   (run-no-error     "assert 1 < 2")
   (run-no-error     "assert not 1 > 2")
-  
-  (multiple-value-bind (x err) 
+
+  (multiple-value-bind (x err)
       (ignore-errors (run "assert 0, 'abc'"))
     (test-false x)
     (test-true err)
@@ -573,7 +573,7 @@ except NameError:
 def f():
   x = 'fl'
   class C:
-    global x  # does not hold for method m 
+    global x  # does not hold for method m
     y = x
     def m(self):
       return x
@@ -584,7 +584,7 @@ x = 'gl'
 assert f() == 'fl'" :fail-info "`global' in a class def must not leak into the methods within")
   (run-no-error "
 a = 'global'
-  
+
 def f():
     a = 'af'
     def g():
@@ -691,11 +691,11 @@ if f(): pass" :fail-info "Functions inherit __nonzero__ from object."))
 import sys
 sys.path.append('" (coerce (loop for c across new-dir if (char= c #\\) collect #\\ and collect #\\ else collect c) 'string) "data')" (string #\Newline))))
     (format t "prefix: ~S~%" prefix)
-    
+
     (clpython::%reset-import-state)
     (run-no-error "import sys
 assert sys" :fail-info "Should work in both ANSI and Modern mode.")
-    
+
     (clpython::%reset-import-state)
     ;; run compilation outside run-no-error, to prevent allegro style warning from failing the test
     (clpython:run (concatenate 'string prefix "
@@ -706,7 +706,7 @@ print 'reload'
 reload(bar)
 print 'del bar.i'
 del bar.i"))
-    
+
     (clpython::%reset-import-state)
     ;; When importing a module, the conditions of type clpython::module-import-pre
     ;; make run-no-error fail. Therefore rely on statements returning nil (?!) by using test-false.
@@ -717,14 +717,14 @@ for i in xrange(3):
   print 'bar.i=', bar.i, 'i=', i
   assert bar.i == i+1
   reload(bar)"))))
-    
+
     (clpython::%reset-import-state)
     ;; run outside run-no-error
     (clpython:run (concatenate 'string prefix "
 print '4a'
 import zut.bla
 print '4b'"))
-  
+
     (clpython::%reset-import-state)
     (test-true (prog1 t
                  (run `,(concatenate 'string prefix "
@@ -819,7 +819,7 @@ assert x == ['a', 'b', 'c', 1, 2]"))
 
 (defmethod test-lang ((kind (eql :try-finally-stmt)))
   (declare (ignorable kind))
-  (progn 
+  (progn
     ;; These two test cases taken from Mike Stall,
     ;;  http://blogs.msdn.com/jmstall/archive/2007/12/16/return-vs-finally-2.aspx
     (run-no-error "
@@ -1163,7 +1163,7 @@ finally:
 are increasing integers starting from 1, up to MAX.
 MAX is a safey limit, in case the code erroneously goes into an endless loop."
   (flet ((wformat (&rest args)
-           (when debug (apply #'format t args)))) 
+           (when debug (apply #'format t args))))
     (let* ((suite-stmt (with-matching ((parse string) ([module-stmt] ?suite-stmt))
                          ?suite-stmt))
            (gener (eval `(with-dummy-namespace
@@ -1216,7 +1216,7 @@ MAX is a safey limit, in case the code erroneously goes into an endless loop."
   (loop for (src expected) in *cps-tests*
       do (eval `(test-equal (make-test-gen ',src :debug nil) ',expected)))
   (run-no-error "
-def f(): 
+def f():
   assert [2,4,6] == [(yield item) for item in (yield list) if (yield (item, item))]
 g = f()
 print 1, g.next()
@@ -1315,7 +1315,7 @@ def f():
     ok = 1
   print 'ok=%s' % ok
   yield 2
-print list(f())  
+print list(f())
 assert list(f()) == [1,2]
 assert ok == 1")
   (run-no-error "
@@ -1470,7 +1470,7 @@ def f():
  class C:
   y = (yield 2)
 list(f())" {SyntaxError} :fail-info "Yield outside function"))
-  
+
 (defmethod test-lang ((kind (eql :yield-stmt)))
   (declare (ignorable kind))
   (run-no-error "
@@ -1561,7 +1561,7 @@ g = f([1,2,3])
 list(g) == [1,2,3]"))
 
 (defmethod test-lang ((kind (eql :attribute-semantics)))
-  (declare (ignorable kind))  
+  (declare (ignorable kind))
   (run-no-error "
 class C: pass
 x = C()

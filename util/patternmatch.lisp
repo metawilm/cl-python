@@ -48,7 +48,7 @@ Returns MATCH-P, BINDINGS; the latter is alist of wildcard-form pairs."
                       (return-from match-p nil)))))
 
       (match-forms form template)
-      
+
       (loop for sublist on bindings
           for (key . val) = (car sublist)
           for next-entry = (find key (cdr sublist) :key #'car)
@@ -57,7 +57,7 @@ Returns MATCH-P, BINDINGS; the latter is alist of wildcard-form pairs."
           do (when verbose (warn "Wildcard mismatch for ~A: ~A != ~A"
                                  key val (cdr next-entry)))
              (return-from match-p nil))
-      
+
       (values t bindings))))
 
 (defmacro with-matching ((form template &key (must-hold t))
@@ -68,7 +68,7 @@ Returns MATCH-P, BINDINGS; the latter is alist of wildcard-form pairs."
        ,@(unless wildcards
            `((declare (ignore .bindings))))
        ,@(when must-hold
-           `((assert .match-p () 
+           `((assert .match-p ()
                "Form does not match required pattern: ~S != ~S" ,form ',template)))
        (when .match-p
          (let ,(loop for wc in wildcards

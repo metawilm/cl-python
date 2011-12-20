@@ -45,7 +45,7 @@
                                             #+(or) ;; also?
                                             (excl::*record-source-file-info* t))
          #-clpython-source-level-debugging ()
-         
+
          (funcall func))))
 
 
@@ -72,7 +72,7 @@
     (with-auto-mode-recompile (:filename filename)
       (with-proper-compiler-settings
           (clpython.parser:with-source-locations
-              
+
               (let ((*package* #.(find-package :clpython))) ;; Package during compilation
                 (call-with-python-code-reader ;; .. must be equal to
                  `((in-package :clpython) ;; .. package while loading (CLHS 3.2.4.4)
@@ -127,7 +127,7 @@ Callers can intercept the condition MODULE-IMPORT-PRE to override default loadin
                                    (mip.muffled c) t)
                              (when pre-import-hook
                                (funcall pre-import-hook (mip.module c)))))))
-           
+
            (with-auto-mode-recompile (:filename filename
                                                 :restart-name delete-fasl-try-again)
              (unless (let (#+lispworks
@@ -165,7 +165,7 @@ ARGS are the command-line args, available as `sys.argv'; can be a string (which 
           (with-proper-compiler-settings
               (multiple-value-bind (func warnings-p failure-p)
 		  (block compilation
-		    (handler-bind (#+ecl 
+		    (handler-bind (#+ecl
 				   ((or c:compiler-error c:compiler-internal-error simple-error)
                                     (lambda (c)
                                       (warn "Compilation failed: ~S" c)
@@ -211,7 +211,7 @@ ARGS are the command-line args, available as `sys.argv'; can be a string (which 
 ;;; seems sound to take the hash of _this_ source file as compiler id.
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
-  (defparameter *clpython-compiler-version-id* 
+  (defparameter *clpython-compiler-version-id*
       #.(let* ((old-id (when (boundp '*clpython-compiler-version-id*)
                          (symbol-value '*clpython-compiler-version-id*)))
                (new-id (cond (*compile-file-truename* (sxhash (slurp-file *compile-file-truename*)))
@@ -235,17 +235,17 @@ ARGS are the command-line args, available as `sys.argv'; can be a string (which 
            The fasl code may not work with the current CLPython runtime. ~
            It is best to recompile the Python source, then load the new fasl."
           fasl-name))
-  
+
 
 ;;; Translates a Python module AST into a Lisp function.
-;;; 
+;;;
 ;;; Each node in the s-expression returned by the
 ;;; parse-python-{file,string} corresponds to a macro defined below
 ;;; that generates the corresponding Lisp code.
-;;; 
+;;;
 ;;; Each such AST node has a name ending in "-expr" or "-stmt", they are
 ;;; in the :clpython.ast.node package.
-;;; 
+;;;
 ;;; In the macro expansions, lexical variables that keep context state
 ;;; have a name like +NAME+.
 
@@ -343,14 +343,14 @@ like .join (string.join), .sort (list.sort), etc")
 (defparameter *want-DEL-setf-expansion* nil
   "Whether the requested setf expansion is for a 'delete' stmt, not for
 an assigment statement. This changes at least the returned 'store' form.")
-    
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;  The macros corresponding to AST nodes
 
 (defun assert-stmt-1 (test test-ast raise-arg)
   (with-simple-restart (:continue "Ignore the assertion failure")
     (unless (py-val->lisp-bool test)
-      (py-raise '{AssertionError} (or raise-arg 
+      (py-raise '{AssertionError} (or raise-arg
 				    (format nil "Failing test: ~A"
 					    (with-output-to-string (s)
 					      (py-pprint test-ast s))))))))
@@ -386,7 +386,7 @@ an assigment statement. This changes at least the returned 'store' form.")
              ([identifier-expr]          (push (second x) res))
              (([list-expr] [tuple-expr]) (setf todo (nconc todo (second x))))))
       finally (return res)))
-             
+
 (defun assign-stmt-get-bound-vars (ass-stmt)
   ;; Valid for ASSIGN-STMT targets and DEL-STMT target.
   (with-matching (ass-stmt ([assign-stmt] ?value ?targets))
@@ -431,10 +431,10 @@ an assigment statement. This changes at least the returned 'store' form.")
            (or (match-p targets '(([tuple-expr] ?items)))
                (match-p targets '(([list-expr] ?items))))
            (= (length (second value)) (length (second (car targets)))))
-      
+
       ;; Note that by using PSETF, we force values to be evaluated before targets.
       `(psetf ,@(mapcan #'list (second (car targets)) (second value)))
-    
+
     whole))
 
 (defmacro [attributeref-expr] (item attr)
@@ -457,9 +457,9 @@ an assigment statement. This changes at least the returned 'store' form.")
 (defmacro [augassign-stmt] (&whole whole op place val &environment env)
   (check-valid-assignment-targets (list place) :augmented t)
   (case (car place)
-    
+
     (([attributeref-expr] [subscription-expr] [identifier-expr])
-     
+
      (let ((py-@= (get-binary-iop-func-name op))
 	   (py-@  (get-binary-op-func-name-from-iop op)))
        (multiple-value-bind (vars vals stores writer reader)
@@ -501,7 +501,7 @@ an assigment statement. This changes at least the returned 'store' form.")
 (defmacro [bracketed-expr] (expr)
   ;; Brackets are only used to force parsing precedence.
   expr)
-  
+
 (defmacro [break-stmt] (&environment e)
   (if (get-pydecl :inside-loop-p e)
       `(go .break)
@@ -636,7 +636,7 @@ an assigment statement. This changes at least the returned 'store' form.")
                                           :parent globals-ns
                                           :scope :exec-locals)
                                          locals)))
-        
+
           (let ((lambda-expr `(lambda (%exec-globals-ns %exec-locals-ns)
                                 (with-pydecl ((:context-type-stack (:module)))
                                   (with-namespace (,globals-ns)
@@ -662,7 +662,7 @@ an assigment statement. This changes at least the returned 'store' form.")
   ;; the function being called is one of the built-in functions EVAL,
   ;; LOCALS or GLOBALS, because they access the variable scope of the
   ;; caller.
-  ;; 
+  ;;
   ;; As a compromise, by default we only check in case the name is
   ;; literally used, so "x = locals()" will work, while
   ;; "y = locals; y()" will not.
@@ -682,7 +682,7 @@ an assigment statement. This changes at least the returned 'store' form.")
                  (pos-args `(nconc (list ,@pos-args) ,(when *-arg `(py-iterate->lisp-list ,*-arg))))
                  (locals-dict '(%locals))
                  (globals-dict '(%globals)))
-               
+
              `(cond ,@(when (member '{locals} which)
                         `(((eq ,prim (function {locals}))
                            (call-expr-locals ,locals-dict ,there-are-args))))
@@ -694,7 +694,7 @@ an assigment statement. This changes at least the returned 'store' form.")
                            (call-expr-eval ,locals-dict ,globals-dict
                                            ,pos-args ,there-are-key-args))))
                     (t (call-expr-1 ,prim ,@(cddr whole)))))))
-    
+
     (let ((specials-to-check (if *allow-indirect-special-call*
                                  *special-calls*
                                (with-perhaps-matching (primary ([identifier-expr] ?name))
@@ -719,7 +719,7 @@ an assigment statement. This changes at least the returned 'store' form.")
 (defun call-expr-eval (locals-dict globals-dict pos-args key-args-p)
   "Handle call to `Eval' at runtime."
   ;; Uses exec-stmt, therefore below it.
-  (when (or key-args-p 
+  (when (or key-args-p
 	    (not pos-args)
 	    (> (length pos-args) 3))
     (py-raise '{TypeError} "Built-in function `eval' takes between 1 and 3 positional args."))
@@ -735,7 +735,7 @@ an assigment statement. This changes at least the returned 'store' form.")
 		     collect (intern (symbol-name key) :keyword)
 		     collect val)))
     (cond
-     ((or kw-args **-arg)  `(call-expr-pos+*+kw+** ,primary 
+     ((or kw-args **-arg)  `(call-expr-pos+*+kw+** ,primary
 						   (list ,@pos-args) ,*-arg
 						   (list ,@kw-args) ,**-arg))
      ((and pos-args *-arg) `(call-expr-pos+* ,primary (list ,@pos-args) ,*-arg))
@@ -775,7 +775,7 @@ an assigment statement. This changes at least the returned 'store' form.")
       (when (inlineable-method-p ?attr-name (length ?pos-args))
         (return-from [call-expr]
           (inlined-method-code ?obj ?attr-name ?pos-args)))))
-          
+
   ;; Optimize "getattr(OBJ, ATTR)(POSARGS...)", to save allocation of bound method.
   (when *inline-getattr-call*
     (with-perhaps-matching (whole ([call-expr]
@@ -790,7 +790,7 @@ an assigment statement. This changes at least the returned 'store' form.")
                      (funcall .b .c ,@?pos-args)
                    (py-call .a ,@?pos-args)))
              (py-call ,?id-getattr ,@?pos-args))))))
-  
+
   ;; XXX todo: Optimize obj.__get__(...)
   whole)
 
@@ -806,7 +806,7 @@ an assigment statement. This changes at least the returned 'store' form.")
     (let* ((cname (with-matching (name ([identifier-expr] ?name))
                     ?name))
 	   (new-context-name-stack (cons cname (get-pydecl :context-name-stack e)))
-	   (context-cname (ensure-user-symbol 
+	   (context-cname (ensure-user-symbol
                            (format nil "~{~A~^.~}" (reverse new-context-name-stack)))))
       `(multiple-value-bind (namespace-ht cls-dict.__metaclass__)
            ;; Need a nested LET, as +cls-namespace+ may not be set when the ASSIGN-STMT
@@ -821,7 +821,7 @@ an assigment statement. This changes at least the returned 'store' form.")
                ;; First, run the statements in the body of the class
                ;; definition. This will fill +cls-namespace+ with the
                ;; class attributes and methods.
-               
+
                ;; Local class variables are not locally visible (they don't extend ":lexically-visible-vars")
                ;; Variables declared `global' in a class scope are not global in sub-scopes.
                (with-pydecl ((:context-type-stack ,(cons :class (get-pydecl :context-type-stack e)))
@@ -832,9 +832,9 @@ an assigment statement. This changes at least the returned 'store' form.")
                  ,(if *mangle-private-variables-in-class*
                       (mangle-suite-private-variables cname suite)
                     suite))
-               
+
                (values %class-namespace (namespace-get {__metaclass__}))))
-         
+
          ;; Second, now that +cls-namespace+ is filled, make the
          ;; class with that as namespace.
          (let ((cls (make-py-class :name ',cname
@@ -903,7 +903,7 @@ an assigment statement. This changes at least the returned 'store' form.")
        ,del-form)))
 
 (defun init-dict (vk-list)
-  (with-py-dict 
+  (with-py-dict
       (let ((dict (make-py-hash-table)))
         (loop for (v k) on vk-list by #'cddr
             do (setf (gethash k dict) v))
@@ -975,7 +975,7 @@ an assigment statement. This changes at least the returned 'store' form.")
       .break)))
 
 (defun lambda-args-and-destruct-form (f-pos-args f-key-args)
-  ;; Replace "def f( (x,y), z):  .." 
+  ;; Replace "def f( (x,y), z):  .."
   ;; by "def f( |(x,y)|, z):  x, y = |(x,y)|; ..".
   (let (nested-vars)
     (labels ((sym-tuple-name (tup)
@@ -1002,8 +1002,8 @@ an assigment statement. This changes at least the returned 'store' form.")
                  (values (nreverse new-arglist)
                          (nreverse normal-args)
                          (nreverse destructs)))))
-      
-      (multiple-value-bind (lambda-pos-args normal-pos-args pos-destructs ) 
+
+      (multiple-value-bind (lambda-pos-args normal-pos-args pos-destructs )
           (analyze-args f-pos-args)
         (multiple-value-bind (lambda-key-args normal-key-args key-destructs)
             (analyze-args (mapcar #'car f-key-args))
@@ -1042,7 +1042,7 @@ LOCALS shares share tail structure with input arg locals."
              (push name sure-locals)
              (push name new-locals)))
 	 (values nil t))
-	
+
 	([identifier-expr]
 	 (let ((name (second form)))
 	   (when (and target
@@ -1050,7 +1050,7 @@ LOCALS shares share tail structure with input arg locals."
 	     (push name sure-locals)
 	     (push name new-locals)))
 	 (values nil t))
-	
+
 	([global-stmt]
          (with-matching ((second form) ([tuple-expr] ?identifiers))
            (dolist (x ?identifiers)
@@ -1072,9 +1072,9 @@ LOCALS shares share tail structure with input arg locals."
          ;; Local variables are determined by looking at assignments.
          ;; Deletions play no role, so don't walk into them.
          (values nil t))
-              
+
 	(t form)))
-  
+
     (values sure-locals new-locals sure-globals)))
 
 (defmacro [funcdef-stmt] (&whole whole &rest args)
@@ -1088,7 +1088,7 @@ LOCALS shares share tail structure with input arg locals."
                           &key (return-default-none t)
                           &environment e)
   ;; The resulting function is returned.
-  ;; 
+  ;;
   ;; If FNAME is a keyword symbol (like :lambda), then an anonymous
   ;; function (like from LAMBDA-EXPR) is created. The function is thus
   ;; not bound to a name. Decorators are not allowed then.
@@ -1099,7 +1099,7 @@ LOCALS shares share tail structure with input arg locals."
       (assert (null decorators))
     (with-matching (fname ([identifier-expr] ?name))
       (setf fname ?name)))
-  
+
   (multiple-value-bind (lambda-pos-args lambda-key-args tuples-destruct-form
                         normal-pos-key-args destructed-pos-key-args)
       (lambda-args-and-destruct-form pos-args key-args)
@@ -1134,7 +1134,7 @@ LOCALS shares share tail structure with input arg locals."
                                  ;;     <Here G is locally visibe because it is a /local variable/
                                  ;;      in F. In general the name of a function is not visible
                                  ;;      in its body.>
-                                 ;; 
+                                 ;;
                                  ;; See also the testcases for the :LEXICALLY-VISIBLE-VARS declaration.
                                  #+(or);; think superfluous
                                  (when (eq (car (get-pydecl :context-type-stack e)) :function)
@@ -1187,9 +1187,9 @@ LOCALS shares share tail structure with input arg locals."
                ,@(when (and (eq (car (get-pydecl :context-type-stack e)) :class)
                             (eq fname '{__new__}))
                    `((setf .decorated-func (py-call (find-class 'py-static-method) .decorated-func))))
-               
+
                (setf ([identifier-expr] ,fname) .decorated-func)
-               
+
                (record-source-file-loc ',context-fname :operator)
                .decorated-func))))))) ;; return the function
 
@@ -1197,7 +1197,7 @@ LOCALS shares share tail structure with input arg locals."
 (defmacro [generator-expr] (&whole whole item for-in/if-clauses)
   (declare (ignore item for-in/if-clauses))
   (rewrite-generator-expr-ast whole))
-       
+
 (defmacro [global-stmt] (names &environment e)
   ;; GLOBAL statements are already determined and used at the moment a
   ;; FUNCDEF-STMT/CLASSDEF-STMT/EXEC-STMT is handled.
@@ -1248,7 +1248,7 @@ LOCALS shares share tail structure with input arg locals."
 
 (defmacro [if-expr] (condition then else)
   `(if (py-val->lisp-bool ,condition) ,then ,else))
-       
+
 (defmacro [if-stmt] (if-clauses else-clause)
   `(cond ,@(loop for (cond body) in if-clauses
 	       collect `((py-val->lisp-bool ,cond) ,body))
@@ -1262,7 +1262,7 @@ LOCALS shares share tail structure with input arg locals."
   ;; But, if a bindname is given, the effect of "import x.y.z as foo":
   ;;   1. imports modules, x, x.y, x.y.z
   ;;   2. binds x.y.z to "foo"; does not bind "x"
-  ;;  
+  ;;
   ;; One import statement can contain multiple submodules to import (the items).
   ;; Returns the imported (sub)modules as multiple values: <module x.y.z>, <module a.b>.
   `(let ((*module-namespace* nil)) ;; hack
@@ -1298,13 +1298,13 @@ LOCALS shares share tail structure with input arg locals."
                       collect `([assign-stmt] (let ((*inside-import-from-stmt* t))
                                                 ([attributeref-expr] mod-obj ([identifier-expr] ,item)))
                                               (([identifier-expr] ,(or bind-name item)))))))))))
-       
+
 (defmacro [lambda-expr] (args expr)
   ;; XXX Treating lambda as a funcdef-stmt results in way more
   ;; code than necessary for the just one expression it contains.
   `([funcdef-stmt] nil :lambda ,args ([suite-stmt] (,expr))
                    :return-default-none nil))
-  
+
 (defmacro [listcompr-expr] (item for-in/if-clauses)
   (with-gensyms (list)
     `(let ((,list ()))
@@ -1348,7 +1348,7 @@ LOCALS shares share tail structure with input arg locals."
         (cl:use-value (val)
             :report (lambda (stream)
                       (format stream "Enter a Lisp value to use for `~A'." name))
-            :interactive (lambda () 
+            :interactive (lambda ()
                            (format t "Enter new Lisp value for `~A': " name)
                            (multiple-value-list (eval (read))))
           (return-from unbound-variable-error val))
@@ -1431,7 +1431,7 @@ LOCALS shares share tail structure with input arg locals."
   (if pathname
       (derive-pathname pathname)
     default))
-  
+
 (defmacro with-module-toplevel-context (() &body body)
   ;; Consider *module-namespace* ?
   `(with-pydecl ((:context-type-stack (:module)))
@@ -1502,7 +1502,7 @@ LOCALS shares share tail structure with input arg locals."
             t)
           (abort-loading ()
             nil))))))
-    
+
 (defmacro [module-stmt] (suite &environment e)
   "If *MODULE-NAMESPACE* is bound, it is used."
   (declare (ignorable e))
@@ -1527,7 +1527,7 @@ LOCALS shares share tail structure with input arg locals."
                                       (with-stmt-decl ()
                                         ,stmt))))
                                func-name))))
-    ;; Because using uninterned symbols gives some problems with Allegro's source form recording, give 
+    ;; Because using uninterned symbols gives some problems with Allegro's source form recording, give
     ;; the functions a practically unique name based on the suite.
     (let* ((suite-hash (sxhash (format nil "~A" suite)))
            (module-function-name #+(or)(make-symbol (format nil "~A.__module_init__" *current-module-name*))
@@ -1536,13 +1536,13 @@ LOCALS shares share tail structure with input arg locals."
           (defun-wrappers (wrap-in-funcs suite-hash)))
       `(progn
          ,@(mapcar #'first defun-wrappers) ;; One function for each top-level form
-         
+
          (defun ,module-function-name ()
            (declare (optimize debug))
-           
+
            #+clpython-source-level-debugging
            ,(create-python-source-location-table-pydecl suite)
-           
+
            (module-init :src-pathname ,(careful-derive-pathname *compile-file-truename* nil)
                         :bin-pathname (load-time-value (careful-derive-pathname *load-truename* #P"__main__"))
                         :current-module-name ,*current-module-name*
@@ -1552,7 +1552,7 @@ LOCALS shares share tail structure with input arg locals."
                         :source-func ',module-function-name
                         :compiler-id ,*clpython-compiler-version-id*
                         :is-compiled ,(not (null *compile-file-truename*))))
-         
+
          ;; suppress spurious warning about undefined function, by going via symbol-function
          (funcall (symbol-function ',module-function-name))))))
 
@@ -1593,10 +1593,10 @@ LOCALS shares share tail structure with input arg locals."
   ;; Skip checks for bound-ness, when a lexical variable is certainly bound.
   (unless (eq (car (get-pydecl :context-type-stack e)) :function)
     (return-from [suite-stmt] whole))
-  
+
   (let* ((deleted-vars (ast-deleted-variables whole))
          (deleted-safe (intersection deleted-vars (get-pydecl :safe-lex-visible-vars e)))
-         (global-safe (intersection (get-pydecl :declared-globals-current-scope e) 
+         (global-safe (intersection (get-pydecl :declared-globals-current-scope e)
                                     (get-pydecl :safe-lex-visible-vars e))))
     ;; This is a nice place for some sanity checks
     (assert (not deleted-safe) () "Bug: deleted vars ~A found in :safe-lex-visible-vars" deleted-safe)
@@ -1605,7 +1605,7 @@ LOCALS shares share tail structure with input arg locals."
     (unless (some (lambda (s) (match-p s '([assign-stmt] ?value ?targets)))
                   (butlast stmts))
       (return-from [suite-stmt] whole))
-    
+
     ;; Collect the stmts before the assignment, and those after
     (multiple-value-bind (before-stmts ass-stmt after-stmts)
         (loop for sublist on stmts
@@ -1624,7 +1624,7 @@ LOCALS shares share tail structure with input arg locals."
                                         (dolist (v bound-vars new-safe-vars)
                                           (when (and (member v (get-pydecl :lexically-visible-vars e))
                                                      (not (member v deleted-vars)))
-                                            (assert (not (member v (get-pydecl :lexically-declared-globals e))) 
+                                            (assert (not (member v (get-pydecl :lexically-declared-globals e)))
                                                 () "Bug: variable ~A both lexicaly-visible and lexically-global." v)
                                             (unless (member v (get-pydecl :safe-lex-visible-vars e))
                                               (push v new-safe-vars)))))))
@@ -1639,14 +1639,14 @@ LOCALS shares share tail structure with input arg locals."
 
 (defun raise-stmt-1 (exc &optional var tb)
   (when tb (warn "Traceback arg to RAISE ignored"))
-  
+
   ;; ERROR does not support _classes_ as first condition argument; it
   ;; must be an _instance_ or condition type _name_.
   (cond ((stringp (deproxy exc))
          (break "String exceptions are not supported (got: ~S)" (deproxy exc))
          (py-raise '{TypeError}
                    "String exceptions are not supported (got: ~S)" (deproxy exc)))
-        
+
         ((and exc var)
          (etypecase exc
            (class  (error (make-exception exc var)))
@@ -1656,7 +1656,7 @@ LOCALS shares share tail structure with input arg locals."
          (etypecase exc
            (class    (error (make-exception exc)))
            (error    (error exc))))
-        
+
         (t
          ;; "raise" only allowed in the dynamic scope of an except block
          (if *last-raised-exception*
@@ -1673,7 +1673,7 @@ LOCALS shares share tail structure with input arg locals."
   ;; exception is thrown.
   (with-gensyms (the-exc)
     (flet ((handler->cond-clause (except-clause)
-	     (destructuring-bind (exc var handler-suite) 
+	     (destructuring-bind (exc var handler-suite)
                  except-clause
                ;; Every handler should store the exception, so it can be returned
                ;; in sys.exc_info().
@@ -1682,7 +1682,7 @@ LOCALS shares share tail structure with input arg locals."
                (cond ((null exc)
 		      `(t (progn ,handler-suite
 				 (return-from try-except-stmt nil))))
-		   
+
 		     ((and (listp exc)
                            (eq (car exc) '[tuple-expr]))
                       ;; Because the names in EXC may be any variable that is bound to an exception
@@ -1692,25 +1692,25 @@ LOCALS shares share tail structure with input arg locals."
                         ,@(when var `(([assign-stmt] ,the-exc (,var))))
                         ,handler-suite
                         (return-from try-except-stmt nil)))
-               
+
                      (t
 		      `((progn (try-except-ensure-valid-exception-class ,exc)
 			       (typep ,the-exc ,exc))
                         ,@(when var `(([assign-stmt] ,the-exc (,var))))
                         ,handler-suite
                         (return-from try-except-stmt nil)))))))
-      
+
       (let ((handler-form `(lambda (,the-exc)
 			     (declare (ignorable ,the-exc))
 			     (cond ,@(mapcar #'handler->cond-clause except-clauses)))))
-      
+
 	`(block try-except-stmt
 	   (tagbody
 	     (handler-bind (({Exception} ,handler-form))
-	       
+
 	       (progn (with-py-errors (:name try-except-function) ,suite)
 		      ,@(when else-suite `((go :else)))))
-	     
+
 	     ,@(when else-suite
 		 `(:else ,else-suite))))))))
 
@@ -1749,7 +1749,7 @@ LOCALS shares share tail structure with input arg locals."
               (list store)
               (if *want-DEL-setf-expansion* del-form store-form)
               'setf-tuple-read-form-unused))))
-  
+
 (defmacro [unary-expr] (op item)
   (let ((py-op-func (get-unary-op-func-name op)))
     (assert py-op-func)
@@ -1761,12 +1761,12 @@ LOCALS shares share tail structure with input arg locals."
      (if (py-val->lisp-bool ,test)
          (go .body)
        (go .else))
-     
+
     .body
      (with-pydecl ((:inside-loop-p t))
        ,suite)
      (go .continue)
-     
+
     .else
      ,@(when else-suite `(,else-suite))
 
@@ -1884,23 +1884,23 @@ finally:
 	  ({lower}      0 stringp      py-string.lower  )
 	  ({strip}      0 stringp      py-string.strip  )
 	  ({upper}      0 stringp      py-string.upper  )
-	  	     
+
 	  ({keys}       0 dict-p    dict.keys     )
 	  ({items}      0 dict-p    dict.items    )
 	  ({values}     0 dict-p    dict.values   )
-	  	     
+
 	  ({next}       0 py-func-iterator-p py-func-iterator.next)
-	  
+
 	  ({read}       (0 . 1) filep    py-file.read      )
 	  ({readline}   (0 . 1) filep    py-file.readline  )
 	  ({readlines}  (0 . 1) filep    py-file.readlines )
 	  ({xreadlines}  0      filep    py-file.xreadlines)
 	  ({write}       1      filep    py-file.write  )
-	  
+
 	  ({append}      1      vectorp  py-list.append )
 	  ({sort}        0      vectorp  py-list.sort   )
 	  ({pop}        (0 . 1) vectorp  py-list.pop    ))
-	
+
       do (when (gethash (car item) *inlineable-methods*)
 	   (warn "Replacing existing entry in *inlineable-methods* for attr ~A:~% ~A => ~A"
 		 (car item) (gethash (car item) *inlineable-methods*) (cdr item)))
@@ -1911,7 +1911,7 @@ finally:
 (defun inlineable-method-p (attr num-pos-args)
   (let ((item (gethash attr *inlineable-methods*)))
     (and item
-         (destructuring-bind (req-args check inline-func) 
+         (destructuring-bind (req-args check inline-func)
              item
            (declare (ignore check inline-func))
            (etypecase req-args
@@ -1936,7 +1936,7 @@ finally:
 
 (defun py-**-mapping->lisp-arg-list (**-arg)
   ;; Return list: ( :|key1| <val1> :|key2| <val2> ... )
-  ;; 
+  ;;
   ;; XXX CPython checks that ** args are unique (also w.r.t. k=v args supplied before it).
   ;;     We catch errors while the called function parses its args.
   (let* ((items-meth (or (x.class-attr-no-magic.bind **-arg '{items})
@@ -1968,27 +1968,27 @@ finally:
   ;; We make use of the fact that every global variable must be _set_
   ;; sometime: at the toplevel of the module, or in a function or
   ;; classdef.
-  ;; 
+  ;;
   ;; The first way, at toplevel, can be detected by looking for the
   ;; variables used at the top level. The latter two (func/class) can
   ;; be detected by looking for the required `global' declaration.
-  ;; 
+  ;;
   ;; However, the resulting list of names is a subset (underestimate)
   ;; of the total list of global variables in the module, as more can be
   ;; created dynamically from outside the module by another module,
   ;; and also by code in an "exec" stmt in this module.
-  
+
   (declare (optimize (debug 3)))
   (assert (eq (car suite) '[suite-stmt]))
-  
+
   (let ((globals ()))
-    
+
     ;; Variables assigned/looked up at module level
-    
+
     (with-py-ast (form suite)
       (case (car form)
 
-	(([classdef-stmt]) 
+	(([classdef-stmt])
 	 ;; name of this class, but don't recurse
          (with-matching ((cdr form) (([identifier-expr] ?cname) ?inheritance ?csuite))
 	   (pushnew ?cname globals))
@@ -1999,13 +1999,13 @@ finally:
          (with-matching ((cdr form) (?deco ([identifier-expr] ?fname) ?args ?fsuite))
            (pushnew ?fname globals))
 	 (values nil t))
-	
+
 	([identifier-expr] (let ((name (second form)))
 			     (pushnew name globals))
 			   (values :dummy-funcdef t))
-	
+
 	(t form)))
-    
+
     ;; Variables explicitly declared `global', somewhere arbitrarily deeply nested.
     (with-py-ast (form suite :into-nested-namespaces t)
       (case (car form)
@@ -2014,13 +2014,13 @@ finally:
                          (dolist (name (mapcar #'second ?identifiers))
                            (pushnew name globals))
                          (values :dummy-global t)))
-	
+
 	(t form)))
-    
+
     ;; Every module has some special names predefined
     (dolist (n '({__name__} {__debug__}))
       (pushnew n globals))
-    
+
     globals))
 
 (defun member* (item &rest lists)
@@ -2059,11 +2059,11 @@ Non-negative integer denoting the number of args otherwise."
 (defmacro py-arg-function (name (pos-args key-args *-arg **-arg) &body body)
   ;; Non-consing argument parsing! (except when *-arg or **-arg
   ;; present)
-  ;; 
+  ;;
   ;; POS-ARGS: list of symbols
   ;; KEY-ARGS: list of (key-symbol default-val) pairs
-  ;; *-ARG, **-ARG: a symbol or NIL 
-  ;; 
+  ;; *-ARG, **-ARG: a symbol or NIL
+  ;;
   ;; XXX todo: the generated code can be cleaned up a bit when there
   ;; are no arguments (currently zero-length vectors are created).
   (let* ((num-pos-args (length pos-args))
@@ -2124,14 +2124,14 @@ Non-negative integer denoting the number of args otherwise."
 						     `((setf ,**-arg (svref arg-val-vec ,(1+ num-pos-key-args)))))))
 					 (the-pop-way
 					  `(progn ,@(loop for p in pos-key-arg-names collect `(setf ,p (pop %args))))))
-					
+
 					(cond ((or *-arg **-arg)  the-array-way)
 					      (some-args-p        `(if (and only-pos-args
 									    (= (the fixnum only-pos-args) ,num-pos-key-args))
 								       ,the-pop-way
 								       ,the-array-way))
 					      (t `(when %args (raise-wrong-args-error)))))
-				  
+
 				  (locally #+(or)(declare (optimize (safety 3) (debug 3)))
 					   ,@body)))))
 		  #',fname))))))
@@ -2173,18 +2173,18 @@ Non-negative integer denoting the number of args otherwise."
        .body
         (return-from .func-body
           (funcall f a1 a2))
-        
+
        .>=3-args
         (if a4
             (go .4-args)
           (go .3-args))
-        
+
        .3-args
         (if (eq a2 kb)
             (progn (setq a2 a3) ;; f(a, b=2)
                    (go .body))
           (go .error)) ;; f(a, xxx=2)
-        
+
        .4-args
         (progn (when (eq a1 ka)
                  (if (eq a3 kb)
@@ -2192,7 +2192,7 @@ Non-negative integer denoting the number of args otherwise."
                                   a2 a4)
                             (go .body))
                    (go .error)))
-               (when (and (eq a1 kb) 
+               (when (and (eq a1 kb)
                           (eq a3 ka)) ;; f(b=2, a=1)
                  (progn (setq a1 a4)
                         (go .body))))
@@ -2210,7 +2210,7 @@ Non-negative integer denoting the number of args otherwise."
   ;; More efficient argument-parsing, for functions that take only a few positional arguments.
   ;; Allegro passes the number of supplied args in a register; the code below makes use of
   ;; that register value.
-  ;; 
+  ;;
   ;; If BODY creates closures, then the register value will be overwritten before we have
   ;; a chance to look at it. Therefore, if we read the :nargs register, the BODY is wrapped
   ;; in FLET.
@@ -2249,7 +2249,7 @@ Non-negative integer denoting the number of args otherwise."
                           ;; violate this assumption.
                           (locally (declare ,+optimize-std+) ;; but run body with safety
                             ,@body))))))))))
-    
+
     (if (or (not *optimize-function-arg-checking*)
                (>= (length pos-args) 3)
                key-args *-arg **-arg)
@@ -2270,32 +2270,32 @@ Non-negative integer denoting the number of args otherwise."
   (*-arg                nil :type symbol :read-only t)
   (**-arg               nil :type symbol :read-only t)
   (func-name            nil :type symbol :read-only t))
-  
+
 
 (defun parse-py-func-args (%args arg-val-vec fa)
   ;; %ARGS: the (&rest) list containing pos and ":key val" arguments
   ;; ARG-VAL-VEC: (dynamic extent) vector to store final argument values in
   ;;              => the penultimate item will get *-arg value (if any)
   ;;                 the last item **-arg value (if any)
-  ;;                 so ARG-VAL-VEC must be larger than just num-pos-and-key-args! 
+  ;;                 so ARG-VAL-VEC must be larger than just num-pos-and-key-args!
   ;; FA: func-args struct
   ;; Returns nothing
   (declare (optimize (safety 3) (debug 3))
 	   (dynamic-extent %args)
 	   (type list %args))
-  
+
   (let ((num-filled-by-pos-args 0) for-* for-**)
     (declare (type (integer 0 #.most-positive-fixnum) num-filled-by-pos-args))
-    
+
     ;; Match standard pos-args and *-arg
     (loop
 	with max-to-fill-with-pos = (the fixnum (fa-num-pos-key-args fa))
 	until (or (= num-filled-by-pos-args max-to-fill-with-pos)
 		  (symbolp (car %args))) ;; the empty list NIL is a symbol, too
-	      
+
 	do (setf (svref arg-val-vec num-filled-by-pos-args) (fastest (pop %args)))
 	   (incf num-filled-by-pos-args)
-	   
+
 	finally
 	  (unless (symbolp (car %args))
 	    (cond ((fa-*-arg fa)
@@ -2303,7 +2303,7 @@ Non-negative integer denoting the number of args otherwise."
 		     ;; Reconsing because %args might be dynamic-extent.
 		     (loop until (symbolp (car %args)) collect (fastest (pop %args)))))
 		  (t (raise-wrong-args-error)))))
-    
+
     ;; All remaining arguments are keyword arguments;
     ;; they have to be matched to the remaining pos and
     ;; key args by name.
@@ -2323,7 +2323,7 @@ Non-negative integer denoting the number of args otherwise."
 			   (raise-double-keyarg-error (svref name-vec i)))
 			 (setf (svref arg-val-vec i) val)
 			 (return-from find-key-index t))))
-	      
+
 	      (when (fa-**-arg fa)
                 (push (cons key val) for-**)
 		t)
@@ -2332,14 +2332,14 @@ Non-negative integer denoting the number of args otherwise."
               (loop for i fixnum from 0 below num-filled-by-pos-args
                   when (eq (svref (fa-arg-kwname-vec fa) i) key)
                   do (raise-double-keyarg-error (svref (fa-pos-key-arg-names fa) i)))
-              
+
 	      (raise-invalid-keyarg-error key)))
-    
+
     ;; Ensure all positional arguments covered
     (loop for i fixnum from num-filled-by-pos-args below (the fixnum (fa-num-pos-args fa))
 	unless (svref arg-val-vec i)
 	do (raise-wrong-args-error))
-    
+
     ;; Use default values for missing keyword arguments
     (loop for i fixnum from (fa-num-pos-args fa) below (the fixnum (fa-num-pos-key-args fa))
 	unless (svref arg-val-vec i)
@@ -2357,7 +2357,7 @@ Non-negative integer denoting the number of args otherwise."
       (setf (svref arg-val-vec (1+ (the fixnum (fa-num-pos-key-args fa))))
         (with-py-dict
             (loop with d = (make-py-hash-table)
-                for (k . v) in for-** 
+                for (k . v) in for-**
                 do (setf (gethash (symbol-name k) d) v)
                 finally (return d))))))
   (values))
@@ -2391,11 +2391,11 @@ Non-negative integer denoting the number of args otherwise."
     ;; Using handler-bind, so uncatched errors are shown in precisely
      ;; the context where they occur.
     (handler-bind
-        ((division-by-zero (lambda (c) 
+        ((division-by-zero (lambda (c)
                              (declare (ignore c))
                              (py-raise '{ZeroDivisionError}
                                        "Division or modulo by zero")))
-         
+
          #+(or) ;; Don't try to raise new Python exception.
          (storage-condition (lambda (c)
                               (declare (ignore c))
@@ -2419,7 +2419,7 @@ Non-negative integer denoting the number of args otherwise."
       (funcall f))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;;; 
+;;;
 ;;;  Generator rewriting
 
 (defun generator-ast-p (ast)
@@ -2429,11 +2429,11 @@ Non-negative integer denoting the number of args otherwise."
   (let (res)
     (with-py-ast (form ast)
       (case (car form)
-        
+
         (([yield-expr] [yield-stmt])
          (progn (pushnew (car form) res)
                 form))
-        
+
         ([classdef-stmt]
          ;; Don't enter the namespace, but do check the superclasses
          ;; which might be yield expressions (don't ask :)
@@ -2442,7 +2442,7 @@ Non-negative integer denoting the number of args otherwise."
              (dolist (node (mapcan #'generator-ast-p ?supers))
                (pushnew node res))))
          (values nil t))
-        
+
         ([funcdef-stmt]
           ;; Don't enter the namespace, but do check the keyword default
           ;; values which might be yield expressions (don't ask :)
@@ -2451,14 +2451,14 @@ Non-negative integer denoting the number of args otherwise."
                 do (dolist (node (generator-ast-p key-default-arg))
                      (pushnew node res))))
           (values nil t))
-        
+
         ([lambda-expr]
          (with-matching (form ([lambda-expr] (?pos-args ?key-args ?*-arg ?**-arg) ?expr))
            (loop for (nil key-default-arg) in ?key-args
                do (dolist (node (generator-ast-p key-default-arg))
                     (pushnew node res))))
          (values nil t))
-        
+
         (t form)))
     res))
 
@@ -2476,11 +2476,11 @@ be bound."
 			   form)
 	(t form)))
     deleted-names))
-  
+
 (defun funcdef-should-save-locals-p (ast)
   (when *allow-indirect-special-call*
     (return-from funcdef-should-save-locals-p t))
-  
+
   (with-py-ast (form ast)
     (case (car form)
       ([call-expr] (destructuring-bind (primary . args)
@@ -2509,11 +2509,11 @@ be bound."
   (declare (ignorable kind))
   (check-type context-name symbol)
   #+(or)
-  (let ((syms (list context-name 
+  (let ((syms (list context-name
                     (ensure-user-symbol (string-upcase context-name))
                     (intern (string context-name) (load-time-value (find-package :clpython)))
                     (intern (string-upcase context-name) (load-time-value (find-package :clpython))))))
-    
+
     (without-redefinition-warnings
      (dolist (s syms)
        #+(or)(eval `(excl:record-source-file ',s :type ',kind))

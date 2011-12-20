@@ -1,5 +1,5 @@
 ;; -*- Mode: LISP; Syntax: COMMON-LISP; Package: CLPYTHON.PARSER; Readtable: PY-AST-READTABLE -*-
-;; 
+;;
 ;; This software is Copyright (c) Franz Inc. and Willem Broekema.
 ;; Franz Inc. and Willem Broekema grant you the rights to
 ;; distribute and use this software as governed by the terms
@@ -41,7 +41,7 @@
 
 (defun get-precedence-and-associativity (left-token right-token no-assoc-token)
   (let ((list (copy-tree *precedence-and-associativity*)))
-    (loop for (old new) in `((left ,left-token) 
+    (loop for (old new) in `((left ,left-token)
                              (right ,right-token)
                              (nonassoc ,no-assoc-token))
         do (setf list (nsubst new old list)))
@@ -151,7 +151,7 @@ Value should be a (weak) EQ hash table: (make-weak-key-hash-table :test 'eq).")
                     (when .min (record-source-location .outcome .min .max))
                     .outcome)))))))
 
-(defun add-rule (name terms outcome)        
+(defun add-rule (name terms outcome)
   ;; Enable reduction trackin, for source form location recording purposes
   (let ((out (instrument-outcome terms outcome)))
     (pushnew (list terms out) (gethash name *python-prods*) :test 'equal)))
@@ -172,7 +172,7 @@ Value should be a (weak) EQ hash table: (make-weak-key-hash-table :test 'eq).")
       (#\+ `(progn (add-rule ',name '(,item) '(list $1))
                    ;; using APPEND instead of NCONC, as latter screws up source form positions
                    (add-rule ',name '(,name ,item) '(append $1 (list $2))))))))
-  
+
 ;; These rules, including most names, are taken from the CPython
 ;; grammar file from CPython CVS, file Python/Grammar/Grammar,
 ;; 20040827.
@@ -191,7 +191,7 @@ Value should be a (weak) EQ hash table: (make-weak-key-hash-table :test 'eq).")
 
 (p funcdef (decorator* [def] [identifier] [(] [)] [:] suite)
    `([funcdef-stmt] ,$1 ([identifier-expr] ,$3) (nil nil nil nil) ,$7))
-(p funcdef (decorator* [def] [identifier] [(] parameters [)] [:] suite) 
+(p funcdef (decorator* [def] [identifier] [(] parameters [)] [:] suite)
    `([funcdef-stmt] ,$1 ([identifier-expr] ,$3) ,$5 ,$8))
 
 (p parameters (parameter-list) $1)
@@ -281,7 +281,7 @@ Value should be a (weak) EQ hash table: (make-weak-key-hash-table :test 'eq).")
           ($2
            `([augassign-stmt] ,(car $2) ,$1 ,(cdr $2)))
           (t $1)))
-   ((testlist) $1)) 
+   ((testlist) $1))
 
 (gp =--testlist+)
 (p =--testlist ([=] testlist) $2)
@@ -399,7 +399,7 @@ Value should be a (weak) EQ hash table: (make-weak-key-hash-table :test 'eq).")
 (p try-stmt :or
    (([try] [:] suite except--suite+ else--suite?) `([try-except-stmt] ,$3 ,$4 ,$5))
    (([try] [:] suite [finally] [:] suite)         `([try-finally-stmt] ,$3 ,$6))
-   
+
    ;; PEP 341 - "Unifying try-except and try-finally"
    (([try] [:] suite except--suite+ else--suite? [finally] [:] suite)
     `([try-finally-stmt] ([suite-stmt] (([try-except-stmt] ,$3 ,$4 ,$5))) ,$8)))
@@ -429,10 +429,10 @@ Value should be a (weak) EQ hash table: (make-weak-key-hash-table :test 'eq).")
    ((binop-expr [if] binop-expr [else] test) `([if-expr] ,$3 ,$1 ,$5)))
 
 ;; These `old-' rules are named after corresponding CPython grammar rule (20071230).
-(p old-test :or 
+(p old-test :or
    ((binop-expr) $1)
    ((old-lambdef) $1))
-   
+
 (p binop-expr :or
    ((binop-expr [and] binop-expr) `([binary-lazy-expr] ,$2 ,$1 ,$3))
    ((binop-expr [or]  binop-expr) `([binary-lazy-expr] ,$2 ,$1 ,$3))
@@ -575,7 +575,7 @@ Value should be a (weak) EQ hash table: (make-weak-key-hash-table :test 'eq).")
                                                              $2)))
                                 $1))
    ((old-test)  $1))
-   
+
 (p testlist-safe2 :or
    (([,])                         (list :dummy))
    (([,] old-test)                (list $2))
@@ -627,7 +627,7 @@ Value should be a (weak) EQ hash table: (make-weak-key-hash-table :test 'eq).")
    ((argument comma?)            (list  $1 nil nil))
    (([*]  test comma--**--test?) (list nil  $2  $3))
    (([**] test)                  (list nil nil  $2)))
- 
+
 (gp argument--comma+)
 (p argument--comma (argument [,]) $1)
 (p comma--**--test ([,] [**] test) $3)
@@ -636,12 +636,12 @@ Value should be a (weak) EQ hash table: (make-weak-key-hash-table :test 'eq).")
 (p argument ([identifier] [=] test) `(:key ([identifier-expr] ,$1) ,$3))
 (p argument (test gen-for) `(:pos ([generator-expr] ,$1 ,$2)))
 
-(p list-iter :or 
-   ((list-for) $1) 
+(p list-iter :or
+   ((list-for) $1)
    ((list-if) $1))
 (p list-for ([for] exprlist [in] testlist-safe list-iter?) `(([for-in-clause] ,$2 ,$4) . ,$5))
 (p list-if ([if] old-test list-iter?) `(([if-clause] ,$2) . ,$3))
- 
+
 (p gen-iter :or
    ((gen-for) $1)
    ((gen-if) $1))
@@ -676,7 +676,7 @@ For example: - (1 * 2) => (-1) * 2"
           (setf unary-expr
             `([binary-expr] ,binary-op ,(maybe-fix-unary-expr `([unary-expr] ,unary-op ,bin-left)) ,bin-right))))))
   unary-expr)
-  
+
 (defun dotted-name-to-attribute-ref (dotted-name)
   (assert dotted-name)
   (let ((res `([identifier-expr] ,(pop dotted-name))))

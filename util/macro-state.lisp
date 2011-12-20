@@ -34,13 +34,13 @@ to retrieve value for :key1."
 
          (defparameter ,decl-keys-name ',allowed-keys
            ,(format nil "List of allowed keys for declaration \"~A\"." decl-name))
-             
+
          (defun ,check-keys-name (&rest keys)
            (dolist (key keys)
              (block check-key
                (unless (member key ,decl-keys-name)
                  (restart-case (break "Declaration \"~A\" does not allow key ~S. ~
-                                       ~_The allowed keys are: ~{~S~^, ~}." 
+                                       ~_The allowed keys are: ~{~S~^, ~}."
                                       ',decl-name key ,decl-keys-name)
                    (declare-new-key ()
                      :report (lambda (s)
@@ -48,11 +48,11 @@ to retrieve value for :key1."
                                        key ',decl-name))
                      (pushnew key ,decl-keys-name)
                      (return-from check-key)))))))
-         
+
          (defmacro ,def-add-keys-name (&rest keys)
            `(eval-when (:compile-toplevel :load-toplevel :execute)
               ,@(loop for k in keys collect `(pushnew ,k ,',decl-keys-name))))
-                  
+
          #+(and :allegro :new-environments)
          ,(with-gensyms (env declaration property-pairs)
             `(sys:define-declaration
@@ -62,11 +62,11 @@ to retrieve value for :key1."
                            (cons ',decl-name
                                  (nconc (copy-list (cdr ,declaration))
                                         (sys:declaration-information ',decl-name ,env)))))))
-         
+
          (defmacro ,with-name (pairs &body body)
            (apply #',check-keys-name (mapcar #'car pairs))
            (list* 'with-custom-decl ',decl-name ',state-name pairs body))
-         
+
          (defgeneric ,get-name (var env)
            (:method (var env)
                     (,check-keys-name var)
@@ -123,20 +123,20 @@ to retrieve value for :key1."
               ((:compiler :compilation) nil)
               (t (break "New kind of environment found: ~A."
                         (sys::augmentable-environment-kind env))))))))
-  
+
   (excl:def-fwrapper with-custom-decl-fwrapper (form env)
     (if (use-fallback-env-accessors env)
         (let ((*use-environment-acccessors* nil))
           (excl:call-next-fwrapper))
       (excl:call-next-fwrapper)))
-  
+
   (excl:fwrap 'with-custom-decl 'with-custom-decl-fwrapper 'with-custom-decl-fwrapper)
-  
+
   (excl:def-fwrapper get-decl-state-fwrapper (decl-name decl-state-name env)
     (declare (ignore decl-name decl-state-name))
     (if (use-fallback-env-accessors env)
         (let ((*use-environment-acccessors* nil))
           (excl:call-next-fwrapper))
       (excl:call-next-fwrapper)))
-  
+
   (excl:fwrap 'get-decl-state 'get-decl-state-fwrapper 'get-decl-state-fwrapper))

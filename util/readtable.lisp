@@ -27,7 +27,7 @@ and returns a symbol in the given package. When no such symbol exists,
 it will be interned if INTERN, otherwise an error is raised."
   (check-type start-char character)
   (check-type end-char character)
-  
+
   (lambda (stream ch)
     (assert (char= ch start-char))
     (loop with name = (make-array 5 :element-type 'character
@@ -38,7 +38,7 @@ it will be interned if INTERN, otherwise an error is raised."
 		  (setf (aref name (1- (length name))) ch))
 		 ((char/= ch end-char)
                   (vector-push-extend ch name))
-                 (t 
+                 (t
                   (return (or (find-symbol name package)
                               (when intern
                                 (intern name package))
@@ -94,4 +94,4 @@ otherwise return STREAM."
 (defun interactive-stream-p-recursive (stream)
   "In case of CONCATENATED-STREAM it looks at the active stream within."
   (interactive-stream-p (concatenated-stream-active-stream stream)))
-    
+

@@ -89,7 +89,7 @@
                     (sb-ext:save-lisp-and-die filename
                                               :executable t
                                               :toplevel #'toplevel)))
-      
+
       #-sbcl (error "Building Python executables is not yet supported in this Lisp implementation.")
       #+sbcl (build-sbcl))))
 

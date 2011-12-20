@@ -20,7 +20,7 @@ import _random
 >>> r = _random.Random()
 >>> dir(r)
 ['__class__', '__delattr__', '__doc__', '__getattribute__', '__hash__', '__init__', '__new__', '__reduce__', '__reduce_ex__', '__repr__', '__setattr__', '__str__', 'getrandbits', 'getstate', 'jumpahead', 'random', 'seed', 'setstate']
->>> 
+>>>
 ||#
 
 (defclass |Random| (clpython:object)

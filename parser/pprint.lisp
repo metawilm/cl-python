@@ -12,7 +12,7 @@
 ;; Of course this is fully dependent on the form of the AST that the
 ;; parser yields.
 ;;
-;; TODO: 
+;; TODO:
 ;;  - insert line breaks for too long lines
 
 (in-package :clpython.parser)
@@ -35,7 +35,7 @@ output to a string does not start with a newline."
                    (do-print s))))
         (when (plusp (length str))
           (assert (char= (aref str 0) #\Newline))
-          (make-array (1- (length str)) 
+          (make-array (1- (length str))
                       :element-type (array-element-type str)
                       :displaced-to str
                       :displaced-index-offset 1))))))
@@ -79,7 +79,7 @@ output to a string does not start with a newline."
     ([attributeref-expr] (format stream "~A.~A"         (second x) (third x)))
     ([augassign-stmt]    (format stream "~A ~A ~A"      (third x) (second x) (fourth x)))
     ([backticks-expr]    (format stream "`~A`"  (second x)))
-    
+
     (([binary-expr] [binary-lazy-expr])
      (destructuring-bind (op left right)
          (cdr x)
@@ -87,12 +87,12 @@ output to a string does not start with a newline."
               (brackets? (< lev *precedence-level*)))
          (let ((*precedence-level* lev))
            (format stream "~@[(~*~]~A ~A ~A~@[)~*~]" brackets? left op right brackets?)))))
-    
+
     ([bracketed-expr] (let ((*in-bracketed-expr* t))
                         ;; Ignore superfluous brackets.
                         (format stream "~A" (second x))))
     ([break-stmt] (format stream "break"))
-    
+
     ([call-expr] (destructuring-bind (primary pos key *a **a) (cdr x)
 		 (format stream "~A(" primary)
 		 (print-arg-list stream pos key *a **a)
@@ -107,7 +107,7 @@ output to a string does not start with a newline."
                            (let ((*tuple-must-have-brackets* t))
                              (format stream "~A" supers)))
                          (format stream ":~A" suite))))
-    
+
     ([comparison-expr] (when (and *in-comparison-expr* *in-bracketed-expr*) ;; needed for "1 < (2 < 3)"
                          (write-char #\( stream))
                        (let ((*in-comparison-expr* t))
@@ -116,13 +116,13 @@ output to a string does not start with a newline."
                          (write-char #\) stream)))
     ([continue-stmt]   (format stream "continue"))
     ([del-stmt]        (format stream "del ~A" (second x)))
-    
+
     ([dict-expr]      (let ((*tuple-must-have-brackets* t))
 			(format stream "{~{~A: ~A~}}"
 				(loop for (v k) on (second x) by #'cddr
 				    collect k
 				    collect v))))
-		      
+
     ([exec-stmt]   (destructuring-bind (code globals locals)
                        (cdr x)
                      (let ((*tuple-must-have-brackets* t))
@@ -131,7 +131,7 @@ output to a string does not start with a newline."
                          (format stream " in ~A" globals)
                          (when locals
                            (format stream ", ~A" locals))))))
-    
+
     ([for-in-stmt] (destructuring-bind (targets source suite else-suite)
 		     (cdr x)
 		   (let ((*suite-no-newline* t))
@@ -152,23 +152,23 @@ output to a string does not start with a newline."
 						       (second clause) (third clause)))
 			      ([if-clause]     (format stream " if ~A" (second clause)))))
 		    (format stream ")"))
-     
+
     ([global-stmt]     (let ((*one-item-tuple-gets-comma* nil))
                          (format stream "global ~A" (second x))))
     ([identifier-expr] (let ((name (second x)))
                          (if (eq name '{Ellipsis})
                              (format stream "...")
                            (format stream "~A" name))))
-    
+
     ([if-expr] (destructuring-bind (cond then else) (cdr x)
                  (format stream "(~A if ~A else ~A)" then cond else)))
-                                                         
+
     ([if-stmt] (destructuring-bind (clauses else-suite) (cdr x)
  	       (let ((*suite-no-newline* t))
 		 (format stream "if ~{~A:~A~}~@[~:{~&elif ~A:~A~}~]~@[~&else:~A~]"
 			 (car clauses) (cdr clauses) else-suite))))
-    
-    
+
+
     ([import-stmt] (format stream "import ")
 		   (with-standard-io-syntax
 		     (format stream "~{~A~^, ~}"
@@ -185,7 +185,7 @@ output to a string does not start with a newline."
 			      (format stream "~{~A~^, ~}"
 				      (loop for (item bind-name) in items
 					  collect (format nil "~A~@[ as ~A~]" item bind-name)))))))
-    
+
     ([lambda-expr] (destructuring-bind (args expr) (cdr x)
 		   (format stream "lambda~:[~; ~]" (some #'identity args))
 		   (apply #'print-arg-list stream args)
@@ -193,7 +193,7 @@ output to a string does not start with a newline."
 
     ([list-expr]   (let ((*tuple-must-have-brackets* t))
 		     (format stream "[~{~A~^, ~}]" (second x))))
-    
+
     ([listcompr-expr] (format stream "[")
                       (let ((*tuple-must-have-brackets* t))
                         (format stream "~A" (second x)))
@@ -203,33 +203,33 @@ output to a string does not start with a newline."
                                                         (second clause) (third clause)))
                                ([if-clause]     (format stream " if ~A" (second clause)))))
                       (format stream "]"))
-    
+
     ([literal-expr] (destructuring-bind (kind value) (cdr x)
                       (py-pprint-literal stream kind value)))
-    
+
     ([module-stmt]  (let ((suite (cadr x)))
 		    (assert (eq (first suite) '[suite-stmt]))
 		    (format stream "~{~A~%~}" (second suite))))
-    
+
     ([pass-stmt]    (format stream "pass"))
-    
+
     ([print-stmt] (destructuring-bind (dest items comma?) (cdr x)
 		  (format stream "print ~@[>> ~A, ~]~{~A~^, ~}~:[~;,~]"
 			  dest items comma?)))
-    
+
     ([raise-stmt] (format stream "raise ~{~A~^, ~}"
 			(loop for y in (cdr x) while y collect y)))
-    
+
     ([return-stmt] (format stream "return ~@[~A~]" (second x)))
-    
+
     ([slice-expr]  (destructuring-bind (start stop step) (cdr x)
 		   (format stream "~@[~A~]:~@[~A~]~@[:~A~]" start stop step)))
 
     ([subscription-expr] (format stream "~A[~A]" (second x) (third x)))
-    
+
     #+(or) ;; this version does not treat docstrings specially
     ([suite-stmt]        (format stream "~&~<    ~@;~@{~A~^~&~}~:>~&" (second x)))
-    
+
     ([suite-stmt] #+(or)
 		;; docstring at the head of the suite: print as:  """docstring"""
 		;; There are still issues with escaping; let's leave it out for now.
@@ -238,24 +238,24 @@ output to a string does not start with a newline."
 		      (let ((body-s (with-standard-io-syntax
 				      (format nil "\"\"\"~A\"\"\"~&" item-1)))
 			    (items-s (mapcar (lambda (x) (format nil "~A" x)) items)))
-			
+
 			(with-standard-io-syntax
 			  (break "body-s: ~S item-s: ~S" body-s items-s))
-			
+
 			;; standard syntax, otherwise strings are
 			;; printed with Python string escapes
-			
+
 			(with-standard-io-syntax
 			  (format stream "~&~@<    ~@;~A~{~A~^~&~}~:>~&" body-s items-s)))))
-		
+
 		#+(or)
 		(format stream "~&~<    ~@;~@{~A~^~&~}~:>~&" (second x))
-		
+
 		(progn (let ((*suite-no-newline* nil))
 			 (format stream "~&~<    ~@;~@{~A~^~&~}~:>" (second x)))
 		       (unless *suite-no-newline*
 			 (format stream "~&"))))
-	   
+
     ([tuple-expr] (let* ((items (second x)))
 		  (if items
 		      (let ((brackets? (or (/= *precedence-level* -1)
@@ -267,47 +267,47 @@ output to a string does not start with a newline."
 			  (format stream "~@[(~*~]~{~A~^, ~}~@[,~*~]~@[)~*~]"
 				  brackets? items post-comma? brackets?)))
 		    (format stream "()"))))
-    
+
     ([try-except-stmt] (destructuring-bind (try-suite except-suites else-suite)
 			       (cdr x)
 		       (let ((*suite-no-newline* t))
 			 (format stream "try:~A~:{~&except~@[ ~A~@[, ~A~]~]:~2@*~A~}~@[~&else:~A~]"
 				     try-suite except-suites else-suite))))
-    
+
     ([try-finally-stmt] (let ((*suite-no-newline* nil))
 			(format stream "try:~Afinally:~A" (second x) (third x))))
-    
+
     ([unary-expr] (destructuring-bind (op arg)
                       (cdr x)
                     (let* ((lev (cdr (assoc op *unary-op-precedence*)))
                            (brackets? (< lev *precedence-level*)))
-                      
+
                       (let ((*precedence-level* lev))
                         (format stream "~@[(~*~]" brackets?)
 			(format stream "~A" op)
 			(when (eq op '[not])
 			  (format stream " "))
 			(format stream "~A~@[)~*~]" arg brackets?)))))
-    
+
     ([while-stmt] (destructuring-bind (test suite else-suite) (cdr x)
 		  (let ((*suite-no-newline* t))
 		    (format stream "while ~A:~A~@[else: ~A~]" test suite else-suite))))
-    
+
     ([yield-expr] (format stream "(yield~@[ ~A~])" (second x)))
     ([yield-stmt] (format stream "yield~@[ ~A~]" (second x)))
-    
+
     (t (format stream "(~{~S~^ ~})" x))))
-  
+
 (defun print-arg-list (stream pos-args key-args *-arg **-arg)
   (let ((*precedence-level* -1)
 	(*tuple-must-have-brackets* t))
     (format stream "~@[~{~A~^, ~}~:[~;, ~]~]"
 	    pos-args (or key-args *-arg **-arg))
-  
+
     (format stream "~@[~{~A=~A~^, ~}~:[~;, ~]~]"
 	    (loop for (k v) in key-args collect k collect v)
 	    (or *-arg **-arg))
-    
+
     (format stream "~@[*~A~:[~;, ~]~]" *-arg **-arg)
     (format stream "~@[**~A~]"         **-arg)))
 
@@ -363,7 +363,7 @@ output to a string does not start with a newline."
                  ((char= ch #\\)  (write-char #\\ stream)
                                   (write-char #\\ stream))
                  ;; printable ASCII character
-                 ((and (<= (char-code ch) 127) 
+                 ((and (<= (char-code ch) 127)
                        (graphic-char-p ch))     (write-char ch stream))
 		 ((> (char-code ch) 255)
                   (format stream "\\u~v,vX"
@@ -373,7 +373,7 @@ output to a string does not start with a newline."
 		 (t (loop for ch across
                           ;; Cross-reference: #'(read-kind (string) ..) does the inverse.
                           (case ch
-                            (#\Bell      "\\a") 
+                            (#\Bell      "\\a")
                             (#\Backspace "\\b")
                             (#\Page      "\\p")
                             (#\Newline   "\\n")

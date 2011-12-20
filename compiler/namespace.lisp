@@ -91,7 +91,7 @@
 #+clpython-namespaces-are-classes
 (defclass namespace ()
   ((parent :accessor ns.parent :initarg :parent :initform nil)
-   (scope :accessor ns.scope :initarg :scope 
+   (scope :accessor ns.scope :initarg :scope
           :initform #+(or)(error "missing arg :scope") :missing-initform ;; hack for my-make-load-form
           )))
 
@@ -116,7 +116,7 @@
 (defmethod make-load-form ((ns namespace) &optional environment)
   (declare (ignore environment))
   (my-make-load-form ns))
-  
+
 (defmethod ns.expand-with ((ns namespace) body-form environment)
   (declare (ignorable ns environment))
   body-form)
@@ -125,28 +125,28 @@
 (progn
   (defclass excl-ns (namespace)
     ((excluded-names :accessor ns.excluded-names :initarg :excluded-names)))
-  
+
   (defmethod ns.read-form :around ((ns excl-ns) (s symbol))
     (unless (member s (ns.excluded-names ns))
       (call-next-method)))
-  
+
   (defmethod ns.write-form :around ((ns excl-ns) (s symbol) val-form)
     (declare (ignore val-form))
     (unless (member s (ns.excluded-names ns))
       (call-next-method)))
-  
+
   (defmethod ns.del-form :around ((ns excl-ns) (s symbol))
     (unless (member s (ns.excluded-names ns))
       (call-next-method))))
 
 (defmethod ns.attributes append ((namespace excl-ns))
   (list :excluded-names (ns.excluded-names namespace)))
-  
+
 #+clpython-namespaces-are-classes
 (progn
   (defclass mapping-ns (namespace)
     ((mapping-form :accessor ns.mapping-form :initarg :mapping-form)))
-  
+
   (defun make-mapping-ns (&rest args)
     (apply #'make-instance 'mapping-ns args)))
 
@@ -169,31 +169,31 @@
 (defmethod ns.del-form ((ns mapping-ns) (s symbol))
   `(prog1 (py-subs ,(ns.mapping-form ns) ,(symbol-name s))
      (setf (py-subs ,(ns.mapping-form ns) ,(symbol-name s)) nil)))
- 
+
 (defmethod ns.locals-form ((ns mapping-ns))
   (ns.mapping-form ns))
 
 #+clpython-namespaces-are-classes
-(progn 
+(progn
   (defclass mapping-w/excl-ns (mapping-ns excl-ns)
     ())
   (defun make-mapping-w/excl-ns (&rest args)
     (apply #'make-instance 'mapping-w/excl-ns args)))
 
 #-clpython-namespaces-are-classes
-(progn 
+(progn
   (defstruct (mapping-w/excl-ns (:include mapping-ns) (:conc-name ns.))
     excluded-names)
 
   (defmethod ns.read-form :around ((ns mapping-w/excl-ns) (s symbol))
     (unless (member s (ns.excluded-names ns))
       (call-next-method)))
-  
+
   (defmethod ns.write-form :around ((ns mapping-w/excl-ns) (s symbol) val-form)
     (declare (ignore val-form))
     (unless (member s (ns.excluded-names ns))
       (call-next-method)))
-  
+
   (defmethod ns.del-form :around ((ns mapping-w/excl-ns) (s symbol))
     (unless (member s (ns.excluded-names ns))
       (call-next-method))))
@@ -203,10 +203,10 @@
   (my-make-load-form ns))
 
 #+clpython-namespaces-are-classes
-(progn 
+(progn
   (defclass let-ns (namespace)
     ((names :accessor ns.names :initarg :names :initform :missing-initform)))
-  
+
   (defun make-let-ns (&rest args)
     (apply #'make-instance 'let-ns args)))
 
@@ -234,7 +234,7 @@
   (loop for subnames on (ns.names ns)
       when (member (car subnames) (cdr subnames))
       collect (car subnames) into dups
-      finally (when dups 
+      finally (when dups
                 (break "Namespace ~A contains duplicate names: ~A" ns dups)))
   `(let ,(ns.names ns)
      ;; Python has no way to declare variables unused, so suppress those warnings.
@@ -260,7 +260,7 @@
 (progn
   (defclass let-w/locals-ns (let-ns)
     ((let-names :accessor ns.let-names :initarg :let-names :initform :missing-initform))) ;; hack
-  
+
   (defun make-let-w/locals-ns (&rest args)
     (apply #'make-instance 'let-w/locals-ns args)))
 
@@ -288,7 +288,7 @@
 (progn
   (defclass hash-table-ns (namespace)
     ((dict-form :accessor ns.dict-form :initarg :dict-form :initform :dict-missing #+(or) (error "required")))) ;;hack
-  
+
   (defun make-hash-table-ns (&rest args)
     (apply #'make-instance 'hash-table-ns args)))
 
@@ -331,7 +331,7 @@
          (setf #+clpython-optimize-namespaces #+clpython-optimize-namespaces
                (get name ,(ns.dict-form ns)) val
                (gethash name ,(ns.dict-form ns)) val))))
-       
+
 (defmethod ns.del-form ((ns hash-table-ns) (s symbol))
   `(progn #+clpython-optimize-namespaces (remprop ',s ,(ns.dict-form ns))
           (with-py-dict
@@ -348,19 +348,19 @@
     (apply #'make-instance 'hash-table-w/excl-ns args)))
 
 #-clpython-namespaces-are-classes
-(progn 
+(progn
   (defstruct (hash-table-w/excl-ns (:include hash-table-ns) (:conc-name ns.))
     excluded-names)
-  
+
   (defmethod ns.read-form :around ((ns hash-table-w/excl-ns) (s symbol))
     (unless (member s (ns.excluded-names ns))
       (call-next-method)))
-  
+
   (defmethod ns.write-form :around ((ns hash-table-w/excl-ns) (s symbol) val-form)
     (declare (ignore val-form))
     (unless (member s (ns.excluded-names ns))
       (call-next-method)))
-  
+
   (defmethod ns.del-form :around ((ns hash-table-w/excl-ns) (s symbol))
     (unless (member s (ns.excluded-names ns))
       (call-next-method))))
@@ -378,7 +378,7 @@
   (defclass package-ns (namespace)
     ((package :accessor ns.package :initarg :package)
      (incl-builtins :accessor ns.incl-builtins :initarg :incl-builtins :initform nil)))
-  
+
   (defun make-package-ns (&rest args)
     (apply #'make-instance 'package-ns args)))
 
@@ -431,7 +431,7 @@
 (progn
   (defclass builtins-ns (namespace)
     ())
-  
+
   (defun make-builtins-ns (&rest args)
     (apply #'make-instance 'builtins-ns args)))
 

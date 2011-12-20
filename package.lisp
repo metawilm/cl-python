@@ -19,19 +19,19 @@
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (defun get-external-symbols (pkg)
     (loop for s being each external-symbol in (find-package pkg) collect s))
-  
+
   (defun cascade-external-symbols (pkg &optional used-pkg-list)
     (let (to-export)
       (dolist (p (or used-pkg-list (package-use-list pkg)))
         (unless (eq p (find-package :common-lisp))
           (do-external-symbols (s p)
-            ;; Test whether not shadowed (like by symbol in the Common Lisp package) 
+            ;; Test whether not shadowed (like by symbol in the Common Lisp package)
             (when (eq s (find-symbol (symbol-name s) pkg))
               (push s to-export)))))
       (export (append to-export (get-external-symbols pkg)) pkg))))
 
 
-;; The exported symbols are given as #:symbols if case is irrelevant, 
+;; The exported symbols are given as #:symbols if case is irrelevant,
 ;; and "strings" if case matters.
 
 
@@ -73,12 +73,12 @@
 	   "global-stmt" "if-stmt" "import-stmt" "import-from-stmt" "module-stmt"
 	   "pass-stmt" "print-stmt" "raise-stmt" "return-stmt" "suite-stmt"
 	   "try-except-stmt" "try-finally-stmt" "while-stmt" "with-stmt" "yield-stmt"
-	   
+
 	   "attributeref-expr" "backticks-expr" "binary-expr" "binary-lazy-expr"
            "bracketed-expr" "call-expr" "comparison-expr" "dict-expr" "generator-expr"
 	   "identifier-expr" "if-expr" "lambda-expr" "listcompr-expr" "list-expr"
            "slice-expr" "subscription-expr" "tuple-expr" "unary-expr" "yield-expr"
-	   
+
 	   "for-in-clause" "if-clause" ;; not really nodes
            ))
 
@@ -90,7 +90,7 @@
 	   "global-stmt-p" "if-stmt-p" "import-stmt-p" "import-from-p-stmt" "module-stmt-p"
 	   "pass-stmt-p" "print-stmt-p" "raise-stmt-p" "return-stmt-p" "suite-stmt-p"
 	   "try-except-p-stmt" "try-finally-p-stmt" "while-stmt-p" "yield-stmt-p"
-           
+
            "attributeref-expr-p" "backticks-expr-p" "binary-expr-p" "binary-lazy-p-expr"
 	   "bracketed-expr-p" "call-expr-p" "comparison-expr-p" "dict-expr-p" "generator-expr-p"
 	   "identifier-expr-p" "lambda-expr-p" "listcompr-expr-p" "list-expr-p" "slice-expr-p"
@@ -169,7 +169,7 @@
 	   "__invert__" "__pos__" "__neg__" "__contains__" "__cmp__" "__abs__" "__len__"
            "__float__"
 	   ;; comparison
-	   "__eq__" "__lt__" "__gt__" "__cmp__" 
+	   "__eq__" "__lt__" "__gt__" "__cmp__"
 	   ;; representation
 	   "__repr__" "__str__" "__hex__" "__oct__"
            ;; iterator
@@ -200,7 +200,7 @@
            #:define-macro-state-declaration #:with-sane-debugging
            ;; data types
            #:named-function #:slurp-file #:with-stack-list #:make-weak-key-hash-table
-           #:ltv-find-class #:class-initarg-p 
+           #:ltv-find-class #:class-initarg-p
            #:alist-remove-prop #:+dict-alist-to-hashtable-threshold+
            #:+max-char-code+ #:char-code-type
            #:derive-pathname #:ensure-path-is-directory #:careful-probe-file
@@ -221,7 +221,7 @@
   (:use :common-lisp :clpython.util)
   (:export
    ;; lexer
-   #:*tab-width-spaces* #:*extra-identifier-char2-p* 
+   #:*tab-width-spaces* #:*extra-identifier-char2-p*
    #:*normal-float-representation-type* #:*enormous-float-representation-type*
    ;; parser
    #:parse #:parse-with-replacements
@@ -281,14 +281,14 @@
            #:habitat-stdout #:habitat-stdin #:habitat-stderr #:habitat-cmd-line-args
            #:habitat-search-paths
            ;; tuples
-           #:*the-empty-tuple* #:make-tuple-from-list 
+           #:*the-empty-tuple* #:make-tuple-from-list
            ;; sequences, mappings
            #:py-subs
            #:make-slice
            #:make-py-list-from-list
            #:py-iterate->lisp-list
 	   ;; callables
-           #:py-call 
+           #:py-call
            ;; modules
 	   #:impl-status #:set-impl-status
            ;; types, methods
@@ -307,9 +307,9 @@
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (cascade-external-symbols :clpython))
- 
+
 (eval-when (:compile-toplevel :load-toplevel :execute)
-  (import '(clpython:raise-syntax-error clpython:*raise-syntax-error-hook* 
+  (import '(clpython:raise-syntax-error clpython:*raise-syntax-error-hook*
             clpython:*ast-readtable* clpython:*user-readtable* clpython:*ast-user-readtable*)
           :clpython.parser))
 

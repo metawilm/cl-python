@@ -8,7 +8,7 @@
 ;;
 ;; This code is free software; you can redistribute it and/or
 ;; modify it under the terms of the version 2.1 of
-;; the GNU Lesser General Public License as published by 
+;; the GNU Lesser General Public License as published by
 ;; the Free Software Foundation, as clarified by the Franz
 ;; preamble to the LGPL found in
 ;; http://opensource.franz.com/preamble.html.
@@ -47,7 +47,7 @@
    #:test-no-error
    #:test-warning
    #:test-no-warning
-   
+
    #:with-tests
    ))
 
@@ -336,7 +336,7 @@ discriminate on new versus known failures."
   (when *announce-test*
     (format t "Just did test ~s~%" test-form)
     (force-output))
-  
+
   ;; this is an internal function
   (flet ((check (expected-result result)
 	   (let* ((results
@@ -486,7 +486,7 @@ Reason: the format-arguments were incorrect.~%")
 	 (format *error-output* "Begin ~a test~%" ,g-name)
 	 (if* *break-on-test-failures*
 	    then (doit)
-	    else (handler-bind 
+	    else (handler-bind
                      ((error (lambda (c)
                                (format
                                 *error-output*
@@ -497,7 +497,7 @@ Reason: the format-arguments were incorrect.~%")
          (macrolet ((without-gc-messages (&body body)
                       #+allegro `(let ((state (sys:gsgc-switch :print)))
                                    (setf (sys:gsgc-switch :print) nil)
-                                   (unwind-protect 
+                                   (unwind-protect
                                        (progn ,@body)
                                      (setf (sys:gsgc-switch :print) state)))
                       #-allegro `(progn ,@body)))

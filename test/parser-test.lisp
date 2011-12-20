@@ -12,7 +12,7 @@
 (in-package :clpython.test)
 
 (in-syntax *ast-user-readtable*)
-	   
+
 (defun ps (s &optional (one-expr nil))
   (values (parse s :one-expr one-expr)))
 
@@ -26,7 +26,7 @@
 
 (defun run-parser-test ()
   (with-subtest (:name "CLPython-Parser")
-    
+
     ;; packages
     (test-true (find-package :clpython.parser))
     (test-true (find-package :clpython.user))
@@ -34,9 +34,9 @@
 	  (find-symbol "def" :clpython.ast) :multiple-values t)
     (test '(clpython.ast.operator:|<=| :external)
 	  (find-symbol "<="  :clpython.ast) :multiple-values t)
-    (test '(clpython.ast.node:|funcdef-stmt| :external) 
+    (test '(clpython.ast.node:|funcdef-stmt| :external)
 	  (find-symbol (symbol-name :|funcdef-stmt|) :clpython.ast) :multiple-values t)
-    
+
     ;; ast readtable
     (test-true (eq '[>] 'clpython.ast.operator:>))
     (test-true (eq '[assign-stmt] 'clpython.ast.node:|assign-stmt|))
@@ -45,7 +45,7 @@
 		:condition-type 'reader-error) ;; not exist
     (test-false (find-symbol "foo" :clpython.ast)) ;; not created by previous test
     (test-true (eq '[>] '[>] ))
-    
+
     ;; user readtable
     (test-true (eq '{__getitem__} 'clpython.user:|__getitem__|))
     (test-true (eq '{abs} 'clpython.user::|abs|))
@@ -57,7 +57,7 @@
     (test-equal '([module-stmt] ([suite-stmt] (([literal-expr] :number 42)))) (ps "42"))
     (test-equal '([module-stmt] ([suite-stmt] (([literal-expr] :string "x")))) (ps "'x'"))
     (test-equal '([module-stmt] ([suite-stmt] (([literal-expr] :bytes "x")))) (ps "b'x'"))
-      
+
     ;; variables
     (test-equal '([assign-stmt] ([literal-expr] :number 3) (([identifier-expr] {y} ))) (ps "y = 3" t))
     (test-equal '([assign-stmt] ([literal-expr] :number 3) (([identifier-expr] {len}))) (ps "len = 3" t))
@@ -85,7 +85,7 @@
                                                     (invoke-restart (find-restart 'continue)))))
                       (ps s t))
                     `([literal-expr] :number ,(expt 10 n-expt)))))
-    
+
     ;; suffix operations
     (test-equal '([attributeref-expr]
 		  ([call-expr]
@@ -93,7 +93,7 @@
 		   (([literal-expr] :number 2)) nil nil nil)
 		  ([identifier-expr] {a3}))
 		(ps "x[1](2).a3" t))
-      
+
     ;; call arguments
     (test-equal '([attributeref-expr]
 		  ([call-expr] ([subscription-expr] ([identifier-expr] {x})
@@ -101,8 +101,8 @@
 		   nil ((([identifier-expr] {len}) ([literal-expr] :number 2))) nil nil)
 		  ([identifier-expr] {a3}))
 		(ps "x[1](len=2).a3" t))
-      
-    (test-equal '([call-expr] 
+
+    (test-equal '([call-expr]
 		  ([identifier-expr] {f})
 		  (([literal-expr] :number 1) ([literal-expr] :number 2))
                   ((([identifier-expr] {y}) ([literal-expr] :number 3)))
@@ -113,15 +113,15 @@
     ;; order of args: pos, key, *, **
     (test-error (ps "f(a=1,b)" t)
 		:condition-type '{SyntaxError})
-    
+
     (test-error (ps "f(*a,1)" t)
 		:condition-type '{SyntaxError})
-    
+
     (test-error (ps "f(**a,*b)" t)
 		:condition-type '{SyntaxError})
-    
+
     (test-no-error (ps "f(x,y,z=3,*a,**b)" t))
-    
+
     ;; function decorators
     (test-equal '([funcdef-stmt]
                   ;; list of decorators: first foo(bar)
@@ -137,12 +137,12 @@
 def f(): pass" t))
 
     ;; Precedence of unary operators and exponentiation
-    (test-equal '([binary-expr] [*] 
+    (test-equal '([binary-expr] [*]
                   ([unary-expr] [-] ([literal-expr] :number 1))
                   ([literal-expr] :number 2))
                 (ps "-1 * 2" t)
                 :fail-info "-1 * 2 == (-1) * 2")
-    (test-equal '([binary-expr] [*] 
+    (test-equal '([binary-expr] [*]
                   ([unary-expr] [+] ([literal-expr] :number 1))
                   ([literal-expr] :number 2))
                 (ps "+1 * 2" t)
@@ -189,19 +189,19 @@ def f(): pass" t))
                    ([bracketed-expr]
                     ([binary-expr] [*]
                      ([bracketed-expr]
-                      ([binary-expr] [*] 
+                      ([binary-expr] [*]
                                      ([unary-expr] [-] ([literal-expr] :number 2))
                                      ([literal-expr] :number 3)))
                      ([literal-expr] :number 4)))))
                 (ps "1 * -((-2 * 3) * 4)" t))
-        
+
     ;; Empty string is parsed as module without body
     #+(or)(test-equal '([module-stmt] ([suite-stmt] () ))
                       (values (parse "")))
 
     ;; yield expressions are implemented
     (test-no-error (values (parse "y = yield x")))
-    
+
     ;; parsing a file
     #+(and allegro unix) ;; no WITH-OPEN-TEMP-FILE on windows
     (let ((fname (excl.osi:with-open-temp-file (s "_clpython-ast-test-XXXXXX")
@@ -209,7 +209,7 @@ def f(): pass" t))
       (test-equal '([print-stmt] nil (([literal-expr] :number 42)) nil)
 		  (values (clpython.parser:parse (pathname fname) :one-expr t)))
       (test t (excl.osi:unlink fname)))
-    
+
     ;; handling eof
     (test-true (subtypep '{UnexpectedEofError} '{SyntaxError}))
     (flet ((try-parse (s)
@@ -241,7 +241,7 @@ def f():
       (let ((error-string (prin1-to-string error-p)))
         (test-true (and (search "unexpected token" error-string)
                         (search "newline" error-string)))))
-    
+
     (test-equal '([literal-expr] :number 42)
                 (handler-bind (({SyntaxError} (lambda (c) (declare (ignore c))
                                                       (continue))))
@@ -295,7 +295,7 @@ if 1 > \\
          nil))
     (test-error (ps "\\1" t) :condition-type '{SyntaxError})
     ;; unicode
-    
+
     #-ecl
     (test-equal (ps (concatenate 'string "u'\\N{" #1="Latin Small Letter Y With Acute" "}'") t)
                 `([literal-expr] :string
@@ -326,12 +326,12 @@ if 1 > \\
     (test-error (ps "u'\\u'" t) :condition-type '{SyntaxError})
     (test-error (ps "u'\\U0000000G'" t) :condition-type '{SyntaxError})
     (test-error (ps "u'\\UFFFFFFFF'" t) :condition-type '{SyntaxError} :fail-info "No such char")
-        
+
     ;; valid, invalid hex code
     (test-equal (ps "'\\x12'" t) `([literal-expr] :string ,(coerce (list (code-char #x12)) 'string)))
     (test-equal (ps "'\\xF'" t) `([literal-expr] :string ,(coerce (list (code-char #xF)) 'string)))
     (test-error (ps "'\\xG'" t) :condition-type '{SyntaxError})
-    
+
     ;; octal code, non-escaping backslash
     #-ecl
     (test-equal (ps "'\\5019\\z'" t)
@@ -376,7 +376,7 @@ if 1:
            #1='(with-subtest (:name "CLPython-PrettyPrinter")
                 ;; Test  string -> ast -> string  and ast -> string -> ast
                 (macrolet ((p (str &rest options)
-                             `(progn 
+                             `(progn
                                 (test ,str (py-pprint (parse ,str))
                                       :test 'string-strip-= ,@options)
                                 (when (string-strip-= ,str (py-pprint (parse ,str)))
@@ -384,7 +384,7 @@ if 1:
                                               (values (parse (py-pprint (parse ,str))))
                                               ,@options))))
                            (pe (str &rest options)
-                             `(progn 
+                             `(progn
                                 (test ,str (py-pprint (parse ,str :one-expr t))
                                       :test 'string-strip-= ,@options)
                                 (when (string-strip-= ,str (py-pprint (parse ,str :one-expr t)))
@@ -406,7 +406,7 @@ if 1:
                   (p "assert (1, 2, 3)")
                   (p "assert x > 0, 'error'")
                   ;; assign-stmt
-                  (p "x = 42")			
+                  (p "x = 42")
                   (p "x, y = 1, 2")
                   (p "x = y = 4")
                   (p "x = y, z = 1, 2")

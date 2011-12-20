@@ -1,5 +1,5 @@
 ;; -*- Mode: LISP; Syntax: COMMON-LISP; Package: CLPYTHON.PARSER; Readtable: PY-AST-USER-READTABLE -*-
-;; 
+;;
 ;; This software is Copyright (c) Franz Inc. and Willem Broekema.
 ;; Franz Inc. and Willem Broekema grant you the rights to
 ;; distribute and use this software as governed by the terms
@@ -76,7 +76,7 @@ Therefore need to convert TOKEN-KIND to the corresponding TOKEN-CODE before pass
            (ignore lexer))
   (cond ((and clpython:*exceptions-loaded* (typep c '{SyntaxError}))
 	 (error c)) ;; Converting SIGNAL to ERROR
-	
+
 	((typep c 'excl.yacc:grammar-parse-error)
 	 (let ((pos (excl.yacc:grammar-parse-error-position c)))
            (assert (listp pos) () "Got invalid grammar position (not a list): ~S" pos)
@@ -94,11 +94,11 @@ Therefore need to convert TOKEN-KIND to the corresponding TOKEN-CODE before pass
                     (raise-syntax-error
                      (format nil "Parse error at line ~A~@[, at token `~S'~].~%[Internal error: ~A~_(caught due to ~S)]"
                              line token encl-error '*catch-yacc-conditions*)))
-                   
+
                    ((or (eq token (lexer-eof-token yacc-version))
                         (and (eq token '[newline]) (not last-newline-in-source))
                         (and (eq token '[dedent]) (not (eq last-newline-in-source :unknown))))
                     (raise-unexpected-eof))
-                   
+
                    (t
                     (raise-syntax-error (format nil "At line ~A, parser got unexpected token: ~S" line token)))))))))

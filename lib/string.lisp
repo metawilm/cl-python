@@ -21,7 +21,7 @@
           for arr-i from 0
           do (setf (schar arr arr-i) (code-char i)))
       arr))
-  
+
   (defun chars-satisfying (pred)
     (let ((bit-arr (make-array +max-char-code+
                                :element-type 'bit
@@ -79,7 +79,7 @@
   (check-type to string)
   (unless (= (length from) (length to))
     (py-raise '{ValueError} "Lengths not the same: ~A vs ~A." (length from) (length to)))
-  
+
   (loop with conv = (copy-seq #.(coerce (loop for i from 0 to 255 collect (code-char i)) 'string))
       for from-char across from
       for from-code = (char-code from-char)

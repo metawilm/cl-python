@@ -99,7 +99,7 @@ starts a new top-level statement. Uses an extra heuristic if *use-ast-return-stm
   ;;
   ;; The user can however input an equivalent definition, by inserting the
   ;; `yield' somewhere before the return, like:
-  ;; 
+  ;;
   ;;  def f():
   ;;    if 0: yield 1
   ;;    return

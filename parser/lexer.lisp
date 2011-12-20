@@ -1,5 +1,5 @@
 ;; -*- Mode: LISP; Syntax: COMMON-LISP; Package: CLPYTHON.PARSER; Readtable: PY-AST-USER-READTABLE -*-
-;; 
+;;
 ;; This software is Copyright (c) Franz Inc. and Willem Broekema.
 ;; Franz Inc. and Willem Broekema grant you the rights to
 ;; distribute and use this software as governed by the terms
@@ -61,9 +61,9 @@ where TOKEN-KIND is a symbol like '[identifier]"
         (when (and source-loc *python-form->source-location*)
           (setf (gethash value *python-form->source-location*) source-loc))
         (values token value)))))
-    
+
 (defun make-lexer-2 (string &rest options)
-  ;; A little hack to merge [not] + [in] into [not in], 
+  ;; A little hack to merge [not] + [in] into [not in],
   ;; and [is] + [not] into [is not].
   ;; This evades precedence issues in the grammars.
   (let ((lexer (apply #'make-lexer-3 string options))
@@ -91,7 +91,7 @@ where TOKEN-KIND is a symbol like '[identifier]"
 
 (defclass lexer (standard-generic-function)
   ((string        :initarg :string        :accessor ls-string                                     :type string)
-   (tab-width     :initarg :tab-width     :accessor ls-tab-width     :initform *tab-width-spaces* :type fixnum) 
+   (tab-width     :initarg :tab-width     :accessor ls-tab-width     :initform *tab-width-spaces* :type fixnum)
    (yacc-version  :initarg :yacc-version  :accessor ls-yacc-version  :initform nil)
    (last-read-char-ix :accessor ls-last-read-char-ix :initform -1  :type fixnum)
    (curr-line-no  :accessor ls-curr-line-no  :initform 1  :type fixnum)
@@ -107,7 +107,7 @@ where TOKEN-KIND is a symbol like '[identifier]"
   (print-unreadable-object (lexer stream :type t :identity t)
     (with-slots (yacc-version string last-read-char-ix) lexer
       (format stream "for \"~A\" at ~A using ~S"
-              (abbreviate-string string 25) 
+              (abbreviate-string string 25)
               (let ((next-unread (1+ last-read-char-ix)))
                 (cond ((zerop next-unread)
                        "initial state")
@@ -129,7 +129,7 @@ where TOKEN-KIND is a symbol like '[identifier]"
   (:documentation "Returns either the eof-token, or two values: TOKEN-KIND, TOKEN-VALUE"))
 
 ;; Work around CMUCL bug: http://article.gmane.org/gmane.lisp.cmucl.devel/11052
-#.(let ((form 
+#.(let ((form
 	 '(defun make-lexer-3 (string &rest options &key yacc-version &allow-other-keys)
 	    "Return a lexer for the given string of Python code.
 Will return two value each time: TYPE, VALUE.
@@ -169,7 +169,7 @@ On EOF returns: eof-token, eof-token."
       (when tokens-todo
         (destructuring-bind (token value) (pop tokens-todo)
           (lex-return token value nil "(from todo)"))) ;; loc not important
-      (loop 
+      (loop
         (let ((c (lex-read-char :eof-error nil)))
           (cond ((not c)
                  (when (eq last-newline-in-source :unknown)
@@ -184,12 +184,12 @@ On EOF returns: eof-token, eof-token."
                  (loop while (plusp (pop indent-stack))
                      do (lex-todo '[dedent] '[dedent]))
                  (lex-return '[newline] '[newline] nil))
-                
+
                 ((digit-char-p c 10)
                  (multiple-value-bind (val source-loc)
                      (read-kind :number c)
                    (lex-return '[literal-expr] (list '[literal-expr] :number val) source-loc)))
-                
+
                 ((identifier-char1-p c)
                  (multiple-value-bind (token source-loc)
                      (read-kind :identifier c)
@@ -207,7 +207,7 @@ On EOF returns: eof-token, eof-token."
                    ;;  br'sdf'  : raw bytes
                    (when (and (<= (length (symbol-name token)) 2)
                               (member (sort (copy-seq (symbol-name token)) #'char-lessp)
-                                      '("r" "u" "ru" "b" "br") 
+                                      '("r" "u" "ru" "b" "br")
                                       :test 'string-equal))
                      (let ((ch (lex-read-char :eof-error nil)))
                        (if (and ch (char-member ch '(#\' #\")))
@@ -217,7 +217,7 @@ On EOF returns: eof-token, eof-token."
                                   (bytes   (position #\b sn :test 'char-equal)))
                              (multiple-value-bind (val source-loc)
                                  (read-kind :string ch :raw raw :unicode unicode)
-                               (lex-return '[literal-expr] 
+                               (lex-return '[literal-expr]
                                            (list '[literal-expr] (if bytes :bytes :string) val)
                                            source-loc)))
                          (when ch (lex-unread-char ch)))))
@@ -274,14 +274,14 @@ On EOF returns: eof-token, eof-token."
                                 do (pop indent-stack)
                                    (lex-todo '[dedent] '[dedent]))
                             (unless (= (car indent-stack) new-indent)
-                              (raise-syntax-error 
+                              (raise-syntax-error
                                "Dedent did not arrive at a previous indentation level (line ~A)."
                                curr-line-no))))
                      (lex-return '[newline] '[newline] nil))))
-                
+
                 ((char= c #\#)
                  (read-kind :comment-line c))
-                
+
                 ((char= c #\\) ;; next line is continuation of this one
                  (let ((c2 (lex-read-char)))
                    (case c2
@@ -293,7 +293,7 @@ On EOF returns: eof-token, eof-token."
                          "Continuation character '\\' must be followed by Newline, ~
                                     but got: '~A' (~S) (line ~A)." c2 c2 curr-line-no))))
                  (incf curr-line-no))
-                
+
                 (t (raise-syntax-error "Nobody expected this character: `~A' (line ~A)."
                                        c curr-line-no))))))))
 
@@ -346,7 +346,7 @@ C must be either a character or NIL."
 (defparameter *extra-identifier-char2-p* ()
   "Characters allowed in identifiers, besides the standard ones.
 Used by compiler to generate 'forbidden' identfiers.")
-        
+
 (defun lookup-external-symbol (sym pkg)
   (check-type sym string)
   (when (eq pkg #.(find-package :clpython.ast.reserved))
@@ -391,7 +391,7 @@ Used by compiler to generate 'forbidden' identfiers.")
               :displaced-index-offset start))
 
 (defun lex-looking-at-token (s &key (char-after-test (complement #'identifier-char2-p)))
-  "Returns whether next characters are for token, with whitespace or eof after it." 
+  "Returns whether next characters are for token, with whitespace or eof after it."
   (loop with chs-seen
       for i from 0 below (length s)
       for ch = (let ((c (lex-read-char :eof-error nil)))
@@ -427,7 +427,7 @@ Used by compiler to generate 'forbidden' identfiers.")
 (defmethod read-kind ((kind (eql :string)) ch1 &key raw unicode)
   (declare (ignorable kind))
   (assert (char-member ch1 '( #\' #\" )))
-  
+
   (labels ((read-unicode-char (uch s s.ix num-hex-digits)
              (check-type num-hex-digits (member 4 8))
              (check-type uch (member #\u #\U))
@@ -437,7 +437,7 @@ Used by compiler to generate 'forbidden' identfiers.")
              (loop for i below num-hex-digits
                  for ch = (aref s (+ s.ix i))
                  for shift downfrom (* 4 (1- num-hex-digits)) by 4
-                 for ch.code = (or (digit-char-p ch 16) 
+                 for ch.code = (or (digit-char-p ch 16)
                                    (raise-syntax-error "Invalid Unicode escape: `\\~A' should be ~
                                                         followed by ~A hex digits, but got non-hex ~
                                                         character `~A' (line ~A)."
@@ -451,7 +451,7 @@ Used by compiler to generate 'forbidden' identfiers.")
                          thereis (and (char= c #\\)
                                       (char-member (aref s (1+ i)) '(#\u #\U))))
                (return-from replace-unicode-hex-escapes s))
-             (loop with res = (make-array (length s) :element-type 'character 
+             (loop with res = (make-array (length s) :element-type 'character
                                           :adjustable t :fill-pointer 0)
                  with s.len = (length s)
                  with s.ix = 0
@@ -463,7 +463,7 @@ Used by compiler to generate 'forbidden' identfiers.")
                     (assert (char= #\\ (aref s s.ix)))
                     (assert (<= s.ix (- (length s) 2)))
                     (let* ((c (aref s (incf s.ix)))
-                           (uni-len (case c 
+                           (uni-len (case c
                                       (#\u 4)
                                       (#\U 8)
                                       (t nil))))
@@ -473,7 +473,7 @@ Used by compiler to generate 'forbidden' identfiers.")
                         (progn (vector-push-extend #\\ res)
                                (vector-push-extend c res)
                                (incf s.ix))))))
-  
+
            (replace-non-unicode-escapes (s)
              (unless (find #\\ s)
                (return-from replace-non-unicode-escapes s))
@@ -492,7 +492,7 @@ Used by compiler to generate 'forbidden' identfiers.")
                         () "Error parsing escapes (last char cannot be backslash): s=~S s.ix=~A" s s.ix)
                     (let ((c (aref s (incf s.ix))))
                       (multiple-value-bind (ch.a ch.b)
-                          (case c 
+                          (case c
                             ;; These clauses must leave s.ix at last handled character
                             ;; Cross-reference: #'(py-pprint-1 (string)) does the inverse.
                             ((#\\ #\' #\" #\a #\b) c)
@@ -539,7 +539,7 @@ Used by compiler to generate 'forbidden' identfiers.")
                                  finally (unless x.octal
                                            (decf s.ix))
                                          (return (careful-code-char code))))
-                            
+
                             (#\x (let* ((a (aref s (incf s.ix))) ;; char code: up to two hex digits
                                         (b (when (< (incf s.ix) s.len)
                                              (aref s s.ix)))
@@ -552,7 +552,7 @@ Used by compiler to generate 'forbidden' identfiers.")
                                        (careful-code-char (+ (* 16 a.hex) b.hex))
                                      (prog1 (careful-code-char a.hex)
                                        (decf s.ix)))))
-                            
+
                             (t (values #\\ c))) ;; Backslash not used for escaping.
                         (when ch.a
                           (check-type ch.a character)
@@ -571,17 +571,17 @@ Used by compiler to generate 'forbidden' identfiers.")
                                           until (and (char= z x y ch1) (not prev-bs))
                                           finally (return (- %lex-last-read-char-ix% 3)))))
                             (lex-substring start end)))
-                         
+
                          ((char= ch1 ch2) ;; "" or '' but not """ or '''
                           (when ch3 (lex-unread-char ch3))
                           (return-from read-kind ""))
-                         
+
                          ((and ch3 ;; "x"
                                (char= ch1 ch3)
                                (char/= ch2 #\\))
-                          (return-from read-kind (lex-substring (1- %lex-last-read-char-ix%) 
+                          (return-from read-kind (lex-substring (1- %lex-last-read-char-ix%)
                                                                 (1- %lex-last-read-char-ix%))))
-                         
+
                          (t (let* ((start (- %lex-last-read-char-ix% 1))
                                    (end   (loop with x = (lex-read-char)
                                               for prev-bs = (and ch3
@@ -602,7 +602,7 @@ Used by compiler to generate 'forbidden' identfiers.")
   "PYTHON-NAME has spaces as dividers, e.g. 'latin capital letter l with stroke'.
 Returns character or NIL."
   (when (plusp (length python-name))
-    (let* ((division-char (checking-reader-conditionals 
+    (let* ((division-char (checking-reader-conditionals
 			   #+(or allegro ccl sbcl) #\_
                            #+(or ecl cmu) nil
 			   #+lispworks #\- ))
@@ -622,7 +622,7 @@ Returns character or NIL."
   (when (typep code '(integer 0 (#.char-code-limit)))
     (whereas ((char (code-char code)))
       (return-from careful-code-char char)))
-  (raise-syntax-error "No character with code ~A (0x~X) defined (line ~A)." 
+  (raise-syntax-error "No character with code ~A (0x~X) defined (line ~A)."
                       code code %lex-curr-line-no%))
 
 ;; Number
@@ -772,10 +772,10 @@ Coercion from float to int must be confirmed by the user.")
                                    the Lisp type ~A, which is [~A, ~A]. ~:@_[~S = ~S]"
                                   primary e-ch expo-value %lex-curr-line-no%
                                   (string-upcase normal-flt-tp)
-                                  (first range) (second range) 
+                                  (first range) (second range)
                                   '*normal-float-representation-type* *normal-float-representation-type*))))))
               (t (lex-unread-char)))))
-          
+
         ;; CPython allows `j' (imaginary) for decimal, not for hex (SyntaxError) or octal
         ;; (becomes decimal!!?)
         ;; and allows 'L' ("long integer") for decimal, hex, octal
@@ -783,13 +783,13 @@ Coercion from float to int must be confirmed by the user.")
           (let ((ch (lex-read-char :eof-error nil)))
             (when (and ch (not (char-member ch '(#\l #\L))))
               (lex-unread-char ch)))))
-            
+
       ;; suffix `j' means imaginary
       (let ((ch (lex-read-char :eof-error nil)))
         (if (char-member ch '(#\j #\J))
             (setf res (complex 0 res))
           (when ch (lex-unread-char ch))))
-      
+
       res)))
 
 
@@ -828,7 +828,7 @@ Coercion from float to int must be confirmed by the user.")
 					(#\* '[**])))))
 	 (lookup-1char (c)
 	   (let* ((vec #.(loop with vec = (make-array 128
-						      :element-type t 
+						      :element-type t
 						      :initial-element nil)
 			     for sym in '([=] [+] [-] [*] [/] [<] [>] [~] [^] [\|] [&] [%]
 					  [(] [)] [.] [[] [\]] [{] [}] [`] [,] [:] [@] [\|] [\;] )
@@ -838,16 +838,16 @@ Coercion from float to int must be confirmed by the user.")
 		  (c.code (char-code c)))
 	     (assert (< c.code 128))
 	     (svref vec c.code))))
-    
+
     (let ((c2 (lex-read-char :eof-error nil)))
       (if (and c2 (punct-char2-p c1 c2))
-	  
+
 	  (let ((c3 (lex-read-char :eof-error nil)))
 	    (if (punct-char3-p c1 c2 c3)
 		(lookup-3char c1)
 	      (progn (when c3 (lex-unread-char c3))
 		     (lookup-2char c1 c2))))
-	    
+
 	    ;; 1 char, or two of three dots
 	    (if (and c2 (char= #\. c1 c2))
 		(if (char= (lex-read-char) #\.)
@@ -884,11 +884,11 @@ Coercion from float to int must be confirmed by the user.")
                == += -= *= /= %=  ^= |= &= ** **= <<= >>= "
   (and c1 c2
        (or (and (char= c2 #\= )
-		(char-member c1 '( #\+ #\- #\* #\/ #\% #\^ 
+		(char-member c1 '( #\+ #\- #\* #\/ #\% #\^
 				   #\| #\! #\= #\< #\> #\& )))
 	   (and (char= c1 c2)
 		(char-member c1 '( #\* #\< #\> #\/ #\< #\> )))
-	   
+
 	   (and (char= c1 #\< )
 		(char= c2 #\> )))))
 
@@ -924,7 +924,7 @@ Returns NEWLINE-P, NEW-INDENT, EOF-P."
                                    (warn "Irregular indentation: both spaces and tabs (line ~A)."
                                          %lex-curr-line-no%))
 				 (return-from read-kind
-                                   (list newline-p 
+                                   (list newline-p
                                          (+ n-spaces (* %lex-tab-width% n-tabs))
                                          nil))))))
 

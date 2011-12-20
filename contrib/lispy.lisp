@@ -1,5 +1,5 @@
 ;; -*- Mode: LISP; Syntax: COMMON-LISP; Package: CLPYTHON.PARSER; Readtable: PY-AST-USER-READTABLE -*- -*-
-;; 
+;;
 ;; This software is Copyright (c) Franz Inc. and Willem Broekema.
 ;; Franz Inc. and Willem Broekema grant you the rights to
 ;; distribute and use this software as governed by the terms
@@ -13,7 +13,7 @@
 (in-syntax *ast-user-readtable*)
 
 (defparameter *lispy-debug* nil)
-        
+
 
 ;;; Parsing progress is communicated using conditions
 
@@ -57,7 +57,7 @@
 :PYTHON must be in front, as basically everything that is parseable as Python is treated as Python.")
 
 (defun python-ast-ambiguous-p (ast)
-  "Whether the Python AST also corresponds to source code that is valid Lisp code." 
+  "Whether the Python AST also corresponds to source code that is valid Lisp code."
   ;; TODO: The alternative empty tuple notatation '(,)' is currently treated the same as '()' so parsed
   ;; as the invalid Lisp form (,) that leads to a syntax error (comma not inside backquote).
   ;; The comma in the source should make the input unambiguously Pythonic, but that fact gets lost during parsing.
@@ -102,7 +102,7 @@ Ends by signalling one of: %PARSE.FINISHED, %PARSE.SWITCH-LANGUAGE, %PARSE.UNEXP
              :new-language :lisp
              :start-ix start-ix
              :reason "Ambiguous # is start of a valid Lisp form -> handle as Lisp"))
-    (handler-case 
+    (handler-case
         (handler-bind ((toplevel-form-finished-condition
                         ;; Called once for each top-level form.
                         (lambda (c)
@@ -134,7 +134,7 @@ Ends by signalling one of: %PARSE.FINISHED, %PARSE.SWITCH-LANGUAGE, %PARSE.UNEXP
                       :start-ix start-ix
                       :reason "Ambiguous hash character (#) apparently part of valid Lisp Lisp form -> handle as Lisp"))
               ;; More special cases as they are found...
-              (t 
+              (t
                (error '%parse.unexpected-eof :start-ix start-ix :language :python :reason c))))
       ({SyntaxError} (c)
         (error '%parse.switch-language :language :python :start-ix start-ix :reason c))))
@@ -190,7 +190,7 @@ If INTERACTIVE-P then the last item is possibly (:lang :incomplete)"
           (dolist (language *languages*) ;; for given char ix, try all languages in this order
             (when *lispy-debug*
               (format t "~&; Starting reading at pos ~S by lang ~S~%" start-ix language))
-            (tagbody 
+            (tagbody
              restart-reading-with-language
               (flet ((switch-language (curr-lang reason &optional new-lang)
                        (assert (eq curr-lang language))
@@ -234,7 +234,7 @@ If INTERACTIVE-P then the last item is possibly (:lang :incomplete)"
                                                                (format t "~&; Collecting form, so starting with first language, start-ix=~S.~%"
                                                                        start-ix))
                                                              (throw 'restart-reading-all-languages nil)))))
-                               (%parse.switch-language (lambda (c) 
+                               (%parse.switch-language (lambda (c)
                                                          (assert (eq (%p.language c) language))
                                                          (setf start-ix (%p.start-ix c))
                                                          (switch-language (%p.language c) (%p.reason c) (%p.new-language c))))
@@ -283,7 +283,7 @@ STREAM can be an interactive (REPL) stream"
                  finally (return (>= num-newlines number))))
 	   (input-pending-p (stream)
 	     (check-type stream stream)
-	     (let ((ch (read-char-no-hang stream nil nil t))) 
+	     (let ((ch (read-char-no-hang stream nil nil t)))
 	       (prog1 (not (null ch))
                  (when ch (unread-char ch stream)))))
            (should-unread-last-newline ()
@@ -293,7 +293,7 @@ STREAM can be an interactive (REPL) stream"
               #+ccl nil
               #+sbcl t
               #-(or allegro ccl sbcl) nil))
-           
+
            (read-complete-input ()
              (let (input-string)
                (let ((got-concatenated-stream (typep stream 'concatenated-stream)))
@@ -307,7 +307,7 @@ STREAM can be an interactive (REPL) stream"
                               (assert (= 1 (length (concatenated-stream-streams stream))) () "Concat stream should have one stream now")
                               (setf stream (car (concatenated-stream-streams stream))))) ;; and forget about the wrapper
                    (setf input-string (normalize-input (string (read-char stream))))))
-               
+
                ;; Rules:
                ;;  - read at least one line, i.e. upto newline (interactive) or eof (file-stream)
                ;;  - if the line is a valid, complete Python form: treat as Python (regardless content of next lines)
@@ -315,7 +315,7 @@ STREAM can be an interactive (REPL) stream"
                ;;     1) result is not valid Python anymore: read it all like a Lisp form instead
                ;;     2) valid Python, and \n\n reached (empty line marks end of input): parse as Python
                ;;  - if line is invalid Python: read a Lisp form
-               
+
                (let ((interactive-p (or force-interactive-p (clpython.util:interactive-stream-p-recursive stream)))
                      (eof-reached nil))
                  (setf input-string (normalize-input (concatenate 'string input-string (slurp-file stream))))
@@ -340,7 +340,7 @@ STREAM can be an interactive (REPL) stream"
                             next-char)))
                    (loop until (enough-input-p) do (read-one-char))
                    ;; Parse what we have
-                   (loop 
+                   (loop
                      (let* ((parsed-input (read-mixed-source-string input-string
                                                                     :lisp-readtable lisp-readtable
                                                                     :interactive-p interactive-p))
@@ -355,7 +355,7 @@ STREAM can be an interactive (REPL) stream"
                               (if (and interactive-p (not eof-reached))
                                   (read-one-char)
                                 (error "Reading toplevel form failed: incomplete input:~%  ~S" input-string)))
-                             ((and interactive-p 
+                             ((and interactive-p
                                    (not (cond ((= (count #\Newline input-string) 1)
                                                (input-ends-with-newline input-string))
                                               ((> (count #\Newline input-string) 1)
@@ -364,7 +364,7 @@ STREAM can be an interactive (REPL) stream"
                              (t
                               (return-from read-complete-input
                                 (values input-string parsed-input)))))))))))
-    
+
     (multiple-value-bind (input-string parsed-input)
         (read-complete-input)
       (assert (plusp (length input-string)))
@@ -457,7 +457,7 @@ It must be delimited at the right by a space, closing bracket, or EOF."
   (values))
 
 (defun create-mixed-readtable (lisp-readtable)
-  (check-type lisp-readtable readtable) 
+  (check-type lisp-readtable readtable)
   (setup-omnivore-readmacro
    :function (lambda (stream) (mixed-readtable-reader stream lisp-readtable))
    :readtable (copy-readtable nil)))
@@ -473,7 +473,7 @@ It must be delimited at the right by a space, closing bracket, or EOF."
      (enter-mixed-lisp-python-syntax-1 ,@args)))
 
 (defparameter *lispy-package* (find-package :cl-user)
-  "Lisp package that acts as the Python module for Lispy Python code.") 
+  "Lisp package that acts as the Python module for Lispy Python code.")
 
 (defun enter-mixed-lisp-python-syntax-1 (&key package)
   (cond ((and *eval-inside-mixed-mode*
@@ -521,7 +521,7 @@ It must be delimited at the right by a space, closing bracket, or EOF."
                                              (signal c)
                                              ;; No transfer of control: we'll end up in the debugger
                                              (with-standard-io-syntax
-                                               
+
                                                (setf *readtable* ,old-readtable)
                                                (with-line-prefixed-output (";; ")
                                                  (format t "Serious condition occured inside WITH-MIXED-LISP-PYTHON-SYNTAX:~% ~A~%" c)
@@ -537,13 +537,13 @@ It must be delimited at the right by a space, closing bracket, or EOF."
 
 (defmethod eval-language-form ((language (eql :lisp)) form)
   ;; #+allegro ((and (keywordp form) (tpl::find-command-or-alias (symbol-name form) :quiet t))
-  ;; A toplevel command like :exit 
+  ;; A toplevel command like :exit
   ;; XXX args not supported yet; should only be done when source is interactive input.
   ;; `(tpl:do-command ,form))
   (declare (ignorable language))
   (check-type *lisp-standard-readtable* readtable)
   (let ((*readtable* *lisp-standard-readtable*)) ;; so compile-file etc don't go through mixed mode
-    (unwind-protect 
+    (unwind-protect
         (eval form)
       (unless (eq *readtable* *lisp-standard-readtable*)
         (check-type *readtable* readtable)
@@ -561,7 +561,7 @@ It must be delimited at the right by a space, closing bracket, or EOF."
   (declare (ignorable language))
   (when (match-p form '([module-stmt] ([suite-stmt] (([identifier-expr] {None})))))
     (return-from eval-language-form (values)))
-  
+
   ;; Wrap Python names like FOO_BAR in a restart that tries Lisp variable FOO-BAR on NameError.
   (setf form
     (walk-py-ast form (lambda (ast &key value target)
@@ -576,11 +576,11 @@ It must be delimited at the right by a space, closing bracket, or EOF."
                                 (let ((dash-name (substitute #\- #\_ (symbol-name name))))
                                   ;; Determining whether symbol is bound happens at compile time already
                                   (return-from wrap
-                                    (values 
+                                    (values
                                      `(let ((clpython::*signal-unbound-variable-errors* t))
                                         (handler-bind ((cl:unbound-variable
                                                         (lambda (c)
-                                                          (assert (eq (cell-error-name c) ',name)) 
+                                                          (assert (eq (cell-error-name c) ',name))
                                                           (whereas ((sym (find-symbol ,dash-name *package*))
                                                                     (val (clpython::bound-in-some-way sym)))
                                                             (use-value val)))))
@@ -588,7 +588,7 @@ It must be delimited at the right by a space, closing bracket, or EOF."
                                      t))))))
                           (return-from wrap (values ast nil))))
                  :into-nested-namespaces t))
-  
+
   (with-sane-debugging ("Error occured in Python/Lisp input mode, while handling a Python form.")
     (let ((clpython:*habitat* (or *lispy-habitat*
                                   (setf *lispy-habitat* (funcall 'clpython:make-habitat))))

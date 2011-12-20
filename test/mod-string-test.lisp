@@ -15,6 +15,6 @@
 import string
 t = string.maketrans('ab', 'xy')
 string.translate('abcdxyz', t, 'd') == 'xycxyz'")
-  
+
     (run-no-error "
 assert '%% %s' % (1,) == '% 1'")))

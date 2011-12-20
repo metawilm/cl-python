@@ -102,7 +102,7 @@
 ;; function STANDARD-INSTANCE-ACCESS, in that it deals with class
 ;; slots. It allows slot names as well as integers for its LOCATION
 ;; argument (and so tests that argument). Also it provides a writer.
-;; 
+;;
 ;; CLOS::FAST-STANDARD-INSTANCE-ACCESS is essentially the same as the
 ;; AMOP function STANDARD-INSTANCE-ACCESS, though it also offers a
 ;; writer."
@@ -182,7 +182,7 @@
 ;; cache where the attribute value can be found: in the class itself,
 ;; in a superclass, in the instance, or whether __getattribute__ or
 ;; __getattr__ should be called.
-;; 
+;;
 ;; Attributes are cached in two places: in the *CA-CACHE* hash table,
 ;; and in the symbol that names the class. The last lookup is the
 ;; fastest.
@@ -200,7 +200,7 @@
   (let* ((cn (class.raw-classname class))
          (plist (symbol-plist cn)))
     #+(or)(check-type cn symbol)
-    (loop 
+    (loop
       #+(or)(check-type (car plist) symbol)
       (when (eq (pop plist) attr)
         (return-from get-ca (car plist)))
@@ -231,12 +231,12 @@ is a Python (meta)class."
   ;; Here we create a struct for caching that can be used for both.
   ;; An overview:  the rows indicate the possible situations
   ;;               x means relevant if special methods taken into account
-  ;;               # means relevant if special methods not taken into account 
+  ;;               # means relevant if special methods not taken into account
   ;;
   ;;     getattribute | classval-dd | getattr |  | classval-non-dd | instance-dict
   ;; (1)      x             #                             #
   ;; (2)      x             #            x                #
-  ;; (3)                    x                       
+  ;; (3)                    x
   ;; (4)                                 x
   ;; (5)                                                  x               x
   ;; (6)                                                                  x
@@ -271,7 +271,7 @@ is a Python (meta)class."
                  (multiple-value-bind (subtype-p valid-p)
                      (subtypep class2 class)
                    (when (or subtype-p (not valid-p))
-                     (remprop (class-name class) attr)            
+                     (remprop (class-name class) attr)
                      (remhash k *ca-cache*))))))
            *ca-cache*))
 
@@ -300,7 +300,7 @@ is a Python (meta)class."
   (declare (optimize (speed 3) (safety 0) (debug 0)))
   (let ((x.cls (py-class-of x)))
     (whereas ((m (class.attr-no-magic x.cls attr)))
-      (bind-val m x x.cls)))) 
+      (bind-val m x x.cls))))
 
 (defun instance.attr-no-magic (inst attr)
   (declare (optimize (speed 3) (safety 0) (debug 0)))
@@ -335,7 +335,7 @@ Returns NIL if not found."
                (functionp x))
       (return-from attr (function-name x)))
     ;; instance dict
-    (whereas ((v (if (ca.is-metaclass ca)    
+    (whereas ((v (if (ca.is-metaclass ca)
                      (class.attr-no-magic x attr)
                    (instance.attr-no-magic x attr))))
       (return-from attr v))

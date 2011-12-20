@@ -22,21 +22,21 @@
     ((args :initarg :args :initform nil :documentation "Arguments as Lisp list"
            :accessor exception-args))
     (:metaclass py-type))
-  
+
   (def-py-method {Exception.__new__} :static (cls &rest args)
     (make-instance cls))
-  
+
   (def-py-method {Exception.__init__} (x &rest args)
     ;; raise AttributeError("a %s b", 24)  =>  AttributeError: "a 24 b"
     (when (and (>= (length args) 2)
                (stringp (car args)))
       (setf args (py-string.__mod__ (car args) (cdr args))))
     (setf (exception-args x) args))
-    
+
   (def-py-method {Exception.__repr__} (x)
     (with-output-to-string (s)
       (print-object x s)))
-  
+
   (defun define-exception-subclass (exc-name &rest supers)
     (dolist (s supers) (check-type s symbol))
     (ensure-class exc-name
@@ -72,7 +72,7 @@
   (when (typep class-name 'class)
     (setf class-name (class-name class-name)))
   (#+clpython-exceptions-are-python-objects make-instance
-   #-clpython-exceptions-are-python-objects make-condition 
+   #-clpython-exceptions-are-python-objects make-condition
    class-name :args args))
 
 
@@ -80,10 +80,10 @@
     `({SystemExit}
       {StopIteration}
       {GeneratorExit}
-      ({StandardError} {KeyboardInterrupt} 
+      ({StandardError} {KeyboardInterrupt}
 		       {ImportError}
-		       ({EnvironmentError} {IOError} 
-					   ({OSError} {WindowsError} 
+		       ({EnvironmentError} {IOError}
+					   ({OSError} {WindowsError}
 						      {VMSError} ))
 		       {EOFError}
 		       ({RuntimeError} {NotImplementedError} )
@@ -99,12 +99,12 @@
 					  {ZeroDivisionError}
 					  {FloatingPointError} )
 		       ({ValueError} ({UnicodeError} {UnicodeEncodeError}
-						     {UnicodeDecodeError} 
+						     {UnicodeDecodeError}
 						     {UnicodeTranslateError} ))
 		       {ReferenceError}
 		       {SystemError}
 		       {MemoryError} )
-      
+
       ({Warning} {BytesWarning}
                  {DeprecationWarning}
 		 {FutureWarning}
@@ -137,7 +137,7 @@
 
 ;; Cache an often-used exception
 
-(defparameter *cached-StopIteration* 
+(defparameter *cached-StopIteration*
     (make-exception '{StopIteration} "Iterator has finished."))
 
 (defun raise-StopIteration ()

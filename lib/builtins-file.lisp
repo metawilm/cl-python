@@ -24,7 +24,7 @@
 (defun ensure-open-file (f)
   (when (py-file-closed-p f)
     (py-raise '{ValueError} "File is closed")))
-    
+
 (def-py-method py-file.__new__ :static (cls &rest args)
   (make-instance cls))
 
@@ -34,7 +34,7 @@
   ;; opened for writing or appending; it will be truncated when opened
   ;; for writing.  Add a 'b' to the mode for binary files. Add a '+'
   ;; to the mode to allow simultaneous reading and writing.
-  ;; 
+  ;;
   ;; Add a 'U' to mode to open the file for input with universal
   ;; newline support.  Any line ending in the input file will be seen
   ;; as a '\n' in Python.  Also, a file so opened gains the attribute
@@ -42,10 +42,10 @@
   ;; newline read yet), '\\r', '\\n', '\\r\\n' or a tuple containing
   ;; all the newline types seen.  'U' cannot be combined with 'w' or
   ;; '+' mode.
-  ;; 
+  ;;
   ;; If the buffering argument is given, 0 means unbuffered, 1 means
   ;; line buffered, and larger numbers specify the buffer size.
-  ;; 
+  ;;
   ;; Note: open() is an alias for file().   [pydoc]
   (unless (stringp name)
     (py-raise '{TypeError} "Invalid file name: ~S." name))
@@ -58,7 +58,7 @@
 	 (fmode (or (cdr (assoc rest-mode modes :test #'string-equal))
 		    (py-raise '{ValueError} "Invalid file mode: ~S." mode)))
 	 (stream (handler-case (open name
-                                     :direction (ecase fmode                  
+                                     :direction (ecase fmode
                                                   (:read            :input)
                                                   (:write           :output)
                                                   ((:read+ :append) :io))
@@ -80,7 +80,7 @@
 	  (py-file-binary-mode-p f) binary-mode-p
 	  (py-file-closed-p f)      nil
 	  (py-file-mode f)          mode)
-    
+
     *the-none*))
 
 (def-py-method py-file.__repr__ (f)
@@ -119,7 +119,7 @@
 (def-py-method py-file.__iter__ (f)
   (ensure-open-file f)
   f)
-  
+
 (def-py-method py-file.next (f)
   ;; In order to make a for loop the most efficient way of looping
   ;; over the lines of a file (a very common operation), the next()
@@ -154,7 +154,7 @@
 		    for i from 0
 		    for not-at-limit = (or (null check-size-p) (< i size))
 		    for ch = (and not-at-limit (read-char (py-file-stream f) nil nil))
-		    while ch 
+		    while ch
 		    collect ch)))
     (coerce chars 'string)))
 
@@ -167,7 +167,7 @@
   ;; is returned only when EOF is encountered immediately. Note:
   ;; Unlike stdio's fgets(), the returned string contains null
   ;; characters ('\0') if they occurred in the input.
-  
+
   ;; XXX Currently every kind of newline char (sequence) is replaced
   ;; by whatever #\Newline is for the platform.
   ;;
@@ -190,7 +190,7 @@
   ;; choose to ignore sizehint if it cannot be implemented, or cannot
   ;; be implemented efficiently.
   (ensure-open-file f)
-  (make-py-list-from-list (loop for line = (multiple-value-bind (line eof-p) 
+  (make-py-list-from-list (loop for line = (multiple-value-bind (line eof-p)
 					       (py-file.readline f)
 					     (and (null eof-p) line))
 			      while line collect line)))
@@ -201,7 +201,7 @@
   ;; instead.
   (ensure-open-file f)
   (make-iterator-from-function :func (lambda ()
-				       (multiple-value-bind (line eof-p) 
+				       (multiple-value-bind (line eof-p)
 					   (py-file.readline f)
 					 (and (null eof-p) line)))
 			       :name :file.xreadlines))
@@ -231,7 +231,7 @@
                          (+ (file-position s) offset))
                         ((= whence +file-seek-relative-to-end+)
                          (+ (file-length s) offset))
-                        (t (py-raise '{ValueError} 
+                        (t (py-raise '{ValueError}
                                      "Invalid position option for file.seek. ~@
                                       Expected one of ~A (abs), ~A (rel to curr), ~A (rel to end); got: ~A."
                                      +file-seek-absolute+ +file-seek-relative-to-current+
@@ -298,7 +298,7 @@
   ;; The I/O mode for the file. If the file was created using the
   ;; open() built-in function, this will be the value of the mode
   ;; parameter. This is a read-only attribute and may not be present
-  ;; on all file-like objects. 
+  ;; on all file-like objects.
   (py-file-mode f))
 
 (def-py-method py-file.name :attribute (f)
@@ -332,4 +332,3 @@
   ;; not used to control the print statement, but to allow the
   ;; implementation of print to keep track of its internal state.
   (error "todo"))
-    

@@ -29,7 +29,7 @@
     (set-macro-character #\{ read-{-func t readtable))
   readtable)
 
-(defvar *ast-readtable* 
+(defvar *ast-readtable*
     (setup-ast-readmacro (copy-readtable nil))
   "Readtable where [NAME] refers to clpython.ast::NAME")
 

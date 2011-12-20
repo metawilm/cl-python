@@ -19,18 +19,18 @@
 \(Disable to debug the grammar rules.)")
 
 (defgeneric parse (thing &rest options)
-  
+
   (:documentation "Parse THING (pathname or string); return AST.
 Most important options:
   :YACC-VERSION -- :allegro-yacc (default) or :cl-yacc
   :ONE-EXPR     -- only return first form read, not wrapped in module/suite
   :TAB-WIDTH    -- width of one tab character in spaces")
-  
+
   (:method ((x string) &rest options &key (yacc-version *default-yacc-version*) one-expr record-source-location tab-width)
            (declare (ignore one-expr record-source-location tab-width))
            (let ((lexer (apply #'make-lexer yacc-version x (sans options :one-expr :record-source-location))))
              (apply #'parse-module-with-yacc yacc-version lexer (sans options :tab-width :yacc-version))))
-  
+
   (:method ((x pathname) &rest options)
            (apply #'parse (slurp-file x) options))
 
@@ -61,7 +61,7 @@ source location hash-table is returned as second value."
              (assert (= (length forms) 1) ()
                "Got ~A forms, while only one expected (due to :ONE-EXPR), in AST for ~S." (length forms))
              (setf forms (car forms)))
-            (t 
+            (t
              (setf forms `([module-stmt] ([suite-stmt] ,forms)))))
       (if *python-form->source-location*
           (values forms *python-form->source-location*)

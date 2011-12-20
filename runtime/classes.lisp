@@ -111,7 +111,7 @@
   ;; is all in upper case. This means you cannot create a full-upper-case method
   ;; name with DEF-PY-METHOD.
   (labels ()
-    
+
     (let* ((cm (symbol-name cls.meth))
 	   (dot-pos (or (position #\. cm)
 			(error "Need dot in name: (def-py-method classname.methodname ..); got: ~A"
@@ -128,17 +128,17 @@
 	   (func-name (if (eq (car modifiers) :attribute-write)
 			  (ensure-user-symbol (format nil "~A-~A" cls.meth '#:writer))
 			cls.meth)))
-      
+
       (assert (<= (length modifiers) 1) ()
 	"Multiple modifiers for a py-method: ~A. Todo?" modifiers)
 
       `(progn ,(destructuring-bind (func-args &body func-body) args
                  (loop with real-args
                      with body = `(locally ,@func-body) ;; allows DECLARE forms at head
-                                 
+
                      for sym in func-args
                      for sym-name = (when (symbolp sym) (symbol-name sym))
-                                    
+
                      if (not (symbolp sym))
                      do (push sym real-args)
                      else if (char= #\^ (aref sym-name (1- (length sym-name))))
@@ -149,7 +149,7 @@
                                         (declare (ignorable ,real-name))
                                         ,body)))
                      else do (push sym real-args)
-                          
+
                      finally (return (progn (setf real-args (nreverse real-args))
                                             `(defun ,func-name ,real-args
                                                ;; Make all args ignorable. Otherwise there will be warnings for
@@ -166,21 +166,21 @@
                                ,(ecase (car modifiers)
                                   ((nil)             `(let ((f (function ,cls.meth)))
                                                         f))
-                                  
+
                                   (:static           `(make-instance 'py-static-method
                                                         :func (function ,cls.meth)))
-                                  
+
                                   (:attribute        `(make-instance 'py-attribute-method
                                                         :func (function ,cls.meth)))
-                                  
+
                                   (:class-attribute  `(make-instance 'py-class-attribute-method
                                                         :func (function ,cls.meth)))
-                                  
+
                                   (:attribute-read   `(let ((x (make-instance 'py-writable-attribute-method
                                                                  :func (function ,cls.meth))))
                                                         (setf (gethash ',cls.meth *writable-attribute-methods*) x)
                                                         x))
-                                  
+
                                   (:attribute-write  `(let ((f (function ,func-name))
                                                             (read-f (or (gethash ',cls.meth
                                                                                  *writable-attribute-methods*)
@@ -222,22 +222,22 @@
                                                  name (mapcar 'class-name supers))))
                      (find-class cond-class-name))
                    :condition)))
-    
+
     #+(or)(assert (symbolp name))
     #+(or)(assert (listp supers))
     #+(or)(assert (typep namespace 'dict))
-  
+
     ;; XXX is this a true restriction?  Custom metaclasses may allow
     ;; more kinds of `bases' in their __new__(...) ?
-  
+
     ;; either:
     ;;  1) all supers are subtype of 'py-type   (to create a new metaclass)
     ;;  2) all supers are subtype of 'object (to create new "regular user-level" class)
-  
+
     (flet ((of-type-class (s) (typep s 'class))
            (subclass-of-py-dl-object-p (s) (subtypep s (ltv-find-class 'object)))
            (subclass-of-py-type-p (s)      (subtypep s (ltv-find-class 'py-type))))
-    
+
       (unless (every #'of-type-class supers)
         (py-raise '{TypeError} "Not all superclasses are classes (got: ~A)." supers))
 
@@ -248,23 +248,23 @@
           (py-raise '{TypeError}
                     "Unsupported heterogeneous superclasses: some CONDITION, some not: ~A." supers))
         (return-from make-py-class-1 (make-condition-exception)))
-      
+
       (loop for s in supers
           unless (or (subclass-of-py-type-p s)
                      (subclass-of-py-dl-object-p s))
           do   (error "BUG? Superclass ~A is neither sub of 'type nor sub of 'object~@[~A~]!"
                       s (unless *exceptions-are-python-objects* " not a subtype of 'condition")))
-    
+
       #+(or)
       (let ((core-supers (remove-if-not (lambda (s) (typep s 'py-type)) supers)))
         (when core-supers
           (py-raise '{TypeError} "Cannot subclass from these classes: ~A" core-supers)))
-    
+
       (when (and (some #'subclass-of-py-type-p supers)
                  (some #'subclass-of-py-dl-object-p supers))
         (py-raise 'TypeError "Superclasses are at different levels (some metaclass, ~
                             some regular class) (got: ~A)." supers))
-    
+
       (let ((metaclass (or cls-metaclass
                            (when supers (class-of (car supers)))
                            mod-metaclass
@@ -274,7 +274,7 @@
           (py-raise '{TypeError} "Metaclass must be a class (got: ~A)" metaclass))
         (unless (or (eq metaclass (ltv-find-class 'py-meta-type))
                     (subtypep metaclass (ltv-find-class 'py-type)))
-          (py-raise '{TypeError} 
+          (py-raise '{TypeError}
                     "Metaclass must be subclass of `type' (got class: ~A)" metaclass))
         ;; When inheriting from py-lisp-type (like `int'), use
         ;; py-meta-type as metaclass.
@@ -291,7 +291,7 @@
                       #+(or):dict #+(or)namespace)))
             (apply-namespace-to-cls namespace cls)
             (return-from make-py-class-1 (values cls :metaclass))))
-            
+
         ;; Not a subclass of `type', so at the `object' level
         (let ((__new__ (class.attr-no-magic metaclass '{__new__})))
           (assert __new__ ()
@@ -300,21 +300,21 @@
           #+(or)(warn "binding __new__: ~A ~A" __new__ metaclass)
           (let ((cls (if (and (eq (class-of __new__) (ltv-find-class 'py-static-method))
                               (eq (py-method-func __new__) (symbol-function 'py-type.__new__)))
-		       
+
                          ;; Optimize common case:  py-type.__new__
-                         (progn 
+                         (progn
                            #+(or)(warn "Inlining make-py-class")
                            (py-type.__new__ metaclass
                                             (string name)
                                             supers ;; MAKE-TUPLE-FROM-LIST not needed
                                             namespace))
-		     
+
                        (let ((bound-_new_ (bind-val __new__ metaclass (py-class-of metaclass))))
                          ;; If __new__ is a static method, then bound-_new_ will
                          ;; be the underlying function.
-		       
+
                          (or (py-call bound-_new_ metaclass
-                                      (string name) 
+                                      (string name)
                                       (make-tuple-from-list supers) ;; ensure not NIL
                                       namespace)
                              (break "Class' bound __new__ returned NIL: ~A" bound-_new_))))))
@@ -322,15 +322,15 @@
             ;; Call __init__ when the "thing" returned by
             ;; <metaclass>.__new__ is of type <metaclass>.
             (if (typep cls metaclass)
-		
+
                 (let ((__init__ (class.attr-no-magic metaclass '{__init__})))
                   #+(or)(warn "  __init__ method ~A is: ~A" metaclass __init__)
                   (when __init__
                     (py-call __init__ cls)))
-	    
+
               #+(or)(warn "Not calling __init__ method, as class ~A is not instance of metaclass ~A"
                           cls metaclass))
-	  
+
             (values cls :class)))))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -346,15 +346,15 @@
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;;; 
+;;;
 ;;; Built-in Python object types:
-;;; 
+;;;
 ;;; -- type ----------- repr ----- subclassable -- examples -------------------
 ;;;  py-lisp-object:  lisp value    yes       number, string, tuples, vectors, dict
 ;;;  object:  py cls inst   no        function, method
 ;;;  dicted-object:  py cls inst   yes       file, module, property
 ;;;
-				       
+
 
 ;; (defun f (&rest args)
 ;;   (with-parsed-py-arglist ("f" (a b) args)
@@ -368,7 +368,7 @@
 	    ,@(loop for f in formal-args
 		  collect `(,f (cdr (assoc ',f ,alist :test #'eq)))))
        ,@body)))
-    
+
 (defun parse-poskey-arglist (func-name formal-pos-args actual-args)
   (let ((pos-args (loop until (symbolp (car actual-args))
 		      collect (pop actual-args)))
@@ -379,17 +379,17 @@
 		     unless (and (symbolp key) val)
 		     do (error "Invalid arglist: ~S" actual-args)
 		     collect (cons key val))))
-    
+
     (let ((res ())
 	  (formal-pos-args (copy-list formal-pos-args)))
-      
+
       (loop while (and formal-pos-args pos-args)
 	  do (push (cons (pop formal-pos-args) (pop pos-args)) res))
-      
+
       (when pos-args
-	(py-raise '{TypeError} "Too many arguments for function ~A (got: ~A)" 
+	(py-raise '{TypeError} "Too many arguments for function ~A (got: ~A)"
 		  func-name))
-      
+
       (loop for (key . val) in kw-args
 	  do (let ((fkw (find key formal-pos-args :test #'string=))) ;; (string= |:a| '|a|)
 	       (if fkw
@@ -398,15 +398,15 @@
 		 (py-raise '{ValueError}
 			   "Invalid argument list: unknown keyword arg (or duplicated arg): ~A"
 			   key))))
-      
+
       (loop for f in formal-pos-args
 	  do (push (cons f nil) res))
-      
+
       res)))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;;; 
+;;;
 ;;; Core objects (function, method, None...; not subclassable by the user)
 ;;;
 
@@ -425,7 +425,7 @@
    #+lispworks (clos::classp x)
    #+sbcl (sb-pcl::classp x)
    #-(or allegro cmu lispworks sbcl) (typep x 'class)))
-  
+
 (def-py-method py-class-method.__get__ (x inst class)
   (let ((arg (if (classp inst) inst (py-class-of inst))))
     (make-instance 'py-bound-method
@@ -490,7 +490,7 @@
 	      (py-function-name func)
 	      (class-name (py-class-of instance))
 	      instance))))
-	
+
 (def-py-method py-bound-method.__repr__ (x)
   (with-output-to-string (s)
     (print-object x s)))
@@ -505,13 +505,13 @@
       (apply #'py-call func instance args))))
 
 (def-py-method py-bound-method.__get__ (x &rest args)
-  
+
   ;; Somewhat surprisingly, when a bound method is __get__ again, the
   ;; underlying function is bound again:
-  ;; 
+  ;;
   ;; >>> class C:
   ;; ...   def m(self): pass
-  ;; ... 
+  ;; ...
   ;; >>> x,y = C(), C()
   ;; >>> m = x.m
   ;; >>> m
@@ -523,13 +523,13 @@
   ;; <__main__.C instance at 0x4021e8ec>
   ;; >>> y
   ;; <__main__.C instance at 0x4021e92c>
-  
+
   (apply #'py-call (x.class-attr-no-magic.bind (py-method-func x) '{__get__}) args))
 
 (def-py-method py-bound-method.__name__ :attribute (x)
-  (py-bound-method.__repr__ x))	       
-    
-    
+  (py-bound-method.__repr__ x))
+
+
 (defclass py-unbound-method (py-method)
   ((class :initarg :class :accessor py-method-class))
   (:metaclass py-type))
@@ -574,7 +574,7 @@
 (defmethod print-object ((x py-static-method) stream)
   (print-unreadable-object (x stream :identity t :type t)
     (format stream ":func ~A" (slot-value x 'func))))
-    
+
 
 ;; Function (Core object)
 
@@ -615,7 +615,7 @@
   (declare (ignorable class superclass))
   t)
 
-;; Temporary (?) hack to get things running on SBCL 1.0.16, 
+;; Temporary (?) hack to get things running on SBCL 1.0.16,
 ;; where instantiating a py-function leads to strange errors.
 ;; See <http://common-lisp.net/pipermail/clpython-devel/2008-May/000048.html>
 (defparameter *create-simple-lambdas-for-python-functions*
@@ -682,7 +682,7 @@ otherwise work well.")
 
 (def-py-method py-function.__hash__ (func)
   (sxhash func))
-  
+
 (def-py-method py-function.__repr__ (func)
   (with-output-to-string (s)
     (if (typep func 'py-function)
@@ -714,7 +714,7 @@ otherwise work well.")
     (or (whereas ((data (gethash func *simple-function-data*)))
           (setf (sfd-name data) name))
         (py-raise '{AttributeError} "Cannot set attribute `__name__' of ~A." func))))
-      
+
 (def-py-method py-function._fif :attribute (x)
   "The funcallable instance function of X."
   ;; CLPython-specific.
@@ -799,7 +799,7 @@ otherwise work well.")
 (def-py-method py-function.func_code :attribute (x)
   "Read-only attribute: the underlying lambda. (In CPython the bytecode vector.)"
   (py-function-lambda x))
-  
+
 (def-py-method py-function._dis :attribute (x)
   ;; CLPython-specific attribute, to ease debugging.
   ;;
@@ -807,7 +807,7 @@ otherwise work well.")
   ;;  - the instructions that load and call the funcallable instance function
   ;;  - the instructions of the funcallable instance function
   ;; The first is not very interesting imho.
-  ;; 
+  ;;
   ;; DISASSEMBLE accepts fbound symbols or lambda expressions, according to the spec.
   ;; It might thus be Allegro-specific that its DISASSEMBLE accepts a function object.
   (when (typep x 'py-function)
@@ -871,7 +871,7 @@ otherwise work well.")
 			(lambda ()
 			  (let ((val (funcall iter)))
 			    (when val
-			      (prog1 
+			      (prog1
 				  (make-tuple-from-list (list i val))
 				(incf i)))))))))
     (make-instance cls :gener gener)))
@@ -895,7 +895,7 @@ otherwise work well.")
     (with-slots (start stop step) x
       (format stream ":start ~A :stop ~A :step ~A"
               start stop step))))
-            
+
 (defun make-slice (start stop step)
   (make-instance 'py-slice
     :start (or start (load-time-value *the-none*))
@@ -905,36 +905,36 @@ otherwise work well.")
 (def-py-method py-slice.indices (x^ length^)
   "Return tuple of three integers: START, STOP, STEP.
 In case of empty range, returns (0,0,1)."
-  
+
   (setf length (py-val->integer length :min 0))
-  
+
   (multiple-value-bind (start stop step)
       (destructuring-bind (kind &rest args)
 	  (slice-indices x length)
 	(ecase kind
-	  
+
 	  ((:empty-slice-bogus :empty-slice-before :empty-slice-after :empty-slice-between)
 	   (values 0 0 1))
-	  
+
 	  (:nonempty-slice
 	   (destructuring-bind (start stop num) args
 	     (declare (ignore num))
 	     (values start (1+ stop) 1)))
-	  
+
 	  (:nonempty-stepped-slice
 	   (destructuring-bind (start stop step num) args
 	     (declare (ignore num))
 	     (values start stop step)))))
-    
+
     (make-tuple-from-list (list start stop step))))
 
 
 ;; XXX THis comment ignores fourth value for extended stepped slices
-;; 
+;;
 ;; Function SLICE-INDICES returns multiple values, best explained by example:
 ;; Assume x = [0,1,2] so LENGTH = 3
-;; 
-;;  -slice- -extr- -assignment-                -values- 
+;;
+;;  -slice- -extr- -assignment-                -values-
 ;;  x[:0]    []     x[:0] = [42] => [42,0,1,2] :empty-slice-before
 ;;  x[3:]    []     x[3:] = [42] => [0,1,2,42] :empty-slice-after
 ;;  x[1:1]   []     x[1:1] = [42]=> [0,42,1,2] :empty-slice-between 0 1  = BEFORE-I, AFTER-I
@@ -944,11 +944,11 @@ In case of empty range, returns (0,0,1)."
 ;;  x[:] [0,1,2](copy) x[:] = [42] => [42](modifies) :nonempty-slice 0 2
 ;;  x[2:1]   []     (error)                    :empty-slice-bogus
 ;;  x[100:200] []                              :empty-slice-bogus
-;; 
+;;
 ;; These have implicit step=1. Other steps result in a `stepped-slice'
 ;; Now with other step values, using x = range(10) = [0,1,2,3,4,5,6,7,8,9] so LENGTH = 10
 ;;
-;;  -slice-   -extr-       -assignment-                -values- 
+;;  -slice-   -extr-       -assignment-                -values-
 ;;  x[::0]    - - - - - step=0 is error - - - - - - - - - - - - - - - -
 ;;  x[::2]    [0,2,4,6,8]  :extended-slice 0 9 2       = FIRST LAST STEP
 ;;  x[::-2]   [9,7,5,4,1]  x[..] = [1,2,3,4,5] =>      :nonempty-stepped-slice 9 1 -2
@@ -957,7 +957,7 @@ In case of empty range, returns (0,0,1)."
 ;;  x[100:200:2] []        (error)                     :empty-slice-bogus
 ;;  x[0:0:4]  []           x[..] = [] => ok            :empty-slice-bogus
 ;;  x[0:1:4]  [0]          x[..] = [42] => [42, 2, ..] :nonempty-stepped-slice 0 0 4
-;; 
+;;
 ;; Assigning to a stepped-slice can only when the thing assigned
 ;; containes the same number of items as teh stepped slice. For an
 ;; empty-slice-bogus, this means only the empty list (or another
@@ -1004,7 +1004,7 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
                  ((< start stop)
 		  (values :nonempty-slice start (1- stop) (- stop start)))))
           ((/= step 1)
-	   (cond ((= start stop) 
+	   (cond ((= start stop)
                   (values :empty-slice-bogus))
                  ((and (plusp step) (< start stop))
 		  (let* ((start (max start 0))
@@ -1031,9 +1031,9 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 ;; super( <B class>, <C instance> ) where C derives from B:
 ;;   :object = <C instance>
 ;;   :current-class = <B class>
-;; 
+;;
 ;; A typical use for calling a cooperative superclass method is:
-;; 
+;;
 ;;  class C(B):
 ;;    def meth(self, arg):
 ;;      super(C, self).meth(arg)
@@ -1048,20 +1048,20 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 	 (py-raise '{TypeError}
 		   "First arg to super.__new__() must be class (got: ~A)"
 		   class-arg))
-	
+
 	((null second-arg)
 	 (warn "super() with one arg is TODO (faking for now)")
 	 (lambda (sec-arg) (py-super.__new__ cls class-arg sec-arg)))
-	
+
 	((typep second-arg class-arg)
 	 ;; like:  super( <B class>, <C instance> )
 	 ;; in the CPL of class C, find the class preceding class B
-	 ;; 
+	 ;;
 	 ;; CPython returns a `super' instance and not directly the
 	 ;; class to allow subclassing class `super' and overriding
 	 ;; the __getattribute__ method.
 	 (make-instance cls :object second-arg :current-class class-arg))
-	
+
 	((typep second-arg 'class)
 	 (unless (or (eq second-arg class-arg) ;; <- efficiency optimization
 		     (subtypep second-arg class-arg))
@@ -1069,7 +1069,7 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 		     "When calling `super' with two classes: second must be ~
                                    subclass of first (got: ~A, ~A)" class-arg second-arg))
 	 (make-instance cls :object second-arg :current-class class-arg))
-	
+
 	(t (error "TODO super clause?"))))
 
 
@@ -1081,7 +1081,7 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 			  finally (return mro))))
 	     #+(or)(warn "-> ~A" res)
 	     res)))
-    
+
     ;; XXX check when attribute is static method and super is bound to class, etc
     (with-slots (object current-class) x
       (let* ((remaining-mro (find-remaining-mro (py-type.__mro__ (if (typep object 'class)
@@ -1092,7 +1092,7 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 	     (attr.sym (ensure-user-symbol attr))
 	     (val (loop for cls in remaining-mro
                       thereis (class.raw-attr-get cls attr.sym))))
-	
+
 	(if val
 	    (bind-val val
 		      (if (eq object class) (load-time-value *the-none*) object)
@@ -1106,7 +1106,7 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
     (print-unreadable-object (x s :type t :identity t)
       (with-slots (object current-class) x
 	(format s ":object ~S  :current-class ~A" object current-class)))))
-  
+
 (defmethod print-object ((x py-super) stream)
   (print-unreadable-object (x stream :type t :identity t)
     (with-slots (object current-class) x
@@ -1121,7 +1121,7 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 (def-py-method py-xrange.__new__ :static (cls &rest args)
   (or args) ;; XX fix warning
   (make-instance cls))
-                                  
+
 (def-py-method py-xrange.__init__ (x &rest args)
   (multiple-value-bind (start stop step)
       (ecase (length args)
@@ -1192,7 +1192,7 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 	   (.x ,x))
        (if (and (functionp .val)
 		(not (none-p .x)))
-	   (progn 
+	   (progn
 	     #+(or)(warn "bind-val ~S ~S -> bound method" val x)
 	     (make-instance 'py-bound-method :instance .x :func .val))
 	 (bind-val .val .x ,x.class)))))
@@ -1263,15 +1263,15 @@ Basically the Python equivalent of ENSURE-CLASS."
       (if (stringp str)
 	  (setf name (ensure-user-symbol str))
 	(py-raise '{TypeError} "Invalid class name: ~A" name))))
-  
+
   (let* ((cls-type (if (and (some (lambda (s) (subtypep s (ltv-find-class 'py-type)))
                                   supers)
 			    (eq metacls 'py-type)) ;; XXX (subtypep meta pytype)?
 		       :metaclass
 		     :class))
          (c (ensure-class
-	     (make-symbol (symbol-name name)) 
-	     
+	     (make-symbol (symbol-name name))
+
 	     :direct-superclasses (if supers
 				      (let ((res (subst (ltv-find-class 'dicted-object)
 							(ltv-find-class 'object)
@@ -1280,7 +1280,7 @@ Basically the Python equivalent of ENSURE-CLASS."
 					  (nconc res (load-time-value (list (find-class 'dicted-object)))))
 					res)
 				    (load-time-value (list (find-class 'dicted-object))))
-	     
+
 	     :metaclass (ecase cls-type
 			  (:metaclass (ltv-find-class 'py-meta-type))
 			  (:class     metacls))
@@ -1314,7 +1314,7 @@ Basically the Python equivalent of ENSURE-CLASS."
 (def-py-method py-type.__bases__ :attribute-write (cls bases^)
   (assert (classp cls))
   (let ((bases (py-iterate->lisp-list bases)))
-    (ensure-class-using-class cls (class-name cls) 
+    (ensure-class-using-class cls (class-name cls)
                               :direct-superclasses bases)
     cls))
 
@@ -1381,13 +1381,13 @@ but the latter two classes are not in CPython.")
   (py-type.__repr__ x))
 
 (defun class-finalizer-p (cls)
-  ;; Could perhaps be optimized by keeping track of whether any class has defined __del__. 
+  ;; Could perhaps be optimized by keeping track of whether any class has defined __del__.
   (not (null (class.attr-no-magic cls '{__del__}))))
 
 (defun generic-finalizer (x)
   (whereas ((__del__ (x.class-attr-no-magic.bind x '{__del__})))
     (py-call __del__)))
-  
+
 (defun maybe-add-finalizer (x)
   (let ((cls (class-of x)))
     (when (and (typep cls (ltv-find-class 'py-type))
@@ -1404,16 +1404,16 @@ but the latter two classes are not in CPython.")
          ;; type(x) -> the type of x
 	 (return-from py-type.__call__
 	   (py-class-of (car args))))
-	
+
 	((eq cls (ltv-find-class 'object))
          ;; object() -> an instance without __dict__
 	 (return-from py-type.__call__
 	   (make-instance 'object)))
-	
+
 	((eq cls (ltv-find-class 'py-type))
          ;; Inline common case: creating new classes with TYPE as requested metaclass
 	 (apply #'py-type.__new__ cls args))
-        
+
         (t
          ;; Object instantiation: x = C(..)
          (let ((__new__ (class.attr-no-magic cls '{__new__})))
@@ -1424,7 +1424,7 @@ but the latter two classes are not in CPython.")
                                  __new__ ;; inline common case
                                (bind-val __new__ cls (py-class-of cls))))
                   (inst    (apply #'py-call bound-new cls args))) ;; including CLS as arg!
-             
+
              (when (or (eq (class-of inst) cls) ;; <- Efficiency optimization
                        (subtypep (py-class-of inst) cls)) ;; <- real test
                ;; Don't run __init__ when inst is not of type cls
@@ -1440,7 +1440,7 @@ but the latter two classes are not in CPython.")
 
 (defclass module (dicted-object)
   ((namespace-ht   :initarg :namespace-ht :accessor module-ht :initform (make-eq-hash-table))
-   (name           :initarg :name           
+   (name           :initarg :name
 		   :type string
 		   :initform (error "module name required")
 		   :accessor module-name
@@ -1552,7 +1552,7 @@ but the latter two classes are not in CPython.")
   (let (res)
     (do-cpl (c x)
       (class.raw-attr-map c (lambda (k v)
-                              (pushnew (cons (symbol-name k) v) res 
+                              (pushnew (cons (symbol-name k) v) res
                                        ;; take the first entry: subclass overrides superclass
                                        :test 'eq :key 'car))))
     res))
@@ -1610,7 +1610,7 @@ but the latter two classes are not in CPython.")
 ;;
 ;; The rule regarding their attributes exposed to the Python world:
 ;;  a Lisp package has an attribute `x' <-> the package has external symbol `x'.
-;; 
+;;
 ;; We supply a few modules that resemble the ones in CPython. But because
 ;; our implementation may still be incomplete, we have the following rule
 ;; regarding unfinished functions and variables:
@@ -1623,7 +1623,7 @@ but the latter two classes are not in CPython.")
 ;;    communicates that the attribute is available, but not implemented 100%
 ;;    yet. A warning is signalled.
 ;;
-;; If we encounter a value :todo upon retrieving an attribute, 
+;; If we encounter a value :todo upon retrieving an attribute,
 
 (defconstant +impl-status-prop+         'clpython::.impl-status.)
 (defconstant +impl-status-comment-prop+ 'clpython::.impl-status-comment.)
@@ -1677,13 +1677,13 @@ DETAILS: alist ((:incomplete . (foo bar)) (:todo . (baz)))"
     (do-external-symbols (s pkg)
       (let ((st (clpython::impl-status s)))
         (push s (gethash st ht))))
-    
+
     (multiple-value-bind (summary details)
         (loop for k in (mapcar #'first +impl-statuses+)
             collect (cons k (length (gethash k ht))) into summary
             collect (cons k (gethash k ht)) into details
             finally (return (values summary details)))
-      
+
       (let ((completeness (let ((complete (+ (length (gethash t ht))
                                              (length (gethash :n/a ht))))
                                 (half-complete (length (gethash :incomplete ht)))
@@ -1692,7 +1692,7 @@ DETAILS: alist ((:incomplete . (foo bar)) (:todo . (baz)))"
                                 (/ (+ complete (* 1/2 half-complete))
                                    (+ complete half-complete missing))
                               nil))))
-        
+
         (values summary completeness details)))))
 
 (defclass lisp-package (object)
@@ -1752,17 +1752,17 @@ But if RELATIVE-TO package name is given, result may contains dots."
     (if (typep cur-val 'py-writable-attribute-method)
         (funcall (attribute-writer cur-val) new-val)
       (py-raise '{AttributeError} "Attribute `~A' of package ~A is not writable." name pkg))))
-         
+
 (def-py-method lisp-package.__getattribute__ (pkg name &key writable-attr-ok)
   (declare (special *inside-import-from-stmt*))
   (assert (stringp name))
   (flet ((todo-error ()
            (if writable-attr-ok
                (return-from lisp-package.__getattribute__ nil)
-             (py-raise '{NotImplementedError} 
+             (py-raise '{NotImplementedError}
                        "Attribute `~A' of module `~A' is not implemented yet."
                        name (relative-package-name pkg))))
-         
+
          (n/a-error ()
            (if writable-attr-ok
                (return-from lisp-package.__getattribute__ nil)
@@ -1770,14 +1770,14 @@ But if RELATIVE-TO package name is given, result may contains dots."
                        "Attribute `~A' of module `~A' is not applicable for this ~
  implementation, therefore it is not implemented."
                        name (relative-package-name pkg))))
-         
+
          (unbound-error ()
            (if writable-attr-ok
                (return-from lisp-package.__getattribute__ nil)
              (py-raise (if *inside-import-from-stmt* '{ImportError} '{AttributeError})
                        "Attribute `~A' of module `~A' is unbound."
                        name (relative-package-name pkg))))
-         
+
          (no-attr-error ()
            (if writable-attr-ok
                (return-from lisp-package.__getattribute__ nil)
@@ -1810,7 +1810,7 @@ But if RELATIVE-TO package name is given, result may contains dots."
 	((:incomplete) (unless (get sym +impl-warned-prop+)
 			 (setf (get sym +impl-warned-prop+) t)
 			 (incomplete-warning))))
-      
+
       (let ((val (or (bound-in-some-way sym) (unbound-error))))
         (if (and (not writable-attr-ok)
                  (typep val 'py-writable-attribute-method))
@@ -1857,7 +1857,7 @@ But if RELATIVE-TO package name is given, result may contains dots."
   (slot-value x 'fget))
 
 (def-py-method py-property.fset :attribute (x)
-  (slot-value x 'fset))	       
+  (slot-value x 'fset))
 
 (def-py-method py-property.fdel :attribute (x)
   (slot-value x 'fdel))
@@ -1896,7 +1896,7 @@ But if RELATIVE-TO package name is given, result may contains dots."
 
 (def-py-method py-number.__abs__ (x^) (abs x))
 
-(def-py-method py-number.__add__ (x^ y^) 
+(def-py-method py-number.__add__ (x^ y^)
   (if (and (numberp x) (numberp y))
       (+ x y)
     (load-time-value *the-notimplemented*)))
@@ -1924,22 +1924,22 @@ But if RELATIVE-TO package name is given, result may contains dots."
 
 (def-py-method py-number.__hash__ (x^)
   (cond ((integerp x)   (sxhash x))
-	
+
 	((floatp x)
 	 (multiple-value-bind (int-part float-part)
 	     (truncate x)
 	   (if (= float-part 0)
 	       (sxhash int-part)
 	     (sxhash x))))
-	       
+
 	((complexp x) (if (= (imagpart x) 0)
 			  (sxhash (realpart x))
 			(sxhash x)))
-	
+
 	(t (break "unexpected"))))
 
 (def-py-method py-number.__eq__  (x^ y^) (py-bool (and (numberp x) (numberp y) (= x y))))
-(def-py-method py-number.__mul__ (x^ y^) 
+(def-py-method py-number.__mul__ (x^ y^)
   (if (and (numberp x) (numberp y))
       (* x y)
     (load-time-value *the-notimplemented*)))
@@ -1989,7 +1989,7 @@ But if RELATIVE-TO package name is given, result may contains dots."
 	   (format nil "(~A+~Aj)" (py-repr-string r) (py-repr-string i)))
 	  (t
 	   (format nil "(~A-~Aj)" (py-repr-string r) (py-repr-string (- i)))))))
-  
+
 ;; Real
 
 (def-proxy-class py-real (py-number))
@@ -2030,19 +2030,19 @@ But if RELATIVE-TO package name is given, result may contains dots."
                       (when (and base-provided (/= base 16))
                         (invalid-arg-error arg))
                       (read-arg (subseq arg 2) 16))
-                     
+
                      ((and (= (length arg) 1))
                       (or (digit-char-p (aref arg 0) 10)
                           (invalid-arg-error arg)))
-                     
+
                      ((and (>= (length arg) 1)
                            (char= (aref arg 0) #\0)
                            (zerop base))
                       (read-arg (subseq arg 1) 8))
-                     
+
                      ((= base 0)
                       (read-arg arg 10))
-                     
+
                      ((/= base 0)
                       (check-type base (integer 2 36))
                       (read-arg arg base))))))
@@ -2077,7 +2077,7 @@ But if RELATIVE-TO package name is given, result may contains dots."
 	((and (numberp x) (numberp y))
 	 (/ x y))
 	(t (load-time-value *the-notimplemented*))))
-       
+
 (def-py-method py-int.__lshift__ (x^ y^)  (ash x y))
 (def-py-method py-int.__rshift__ (x^ y^)  (ash x (- y)))
 
@@ -2158,7 +2158,7 @@ But if RELATIVE-TO package name is given, result may contains dots."
 (def-py-method dict.__init__ (x &rest kwargs)
   (when kwargs
     (if (cadr kwargs)
-        (loop with setitem-meth = 
+        (loop with setitem-meth =
               (or (x.class-attr-no-magic.bind x '{__setitem__})
                   (py-raise '{TypeError}
                             "Dict.__init__ called on object without __setitem__: ~A." x))
@@ -2187,7 +2187,7 @@ But if RELATIVE-TO package name is given, result may contains dots."
                          items)))))
 
 (def-py-method dict.__delitem__ (dict k)
-  (with-py-dict 
+  (with-py-dict
       (or (remhash k dict)
           (py-raise '{KeyError} "Dict ~A has no such key: ~A." dict k))))
 
@@ -2197,14 +2197,14 @@ But if RELATIVE-TO package name is given, result may contains dots."
     -1)) ;; XXX -1/+1 now arbitrary: fix later
 
 (def-py-method dict.__eq__ (dict1 dict2)
-  (with-py-dict 
+  (with-py-dict
       (py-bool (cond ((eq dict1 dict2)
                       t)
                      ((not (hash-table-p dict2))
                       nil)
                      ((/= (hash-table-count dict1) (hash-table-count dict2))
                       nil)
-                     (t 
+                     (t
                       (with-hash-table-iterator (next dict1)
                         (loop named iter
                             do (multiple-value-bind (entry-p k v) (next)
@@ -2270,7 +2270,7 @@ But if RELATIVE-TO package name is given, result may contains dots."
 (def-py-method dict.get (x k &optional (default (load-time-value *the-none*)))
   (with-py-dict
       (or (gethash k x) default)))
-      
+
 (def-py-method dict.has_key (x k)
   (with-py-dict
       (multiple-value-bind (val presentp)
@@ -2311,8 +2311,8 @@ invocation form.\"")
                                 (when ok (funcall func key val)))))))
     (progn
       #+custom-hash-table-fallback ;; from library CL-CUSTOM-HASH-TABLE
-      (error "This LOOP is not supported by CUSTOM-HASH-TABLE-FALLBACK") 
-      (let ((vec 
+      (error "This LOOP is not supported by CUSTOM-HASH-TABLE-FALLBACK")
+      (let ((vec
              (loop with vec = (make-array (* 2 (hash-table-count hash-table)))
                  with i = -1
                  for key being each hash-key in hash-table
@@ -2362,7 +2362,7 @@ invocation form.\"")
   (with-py-dict
       (maphash (lambda (k v)
                  (remhash k x)
-                 (return-from dict.popitem 
+                 (return-from dict.popitem
                    (make-tuple-from-list (list k v))))
                x))
   (py-raise '{KeyError} "Dict is empty, can not popitem()."))
@@ -2391,7 +2391,7 @@ invocation form.\"")
     (loop for (key val) on kv-items by #'cddr
         do (setf (gethash (symbol-name key) x) val)))
   *the-none*)
-   
+
 (def-py-method dict.values (x)
   ;; XXX should err in ECL
   (with-py-dict
@@ -2407,7 +2407,7 @@ invocation form.\"")
 ;; Is there a reason to make the mapping unique?
 
 (defun make-symbol-hash-table (ht)
-  (with-py-dict 
+  (with-py-dict
       (or (gethash ht *ht->symbol-hash-table*)
           (setf (gethash ht *ht->symbol-hash-table*)
             (make-instance 'symbol-hash-table :hash-table ht)))))
@@ -2441,7 +2441,7 @@ invocation form.\"")
   (loop for key being each hash-key in (sht-ht d)
       using (hash-value value)
       collect (make-tuple-from-list (list (string key) value))))
-  
+
 ;; TODO: add the other dict methods
 
 ;;; Proxies for funky dicts
@@ -2478,7 +2478,7 @@ invocation form.\"")
     (if (eq cls (ltv-find-class 'py-list))
         vec
       (make-instance cls :lisp-object vec))))
-		    
+
 (def-py-method py-list.__init__ (x^ &optional iterable)
   (when iterable
     (let* ((items (py-iterate->lisp-list iterable))
@@ -2496,7 +2496,7 @@ invocation form.\"")
     (loop for item across res
         do (vector-push-extend item x))
     x))
-          
+
 (def-py-method py-list.__add__ (x^ y^)
   (when (stringp y)
     (setf y (map 'vector #'py-string-from-char y)))
@@ -2518,7 +2518,7 @@ invocation form.\"")
     (return-from py-list.__cmp__ (load-time-value *the-notimplemented*)))
   (let ((x.len (length x))
 	(y.len (length y)))
-    
+
     (cond ((< x.len y.len) -1)
 	  ((> x.len y.len) 1)
 	  (t (loop for xi across x and yi across y
@@ -2584,7 +2584,7 @@ invocation form.\"")
 			 "Sequence subscript outside range (got ~A, length = ~A)"
 			 item (length x)))
 	     (funcall make-seq-func (aref x item) t))
-    
+
     (py-slice (destructuring-bind (kind &rest args)
 		  (multiple-value-list (slice-indices item (length x)))
                 (ecase kind
@@ -2627,7 +2627,7 @@ invocation form.\"")
 	 (x.len (length x))
 	 (res.len (* n x.len))
 	 (res (make-array res.len :adjustable t :fill-pointer res.len
-			  :initial-element (when (= x.len 1) 
+			  :initial-element (when (= x.len 1)
 					      (aref x 0)))))
     (unless (= x.len 1)
       (dotimes (i n)
@@ -2724,14 +2724,14 @@ invocation form.\"")
   (loop for item in (py-iterate->lisp-list iterable)
       do (py-list.append x item))
   (load-time-value *the-none*))
-       
+
 (def-py-method py-list.pop (x^ &optional index)
   "Remove and return item at index (default: last item)"
   (let* ((x.len (length x)))
     (setf index (if index
 		    (deproxy index)
 		  (1- x.len)))
-					   
+
     (let ((ix (if (< index 0) (+ index x.len) index)))
       (if (<= 0 ix (1- x.len))
 	  (prog1 (aref x ix)
@@ -2753,7 +2753,7 @@ invocation form.\"")
     ;; It's not guaranteed by ANSI that (eq res x).
     (unless (eq res x)
       (replace x res))
-    
+
     (load-time-value *the-none*)))
 
 
@@ -2781,12 +2781,12 @@ invocation form.\"")
 (def-py-method py-string.__new__ :static (cls &optional (val "") unicode-encoding)
 	       (unless (stringp val)
 		 (setf val (py-str-string val))) ;; convert to string using __str__
-	       
+
 	       (let ((the-val
 		      (if unicode-encoding
 			  (py-decode-unicode val (py-val->string unicode-encoding))
 			val)))
-		 
+
 		 (if (eq cls (find-class 'py-string))
 		     the-val
 		   (make-instance cls :lisp-object the-val))))
@@ -2811,34 +2811,34 @@ invocation form.\"")
 
 (defun py-unicode-external-format->lisp-external-format (name)
   ;; Returns NAME, MAX-CHAR-CODE, MAX-ENCODED-OCTET-CODE
-  
+
   ;; Based on:
   ;;  http://meta.kabel.utwente.nl/specs/Python-Docs-2.3.3/lib/node127.html
   ;;  http://www.franz.com/support/documentation/7.0/doc/iacl.htm#external-formats-1
   ;; For now only ASCII and UTF-8 are supported.
-  
+
   (when (null name)
     (setf name "ascii"))
-  
+
   (setf name (string-downcase name))
-  
-  (cond 
-   ((member name '("ascii" "646" "us") :test 'string=) 
+
+  (cond
+   ((member name '("ascii" "646" "us") :test 'string=)
     (values :latin1 127 127))
-   
-   ((member name '("latin" "latin1" "latin-1") :test 'string=) 
+
+   ((member name '("latin" "latin1" "latin-1") :test 'string=)
     (values :latin1 255 255))
-   
+
    ((member name '("utf8" "utf_8" "utf-8" "utf" "u8") :test 'string=)
     (values :utf8 #x0010FFFF 255))
-   
+
    (t (py-raise '{UnicodeError} "Unrecognized Unicode external format: ~S" name))))
 
 (defun py-encode-unicode (string &optional (external-format "ascii") errors)
   ;; The result is a string (containing characters), not a vector of
   ;; octets, because Python doesn't have vectors. Python could use
   ;; regular lists, but strings are immutable so more efficient.
-  ;; 
+  ;;
   ;; A future version of Python will have a `byte vector' data type.
   (when errors
     (error "TODO: errors parameter for unicode.encode"))
@@ -2862,7 +2862,7 @@ invocation form.\"")
 			       :null-terminate nil)
         #-allegro
         (error "No STRING-TO-OCTECTS defined in this implementation.")
-      
+
       (when (< num-bytes-copied (length string))
 	(py-raise '{UnicodeEncodeError}
 		  "During encoding (string -> bytes): Not all bytes valid"))
@@ -2872,7 +2872,7 @@ invocation form.\"")
 	string))))
 
 (defun py-decode-unicode (string &optional (external-format "ascii") errors)
-  
+
   (when errors
     (error "TODO: `errors' parameter for unicode encode"))
 
@@ -2882,7 +2882,7 @@ invocation form.\"")
   (multiple-value-bind (ex-format max-code max-octet-code)
       (py-unicode-external-format->lisp-external-format external-format)
     (declare (ignore max-code))
-    
+
     (let ((vec (make-array (length string) :element-type '(unsigned-byte 8))))
       (map-into vec #'char-code string)
 
@@ -2897,14 +2897,14 @@ invocation form.\"")
                      code is out of allowed range (got character code: ~A; ~
                      external format: ~A; max octet code allowed for external format: ~A)"
 		    max-found-code ex-format max-octet-code)))
-      
+
       (multiple-value-bind (string chars-copied octets-used)
           #+allegro
 	  (excl:octets-to-string vec :external-format ex-format)
           #-allegro
           (error "No OCTETS-TO-STRING defined in this implementation.")
 	(declare (ignore chars-copied))
-	
+
 	(when (< octets-used (length vec))
 	  (py-raise '{UnicodeDecodeError}
 		    "In unicode.decode (bytes -> string): Not all octets valid"))
@@ -2971,7 +2971,7 @@ invocation form.\"")
 (def-py-method py-string.center (x^ width &optional (fillchar " "))
   (assert (= (length fillchar) 1))
   (error "todo"))
-   
+
 (def-py-method py-string.decode (x^ &optional encoding^ errors)
   (py-decode-unicode x encoding errors))
 
@@ -2981,7 +2981,7 @@ invocation form.\"")
 (def-py-method py-string.endswith (x^ suffix &optional start end)
   (when (or start end) (error "todo"))
   (py-bool (string= (subseq x (- (length x) (length suffix))) suffix)))
-  
+
 (def-py-method py-string.find (x^ item &rest args)
   (warn "todo :string.find")
   -1)
@@ -3034,7 +3034,7 @@ invocation form.\"")
 
 (def-py-method py-string.lstrip (x^ &optional (chars '(#\Newline #\Space #\Tab)))
   (string-left-trim (verify-string-strip-chars chars) x))
-  
+
 (def-py-method py-string.rstrip (x^ &optional (chars '(#\Newline #\Space #\Tab)))
   (string-right-trim (verify-string-strip-chars chars) x))
 
@@ -3069,7 +3069,7 @@ invocation form.\"")
         (unless (>= ix (length x))
           (push (subseq x ix) res))
         (make-py-list-from-list (nreverse res)))))
-  
+
 (def-py-method py-string.startswith (x^ prefix &optional start end)
   (when (or start end) (error "todo"))
   (py-bool (and (>= (length x) (length prefix))
@@ -3077,7 +3077,7 @@ invocation form.\"")
 
 (def-py-method py-string.upper (x^)
   (string-upcase x))
-   
+
 ;; Symbols
 
 (def-proxy-class py-symbol)
@@ -3114,17 +3114,17 @@ invocation form.\"")
 (def-proxy-class py-tuple)
 
 (def-py-method py-tuple.__new__ :static (cls &optional iterable)
-	       
-	       (let ((tup (make-tuple-from-list (when iterable 
+
+	       (let ((tup (make-tuple-from-list (when iterable
 						  (py-iterate->lisp-list iterable)))))
-		 
+
 		 (cond ((eq cls (ltv-find-class 'py-tuple)) tup)
-		       
+
 		       ((subtypep cls (ltv-find-class 'py-tuple))
 			(let ((x (make-instance cls)))
 			  (setf (proxy-lisp-val x) tup)
 			  x))
-		       
+
 		       (t (error "invalid py-tuple.__new__ cls: ~A" cls)))))
 
 (defvar *the-empty-tuple* (make-instance 'py-tuple :lisp-object nil))
@@ -3151,7 +3151,7 @@ invocation form.\"")
     (return-from py-tuple.__cmp__ (load-time-value *the-notimplemented*)))
   (let ((x.len (length x))
 	(y.len (length y)))
-    
+
     (cond ((= x.len y.len)
 	   (loop for xi in x and yi in y
 	       do (ecase (py-cmp xi yi)
@@ -3159,14 +3159,14 @@ invocation form.\"")
 		    (1  (return 1))
 		    (0  ))
 	       finally (return 0)))
-	  
+
 	  ((< x.len y.len) -1)
 	  (t                1))))
 
 (def-py-method py-tuple.__eq__ (x^ y^)
   (py-bool (and (listp x)
                 (listp y)
-                (loop 
+                (loop
                     for xi = (pop x)
                     for yi = (pop y)
                     do (cond ((null (or xi yi))        (return t))
@@ -3213,7 +3213,7 @@ invocation form.\"")
     (make-tuple-from-list (apply #'concatenate 'list repeats))))
 
 (def-py-method py-tuple.__rmul__ (tuple n) (py-tuple.__mul__ n tuple))
-                                 
+
 (def-py-method py-tuple.__nonzero__ (x^)
   (py-bool x))
 
@@ -3229,10 +3229,10 @@ invocation form.\"")
 	  (format s "tuple with ~A items" (length x))))
     (py-tuple.__repr__ x)))
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;  
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defgeneric py-class-of (x)
-  
+
   ;; Lisp objects lead to their proxy class
   (:method ((x hash-table)) (declare (ignorable x)) (ltv-find-class 'dict))
   (:method ((x integer)) (declare (ignorable x)) (ltv-find-class 'py-int    ))
@@ -3240,12 +3240,12 @@ invocation form.\"")
   (:method ((x complex)) (declare (ignorable x)) (ltv-find-class 'py-complex))
   (:method ((x string))  (declare (ignorable x)) (ltv-find-class 'py-string ))
   (:method ((x vector))  (declare (ignorable x)) (ltv-find-class 'py-list   ))
-  
+
   #+ecl
   (:method ((x cl-custom-hash-table:custom-hash-table))
            (declare (ignorable x))
            (ltv-find-class 'dict))
-                               
+
   (:method ((x list))    (cond ((null x)
                                 (break "PY-CLASS-OF of NIL"))
                                ((and (listp (car x)) (symbolp (caar x)))
@@ -3260,16 +3260,16 @@ invocation form.\"")
                              (ltv-find-class 'py-function))
   (:method ((x package))     (declare (ignorable x))
                              (ltv-find-class 'lisp-package))
-  
+
   #+(or)(:method ((x py-type)) (ltv-find-class 'py-type))
-    
+
   (:method ((x py-meta-type)) ;; metatypes (including `type')
                               ;;  fake being of type `type'
                               (declare (ignorable x))
                               (ltv-find-class 'py-type))
-  
+
   (:method ((x py-type)) (class-of x))
-  
+
   (:method ((x (eql (find-class 'py-meta-type))))
            ;; the metatypes is posing as `type'
            (declare (ignorable x))
@@ -3286,22 +3286,22 @@ invocation form.\"")
 ;;#+(and allegro-version>= (version>= 8 0))
 (define-compiler-macro py-attr (&whole whole x attr &key (bind-class-attr t) via-getattr &environment e)
   (declare (ignore bind-class-attr via-getattr))
-  
+
   ;; Work around Allegro CL issues w.r.t. compiler macros and SETF forms:
   ;; don't run this PY-ATTR compilar macro on (setf (py-attr ..) ..) forms
   ;; if the expanded form is invalid -- e.g. if expansion becomes a 'let,
   ;; then 'setf form becomes (setf (let ..) ..) which is invalid.
-  ;; 
+  ;;
   ;; The (setf py-attr) case is detected usign our :inside-setf-py-attr
   ;; declaration.
-  
-  (cond ((eq attr '{__class__})  
+
+  (cond ((eq attr '{__class__})
 	 ;; As "x.__class__ = y" is intercepted, __class__ is always a valid class.
-         ;; 
+         ;;
          ;; Note that this is also okay within :inside-setf-py-attr, as (setf py-class-of)
          ;; is defined.
 	 `(py-class-of ,x))
-	
+
 	((and (fboundp 'get-pydecl)
 	      (not (funcall 'get-pydecl :inside-setf-py-attr e))
 	      (listp attr)
@@ -3313,13 +3313,13 @@ invocation form.\"")
                              (locally
 				 (declare (notinline py-attr))
 			       (py-attr .x ,attr)))))
-	
+
 	   ({__dict__}  `(let ((x ,x))
 			   (or (dict x)
 			       (py-raise '{AttributeError} "No __dict__ attribute: ~A" x))))
-	
+
 	   (t            whole)))
-	
+
 	(t whole)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -3347,7 +3347,7 @@ invocation form.\"")
 
 (def-py-method generator.close (g)
   (%generator.close g))
-  
+
 #+(or) ;; todo -- will be the first built-in class with a del method?
 (defun generator.__del__ (g)
   (generator.close g))
@@ -3418,7 +3418,7 @@ finished; F will then not be called again."
   (:method ((f null) &rest args)
            (declare (ignore args) (ignorable f) (dynamic-extent args))
 	   (error "PY-CALL of NIL"))
-  
+
   (:method ((f class) &rest args)
            (declare (dynamic-extent args)
                     (ignorable f args)
@@ -3426,7 +3426,7 @@ finished; F will then not be called again."
            #-clpython-exceptions-are-python-objects
            (when (subtypep f '{Exception})
              #+cmu (when (typep f 'class)
-                     ;; CMUCL Snapshot 2009-01 bug: 
+                     ;; CMUCL Snapshot 2009-01 bug:
                      ;;  make-condition does not work with class arguments.
                      (setf f (class-name f)))
              (return-from py-call (make-condition f :args (copy-list args))))
@@ -3438,27 +3438,27 @@ finished; F will then not be called again."
                     (apply __call__ x args))
                    (__call__
                     (apply #'py-call (bind-val __call__ x (py-class-of x)) args))
-                   (t 
+                   (t
                     (error "Don't know how to call: ~S (args: ~A)" x args)))))
 
   ;; XXX For bound/unbound/static method: need to check if object is
   ;; not instance of (user-defined) subclass?
-  
+
   (:method ((f py-bound-method) &rest args)
            (declare (dynamic-extent args)
                     (optimize (speed 3) (safety 0) (debug 0)))
 	   (apply 'py-bound-method.__call__ f args))
-  
+
   (:method ((f py-unbound-method) &rest args)
            (declare (dynamic-extent args)
                     (optimize (speed 3) (safety 0) (debug 0)))
 	   (apply 'py-unbound-method.__call__ f args))
-  
+
   (:method ((f py-static-method) &rest args)
            (declare (dynamic-extent args)
                     (optimize (speed 3) (safety 0) (debug 0)))
 	   (apply 'py-static-method.__call__ f args))
-  
+
   ;; Avoid infinite recursion:
   (:method ((f function) &rest args)
            (declare (dynamic-extent args)
@@ -3489,7 +3489,7 @@ finished; F will then not be called again."
 (define-compiler-macro py-call (&whole whole prim &rest args)
   (declare (ignorable whole))
   `(locally (declare (notinline py-call))
-     
+
      ,(cond ((and (listp prim)
 		  (eq (first prim) 'py-attr)
 		  (= (length prim) 3))
@@ -3515,7 +3515,7 @@ finished; F will then not be called again."
                            #+(or)(warn "saving bound method ~A ~A" .b .c)
                            (funcall .b .c ,@args))
                   (py-call .a ,@args))))
-            
+
 	    #+(or)
 	    ((and (listp prim)
 		  (eq (first prim) 'bind-val)
@@ -3534,7 +3534,7 @@ finished; F will then not be called again."
 		    (py-call (bind-val .val .x .x.class) ,@args)))))
 
             #+(or)
-	    (t 
+	    (t
              ;; Optimize case where PRIM is a function.
              (let ((a (gensym "args"))
                    (p (gensym "prim")))
@@ -3588,7 +3588,7 @@ finished; F will then not be called again."
     (when meth
       (return-from py-subs (py-call meth start stop))))
   (call-next-method))
-  
+
 (defmethod py-subs (x item)
   (whereas ((gi (x.class-attr-no-magic.bind x '{__getitem__})))
     (return-from py-subs (py-call gi item)))
@@ -3624,14 +3624,14 @@ finished; F will then not be called again."
 ;;; Math ops:  + - << ~  (etc)  and inplace variants:  += -= <<= ~=  (etc)
 
 ;; a + b   ->  (py-+ a b)   ->  a.__add__(b) or b.__radd__(a)
-;; 
+;;
 ;; x += y  ->  (py-+= x y)  ->  x.__iadd__(y)
 ;;                              fallback: x = x.__add__(y)
-;; 
+;;
 ;; The fall-back is not part of the py-+= function, because it
 ;; operates on /places/, while the function only tries the in-place
 ;; operation on a /value/.
-;; 
+;;
 ;; The return value of py-+= indicates whether the in-place method
 ;; __iadd__ was found.
 
@@ -3642,7 +3642,7 @@ finished; F will then not be called again."
 (defvar *binary-op-funcs-ht* (make-hash-table :test #'eq))
 (defvar *binary-iop-funcs-ht* (make-hash-table :test #'eq))
 (defvar *binary-iop->op-ht* (make-hash-table :test #'eq))
-  
+
 (defun get-binary-op-func-name (op)
   (or (gethash op *binary-op-funcs-ht*)
       (error "missing binary op func: ~A" op)))
@@ -3693,22 +3693,22 @@ finished; F will then not be called again."
 
 (defmacro def-math-func (op-syntax op-func l-meth r-meth iop-syntax iop-func i-meth)
   `(progn
-     
+
      (defgeneric ,op-func (x y)
        (:method ((x t) (y t))
                 (generic-binary-op x y ',l-meth ',r-meth ',op-syntax)))
-     
+
      ,(when op-syntax
 	`(setf (gethash ',op-syntax *binary-op-funcs-ht*) ',op-func))
-     
+
      ,(when iop-func
 	`(defgeneric ,iop-func (x val)
 	   (:method ((x t) (val t))
                     (generic-binary-iop x val ',i-meth))))
-     
+
      ,(when iop-syntax
 	`(setf (gethash ',iop-syntax *binary-iop-funcs-ht*) ',iop-func))
-     
+
      ,(when (and iop-syntax op-syntax)
 	`(setf (gethash ',iop-syntax *binary-iop->op-ht*) ',op-syntax))))
 
@@ -3718,7 +3718,7 @@ finished; F will then not be called again."
        (def-math-func [-]   py--    {__sub__}      {__rsub__}       [-=]   py--=   {__isub__}      )
        (def-math-func [*]   py-*    {__mul__}      {__rmul__}       [*=]   py-*=   {__imul__}      )
        (def-math-func [/t/] py-/t/  {__truediv__}  {__rtruediv__}   [/t/]  py-/t/= {__itruediv__}  )
-       (def-math-func [//]  py-//   {__floordiv__} {__rfloordiv__}  [//=]  py-//=  {__ifloordiv__} ) 
+       (def-math-func [//]  py-//   {__floordiv__} {__rfloordiv__}  [//=]  py-//=  {__ifloordiv__} )
        (def-math-func [/]   py-/    {__div__}      {__rdiv__}       [/=]   py-/=   {__idiv__}      )
        (def-math-func [%]   py-%    {__mod__}      {__rmod__}       [%=]   py-%=   {__imod__}      )
        (def-math-func [<<]  py-<<   {__lshift__}   {__rlshift__}    [<<=]  py-<<=  {__ilshift__}   )
@@ -3729,13 +3729,13 @@ finished; F will then not be called again."
        (def-math-func [<divmod>] py-divmod {__divmod__} {__rdivmod__}   nil    nil     nil         ))
 
 ;; a**b (to-the-power) is a special case:
-;;   
+;;
 ;; - method __pow__ takes an optional third argument: the c in
 ;;   (a**b)%c that argument can be supplied using the built-in
 ;;   function POW, but not syntactically using **
-;;  
+;;
 ;; - there are no __rpow__ methods
-;;   
+;;
 ;; - so, this function py-** always gets 2 arguments when called for
 ;;   the a**b syntax, but may have a third argument when called for
 ;;   the built-in function POW.
@@ -3745,7 +3745,7 @@ finished; F will then not be called again."
 (defmethod py-** (x y &optional z)
   (if z
       ;; XXX should also do __rpow__ for three-arg case...
-      (let* ((op-meth (x.class-attr-no-magic.bind x '{__pow__})) 
+      (let* ((op-meth (x.class-attr-no-magic.bind x '{__pow__}))
              (res (and op-meth (py-call op-meth y z))))
         (if (and res (not (eq res (load-time-value *the-notimplemented*))))
             res
@@ -3762,7 +3762,7 @@ finished; F will then not be called again."
 	 (res (and iop-meth (if z
 				(py-call iop-meth x y z)
 			      (py-call iop-meth x y)))))
-    
+
     (if (and iop-meth (not (eq res (load-time-value *the-notimplemented*))))
 	res
       nil)))
@@ -3818,7 +3818,7 @@ finished; F will then not be called again."
 		   while seq-item
 		   when (py-==->lisp-val x seq-item) return +the-true+
 		   finally (return +the-false+))))))
-	     
+
 (defgeneric py-not-in (x seq)
   (:method ((x t) (seq t))
 	   (py-not (py-in x seq))))
@@ -3840,19 +3840,19 @@ finished; F will then not be called again."
 
 
 ;; Binary comparison operations
-;; 
+;;
 ;; It appears that all comparisons -- < > <= >= == != <> -- are
 ;; defined in terms of the outcome of built-in function `cmp'
 ;; (#'py-cmp).
-;; 
+;;
 ;; #'py-< implements the logic for "a < b"
-;; 
+;;
 ;; Note this important point: "a < b" is NOT directly translated into
 ;; a.__lt__(b), although this __lt__ method *might* be called by
 ;; __cmp__, as might b.__ge__ in this case.
-;; 
+;;
 ;;  '<  -->  #'py-<
-;; 
+;;
 ;; This mapping is used by the interpreter, in EVAL-COMPARISON
 ;; (pyeval.cl).
 
@@ -3889,21 +3889,21 @@ fixed id during the object's lifetime."
   (:documentation
    "Compare two objects, of which at least one is a user-defined-object.
 Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
-  
+
   (:method ((x class) (y class))
            ;; Added, perhaps not in CPython. Invalid for sufficiently hairy metaclasses.
            ;; Without this method, the method (x t) (y t) tries to compare IDs
            (cond ((eq x y) 0)
                  ((string< (class-name x) (class-name y)) -1)
                  (t 1)))
-  
+
   (:method ((x t) (y t))
 	   #+(or)(warn "cmp ~S ~S" x y)
 	   ;; This function is used in comparisons like <, <=, ==.
-	   ;; 
+	   ;;
 	   ;; The CPython logic is a bit complicated; hopefully the following
 	   ;; is a correct translation.
-	   ;; 
+	   ;;
 	   ;; Note: (eq X Y) does not guarantee "X == Y".
 
 	   (flet ((normalize (x)  ;; object.c - adjust_tp_compare(c)
@@ -3915,7 +3915,7 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
 	     ;; CPython: object.c - do_cmp(v,w)
 	     (let ((x.class (py-class-of x))
 		   (y.class (py-class-of y)))
-      
+
 	       (let ((pt (ltv-find-class 'py-type)))
 		 (when (or (eq pt x.class) (eq pt y.class))
 		   (return-from py-cmp
@@ -3924,7 +3924,7 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
 		       -1))))
 
 	       ;; If the class is equal and it defines __cmp__, use that.
-      
+
 	       (when (eq x.class y.class)
 		 (let* ((__cmp__ (class.attr-no-magic x.class '{__cmp__})) ;; XXX bind
 			(cmp-res (when __cmp__ (py-call __cmp__ x y))))
@@ -3934,22 +3934,22 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
 
 	       ;; The "rich comparison" operations __lt__, __eq__, __gt__ are
 	       ;; now called before __cmp__ is called.
-	       ;; 
+	       ;;
 	       ;; Normally, we take these methods of X.  However, if class(Y)
 	       ;; is a subclass of class(X), the first look at Y's magic
 	       ;; methods.  This allows the subclass to override its parent's
 	       ;; comparison operations.
-	       ;; 
+	       ;;
 	       ;; It is assumed that the subclass overrides all of
 	       ;; __{eq,lt,gt}__. For example, if sub.__eq__ is not defined,
 	       ;; first super.__eq__ is called, and after that __sub__.__lt__
 	       ;; (or super.__lt__).
-	       ;; 
+	       ;;
 	       ;; object.c - try_rich_compare_bool(v,w,op) / try_rich_compare(v,w,op)
-      
+
 	       (let ((y-sub-of-x (and (not (eq x.class y.class))
 				      (subtypep y.class x.class))))
-	
+
 		 ;; Try each `meth'; if the outcome it True, return `res-value'.
 		 (loop for (meth-name res-value) in `(({__eq__}   0)
 						      ({__lt__}  -1)
@@ -3959,7 +3959,7 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
 				      (py-call meth
 					       (if y-sub-of-x y x)
 					       (if y-sub-of-x x y)))))
-		 
+
 			  (when (and res (not (eq res (load-time-value *the-notimplemented*))))
 			    (let ((true? (py-val->lisp-bool res)))
 			      (when true?
@@ -3967,9 +3967,9 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
 				  (if y-sub-of-x (- res-value) res-value))))))))
 
 	       ;; So the rich comparison operations didn't lead to a result.
-	       ;; 
+	       ;;
 	       ;; object.c - try_3way_compare(v,w)
-	       ;; 
+	       ;;
 	       ;; Now, first try X.__cmp__ (even it y.class is a subclass of
 	       ;; x.class) and Y.__cmp__ after that.
 
@@ -3986,16 +3986,16 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
 		 (when (and res (not (eq res (load-time-value *the-notimplemented*))))
 		   (let ((norm-res (- (normalize res))))
 		     (return-from py-cmp norm-res))))
-      
+
 	       ;; CPython now does some number coercion attempts that we don't
 	       ;; have to do because we have first-class numbers. (I think.)
-      
+
 	       ;; object.c - default_3way_compare(v,w)
-	       ;; 
+	       ;;
 	       ;; Two instances of same class without any comparison operator,
 	       ;; are compared by pointer value. Our function `py-id' fakes
 	       ;; that.
-      
+
 	       (when (eq x.class y.class)
 		 (let ((x.id (py-id x))
 		       (y.id (py-id y)))
@@ -4003,22 +4003,22 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
 		     (cond ((< x.id y.id) -1)
 			   ((= x.id y.id) 0)
 			   (t             1)))))
-      
+
 	       ;; None is smaller than everything (excluding itself, but that
 	       ;; is catched above already, when testing for same class;
 	       ;; NoneType is not subclassable).
-      
+
 	       (cond ((none-p x) (return-from py-cmp -1))
 		     ((none-p y) (return-from py-cmp  1)))
-      
+
 	       ;; Instances of different class are compared by class name, but
 	       ;; numbers are always smaller.
-      
+
 	       ;; Probably, when we arrive here, there is a bug in the logic
 	       ;; above. Therefore print a warning.
-      
+
 	       #+(or)(warn "[debug] CMP can't properly compare ~A and ~A." x y)
-      
+
 	       (return-from py-cmp
 		 (if (string< (class-name x.class) (class-name y.class))
 		     -1
@@ -4059,7 +4059,7 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
 
 #+(or) ;; moved to classdefs
 (defun py-==->lisp-val (x y)
-  (py-val->lisp-bool (py-== x y))) 
+  (py-val->lisp-bool (py-== x y)))
 
 (defgeneric py-val->lisp-bool (x)
   (:method ((x number)) (/= x 0))
@@ -4114,7 +4114,7 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
   (declare (ignorable x))
   "#<the symbol NIL>")
 
-#|| 
+#||
 ;; Defining the shortcut functions like this would be more efficient,
 ;; in that is skips creation of bound method.
 (defmethod py-hash ((x t))
@@ -4152,7 +4152,7 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
       (py-raise '{TypeError} "Expected a number; got: ~S" x))))
 
 
-(defun py-repr-string (x &key circle) 
+(defun py-repr-string (x &key circle)
   "Convert `repr(x)' to Lisp string."
   (py-val->string (if circle (py-repr-circle x) (py-repr x))))
 
@@ -4187,7 +4187,7 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
         ((or (> (incf (gethash x *circle-print-ht* 0)) *circle-print-max-occur*)
              (>= (hash-table-count *circle-print-ht*) *circle-print-max-num-objects*))
          *circle-print-abbrev*)
-        (t 
+        (t
          (excl:call-next-fwrapper))))
 
 (defmacro with-circle-detection (&body body)
@@ -4211,7 +4211,7 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
               (if (>= *circle-level* +max-circle-level+)
                   *circle-print-abbrev*
                 (funcall f))))))
-  
+
 (defun py-repr-circle (x)
   (with-circle-detection (py-repr x)))
 
@@ -4222,7 +4222,7 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
 (defun py-string->symbol  (x &optional (package #+cmu(load-time-value (find-package :clpython.user))
                                                 #-cmu #.(find-package :clpython.user))) ;; cmu errs on this
   ;; {symbol,string} -> symbol
-  (if (symbolp x) 
+  (if (symbolp x)
       x
     (let ((str (deproxy x)))
       (if (stringp str)
@@ -4243,14 +4243,14 @@ the ~/.../ directive: ~/clpython:repr-fmt/"
   (when (or colon-p at-p parameters)
     (error "Format string function py-repr-fmt does not support colon, ~
             at or parameters"))
-  
+
   (let ((s (py-repr-string argument :circle t)))
     (write-string s stream)))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; general useful iteration constructs
-   
+
 (defgeneric get-py-iterate-fun (x)
   (:documentation
    "Return a function that when called repeatedly returns VAL, T, where VAL is the
@@ -4262,12 +4262,12 @@ next value gotten by iterating over X. Returns NIL, NIL upon exhaustion.")
                                      (class.attr-no-magic x.cls '{__getitem__})))
                   (__getitem__ (when __getitem__-unb
                                  (bind-val __getitem__-unb x x.cls))))
-             
+
              ;; TODO: binding __getitem__ using __get__ is not done at all yet.
-             
+
              #+(or)(warn "GET-PY-ITERATE-FUN ~A (a ~A)~% -> __iter__ = ~A; __getitem = ~A"
                          x x.cls __iter__ __getitem__)
-             
+
              (cond (__iter__ ;; Preferable, use __iter__ to retrieve x's iterator
                     (let* ((iterator     (py-call (bind-val __iter__ x x.cls)))
                            (iterator.cls (py-class-of iterator))
@@ -4277,17 +4277,17 @@ next value gotten by iterating over X. Returns NIL, NIL upon exhaustion.")
                                  '{TypeError} "The value returned by ~A's `__iter__' method ~
                                  	       is ~A, which is not an iterator (no `next' method)"
                                  x iterator)))
-                           
-                           (next-meth-bound 
+
+                           (next-meth-bound
                             ;; Efficiency optimization: skip creation of bound methods
                             (unless (functionp next-meth-unbound)
                               (bind-val next-meth-unbound iterator iterator.cls))))
-                      
+
                       ;; Note that we just looked up the `next' method before the first
                       ;; value is demanded. This is semantically incorrect (in an
                       ;; ignorable way) as the method should be looked up on the
                       ;; request of every new value. For efficiency that's not done.
-                      
+
                       ;; (excl:named-function (:py-iterate-fun using __iter__)
                       (flet ((using-__iter__ ()
                                (handler-case (values (if next-meth-bound
@@ -4296,7 +4296,7 @@ next value gotten by iterating over X. Returns NIL, NIL upon exhaustion.")
                                  ({StopIteration} () (values nil nil))
                                  (:no-error (val)  (values val t)))))
                         #'using-__iter__)))
-                   
+
                    (__getitem__ ;; Fall-back: call __getitem__ with successive integers
                     (let ((index 0))
                       ;; (excl:named-function (:py-iterate-fun using __getitem__)
@@ -4313,9 +4313,9 @@ next value gotten by iterating over X. Returns NIL, NIL upon exhaustion.")
                     (py-raise '{TypeError} "Iteration over non-sequence: ~A." x))))))
 
 (defgeneric map-over-object (func object)
-  (:documentation 
+  (:documentation
    "Iterate over OBJECT, calling the Lisp function FUNC on each value. Returns nothing.")
-  
+
   (:method ((func function) (object t))
 	   #+(or)(break "map over ~A" object)
 	   (loop with it-fun = (get-py-iterate-fun object)
@@ -4337,7 +4337,7 @@ the lisp list will be returned).")
 (defun get-py-iterator-for-object (x)
   (let* ((x.cls       (py-class-of x))
 	 (__iter__    (class.attr-no-magic x.cls '{__iter__})))
-    
+
     (if __iter__
 	(py-call __iter__ x)
       (let ((f (get-py-iterate-fun x)))
@@ -4361,7 +4361,7 @@ the lisp list will be returned).")
                        (attr dest '{write})))
          (softspace-val (if (streamp dest)
                             (or (gethash dest *stream-softspaces*) 0)
-                          (handler-case 
+                          (handler-case
                               (attr dest '{softspace})
                             (error (c)
                               (warn "PY-PRINT: error retrieving attribute `softspace' of ~S: ~S"
@@ -4399,7 +4399,7 @@ the lisp list will be returned).")
       (symbol (return-from py-string-val->symbol x))
       (string (setf x.string x))
       (t      (setf x.string (py-val->string x))))
-    
+
     (or (find-symbol x.string #.(find-package :clpython.user))
 	(when intern
 	  (intern x.string #.(find-package :clpython.user))))))

@@ -1,5 +1,5 @@
 ;; -*- Mode: LISP; Syntax: COMMON-LISP; Package: CLPYTHON.PARSER; Readtable: PY-AST-USER-READTABLE -*-
-;; 
+;;
 ;; This software is Copyright (c) Franz Inc. and Willem Broekema.
 ;; Franz Inc. and Willem Broekema grant you the rights to
 ;; distribute and use this software as governed by the terms
@@ -24,7 +24,7 @@
               (:terminals ,*terminals*)
             (:precedence ,(nreverse (get-precedence-and-associativity :left :right :nonassoc)))
             (:start-symbol python-grammar)
-            
+
             ,@(loop for name being each hash-key in *python-prods*
                   using (hash-value rules)
                   collect `(,name ,@(loop for (terms outcome) in rules
@@ -33,7 +33,7 @@
                                         for func = `(lambda ,args
                                                       (declare (ignorable ,@args))
                                                       ,outcome)
-                                        collect `(,@(or terms `(())) ;; splice terms or insert () 
+                                        collect `(,@(or terms `(())) ;; splice terms or insert ()
                                                     ,func)))))))
     ;; Prevent out of memory during compilation in ECL
     #+ecl `(eval ',parser-form)
@@ -67,12 +67,12 @@
                 (token (yacc:yacc-parse-error-terminal c))
                 (value (maybe-unwrap-literal-value (yacc:yacc-parse-error-value c)))
                 (expected-tokens (yacc:yacc-parse-error-expected-terminals c)))
-           
+
            (cond ((or (eq token (lexer-eof-token yacc-version))
                       (and (eq token '[newline]) (not last-newline-in-source))
                       (and (eq token '[dedent]) (not (eq last-newline-in-source :unknown))))
                   (raise-unexpected-eof))
-                 
+
                  (t
                   (raise-syntax-error
                    (format nil "At line ~A, parser got unexpected token: ~S. ~
