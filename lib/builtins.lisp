@@ -388,6 +388,7 @@ None, use identity function (multiple sequences -> list of tuples)."
 	(py-raise '{TypeError} "reduce() of empty sequence with no initial value"))))
 
 (defun {reload} (m)
+  (check-type m (or module package))
   ;; XXX Not sure these are the right semantics.
   (let* ((*import-force-reload* t)
          (mod-name-as-symbol-list (list (py-string-val->symbol (slot-value m 'name))))) ;; XXX only works for toplevel modules
