@@ -55,16 +55,19 @@
   "The name of the module now being compiled; module.__name__ is set to it.")
 
 (defun compile-py-source-file-to-lisp-source (&key filename output-file)
-  (call-with-python-code-reader
-   `((in-package :clpython))
-   (lambda ()
-     (let (#+ecl (c::*debug-compiler* t))
-       (with-open-file (in filename :direction :input)
-         (with-open-file (out output-file :direction :output :element-type 'character :if-exists :supersede)
-           (loop for form = (read in nil 'eof)
-               until (eq form 'eof)
-               do (write form :stream out)
-                  (write-char #\Newline out))))))))
+  (with-standard-io-syntax ;; No surprises for e.g. *print-length*
+    (let ((progn-form (call-with-python-code-reader
+                       `((in-package :clpython))
+                       (lambda ()
+                         (let (#+ecl (c::*debug-compiler* t))
+                           (with-open-file (in filename :direction :input)
+                             (read in)))))))
+      (assert (and (listp progn-form)
+                   (eq (car progn-form) 'progn)))
+      (with-open-file (out output-file :direction :output :element-type 'character :if-exists :supersede)
+        (loop for form in (cdr progn-form)
+            do (write form :stream out)
+               (write-char #\Newline out))))))
 
 (defun compile-py-source-file (&key filename mod-name output-file)
   (assert (and filename mod-name output-file))
