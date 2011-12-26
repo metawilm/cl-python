@@ -10,7 +10,7 @@
 (in-package :clpython)
 (in-syntax *user-readtable*)
 
-(defvar *compile-for-import* nil
+(defvar *compile-for-import* t
   "Whether source files are compiled before being run")
     
 (defvar *py-compiled-file-type* "FASL"
