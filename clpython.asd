@@ -103,6 +103,7 @@
                                        (:file "_random" :depends-on ("lsetup"))
                                        (:file "re" :depends-on ("lsetup"))
                                        (:file "_socket" :depends-on ("lsetup"))
+                                       (:file "_ssl" :depends-on ("lsetup"))
                                        (:file "sys" :depends-on ("lsetup"))
                                        (:file "string" :depends-on ("lsetup"))
                                        (:file "symbol" :depends-on ("lsetup"))

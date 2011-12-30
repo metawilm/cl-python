@@ -111,6 +111,16 @@
            #:|SO_SNDLOWAT| #:|SO_RCVLOWAT| #:|SO_SNDTIMEO| #:|SO_RCVTIMEO| #:|SO_ERROR| #:|SO_TYPE| 
            #:|TCP_NODELAY| #:|TCP_MAXSEG|))
 
+(defpackage :clpython.module._ssl
+  (:use :clpython :common-lisp)
+  (:export #:|SSLError| #:|CERT_NONE| #:|CERT_OPTIONAL| #:|CERT_REQUIRED|
+           #:|PROTOCOL_SSLv2| #:|PROTOCOL_SSLv3| #:|PROTOCOL_SSLv23| #:|PROTOCOL_TLSv1|
+           #:|SSL_ERROR_SSL| #:|SSL_ERROR_WANT_READ| #:|SSL_ERROR_WANT_WRITE| #:|SSL_ERROR_WANT_X509_LOOKUP|
+           #:|SSL_ERROR_SYSCALL| #:|SSL_ERROR_ZERO_RETURN| #:|SSL_ERROR_WANT_CONNECT| #:|SSL_ERROR_EOF|
+           #:|SSL_ERROR_INVALID_ERROR_CODE|
+           #:|RAND_status| #:|RAND_egd| #:|RAND_add|
+           ))
+
 (defpackage :clpython.module.string
   (:use :clpython :common-lisp)
   (:export #:|ascii_letters| #:|ascii_lowercase| #:|ascii_uppercase| #:|digits|
