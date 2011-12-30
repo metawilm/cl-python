@@ -21,6 +21,9 @@
 (defconstant-once |X| 64)
 (defconstant-once |VERBOSE| |X|)
 
+(defconstant-once |M| 8)
+(defconstant-once |MULTILINE| |M|)
+
 (defun |compile| (pattern &optional flags)
   (make-instance '|reg-exp|
     :pattern pattern
