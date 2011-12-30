@@ -64,43 +64,40 @@ In particular, asdf-binary-locations is used if available.")
                   (result-path (or asdf-path bin-path)))
              (unless (file-writable-p result-path)
                ;; Fall back to using a temporary file.
-               (whereas ((temp-file (get-temporary-fasl-file kind modname filepath)))
-                 (setf result-path temp-file)))
+               (setf result-path
+                 (get-temporary-file :key (list kind modname filepath)
+                                     :filename-items (list "clpython" modname))))
              result-path))
   
   (:method (kind modname filepath)
            (%get-py-file-name kind modname filepath *py-compiled-file-type*)))
 
-(defparameter *temp-fasl-file-map* (make-hash-table :test 'equal)
-  "Mapping from Python source file to corresponding temporary fasl file.")
+(defparameter *temp-file-map* (make-hash-table :test 'equal)
+  "Mapping from filename-items to corresponding temporary fasl file.")
 
-(defun get-temporary-fasl-file (kind modname src-file)
-  (declare (ignorable modname))
-  (let ((hash-key (list kind modname src-file)))
-    (multiple-value-bind (file found-p)
-        (gethash hash-key *temp-fasl-file-map*)
-      (when found-p
-        (return-from get-temporary-fasl-file file)))
-    (flet ((get-temp-file-name (i)
-             (declare (ignorable i))
-             (let ((random-n (random 1000000)))
-               (declare (ignorable random-n))
-               (or 
-                #+allegro
-                (let* ((temp-dir (sys:temporary-directory)))
-                  ;; temp-dir might contain ~ as in C:\DOCUME~1\.. so careful with FORMAT
-                  (format nil "~Aclpython.~A.~A.~A.fasl" temp-dir modname random-n i))
-                #+unix ;; at least for lispworks, abcl
-                (format nil "/tmp/clpython.~A.~A.~A.fasl" modname random-n i)
-                #+(and)
-                (error "No temporary-file functionality defined for this implementation.")))))
-      (dotimes (i 1000)
-        (let ((fname (get-temp-file-name i)))
-          (unless (careful-probe-file fname)
-            (when (file-writable-p fname)
-              (return-from get-temporary-fasl-file
-                (setf (gethash hash-key *temp-fasl-file-map*) (pathname fname)))))))))
-  (error "Could not determine temporary fasl file"))
+(defun get-temporary-file (&key key filename-items)
+  "Returns the pathname of a new temporary file.
+FILENAME-ITEMS are converted to strings.
+Wen FILENAME-ITEMS is (:A :B :C) result could be #p\"/tmp/A/B/C.123343\""
+  (multiple-value-bind (file found-p)
+      (gethash key *temp-file-map*)
+    (when found-p
+      (return-from get-temporary-file file)))
+  (flet ((get-temp-file-name ()
+           (let ((random-n (random 1000000)))
+             (declare (ignorable random-n))
+             (let ((dir-string (or #+allegro (namestring (sys:temporary-directory))
+                                   #+unix "/tmp/" ;; e.g. Lispworks, ABCL
+                                   #-(or allegro unit) (error "GET-TEMPORARY-FILE not defined in this implementation.")))                     
+                   (filename (format nil "~{~A~^.~}.~D" filename-items random-n)))
+               (concatenate 'string dir-string filename)))))
+    (dotimes (i 1000)
+      (let ((fname (get-temp-file-name)))
+        (unless (careful-probe-file fname)
+          (when (file-writable-p fname)
+            (return-from get-temporary-file
+              (setf (gethash key *temp-file-map*) (pathname fname))))))))
+  (error "GET-TEMPORARY-FILE failed"))
 
 (defun file-writable-p (f)
   (handler-case
@@ -441,6 +438,10 @@ Otherwise raises ImportError."
                          (setf (gethash bin-file *import-recompiled-files*) t))
                         (t
                          (setf bin-file (pathname (concatenate 'string (namestring src-file) ".lisp")))
+                         (unless (file-writable-p bin-file)
+                           ;; Fall back to using a temporary file.
+                           (setf bin-file (get-temporary-file :key (list kind just-mod-name src-file)
+                                                              :filename-items (list "clpython" just-mod-name "lisp"))))
                          (format t ";; Parsing ~S into ~S~%" src-file bin-file)
                          (compile-py-source-file-to-lisp-source :filename src-file 
                                                                 :output-file bin-file))))))
