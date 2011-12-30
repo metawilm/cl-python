@@ -200,7 +200,7 @@ Caller is responsible for deciding if recompiling is really necessary."
                                    &key (mod-name (error ":mod-name required"))
                                         (context-mod-name mod-name)
                                         (habitat (error "habitat required"))
-                                        #+(or)(update-existing-mod t))
+                                   &aux (*habitat* habitat))
   "Loads and registers given compiled Python file.
 Returns the (updated) loaded module, or NIL on error (e.g. when the underlying
 LOAD failed and was aborted by the user)."
