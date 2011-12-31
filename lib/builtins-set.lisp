@@ -35,4 +35,8 @@
 (def-py-method |frozenset.__init__| (x iterable)
   (setf (set-items x) (py-iterate->lisp-list iterable)))
 
+(def-py-method |frozenset.__iter__| (x)
+  (make-iterator-from-function :name "frozenset-iterator"
+                               :func (let ((items (copy-list (set-items x))))
+                                       (lambda () (pop items)))))
 ;; much TODO...
