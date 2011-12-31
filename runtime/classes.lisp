@@ -648,7 +648,8 @@ otherwise work well.")
   ;; mop:funcallable-standard-class defines :name initarg, but how to to access it portably...
   ((fname        :initarg :fname        :initform nil :accessor py-function-name)
    (context-name :initarg :context-name :initform nil :accessor py-function-context-name)
-   (lambda       :initarg :lambda       :initform nil :accessor py-function-lambda))
+   (lambda       :initarg :lambda       :initform nil :accessor py-function-lambda)
+   (func-globals :initarg :func-globals                         :accessor py-function-func-globals))
   (:metaclass funcallable-python-class))
 
 ;; XXX On LispWorks this is not guaranteed to work:
@@ -665,14 +666,15 @@ otherwise work well.")
                (string (sfd-name data)))))
   (:method ((f py-function)) (string (py-function-name f))))
 
-(defun make-py-function (&key name context-name lambda)
+(defun make-py-function (&key name context-name lambda func-globals)
   (if *create-simple-lambdas-for-python-functions*
       (progn (register-simple-function lambda name)
              lambda)
     (let ((x (make-instance 'py-function
                :fname (string name)
                :lambda lambda
-               :context-name context-name)))
+               :context-name context-name
+               :func-globals func-globals)))
       (set-funcallable-instance-function x lambda)
       ;; fill dict?
       x)))
@@ -722,6 +724,9 @@ otherwise work well.")
     (setf x (py-function-lambda x)))
   (assert (functionp x))
   x)
+
+(def-py-method py-function.func_globals :attribute-read (x)
+  (py-function-func-globals x))
 
 (def-py-method py-function.__setattr__ (func attr val)
   (when (stringp attr)
