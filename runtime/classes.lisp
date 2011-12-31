@@ -1451,7 +1451,7 @@ but the latter two classes are not in CPython.")
 		   :accessor module-name
 		   :documentation "The (dotted) module name")
    (builtinp       :initarg :builtin   :initform nil :accessor module-builtin-p)
-   (packagep       :initarg :package   :initform :maybe :accessor module-package-p)
+   (packagep       :initarg :package                 :accessor module-package-p)
    ;; Keep track of original files
    (src-pathname   :initarg :src-pathname :initform nil :accessor module-src-pathname
                    :type (or pathname null))
@@ -1489,6 +1489,16 @@ but the latter two classes are not in CPython.")
         (setf bin-file-write-date (file-write-date bin-pathname))))
     (when (string= name "__main__")
       (setf name (pathname-name (or src-pathname bin-pathname)))))
+  (with-slots (src-pathname bin-pathname packagep) m
+      (cond (src-pathname
+             (locally
+                 (declare (special *package-indicator-filename*))
+               (setf packagep (equal (pathname-name src-pathname :case :common) *package-indicator-filename*))))
+            ((equal bin-pathname #P"__main__")
+             ;; REPL
+             (setf packagep nil))
+            (t
+             (break "Can't determine :packagep for ~S: no src-pathname" m))))
   (check-type (module-ht m) hash-table) ;; XXX or custom ht
   (setf (gethash m *all-modules*) t))
 
