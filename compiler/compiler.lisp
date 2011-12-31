@@ -1180,7 +1180,8 @@ LOCALS shares share tail structure with input arg locals."
               (setf art-deco `(py-call ,x ,art-deco)))
             `(let* ((.undecorated-func (make-py-function :name ',fname
                                                          :context-name ',context-fname
-                                                         :lambda ,func-lambda))
+                                                         :lambda ,func-lambda
+                                                         :func-globals %module-globals))
                     (.decorated-func ,art-deco))
                ;; Ugly special case:
                ;;  class C:
