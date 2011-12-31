@@ -147,7 +147,7 @@
 	   #:|prefix| #:|ps1| #:|ps2| #:|stdin| #:|stdout| #:|stderr|
 	   #:|__stdin__| #:|__stdout__| #:|__stderr__|
 	   #:|api_version| #:|version_info| #:|version|
-           #:|warnoptions|)
+           #:|warnoptions| #:|py3kwarning|)
   (:import-from :clpython #:*last-raised-exception*))
 
 (defpackage :clpython.module.thread
