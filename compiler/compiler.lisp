@@ -1331,7 +1331,7 @@ LOCALS shares share tail structure with input arg locals."
     (:string (check-type value string)
              value)
     (:bytes  (check-type value string)
-             `(TODO-make-bytes ,value)) ;; XXX TODO
+             `(error "TODO: the `bytes' data type"))
     (:number (check-type value number)
              value)
     (:lisp   value)))
