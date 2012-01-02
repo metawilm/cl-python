@@ -1797,7 +1797,7 @@ But if RELATIVE-TO package name is given, result may contains dots."
            (if writable-attr-ok
                (return-from lisp-package.__getattribute__ nil)
              (py-raise (if *inside-import-from-stmt* '{ImportError} '{AttributeError})
-                       "Module `~A' (Lisp package ~A) has no attribute named `~A'."
+                       "Module `~A' (Lisp package ~A) has no attribute `~A'."
                        (relative-package-name pkg) pkg name)))
 
          (incomplete-warning ()
