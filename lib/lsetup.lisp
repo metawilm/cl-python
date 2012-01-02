@@ -37,6 +37,9 @@
   (:use :clpython :common-lisp)
   (:export #:|get_magic| #:|find_module| #:|load_module|))
 
+(defpackage :clpython.module.marshal
+  (:use :clpython :common-lisp))
+  
 (defpackage :clpython.module.math
   (:use :clpython :common-lisp)
   (:export #:|pi| #:|e|

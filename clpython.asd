@@ -97,6 +97,7 @@
                                        (:file "exceptions" :depends-on ("lsetup"))
                                        (:file "imp" :depends-on ("lsetup"))
                                        (:file "gc"  :depends-on ("lsetup"))
+                                       (:file "marshal"  :depends-on ("lsetup"))
                                        (:file "math"  :depends-on ("lsetup"))
                                        (:file "operator" :depends-on ("lsetup"))
                                        (:file "posix" :depends-on ("lsetup"))
