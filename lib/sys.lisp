@@ -98,6 +98,11 @@ The corresponding module must be defined as package, e.g. :clpython.module.posix
                  (:unicode nil)
                  (:bytes-warning nil))))
 
+(defun |_getframe| (&optional depth)
+  (declare (ignore depth))
+  :todo)
+(set-impl-status '|_getframe| :todo)
+
 (defun |setcheckinterval| (arg)
   "How often to check for thread switches and signal handlers"
   (declare (ignore arg))
