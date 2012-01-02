@@ -7,6 +7,24 @@
 ;; (http://opensource.franz.com/preamble.html),
 ;; known as the LLGPL.
 
+(defpackage :clpython.module.__builtin__
+  (:use :clpython)
+  (:export #:|basestring| #:|bool| #:|buffer| #:|classmethod| #:|complex| #:|dict|
+           #:|enumerate| #:|file| #:|float| #:|frozenset| #:|int| #:|list| #:|long|
+           #:|number| #:|object| #:|property| #:|slice| #:|set| #:|staticmethod| #:|str|
+           #:|super| #:|tuple| #:|type| #:|unicode| #:|xrange|
+           
+           #:|__import__| #:|abs| #:|all| #:|any| #:|apply| #:|callable| #:|chr| #:|cmp|
+           #:|coerce| #:|compile| #:|delattr| #:|dir| #:|divmod| #:|eval| #:|execfile|
+           #:|filter| #:|getattr| #:|globals| #:|hasattr| #:|hash| #:|hex| #:|id| #:|input|
+           #:|intern| #:|isinstance| #:|issubclass| #:|iter| #:|len| #:|map| #:|max|
+           #:|min| #:|oct| #:|open| #:|ord| #:|pow| #:|range| #:|raw| #:|reduce| #:|reload|
+           #:|repr| #:|round| #:|setattr| #:|sorted| #:|sum| #:|unichr| #:|vars| #:|zip| 
+           
+           . #.(loop for class in clpython::*exception-classes*
+                 collect (class-name class))
+           ))
+  
 (defpackage :clpython.module.array
   (:use :clpython :common-lisp)
   (:import-from :clpython #:py-val->string)
