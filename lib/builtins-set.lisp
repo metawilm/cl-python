@@ -39,4 +39,8 @@
   (make-iterator-from-function :name "frozenset-iterator"
                                :func (let ((items (copy-list (set-items x))))
                                        (lambda () (pop items)))))
+
+(def-py-method |frozenset.__contains__| (x item)
+  (py-bool (find-if (lambda (x) (py-== item x)) (set-items x))))
+
 ;; much TODO...
