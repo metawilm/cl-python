@@ -39,8 +39,10 @@
 				  (fs-list-num-args fs) (length args)))
 			       args))
 				 
-	  with mapping-getitem-unb = (when is-mapping-fs
-				       (class.attr-no-magic (py-class-of arg) '|__getitem__|))
+	  with mapping-getitem-unb = (and (not (stringp arg))
+                                          is-mapping-fs
+                                          (or (class.attr-no-magic (py-class-of arg) '{__getitem__})
+                                              (error "Not suitable as format string mapping: ~A ~S" (py-class-of arg) arg)))
 	  with mapping-getitem-bound = (when mapping-getitem-unb
 					 ;; for efficiency, skip making bound method
 					 (unless (functionp mapping-getitem-unb)
