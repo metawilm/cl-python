@@ -1,4 +1,4 @@
-;; -*- Mode: LISP; Syntax: COMMON-LISP; Package: CLPYTHON.MODULE.SYS -*-
+;; -*- Mode: LISP; Syntax: COMMON-LISP; Package: CLPYTHON.MODULE.SYS; Readtable: PY-USER-READTABLE -*-
 ;;
 ;; This software is Copyright (c) Franz Inc. and Willem Broekema.
 ;; Franz Inc. and Willem Broekema grant you the rights to
@@ -8,6 +8,7 @@
 ;; known as the LLGPL.
 
 (in-package :clpython.module.sys)
+(in-syntax *user-readtable*)
 
 (defmacro def-habitat-attribute (name accessor-func doc)
   `(progn (defparameter ,name
@@ -100,8 +101,8 @@ The corresponding module must be defined as package, e.g. :clpython.module.posix
 
 (defun |_getframe| (&optional depth)
   (declare (ignore depth))
-  :todo)
-(set-impl-status '|_getframe| :todo)
+  (py-raise '{ValueError} "TODO: For now sys._getframe() always throws ValueError"))
+(set-impl-status '|_getframe| :incomplete)
 
 (defun |setcheckinterval| (arg)
   "How often to check for thread switches and signal handlers"
