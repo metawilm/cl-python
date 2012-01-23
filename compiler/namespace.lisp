@@ -1,4 +1,4 @@
-;; -*- Mode: LISP; Syntax: COMMON-LISP; Package: CLPYTHON -*-
+;; -*- Mode: LISP; Syntax: COMMON-LISP; Package: CLPYTHON; Readtable: PY-USER-READTABLE -*-
 ;;
 ;; This software is Copyright (c) Franz Inc. and Willem Broekema.
 ;; Franz Inc. and Willem Broekema grant you the rights to
@@ -8,6 +8,7 @@
 ;; known as the LLGPL.
 
 (in-package :clpython)
+(in-syntax *user-readtable*)
 
 ;;; Namespaces
 
@@ -159,7 +160,12 @@
   (my-make-load-form ns))
 
 (defmethod ns.read-form ((ns mapping-ns) (s symbol))
-  `(or (py-subs ,(ns.mapping-form ns) ,(symbol-name s))
+  `(or (handler-case (py-subs ,(ns.mapping-form ns) ,(symbol-name s))
+         ({KeyError} ()
+           nil)
+         ((or error {Exception}) (e)
+           (warn "Unexpected mapping namespace lookup exception: ~S." e)
+           nil))
        ,(when (ns.parent ns)
           (ns.read-form (ns.parent ns) s))))
 
