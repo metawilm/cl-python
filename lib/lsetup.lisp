@@ -35,6 +35,11 @@
   (:use :clpython :common-lisp)
   (:export #:|hexlify|))
 
+
+(defpackage :clpython.module.collections
+  (:use :common-lisp)
+  (:export #:|namedtuple|))
+
 (defpackage :clpython.module.cStringIO
   (:use :common-lisp)
   (:export ))
@@ -47,6 +52,10 @@
   (:use :common-lisp)
   (:export #:|ValueError| #:|SyntaxError|))
 
+(defpackage :clpython.module._functools
+  (:use :clpython :common-lisp)
+  (:export #:|partial|))
+
 (defpackage :clpython.module.gc
   (:use :clpython :common-lisp)
   (:export #:|disable| ))
@@ -54,6 +63,10 @@
 (defpackage :clpython.module.imp
   (:use :clpython :common-lisp)
   (:export #:|get_magic| #:|find_module| #:|load_module|))
+
+(defpackage :clpython.module.itertools
+  (:use :clpython :common-lisp)
+  (:export))
 
 (defpackage :clpython.module.marshal
   (:use :clpython :common-lisp))
