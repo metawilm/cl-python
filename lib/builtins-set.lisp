@@ -41,6 +41,6 @@
                                        (lambda () (pop items)))))
 
 (def-py-method |frozenset.__contains__| (x item)
-  (py-bool (find-if (lambda (x) (py-== item x)) (set-items x))))
+  (py-bool (find item (set-items x) :test 'clpython::py-==->lisp-val)))
 
 ;; much TODO...
