@@ -212,7 +212,7 @@ the call f(b) returns b.date.month."
 (eval-when (:load-toplevel :execute)
   (export '|attrgetter|))
 
-(defun |itemgetter| (item &rest args)
+(defun |itemgetter| (&rest items)
   "Return a callable object that fetches item from its operand using the operand’s
 __getitem__() method. If multiple items are specified, returns a tuple of lookup
 values. Equivalent to:
@@ -229,8 +229,16 @@ values. Equivalent to:
 
 The items can be any type accepted by the operand’s __getitem__() method. Dictionaries
 accept any hashable value. Lists, tuples, and strings accept an index or a slice."
-  (declare (ignore item args))
-  (error "todo"))
+  (cond ((null items)
+         (py-raise '{ValueError} "One or more items must be provided."))
+        ((not (cdr items))
+         (named-function :itemgetter
+             (lambda (obj &aux (item (car items)))
+               (py-subs obj item))))
+        (t
+         (named-function :itemgetter
+           (lambda (obj)
+             (make-tuple-from-list (loop for item in items collect (py-subs obj item))))))))
 
 (eval-when (:load-toplevel :execute)
   (export '|itemgetter|))
