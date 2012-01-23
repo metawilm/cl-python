@@ -1181,7 +1181,7 @@ LOCALS shares share tail structure with input arg locals."
             `(let* ((.undecorated-func (make-py-function :name ',fname
                                                          :context-name ',context-fname
                                                          :lambda ,func-lambda
-                                                         :func-globals %module-globals))
+                                                         :func-globals ,(get-module-namespace e)))
                     (.decorated-func ,art-deco))
                ;; Ugly special case:
                ;;  class C:
