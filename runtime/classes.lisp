@@ -1451,6 +1451,7 @@ but the latter two classes are not in CPython.")
 		   :accessor module-name
 		   :documentation "The (dotted) module name")
    (builtinp       :initarg :builtin   :initform nil :accessor module-builtin-p)
+    ;; PACKAGEP <-> a Python package, i.e. a directory with __init__.py file
    (packagep       :initarg :package                 :accessor module-package-p)
    ;; Keep track of original files
    (src-pathname   :initarg :src-pathname :initform nil :accessor module-src-pathname
@@ -1770,7 +1771,11 @@ But if RELATIVE-TO package name is given, result may contains dots."
          
 (def-py-method lisp-package.__getattribute__ (pkg name &key writable-attr-ok)
   (declare (special *inside-import-from-stmt*))
-  (assert (stringp name))
+  (check-type name string)
+  (when (string= name "__dict__")
+    (return-from lisp-package.__getattribute__
+      (lisp-package.__dict__ pkg)))
+  
   (flet ((todo-error ()
            (if writable-attr-ok
                (return-from lisp-package.__getattribute__ nil)
@@ -1832,7 +1837,21 @@ But if RELATIVE-TO package name is given, result may contains dots."
             (funcall (py-method-func val))
           val)))))
 
-
+(def-py-method lisp-package.__dict__ (pkg)
+  ;; TODO: keep package and dict in sync
+  (check-type pkg package)
+  (loop with dict = (make-py-hash-table)
+      for s being each external-symbol in pkg
+      for skipped = (member (impl-status s) '(:todo :n/a))
+      count skipped into num-skipped
+      unless skipped
+      do (setf (py-subs dict (symbol-name s))
+           (lisp-package.__getattribute__ pkg (symbol-name s)))
+      finally
+        (when (plusp num-skipped)
+          (warn "Module (Lisp package) ~S has some attributes with :TODO or :N/A status, excluded from returned __dict__."
+                pkg))
+        (return dict)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Property (User object)
@@ -2456,7 +2475,8 @@ invocation form.\"")
   (loop for key being each hash-key in (sht-ht d)
       using (hash-value value)
       collect (make-tuple-from-list (list (string key) value))))
-  
+
+ 
 ;; TODO: add the other dict methods
 
 ;;; Proxies for funky dicts
@@ -3057,8 +3077,29 @@ invocation form.\"")
   (string-trim (verify-string-strip-chars chars) x))
 
 (def-py-method py-string.replace (x^ old new &optional count^)
-  (substitute (py-val->string new) (py-val->string old) x :count count))
-
+  (setf old (py-val->string old)
+        new (py-val->string new))
+  (when count
+    (setf count (py-val->integer count 0)))
+  (cond ((zerop (length old))
+         (py-raise '{ValueError} "Can't string.replace with old having length 0"))
+        ((and (= (length old) 1)
+              (= (length new) 1))
+         (substitute (aref new 0) (aref old 0) x :count count))
+        (t
+         (apply #'concatenate 'string
+                (loop with find-start-ix = 0
+                    with coll = ()
+                    for find-ix = (search old x :start2 find-start-ix)
+                    for replacements from 0
+                    while find-ix
+                    while (or (not count) (< replacements count))
+                    do (push (subseq x find-start-ix find-ix) coll)
+                       (push new coll)
+                       (setf find-start-ix (+ find-ix (length old)))
+                    finally (push (subseq x find-start-ix) coll)
+                            (return (nreverse coll)))))))
+ 
 (def-py-method py-string.split (x^ &optional (sep (load-time-value *the-none*))
                                              (max-splits most-positive-fixnum))
   (let ((sep-sequence (cond ((none-p sep) (list #\Space #\Tab #\Return)) ;; definition of whitespace?
@@ -4158,7 +4199,7 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
   (let ((i (deproxy x)))
     (if (and (integerp i) (if min (>= i min) t))
 	i
-      (py-raise '{TypeError} "Expected an integer ~@[>= ~A~]; got: ~S" min x))))
+      (py-raise '{TypeError} "Expected an integer~@[ >= ~A~]; got: ~S" min x))))
 
 (defun py-val->number (x)
   (let ((n (deproxy x)))
