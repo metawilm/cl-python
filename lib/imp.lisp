@@ -10,7 +10,8 @@
 (in-package :clpython.module.imp)
 
 (defun |get_magic| ()
-  (break "The method imp.get_magic() was called. This method does not make much sense for CLPython"))
+  ;; Does not make sense for this implementation
+  "")
 
 (defun |find_module| (name path)
   (declare (ignore name path))
