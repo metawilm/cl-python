@@ -101,7 +101,7 @@ The corresponding module must be defined as package, e.g. :clpython.module.posix
 
 (defun |_getframe| (&optional depth)
   (declare (ignore depth))
-  (py-raise '{ValueError} "TODO: For now sys._getframe() always throws ValueError"))
+  (make-instance 'object))
 (set-impl-status '|_getframe| :incomplete)
 
 (defun |setcheckinterval| (arg)
