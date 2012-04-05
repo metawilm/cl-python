@@ -2775,6 +2775,10 @@ invocation form.\"")
   "For internal use, e.g. list comprehensions."
   `(vector-push-extend ,item ,list))
 
+(def-py-method py-list.index (list item)
+  (or (position item list :test #'py-==->lisp-val)
+      (py-raise '{ValueError} "Item ~S not in list." item)))
+  
 (def-py-method py-list.insert (list index object)
   "Insert OBJECT before index INDEX"
   (setf index (min (max index 0) (length list)))
