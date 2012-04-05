@@ -357,53 +357,36 @@
 				       
 
 ;; (defun f (&rest args)
-;;   (with-parsed-py-arglist ("f" (a b) args)
+;;   (with-parsed-py-arglist ((a b) args)
 ;;     (+ a b)))
 ;;
 ;; (f 1 2) (f 1 :b 2) (f :a 1 :b 2)
 
-(defmacro with-parsed-py-arglist ( (func-name formal-args actual-args) &body body)
+(defmacro with-parsed-py-arglist ((formal-args actual-args) &body body)
   (let ((alist '#:alist))
-    `(let* ((,alist (parse-poskey-arglist ,func-name ',formal-args ,actual-args))
+    `(let* ((,alist (parse-poskey-arglist ',formal-args ,actual-args))
 	    ,@(loop for f in formal-args
 		  collect `(,f (cdr (assoc ',f ,alist :test #'eq)))))
        ,@body)))
     
-(defun parse-poskey-arglist (func-name formal-pos-args actual-args)
-  (let ((pos-args (loop until (symbolp (car actual-args))
-		      collect (pop actual-args)))
-	(kw-args (loop for aa = actual-args then (cddr aa)
-		     for key = (pop actual-args)
-		     for val = (pop actual-args)
-                     while aa
-		     unless (and (symbolp key) val)
-		     do (error "Invalid arglist: ~S" actual-args)
-		     collect (cons key val))))
-    
-    (let ((res ())
-	  (formal-pos-args (copy-list formal-pos-args)))
-      
-      (loop while (and formal-pos-args pos-args)
-	  do (push (cons (pop formal-pos-args) (pop pos-args)) res))
-      
-      (when pos-args
-	(py-raise '{TypeError} "Too many arguments for function ~A (got: ~A)" 
-		  func-name))
-      
-      (loop for (key . val) in kw-args
-	  do (let ((fkw (find key formal-pos-args :test #'string=))) ;; (string= |:a| '|a|)
-	       (if fkw
-		   (progn (setf formal-pos-args (delete fkw formal-pos-args :test #'eq))
-			  (push (cons fkw val) res))
-		 (py-raise '{ValueError}
-			   "Invalid argument list: unknown keyword arg (or duplicated arg): ~A"
-			   key))))
-      
-      (loop for f in formal-pos-args
-	  do (push (cons f nil) res))
-      
-      res)))
-
+(defun parse-poskey-arglist (formal-args actual-args)
+  (setf formal-args (copy-list formal-args))
+  (let (res)
+    ;; handle all actual positional args
+    (loop while (and formal-args actual-args (not (symbolp (car actual-args))))
+        do (push (cons (pop formal-args) (pop actual-args)) res))
+    ;; handle remaining keyword arguments
+    (warn "actual-args: ~S formal-args: ~S" actual-args formal-args)
+    (loop while actual-args
+        for key = (pop actual-args)
+        do (cond ((keywordp key)
+                  (let ((formal-keyword-arg (or (find key formal-args :test 'string=) ;; (string= |:a| '|a|)
+                                                 (py-raise '{ValueError} "Invalid keyword argument supplied: ~S." key))))
+                    (push (cons formal-keyword-arg (pop actual-args)) res)
+                    (setf formal-args (delete formal-keyword-arg formal-args :test 'eq))))
+                 (t
+                  (py-raise '{ValueError} "Invalid positional arguement supplied: ~S." key))))
+    res))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; 
@@ -1893,7 +1876,7 @@ But if RELATIVE-TO package name is given, result may contains dots."
 ;; standard __new__ behaviour
 
 (def-py-method py-property.__init__ (x &rest args)
-  (with-parsed-py-arglist ("property.__init__" (fget fset fdel doc) args)
+  (with-parsed-py-arglist ((fget fset fdel doc) args)
     (setf (slot-value x 'fget) (or fget (load-time-value *the-none*))
 	  (slot-value x 'fset) (or fset (load-time-value *the-none*))
 	  (slot-value x 'fdel) (or fdel (load-time-value *the-none*))
