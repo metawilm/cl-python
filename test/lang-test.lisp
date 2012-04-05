@@ -754,7 +754,8 @@ assert f(1) == 1 + 42")
   (run-no-error "
 f = lambda x, y=lambda: 42: x + y()
 assert f(1, lambda: 2) == 1 + 2")
-  (run-no-error "assert (lambda x, y: x+y)(x=3, y=4) == 7"))
+  (run-no-error "assert (lambda x, y: x+y)(x=3, y=4) == 7")
+  (run-no-error "print (lambda:42).func_globals" :known-failure t))
 
 (defmethod test-lang ((kind (eql :listcompr-expr)))
   (declare (ignorable kind))
