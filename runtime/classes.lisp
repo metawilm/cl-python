@@ -4126,22 +4126,25 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
 
 ;; Shortcut functions
 
-(defmacro def-py-shortcut-func (funcname method &key error (defgeneric t))
+(defmacro def-py-shortcut-func (funcname method &key not-found-clause (defgeneric t))
   `(progn ,@(when defgeneric
 	      `((defgeneric ,funcname (x))))
 	  (defmethod ,funcname ((x t))
 	      (let ((,method (x.class-attr-no-magic.bind x ',method)))
                 (if ,method
                     (py-call ,method)
-                  ,(or error
+                  ,(or not-found-clause
                        `(py-raise '{TypeError}
                                   "Object ~A (a ~A) has no `~A' method."
                                   x (class-name (py-class-of x))
                                   ',method)))))))
 
 (def-py-shortcut-func py-abs  {__abs__} )
-(def-py-shortcut-func py-repr {__repr__})
-(def-py-shortcut-func py-str  {__str__} :error (py-repr x))
+(def-py-shortcut-func py-repr {__repr__} 
+  :not-found-clause ;; it's not a Python object, otherwise object.__repr__ would kick in
+  (with-output-to-string (s)
+    (format s "~A" x)))
+(def-py-shortcut-func py-str  {__str__} :not-found-clause (py-repr x))
 (def-py-shortcut-func py-hex  {__hex__} )
 (def-py-shortcut-func py-oct  {__oct__} )
 (def-py-shortcut-func py-len  {__len__} )
