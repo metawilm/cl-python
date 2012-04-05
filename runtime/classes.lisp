@@ -801,10 +801,40 @@ otherwise work well.")
     (unless ok
       (py-raise '{AttributeError} "Function ~A has no attribute `~A' to delete." func attr))))
 
+(defclass func-code (clpython:object)
+  ((name      :type string                :initarg :name      :reader func-code.name      :initform "")
+   (arg-count :type (integer 0)           :initarg :arg-count :reader func-code.arg-count :initform 0)
+   (nlocals   :type (integer 0)           :initarg :nlocals   :reader func-code.nlocals   :initform 0)
+   (varnames  :type #1=(or py-tuple list) :initarg :varnames  :reader func-code.varnames  :initform *the-empty-tuple*)
+   (cellvars  :type #1#                   :initarg :cellvars  :reader func-code.cellvars  :initform *the-empty-tuple*)
+   (freevars  :type #1#                   :initarg :freevars  :reader func-code.freevars  :initform *the-empty-tuple*)
+   (code      :type string                :initarg :code      :reader func-code.code      :initform "")
+   (consts    :type #1#                   :initarg :consts    :reader func-code.consts    :initform *the-empty-tuple*)
+   (names     :type #1#                   :initarg :names     :reader func-code.names     :initform *the-empty-tuple*)
+   (filename  :type string                :initarg :filename  :reader func-code.filename  :initform "")
+   (lnotab    :type string                :initarg :lnotab    :reader func-code.lnotab    :initform "")
+   (stacksize :type (integer 0)           :initarg :stacksize :reader func-code.stacksize :initform 0)
+   (flags     :type (integer 0)           :initarg :flags     :reader func-code.flags     :initform 0))
+  (:metaclass clpython:py-type))
+  
 (def-py-method py-function.func_code :attribute (x)
   "Read-only attribute: the underlying lambda. (In CPython the bytecode vector.)"
-  (py-function-lambda x))
-  
+  (make-instance 'func-code))
+
+(progn (def-py-method func-code.co_name      :attribute (x) (func-code.name x))
+       (def-py-method func-code.co_argcount  :attribute (x) (func-code.arg-count x))
+       (def-py-method func-code.co_nlocals   :attribute (x) (func-code.nlocals x))
+       (def-py-method func-code.co_varnames  :attribute (x) (func-code.varnames x))
+       (def-py-method func-code.co_cellvars  :attribute (x) (func-code.cellvars x))
+       (def-py-method func-code.co_freevars  :attribute (x) (func-code.freevars x))
+       (def-py-method func-code.co_code      :attribute (x) (func-code.code x))
+       (def-py-method func-code.co_consts    :attribute (x) (func-code.consts x))
+       (def-py-method func-code.co_names     :attribute (x) (func-code.names x))
+       (def-py-method func-code.co_filename  :attribute (x) (func-code.filename x))
+       (def-py-method func-code.co_lnotab    :attribute (x) (func-code.lnotab x))
+       (def-py-method func-code.co_stacksize :attribute (x) (func-code.stacksize x))
+       (def-py-method func-code.co_flags     :attribute (x) (func-code.flags x)))
+
 (def-py-method py-function._dis :attribute (x)
   ;; CLPython-specific attribute, to ease debugging.
   ;;
@@ -1849,7 +1879,7 @@ But if RELATIVE-TO package name is given, result may contains dots."
            (lisp-package.__getattribute__ pkg (symbol-name s)))
       finally
         (when (plusp num-skipped)
-          (warn "Module (Lisp package) ~S has some attributes with :TODO or :N/A status, excluded from returned __dict__."
+          (break "Module (Lisp package) ~S has some attributes with :TODO or :N/A status, excluded from returned __dict__."
                 pkg))
         (return dict)))
 
