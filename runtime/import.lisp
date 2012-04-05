@@ -398,13 +398,14 @@ Otherwise raises ImportError."
                                       (whereas ((within-mod (with-py-dict
                                                                 (gethash within-mod-name
                                                                          (find-symbol-value '#:|modules| :clpython.module.sys)))))
-                                               (and (eq t (module-package-p within-mod)) ;; not "maybe"
-                                                    (equal (pathname-device within-mod)
-                                                           (pathname-device src-file))
-                                                    (equal (pathname-host within-mod)
-                                                           (pathname-host src-file))
-                                                    (equal (pathname-directory within-mod)
-                                                           (pathname-directory src-file))))))
+                                               (let ((within-src-pathname (module-src-pathname within-mod)))
+                                                 (and (eq t (module-package-p within-mod)) ;; not "maybe"
+                                                      (equal (pathname-device within-src-pathname)
+                                                             (pathname-device src-file))
+                                                      (equal (pathname-host within-src-pathname)
+                                                             (pathname-host src-file))
+                                                      (equal (pathname-directory within-src-pathname)
+                                                             (pathname-directory src-file)))))))
                    (new-mod-dotted-name (if sub-module-p
                                             (concatenate 'string within-mod-name "." dotted-name)
                                           dotted-name)))
