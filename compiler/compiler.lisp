@@ -981,35 +981,37 @@ an assigment statement. This changes at least the returned 'store' form.")
   ;; Replace "def f( (x,y), z):  .." 
   ;; by "def f( |(x,y)|, z):  x, y = |(x,y)|; ..".
   (let (nested-vars)
-    (labels ((sym-tuple-name (tup)
-	       ;; Convert tuple with identifiers to symbol:  (a,(b,c)) -> |(a,(b,c))|
-	       ;; Returns the symbol and a list with the "included" symbols (here: a, b and c)
-	       (assert (match-p tup '([tuple-expr] ?items)))
-	       (labels ((rec (x)
-			  (ecase (car x)
-			    ([tuple-expr] (format nil "(~{~A~^,~})"
-						  (loop for v in (second x) collect (rec v))))
-			    ([identifier-expr] (push (second x) nested-vars)
-					       (symbol-name (second x))))))
-		 (ensure-user-symbol (rec tup))))
-             (analyze-args (args)
+    (labels ((find-nested-vars (tup)
+               ;; Convert tuple with identifiers to symbol:  (a,(b,c)) -> |(a,(b,c))|
+               ;; Returns the symbol and a list with the "included" symbols (here: a, b and c)
+               (assert (match-p tup '([tuple-expr] ?items)))
+               (labels ((rec (x)
+                          (ecase (car x)
+                            ([tuple-expr] (loop for v in (second x) do (rec v)))
+                            ([identifier-expr] (push (second x) nested-vars)))))
+                 (rec tup)))
+             
+             (analyze-args (args start-ix)
                (let (new-arglist normal-args destructs)
-                 (dolist (arg args)
-                   (ecase (car arg)
-                     ([identifier-expr] (let ((name (second arg)))
-                                          (push name new-arglist)
-                                          (push name normal-args)))
-                     ([tuple-expr] (let ((tuple-var (sym-tuple-name arg)))
-                                     (push tuple-var new-arglist)
-                                     (push `([assign-stmt] ,tuple-var (,arg)) destructs)))))
+                 (loop
+                     for arg in args
+                     for ix from start-ix
+                     do (ecase (car arg)
+                          ([identifier-expr] (let ((name (second arg)))
+                                               (push name new-arglist)
+                                               (push name normal-args)))
+                          ([tuple-expr] (find-nested-vars arg)
+                                        (let ((tuple-var (make-symbol (format nil ".~D" ix))))
+                                          (push tuple-var new-arglist)
+                                          (push `([assign-stmt] ,tuple-var (,arg)) destructs)))))
                  (values (nreverse new-arglist)
                          (nreverse normal-args)
                          (nreverse destructs)))))
       
-      (multiple-value-bind (lambda-pos-args normal-pos-args pos-destructs ) 
-          (analyze-args f-pos-args)
+      (multiple-value-bind (lambda-pos-args normal-pos-args pos-destructs)
+          (analyze-args f-pos-args 0)
         (multiple-value-bind (lambda-key-args normal-key-args key-destructs)
-            (analyze-args (mapcar #'car f-key-args))
+            (analyze-args (mapcar #'car f-key-args) (length f-pos-args))
           (values lambda-pos-args ;; LAMBDA args
                   lambda-key-args ;;  are in the same order as original lists
                   (when (or pos-destructs key-destructs)
@@ -1124,6 +1126,7 @@ LOCALS shares share tail structure with input arg locals."
 	       (context-fname (ensure-user-symbol
                                (format nil "~A/~{~A~^.~}" *current-module-name*
                                        (reverse new-context-name-stack))))
+               (generator-p (generator-ast-p suite))
 	       (body-decls `((:lexically-declared-globals ,func-cumul-declared-globals)
                              (:declared-globals-current-scope ,func-cumul-declared-globals)
                              (:context-type-stack ,(cons :function (get-pydecl :context-type-stack e)))
@@ -1167,12 +1170,34 @@ LOCALS shares share tail structure with input arg locals."
                     (block function-body
 		      (with-pydecl ,body-decls
                         ,tuples-destruct-form
-                        ,(if (generator-ast-p suite)
+                        ,(if generator-p
                              `([return-stmt] ,(rewrite-generator-funcdef-suite
                                                context-fname suite))
                            `(progn ,suite
                                    ,@(when return-default-none
-                                       `((load-time-value *the-none*)))))))))))
+                                       `((load-time-value *the-none*))))))))))
+               (func-code `(make-instance 'func-code
+                             :name ,(symbol-name fname)
+                             :arg-count ,(+ (length lambda-pos-args) (length lambda-key-args))
+                             :nlocals ,(length (append destructed-pos-key-args new-locals)) ;; TODO: check this
+                             :varnames (make-tuple-from-list ',(mapcar #'symbol-name
+                                                                       (append lambda-pos-args
+                                                                               lambda-key-args
+                                                                               (when *-arg (list (second *-arg)))
+                                                                               (when **-arg (list (second **-arg)))
+                                                                               destructed-pos-key-args
+                                                                               new-locals)))
+                             :cellvars *the-empty-tuple* ;; FIXME
+                             :freevars *the-empty-tuple* ;; FIXME
+                             :code ""
+                             :consts *the-empty-tuple*
+                             :names *the-empty-tuple*
+                             :filename "FIXME"
+                             :lnotab ""
+                             :stacksize 1
+                             :flags ,(+ (if *-arg  #x04 0)
+                                        (if **-arg #x08 0)
+                                        (if generator-p #x20 0)))))
           (when (keywordp fname)
 	    (return-from funcdef-stmt-1 func-lambda))
           (let ((art-deco '.undecorated-func))
@@ -1181,7 +1206,8 @@ LOCALS shares share tail structure with input arg locals."
             `(let* ((.undecorated-func (make-py-function :name ',fname
                                                          :context-name ',context-fname
                                                          :lambda ,func-lambda
-                                                         :func-globals ,(get-module-namespace e)))
+                                                         :func-globals ,(get-module-namespace e)
+                                                         :func-code ,func-code))
                     (.decorated-func ,art-deco))
                ;; Ugly special case:
                ;;  class C:

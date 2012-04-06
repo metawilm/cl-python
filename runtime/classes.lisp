@@ -632,7 +632,8 @@ otherwise work well.")
   ((fname        :initarg :fname        :initform nil :accessor py-function-name)
    (context-name :initarg :context-name :initform nil :accessor py-function-context-name)
    (lambda       :initarg :lambda       :initform nil :accessor py-function-lambda)
-   (func-globals :initarg :func-globals                         :accessor py-function-func-globals))
+   (func-globals :initarg :func-globals                         :accessor py-function-func-globals)
+   (func-code    :initarg :func-code                  :reader   py-function-code))
   (:metaclass funcallable-python-class))
 
 ;; XXX On LispWorks this is not guaranteed to work:
@@ -649,7 +650,7 @@ otherwise work well.")
                (string (sfd-name data)))))
   (:method ((f py-function)) (string (py-function-name f))))
 
-(defun make-py-function (&key name context-name lambda func-globals)
+(defun make-py-function (&key name context-name lambda func-globals func-code)
   (if *create-simple-lambdas-for-python-functions*
       (progn (register-simple-function lambda name)
              lambda)
@@ -657,7 +658,8 @@ otherwise work well.")
                :fname (string name)
                :lambda lambda
                :context-name context-name
-               :func-globals func-globals)))
+               :func-globals func-globals
+               :func-code func-code)))
       (set-funcallable-instance-function x lambda)
       ;; fill dict?
       x)))
@@ -802,7 +804,7 @@ otherwise work well.")
   
 (def-py-method py-function.func_code :attribute (x)
   "Read-only attribute: the underlying lambda. (In CPython the bytecode vector.)"
-  (make-instance 'func-code))
+  (py-function-code x))
 
 (progn (def-py-method func-code.co_name      :attribute (x) (func-code.name x))
        (def-py-method func-code.co_argcount  :attribute (x) (func-code.arg-count x))
