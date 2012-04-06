@@ -103,7 +103,8 @@ The corresponding module must be defined as package, e.g. :clpython.module.posix
   ()
   (:metaclass clpython:py-type))
 
-(def-py-method frame.f_globals :attribute (x) *the-empty-tuple*)
+(def-py-method frame.f_globals :attribute (x) (clpython:make-py-hash-table))
+(def-py-method frame.f_lineno :attribute (x) 0)
 
 (defun |_getframe| (&optional depth)
   (declare (ignore depth))
