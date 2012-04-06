@@ -376,12 +376,12 @@
     (loop while (and formal-args actual-args (not (symbolp (car actual-args))))
         do (push (cons (pop formal-args) (pop actual-args)) res))
     ;; handle remaining keyword arguments
-    (warn "actual-args: ~S formal-args: ~S" actual-args formal-args)
     (loop while actual-args
         for key = (pop actual-args)
         do (cond ((keywordp key)
-                  (let ((formal-keyword-arg (or (find key formal-args :test 'string=) ;; (string= |:a| '|a|)
-                                                 (py-raise '{ValueError} "Invalid keyword argument supplied: ~S." key))))
+                  (let ((formal-keyword-arg (or (find key formal-args :test 'string-equal)
+                                                ;; FIXME case issue; (string= |:a| '|a|)
+                                                (py-raise '{ValueError} "Invalid keyword argument supplied: ~S." key))))
                     (push (cons formal-keyword-arg (pop actual-args)) res)
                     (setf formal-args (delete formal-keyword-arg formal-args :test 'eq))))
                  (t
