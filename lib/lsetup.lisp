@@ -66,7 +66,7 @@
 
 (defpackage :clpython.module.itertools
   (:use :clpython :common-lisp)
-  (:export))
+  (:export #:|islice|))
 
 (defpackage :clpython.module.marshal
   (:use :clpython :common-lisp))
