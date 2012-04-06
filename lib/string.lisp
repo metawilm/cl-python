@@ -125,3 +125,6 @@
                       (incf dest-i))))
           finally (when delete-chars (setf (fill-pointer res) dest-i))
                   (return res))))
+
+(defun |replace| (&rest args)
+  (apply #'clpython::py-string.replace args))
