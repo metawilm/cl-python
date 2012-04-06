@@ -41,9 +41,9 @@
 (defpackage :clpython.module._csv
   (:use :clpython :common-lisp))
 
-(defpackage :clpython.module.collections
+(defpackage :clpython.module._collections
   (:use :common-lisp)
-  (:export #:|namedtuple|))
+  (:export #:|deque| #:|defaultdict|))
 
 (defpackage :clpython.module.cStringIO
   (:use :common-lisp)

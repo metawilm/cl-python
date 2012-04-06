@@ -92,7 +92,7 @@
                                        (:file "builtins" :depends-on ("builtins-file" "builtins-set"))
                                        (:file "array" :depends-on ("lsetup"))
                                        (:file "binascii" :depends-on ("lsetup"))
-                                       (:file "collections" :depends-on ("lsetup"))
+                                       (:file "_collections" :depends-on ("lsetup"))
                                        (:file "cStringIO" :depends-on ("lsetup"))
                                        (:file "errno"  :depends-on ("lsetup"))
                                        (:file "exceptions" :depends-on ("lsetup"))
