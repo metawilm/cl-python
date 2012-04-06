@@ -345,9 +345,10 @@ Returns NIL if not found."
     ;; __getattr__
     (whereas ((v (ca.getattr ca)))
       (py-call (bind-val v x x.cls) (symbol-name attr))))
-  (py-raise '{AttributeError}
-            "Object ~A (a ~A) has no attribute `~A'."
-            x (class-name (class-of x)) attr))
+  (or (attr-hook x attr)
+      (py-raise '{AttributeError}
+                "Object ~A (a ~A) has no attribute `~A'."
+                x (class-name (class-of x)) attr)))
 
 (defun bind-val (val x x.class)
   (assert (and x x.class))

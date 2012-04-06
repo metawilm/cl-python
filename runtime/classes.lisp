@@ -4481,3 +4481,19 @@ the lisp list will be returned).")
     (or (find-symbol x.string #.(find-package :clpython.user))
 	(when intern
 	  (intern x.string #.(find-package :clpython.user))))))
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Additional attributes
+
+(defgeneric attr-hook (object attr)
+  (:documentation "Hook to define additional attributes for (non-Python) objects"))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Make Lisp streams available to Python
+
+(defmethod attr-hook ((stream stream) (attr (eql '{write})))
+  (if (output-stream-p stream)
+      (flet ((stream.write (string)
+               (check-type string string)
+               (write-string string stream)))
+        #'stream.write)
+    (call-next-method)))
