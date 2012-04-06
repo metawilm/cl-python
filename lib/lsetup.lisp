@@ -25,6 +25,9 @@
                  collect (class-name class))
            ))
   
+(defpackage :clpython.module._ast
+  (:use :clpython :common-lisp))
+
 (defpackage :clpython.module.array
   (:use :clpython :common-lisp)
   (:import-from :clpython #:py-val->string)
@@ -35,6 +38,8 @@
   (:use :clpython :common-lisp)
   (:export #:|hexlify|))
 
+(defpackage :clpython.module._csv
+  (:use :clpython :common-lisp))
 
 (defpackage :clpython.module.collections
   (:use :common-lisp)
@@ -43,6 +48,9 @@
 (defpackage :clpython.module.cStringIO
   (:use :common-lisp)
   (:export ))
+
+(defpackage :clpython.module.datetime
+  (:use :clpython :common-lisp))
 
 (defpackage :clpython.module.errno
   (:use :common-lisp)
@@ -56,6 +64,12 @@
   (:use :clpython :common-lisp)
   (:export #:|partial| #:|reduce|))
 
+(defpackage :clpython.module._fileio
+  (:use :clpython :common-lisp))
+
+(defpackage :clpython.module.fcntl
+  (:use :clpython :common-lisp))
+
 (defpackage :clpython.module.gc
   (:use :clpython :common-lisp)
   (:export #:|disable| ))
@@ -67,6 +81,12 @@
 (defpackage :clpython.module.itertools
   (:use :clpython :common-lisp)
   (:export #:|islice|))
+
+(defpackage :clpython.module._lsprof
+  (:use :clpython :common-lisp))
+
+(defpackage :clpython.module._md5
+  (:use :clpython :common-lisp))
 
 (defpackage :clpython.module.marshal
   (:use :clpython :common-lisp))
@@ -92,6 +112,9 @@
            #:|O_RDONLY| #:|O_WRONLY| #:|O_RDWR| #:|O_NONBLOCK| #:|O_NDELAY| #:|O_APPEND|
            #:|O_SHLOCK| #:|O_EXLOCK| #:|O_SYNC| #:|O_NOFOLLOW| #:|O_CREAT| #:|O_TRUNC|
            #:|O_EXCL| #:|O_NOCTTY| #:|O_DIRECTORY|))
+
+(defpackage :clpython.module.pwd
+  (:use :clpython :common-lisp))
 
 (defpackage :clpython.module._random
   (:use :clpython :common-lisp)
@@ -145,6 +168,9 @@
            #:|SO_SNDLOWAT| #:|SO_RCVLOWAT| #:|SO_SNDTIMEO| #:|SO_RCVTIMEO| #:|SO_ERROR| #:|SO_TYPE| 
            #:|TCP_NODELAY| #:|TCP_MAXSEG|))
 
+(defpackage :clpython.module._sre
+  (:use :clpython :common-lisp))
+
 (defpackage :clpython.module._ssl
   (:use :clpython :common-lisp)
   (:export #:|SSLError| #:|CERT_NONE| #:|CERT_OPTIONAL| #:|CERT_REQUIRED|
@@ -154,6 +180,18 @@
            #:|SSL_ERROR_INVALID_ERROR_CODE|
            #:|RAND_status| #:|RAND_egd| #:|RAND_add|
            ))
+
+(defpackage :clpython.module._struct
+  (:use :clpython :common-lisp))
+
+(defpackage :clpython.module._symtable
+  (:use :clpython :common-lisp))
+
+(defpackage :clpython.module.select
+  (:use :clpython :common-lisp))
+
+(defpackage :clpython.module.signal
+  (:use :clpython :common-lisp))
 
 (defpackage :clpython.module.string
   (:use :clpython :common-lisp)
@@ -185,6 +223,9 @@
            #:|warnoptions| #:|py3kwarning|)
   (:import-from :clpython #:*last-raised-exception*))
 
+(defpackage :clpython.module.termios
+  (:use :clpython :common-lisp))
+
 (defpackage :clpython.module.thread
   (:use :clpython :common-lisp)
   (:import-from :clpython #:def-py-method)
@@ -194,3 +235,13 @@
   (:use :clpython :common-lisp)
   (:shadow #:|sleep| #:|time|)
   (:export #:|clock| #:|sleep| #:|time|))
+
+(defpackage :clpython.module.unicodedata
+  (:use :clpython :common-lisp))
+
+(defpackage :clpython.module._weakref
+  (:use :clpython :common-lisp))
+
+(defpackage :clpython.module.zlib
+  (:use :clpython :common-lisp))
+
