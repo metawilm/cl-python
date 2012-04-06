@@ -1316,6 +1316,11 @@ Basically the Python equivalent of ENSURE-CLASS."
   ;; XXX remove prefix `py-' etc
   (symbol-name (class-name cls)))
 
+(def-py-method py-type.__nonzero__ (cls)
+  ;; to make e.g. "if str: ..." work
+  (declare (ignore cls))
+  +the-true+)
+
 (def-py-method py-type.__dict__ :attribute-read (cls)
   (make-instance 'funky-dict-wrapper
     :getter (lambda () (dict cls))
@@ -4485,7 +4490,10 @@ the lisp list will be returned).")
 ;; Additional attributes
 
 (defgeneric attr-hook (object attr)
-  (:documentation "Hook to define additional attributes for (non-Python) objects"))
+  (:documentation "Hook to define additional attributes for (non-Python) objects")
+  (:method (object attr)
+           (declare (ignore object attr))
+           nil))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Make Lisp streams available to Python
