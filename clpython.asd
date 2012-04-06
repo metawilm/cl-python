@@ -96,6 +96,7 @@
                                        (:file "cStringIO" :depends-on ("lsetup"))
                                        (:file "errno"  :depends-on ("lsetup"))
                                        (:file "exceptions" :depends-on ("lsetup"))
+                                       (:file "_functools" :depends-on ("lsetup"))
                                        (:file "gc"  :depends-on ("lsetup"))
                                        (:file "imp" :depends-on ("lsetup"))
                                        (:file "itertools" :depends-on ("lsetup"))
