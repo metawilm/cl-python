@@ -99,9 +99,15 @@ The corresponding module must be defined as package, e.g. :clpython.module.posix
                  (:unicode nil)
                  (:bytes-warning nil))))
 
+(defclass frame (clpython:object)
+  ()
+  (:metaclass clpython:py-type))
+
+(def-py-method frame.f_globals :attribute (x) *the-empty-tuple*)
+
 (defun |_getframe| (&optional depth)
   (declare (ignore depth))
-  (make-instance 'object))
+  (make-instance 'frame))
 (set-impl-status '|_getframe| :incomplete)
 
 (defun |setcheckinterval| (arg)
