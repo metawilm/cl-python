@@ -54,7 +54,7 @@
 
 (defpackage :clpython.module._functools
   (:use :clpython :common-lisp)
-  (:export #:|partial|))
+  (:export #:|partial| #:|reduce|))
 
 (defpackage :clpython.module.gc
   (:use :clpython :common-lisp)
