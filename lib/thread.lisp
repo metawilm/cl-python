@@ -1,4 +1,4 @@
-;; -*- Mode: LISP; Syntax: COMMON-LISP; Package: CLPYTHON.MODULE.THREAD -*-
+;; -*- Mode: LISP; Syntax: COMMON-LISP; Package: CLPYTHON.MODULE.THREAD; Readtable: PY-AST-USER-READTABLE -*-
 ;;
 ;; This software is Copyright (c) Franz Inc. and Willem Broekema.
 ;; Franz Inc. and Willem Broekema grant you the rights to
@@ -8,6 +8,7 @@
 ;; known as the LLGPL.
 
 (in-package :clpython.module.thread)
+(in-syntax *ast-user-readtable*)
 
 (defparameter *lock-counter* 0)
 
@@ -146,3 +147,8 @@
     (or (gethash curr-thread *threads*)
         (prog1 (setf (gethash curr-thread *threads*) *next-thread-id*)
           (incf *next-thread-id*)))))
+
+;;; Errors
+
+(define-exception-subclass 'thread.error '{Exception})
+(defvar |error| (find-class 'thread.error))
