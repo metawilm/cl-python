@@ -34,9 +34,15 @@
   (:shadow #:|array|)
   (:export #:|array|))
 
+(defpackage :clpython.module._bsddb
+  (:use :clpython :common-lisp))
+
 (defpackage :clpython.module.binascii
   (:use :clpython :common-lisp)
   (:export #:|hexlify|))
+
+(defpackage :clpython.module._codecs
+  (:use :clpython :common-lisp))
 
 (defpackage :clpython.module._csv
   (:use :clpython :common-lisp))
