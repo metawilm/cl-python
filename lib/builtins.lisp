@@ -18,7 +18,7 @@
   (loop for (sym cls-name) in
 	`(({basestring}   py-string       )
 	  ({bool}         py-bool         )
-          ({buffer}       ,*the-notimplemented*)
+          ({buffer}       buffer          )
 	  ({classmethod}  py-class-method )
 	  ({complex}      py-complex      )
 	  ({dict}         dict            )

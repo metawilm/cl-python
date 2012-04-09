@@ -96,7 +96,7 @@
 
 (defpackage :clpython.module.marshal
   (:use :clpython :common-lisp))
-  
+
 (defpackage :clpython.module.math
   (:use :clpython :common-lisp)
   (:export #:|pi| #:|e|
