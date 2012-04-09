@@ -12,3 +12,7 @@
 
 (defun |lookup_error| (&rest args)
   (py-raise '{LookupError} "_codecs.lookup_error() args: ~S" args))
+
+(defun |register| (search-func)
+  (declare (ignore search-func))
+  (break "Todo: _codecs.register()"))

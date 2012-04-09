@@ -43,7 +43,7 @@
 
 (defpackage :clpython.module._codecs
   (:use :clpython :common-lisp)
-  (:export #:|lookup_error|))
+  (:export #:|lookup_error| #:|register|))
 
 (defpackage :clpython.module._csv
   (:use :clpython :common-lisp))
