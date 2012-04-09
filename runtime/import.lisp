@@ -175,52 +175,31 @@ Caller is responsible for deciding if recompiling is really necessary."
   (compile-py-source-file :filename filename :mod-name mod-name :output-file output-file)
   (cached-probe-file output-file t))
 
-(defun %load-source-python-file (lisp-filename &key (mod-name (error ":mod-name required"))
-                                                   (habitat (error "habitat required")))
-  (check-type lisp-filename pathname)
-  (check-type mod-name (or symbol string))
-
-  (let #1=(module new-module-p success source-func source)
-       (unwind-protect
-           (progn 
-             (multiple-value-setq #1#
-               (load-py-fasl-file :filename lisp-filename
-                                  :pre-import-hook (lambda (module) (add-loaded-module module habitat))))
-             (module-import-post . #1#))
-         
-         ;; clean-up:
-         (unless success
-           (when new-module-p
-             ;; It's a hack that there are two places:
-             (remove-loaded-module module habitat)
-             (remhash module *all-modules*))))
-       (setf success t)
-       module))
-
-(defun %load-compiled-python-file (bin-filename
-                                   &key (mod-name (error ":mod-name required"))
-                                        (context-mod-name mod-name)
-                                        (habitat (error "habitat required"))
-                                   &aux (*habitat* habitat))
-  "Loads and registers given compiled Python file.
+(defun %load-python-file (filename
+                          &key (mod-name (error ":mod-name required"))
+                               (habitat (error "habitat required"))
+                          &aux (*habitat* habitat))
+  "Loads and registers given compiled Python file, which can be either a Lisp source or fasl file.
 Returns the (updated) loaded module, or NIL on error (e.g. when the underlying
 LOAD failed and was aborted by the user)."
-  (check-type bin-filename pathname)
+  (check-type filename pathname)
   (check-type mod-name (or symbol string))
-  (check-type context-mod-name (or symbol string))
-  (assert (cached-probe-file bin-filename t))
+  (assert (cached-probe-file filename t))
 
   #+sbcl ;; SBCL only forces loading as fasl, if extension is _lower-case_ 'fasl' (2009.11.26)
-  (when (string= (pathname-type bin-filename) *py-compiled-file-type*)
-    (setf bin-filename
-      (merge-pathnames (make-pathname :type (string-downcase *py-compiled-file-type*)) bin-filename)))
+  (when (string= (pathname-type filename) *py-compiled-file-type*)
+    (setf filename
+      (merge-pathnames (make-pathname :type (string-downcase *py-compiled-file-type*)) filename)))
   
   (let #1=(module new-module-p success source-func source)
        (unwind-protect
            (progn 
              (multiple-value-setq #1#
-               (load-py-fasl-file :filename bin-filename
-                                  :pre-import-hook (lambda (module) (add-loaded-module module habitat))))
+               (load-py-fasl-file :filename filename
+                                  :pre-import-hook (lambda (%module %new-module-p)
+                                                     (add-loaded-module %module habitat)
+                                                     (setf new-module-p %new-module-p
+                                                           module %module))))
              (module-import-post . #1#))
          
          ;; clean-up:
@@ -400,6 +379,8 @@ Otherwise raises ImportError."
                                                                          (find-symbol-value '#:|modules| :clpython.module.sys)))))
                                                (let ((within-src-pathname (module-src-pathname within-mod)))
                                                  (and (eq t (module-package-p within-mod)) ;; not "maybe"
+                                                      within-src-pathname
+                                                      src-file
                                                       (equal (pathname-device within-src-pathname)
                                                              (pathname-device src-file))
                                                       (equal (pathname-host within-src-pathname)
@@ -492,12 +473,7 @@ Otherwise raises ImportError."
                                          (remhash bin-file *import-recompiled-files*)
                                          (cached-probe-file bin-file t)
                                          
-                                         ;; Restart the py-import call.
-                                         ;; This used to recursively callpy-import instead of throw,
-                                         ;; but that is wrong: e.g. %load-compiled-python-file relies
-                                         ;; on immediate unwinding on failure, to keep loaded modules
-                                         ;; consistent.
-                                         (throw 'py-import-retry nil))
+                                         (throw 'py-import-retry nil)) ;; cause unwinding
                                      
                                        :test-function (lambda
                                                           #+allegro (&optional c) ;; ACL bug: C not supplied
@@ -511,15 +487,11 @@ Otherwise raises ImportError."
                                                               from file ~A" dotted-name src-file))))
                       (setf new-module
                         (if *compile-for-import*
-                            (%load-compiled-python-file bin-file
-                                                        :mod-name new-mod-dotted-name
-                                                        :habitat habitat)
+                            (%load-python-file bin-file :mod-name new-mod-dotted-name :habitat habitat)
                           (let ((*current-module-name* new-mod-dotted-name)  ;; used by compiler
                                 (*compile-file-truename* src-file)) ;; needed for import stmts
                             (declare (special *current-module-name*))
-                            (%load-source-python-file bin-file
-                                                      :mod-name new-mod-dotted-name
-                                                      :habitat habitat)))))
+                            (%load-python-file bin-file :mod-name new-mod-dotted-name :habitat habitat)))))
                   ;; Cleanup form:
                   (flet ((log-abort (error-p)
                            (let ((args (list "Loading of module `~A' was aborted. ~

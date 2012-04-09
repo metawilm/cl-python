@@ -114,9 +114,6 @@ Callers can intercept the condition MODULE-IMPORT-PRE to override default loadin
                            ;; Being muffled means condition was intended for an earlier handler,
                            ;; corresponding to a nested inner import action.
                            (unless (mip.muffled c)
-                             ;; Need to register module before it is fully loaded,
-                             ;; otherwise infinite recursion if two modules import
-                             ;; each other.
                              (unless (fasl-matches-compiler-p (mip.compiler-id c))
                                (when (mip.is-compiled c)
                                  (whereas ((r (find-restart 'delete-fasl-try-again)))
@@ -129,10 +126,9 @@ Callers can intercept the condition MODULE-IMPORT-PRE to override default loadin
                                    source (mip.source c)
                                    (mip.muffled c) t)
                              (when pre-import-hook
-                               (funcall pre-import-hook (mip.module c)))))))
+                               (funcall pre-import-hook (mip.module c) new-module-p))))))
            
-           (with-auto-mode-recompile (:filename filename
-                                                :restart-name delete-fasl-try-again)
+           (with-auto-mode-recompile (:filename filename :restart-name delete-fasl-try-again)
              (unless (let (#+lispworks
                            (system:*binary-file-type* (string-downcase *py-compiled-file-type*)))
                        (load filename))
