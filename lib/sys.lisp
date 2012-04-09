@@ -21,8 +21,9 @@
 (def-habitat-attribute |argv| clpython:habitat-cmd-line-args
   "Comand line args passed to script; argv[0] is script name (rel or abs)")
 
-(defvar |byteorder| :n/a "Byte order of implementation: 'big' or 'little'")
-(set-impl-status '|byteorder| :n/a "Byte order is hidden in Lisp implementation.")
+(defvar |byteorder| "big" 
+  "Byte order of implementation: 'big' or 'little'. CLPython is hereby arbitrarily defined to be big-endian.")
+(set-impl-status '|byteorder| t)
 
 ;; Not implemented, and no intention to: 
 ;;  subversion, _current_frames, dllhandle, exc_type, exc_value, exc_traceback,
@@ -42,6 +43,9 @@
 	     *the-none*) ;; traceback object
      (list *the-none* *the-none* *the-none*))))
 (set-impl-status '|exc_info| :incomplete "No traceback objects (yet).")
+
+(defun |exc_clear| ()
+  (setf *last-raised-exception* nil))
 
 (defvar |copyright| "Copyright (c) Franz Inc. and Willem Broekema.")
 (set-impl-status '|copyright| t)

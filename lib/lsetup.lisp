@@ -213,7 +213,7 @@
 
 (defpackage :clpython.module.sys
   (:use :clpython :common-lisp)
-  (:export #:|argv| #:|byteorder| #:|exc_info| #:|copyright|
+  (:export #:|argv| #:|byteorder| #:|exc_info| #:|exc_clear| #:|copyright|
 	   #:|builtin_module_names| #:|displayhook| #:|excepthook|
 	   #:|__displayhook__| #:|exc_info| #:|__excepthook__| #:|exit| #:|exitfunc|
            #:|flags| #:|_getframe|
