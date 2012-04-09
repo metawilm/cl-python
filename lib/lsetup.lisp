@@ -42,7 +42,8 @@
   (:export #:|hexlify|))
 
 (defpackage :clpython.module._codecs
-  (:use :clpython :common-lisp))
+  (:use :clpython :common-lisp)
+  (:export #:|lookup_error|))
 
 (defpackage :clpython.module._csv
   (:use :clpython :common-lisp))
@@ -188,7 +189,8 @@
            ))
 
 (defpackage :clpython.module._struct
-  (:use :clpython :common-lisp))
+  (:use :clpython :common-lisp)
+  (:export #:|_clearcache| #:|__doc__|))
 
 (defpackage :clpython.module._symtable
   (:use :clpython :common-lisp))
