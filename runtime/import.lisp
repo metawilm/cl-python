@@ -175,14 +175,12 @@ Caller is responsible for deciding if recompiling is really necessary."
   (compile-py-source-file :filename filename :mod-name mod-name :output-file output-file)
   (cached-probe-file output-file t))
 
-(defun %load-python-file (filename
-                          &key (mod-name (error ":mod-name required"))
-                               (habitat (error "habitat required"))
-                          &aux (*habitat* habitat))
+(defun load-python-file (filename
+                         &key (mod-name (error ":mod-name required"))
+                              (habitat (error "habitat required"))
+                         &aux (*habitat* habitat))
   "Loads and registers given compiled Python file, which can be either a Lisp source or fasl file.
-Returns the (updated) loaded module, or NIL on error (e.g. when the underlying
-LOAD failed and was aborted by the user)."
-  (check-type filename pathname)
+Returns the (updated) loaded module, or NIL on load error."
   (check-type mod-name (or symbol string))
   (assert (cached-probe-file filename t))
 
@@ -191,27 +189,20 @@ LOAD failed and was aborted by the user)."
     (setf filename
       (merge-pathnames (make-pathname :type (string-downcase *py-compiled-file-type*)) filename)))
   
-  (let #1=(module new-module-p success source-func source)
-       (unwind-protect
-           (progn 
-             (multiple-value-setq #1#
-               (load-py-fasl-file :filename filename
-                                  :pre-import-hook (lambda (%module %new-module-p)
-                                                     (add-loaded-module %module habitat)
-                                                     (setf new-module-p %new-module-p
-                                                           module %module))))
-             (module-import-post . #1#))
-         
-         ;; clean-up:
-         (unless success
-           (when new-module-p
-             ;; It's a hack that there are two places:
-             (remove-loaded-module module habitat)
-             (remhash module *all-modules*))))
-       (setf success t)
-       module))
+  (load-python-file-with-hooks 
+   :filename filename
+   :on-pre-import (lambda (%module %new-module-p)
+                    (declare (ignore %new-module-p))
+                    (add-loaded-module %module habitat))
+   :on-import-success (lambda (%module %new-module-p %source-func %source)
+                        (module-import-post %module %new-module-p %source-func %source))
+   :on-import-fail (lambda (%module %new-module-p)
+                     (when %new-module-p
+                       ;; It's a hack that there are two places:
+                       (remove-loaded-module %module habitat)
+                       (remhash %module *all-modules*)))))
 
-(defun module-import-post #1=(module new-module-p success source-func source)
+(defun module-import-post #1=(module new-module-p source-func source)
   (declare (ignorable . #1#))
   #+clpython-source-level-debugging
   (progn
@@ -487,11 +478,11 @@ Otherwise raises ImportError."
                                                               from file ~A" dotted-name src-file))))
                       (setf new-module
                         (if *compile-for-import*
-                            (%load-python-file bin-file :mod-name new-mod-dotted-name :habitat habitat)
+                            (load-python-file bin-file :mod-name new-mod-dotted-name :habitat habitat)
                           (let ((*current-module-name* new-mod-dotted-name)  ;; used by compiler
                                 (*compile-file-truename* src-file)) ;; needed for import stmts
                             (declare (special *current-module-name*))
-                            (%load-python-file bin-file :mod-name new-mod-dotted-name :habitat habitat)))))
+                            (load-python-file bin-file :mod-name new-mod-dotted-name :habitat habitat)))))
                   ;; Cleanup form:
                   (flet ((log-abort (error-p)
                            (let ((args (list "Loading of module `~A' was aborted. ~

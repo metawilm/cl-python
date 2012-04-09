@@ -100,41 +100,46 @@
               (do-compile))
         (do-compile)))))
 
-(defun load-py-fasl-file (&key filename pre-import-hook)
-  "Loads given compiled Python file.
-FILENAME can actually be either source or fasl file.
-Returns MODULE, NEW-MODULE-P, SOURCE-FUNC, SOURCE
-or NIL on error (e.g. when the underlying LOAD failed and was aborted by the user).
-
-Callers can intercept the condition MODULE-IMPORT-PRE to override default loading behaviour."
+(defun load-python-file-with-hooks (&key filename on-pre-import on-import-success on-import-fail)
+  "Loads given FILENAME (either a source or fasl file) with given hooks.
+Hook arguments:
+ (ON-PRE-IMPORT MODULE NEW-MODULE-P)
+ (ON-IMPORT-SUCCESS MODULE NEW-MODULE-P SOURCE-FUNC SOURCE)
+ (ON-IMPORT-FAIL MODULE NEW-MODULE-P)
+Returns the module loading success, or NIL after failure.
+Callers can intercept the condition MODULE-IMPORT-PRE to further customize loading behaviour."
   (assert filename)
   (let #1=(module new-module-p source-func source)
-         (handler-bind ((module-import-pre
-                         (lambda (c)
-                           ;; Being muffled means condition was intended for an earlier handler,
-                           ;; corresponding to a nested inner import action.
-                           (unless (mip.muffled c)
-                             (unless (fasl-matches-compiler-p (mip.compiler-id c))
-                               (when (mip.is-compiled c)
-                                 (whereas ((r (find-restart 'delete-fasl-try-again)))
-                                   (format t "~&;; Recompiling obsolete Python fasl file.~%")
-                                   (invoke-restart r)))
-                               (fasl-mismatch-cerror filename))
-                             (setf module (mip.module c)
-                                   new-module-p (mip.module-new-p c)
-                                   source-func (mip.source-func c)
-                                   source (mip.source c)
-                                   (mip.muffled c) t)
-                             (when pre-import-hook
-                               (funcall pre-import-hook (mip.module c) new-module-p))))))
-           
-           (with-auto-mode-recompile (:filename filename :restart-name delete-fasl-try-again)
-             (unless (let (#+lispworks
-                           (system:*binary-file-type* (string-downcase *py-compiled-file-type*)))
-                       (load filename))
-               ;; Might happen if loading errs and there is a restart that lets LOAD return NIL.
-               (return-from load-py-fasl-file nil))))
-         (values . #1#)))
+    (flet ((handle-module-import-pre (c)
+             ;; Being muffled means condition was intended for an earlier handler,
+             ;; corresponding to a nested inner import action.
+             (unless (mip.muffled c)
+               (unless (fasl-matches-compiler-p (mip.compiler-id c))
+                 (when (mip.is-compiled c)
+                   (whereas ((r (find-restart 'delete-fasl-try-again)))
+                            (format t "~&;; Recompiling obsolete Python fasl file.~%")
+                            (invoke-restart r)))
+                 (fasl-mismatch-cerror filename))
+               (setf module (mip.module c)
+                     new-module-p (mip.module-new-p c)
+                     source-func (mip.source-func c)
+                     source (mip.source c)
+                     (mip.muffled c) t)
+               (when on-pre-import
+                 (funcall on-pre-import module new-module-p)))))
+      (let ((load-success))
+        (unwind-protect
+            (handler-bind ((module-import-pre #'handle-module-import-pre))
+              (with-auto-mode-recompile (:filename filename :restart-name delete-fasl-try-again)
+                (let (#+lispworks (system:*binary-file-type* (string-downcase *py-compiled-file-type*)))
+                  ;; LOAD can e.g. return NIL, if loading fails and user invoked a restart to let LOAD return NIL.
+                  (when (setf load-success (load filename))
+                    (when on-import-success
+                      (funcall on-import-success . #1#))))))
+          (unless load-success
+            (when on-import-fail
+              (funcall on-import-fail module new-module-p))))
+        (when load-success module)))))
 
 (defparameter *compile-python-ast-before-running* nil
   "Whether to compile an AST before running it.")
