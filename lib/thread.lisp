@@ -136,3 +136,13 @@
            #+allegro (mp:process-kill (internal-thread x))
            #-allegro (break "todo")))
     (map nil #'kill *threads*)))
+
+(defparameter *threads* (make-hash-table #+allegro #+allegro :weak-keys t))
+(defparameter *next-thread-id* 0)
+
+(defun |get_ident| ()
+  (let ((curr-thread #+allegro sys:*current-process*
+                     #-allegro (break "TODO")))
+    (or (gethash curr-thread *threads*)
+        (prog1 (setf (gethash curr-thread *threads*) *next-thread-id*)
+          (incf *next-thread-id*)))))
