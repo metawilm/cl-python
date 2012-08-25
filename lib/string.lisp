@@ -23,26 +23,13 @@
       arr))
   
   (defun chars-satisfying (pred)
-    (let ((bit-arr (make-array +max-char-code+
-                               :element-type 'bit
-                               :initial-element 0)))
-      (let* ((num-chars (loop with num-chars = 0
-                            for i from 0 below +max-char-code+
-                            for ch = (code-char i)
-                            when (and ch ;; CHAR-CODE-LIMIT could be > actual num chars
-                                      (funcall pred ch))
-                            do (setf (sbit bit-arr i) 1)
-                               (incf num-chars)
-                            finally (return num-chars)))
-             (char-arr (make-array num-chars :element-type 'character)))
-        (loop for i fixnum from 0
-            with res-i fixnum = 0
-            when (= (sbit bit-arr i) 1)
-            do (setf (schar char-arr res-i) (code-char i))
-               (incf res-i)
-               (when (= res-i num-chars)
-                 (return)))
-        char-arr))))
+    (let ((ret (make-array 10 :element-type 'character :adjustable t :fill-pointer 0)))
+      (loop for i from 0 below +max-char-code+
+	    for ch = (code-char i)
+	    when (and ch ;; CHAR-CODE-LIMIT could be > actual num chars
+		      (funcall pred ch))
+	    do (vector-push-extend ch ret))
+      ret)))
 
 (defconstant-once |ascii_lowercase| #.(char-range #\a #\z))
 (defconstant-once |ascii_uppercase| #.(char-range #\A #\Z))
