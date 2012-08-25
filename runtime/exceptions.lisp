@@ -51,7 +51,9 @@
            :accessor exception-args)))
 
   (defun define-exception-subclass (exc-name &rest supers)
-    (eval `(define-condition ,exc-name ,supers nil))))
+    (eval `(define-condition ,exc-name ,supers nil))
+    ;; Conditions are not guaranteed to be found by FIND-CLASS, but in practice it works:
+    (find-class exc-name)))
 
 
 ;;; Create, print
