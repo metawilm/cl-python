@@ -220,7 +220,8 @@
            (assert (not *exceptions-are-python-objects*))
            (values (let ((cond-class-name (apply #'define-exception-subclass
                                                  name (mapcar 'class-name supers))))
-                     (find-class cond-class-name))
+                     (check-type cond-class-name class)
+                     cond-class-name)
                    :condition)))
     
     #+(or)(assert (symbolp name))
