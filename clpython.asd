@@ -149,7 +149,8 @@
                                        (:file "function-test")
                                        (:file "mod-builtins-test")
                                        (:file "mod-string-test")
-                                       (:file "mod-math-test")))))
+                                       (:file "mod-math-test")
+                                       (:file "mod-operator-test")))))
 
 
 (defmethod asdf:perform :after ((op asdf:test-op) (c (eql (asdf:find-system :clpython))))
