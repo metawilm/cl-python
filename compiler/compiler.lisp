@@ -463,27 +463,39 @@ an assigment statement. This changes at least the returned 'store' form.")
   (case (car place)
     
     (([attributeref-expr] [subscription-expr] [identifier-expr])
-     
+     ;; XXX should also use __coerce__ http://www.python.org/dev/peps/pep-0203/
      (let ((py-@= (get-binary-iop-func-name op))
 	   (py-@  (get-binary-op-func-name-from-iop op)))
        (multiple-value-bind (vars vals stores writer reader)
 	   (get-setf-expansion place env)
 	 (assert (null (cdr stores)))
-	 (with-gensyms (place-val-now op-val)
+	 (with-gensyms (place-val-now op-val new-val)
 	   `(let* (,@(mapcar #'list vars vals)
-		   (,op-val ,val)
-		   (,place-val-now ,reader))
-
-	      ;; The @= functions are not defined on numbers and strings.
-	      ;; Check for fixnum inline.
-	      (or (unless (fixnump ,place-val-now)
-		    ;; py-@= returns t iff __i@@@__ found
-		    (,py-@= ,place-val-now ,op-val))
-		  (let ((,(car stores) (,py-@ ,place-val-now ,op-val)))
-		    ,writer)))))))
-
+                   (,op-val ,val)
+                   (,place-val-now ,reader)
+                   (,new-val))
+              (tagbody
+                
+                ;; The @= functions are not defined on numbers and strings.
+                ;; Check for fixnum inline.
+                (when (fixnump ,place-val-now)
+                  (go non-aug))
+                
+                ;; py-@= returns NIL iff __i@@@__ not found
+                (setf ,new-val (,py-@= ,place-val-now ,op-val))
+                (cond ((not ,new-val)
+                       (go non-aug))
+                      (t
+                       (go set-new-val)))
+               non-aug
+                (setf ,new-val (,py-@ ,place-val-now ,op-val))
+                
+               set-new-val
+                (let ((,(car stores) ,new-val))
+                  ,writer)))))))
+    
     (t (raise-syntax-error "Invalid augmented assignment: ~A"
-                                     (py-pprint whole nil)))))
+                           (py-pprint whole nil)))))
 
 (defmacro [backticks-expr] (item)
   `(py-repr ,item))
