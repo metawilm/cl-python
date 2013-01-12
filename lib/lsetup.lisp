@@ -69,6 +69,7 @@
 
 (defpackage :clpython.module._functools
   (:use :clpython :common-lisp)
+  (:shadow #:|reduce|)
   (:export #:|partial| #:|reduce|))
 
 (defpackage :clpython.module._fileio
@@ -207,7 +208,8 @@
            #:|hexdigits| #:|octdigits| #:|lowercase| #:|uppercase| #:|letters|
            #:|punctuation| #:|whitespace| #:|printable| #:|translate| #:|maketrans|
            #:|replace|)
-  (:import-from :clpython.util #:+max-char-code+))
+  (:import-from :clpython.util #:+max-char-code+)
+  (:shadow #:|replace|))
 
 (defpackage :clpython.module.symbol
   (:use :clpython :common-lisp)
@@ -252,4 +254,5 @@
 
 (defpackage :clpython.module.zlib
   (:use :clpython :common-lisp))
+
 
