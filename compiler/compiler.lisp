@@ -167,16 +167,16 @@ ARGS are the command-line args, available as `sys.argv'; can be a string (which 
         (when compile
           ;; Same context as for importing a module
           (with-proper-compiler-settings
-              (multiple-value-bind (func warnings-p failure-p)
+              (multiple-value-bind (func)
 		  (block compilation
 		    (handler-bind (#+ecl 
 				   ((or c:compiler-error c:compiler-internal-error simple-error)
                                     (lambda (c)
                                       (warn "Compilation failed: ~S" c)
-                                      (return-from compilation (values nil nil t)))))
+                                      (return-from compilation nil))))
                       (compile nil get-module-f)))
                 (declare (ignore warnings-p))
-                (cond ((and func (not failure-p))
+                (cond (func
                        (setf fc func))
                       (t
                        (warn "CLPython detected a compilation failure, possibly indicating a bug in the Lisp compiler.")
