@@ -86,7 +86,8 @@
                (change-token-suffix (x suffix)
                  (check-type suffix character)
                  (let ((s (remove-token-suffix x)))
-                   (intern (format nil "~A~C" s suffix) #.*package*))))
+                   (with-standard-io-syntax 
+                     (intern (format nil "~A~C" s suffix) #.*package*)))))
         (flet ((shift-outcome (removed-$)
                  `(let ((,(make-number-token removed-$) nil)
                         ,@(loop for i from (1+ removed-$) to (length terms)
