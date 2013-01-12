@@ -86,6 +86,7 @@
     :description "Python module library"
     :depends-on (:clpython.basic :clpython.runtime :clpython.compiler #| TODO: remove compiler dep |#)
     :components ((:module "lib"
+                          :serial t
                           :components ((:file "lsetup")
                                        (:file "builtins-file" :depends-on ("lsetup"))
                                        (:file "builtins-set" :depends-on ("lsetup"))
