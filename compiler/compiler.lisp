@@ -1212,15 +1212,15 @@ LOCALS shares share tail structure with input arg locals."
                                         (if **-arg #x08 0)
                                         (if generator-p #x20 0)))))
           (when (keywordp fname)
-	    (return-from funcdef-stmt-1 func-lambda))
+	    (return-from funcdef-stmt-1 `#1=(make-py-function :name ',fname
+                                                              :context-name ',context-fname
+                                                              :lambda ,func-lambda
+                                                              :func-globals ,(get-module-namespace e)
+                                                              :func-code ,func-code)))
           (let ((art-deco '.undecorated-func))
             (dolist (x (reverse decorators))
               (setf art-deco `(py-call ,x ,art-deco)))
-            `(let* ((.undecorated-func (make-py-function :name ',fname
-                                                         :context-name ',context-fname
-                                                         :lambda ,func-lambda
-                                                         :func-globals ,(get-module-namespace e)
-                                                         :func-code ,func-code))
+            `(let* ((.undecorated-func #1#)
                     (.decorated-func ,art-deco))
                ;; Ugly special case:
                ;;  class C:

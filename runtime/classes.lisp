@@ -611,16 +611,18 @@ Note that in the latter case, functions miss their name and attribute dict, but 
 otherwise work well.")
 
 (defstruct (simple-function-data (:conc-name sfd-))
-  func name attributes)
+  func name attributes func-globals func-code)
 
 (defparameter *simple-function-data* (make-hash-table :test 'eq)
   "Mapping from function to SIMPLE-FUNCTION-DATA")
 
-(defun register-simple-function (func name)
+(defun register-simple-function (func name func-globals func-code)
   (setf (gethash func *simple-function-data*)
     (make-simple-function-data :func func
                                :name name
-                               :attributes (make-hash-table :test 'eq))))
+                               :attributes (make-hash-table :test 'eq)
+                               :func-globals func-globals
+                               :func-code func-code)))
 
 (defgeneric py-function-lambda (x)
   ;; XXX this function is also used when *create-simple-lambdas-for-python-functions*
@@ -652,7 +654,7 @@ otherwise work well.")
 
 (defun make-py-function (&key name context-name lambda func-globals func-code)
   (if *create-simple-lambdas-for-python-functions*
-      (progn (register-simple-function lambda name)
+      (progn (register-simple-function lambda name func-globals func-code)
              lambda)
     (let ((x (make-instance 'py-function
                :fname (string name)
@@ -711,7 +713,10 @@ otherwise work well.")
   x)
 
 (def-py-method py-function.func_globals :attribute-read (x)
-  (py-function-func-globals x))
+  (etypecase x
+    (py-function (py-function-func-globals x))
+    (function (sfd-func-globals (or (gethash x *simple-function-data*)
+                                    (error "No function metadata available"))))))
 
 (def-py-method py-function.__setattr__ (func attr val)
   (when (stringp attr)
@@ -804,7 +809,10 @@ otherwise work well.")
   
 (def-py-method py-function.func_code :attribute (x)
   "Read-only attribute: the underlying lambda. (In CPython the bytecode vector.)"
-  (py-function-code x))
+  (etypecase x
+    (py-function (py-function-code x))
+    (function (sfd-func-code (or (gethash x *simple-function-data*)
+                                 (error "No function metadata available"))))))
 
 (progn (def-py-method func-code.co_name      :attribute (x) (func-code.name x))
        (def-py-method func-code.co_argcount  :attribute (x) (func-code.arg-count x))
