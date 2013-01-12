@@ -18,24 +18,26 @@
     (let ((name (symbol-name meth)))
       (intern (format nil "__~A~A_"
                       (string-downcase meth)
-                      (if (equal (aref name (1- (length name))) #\_) "" #\_)))))
+                      (if (equal (aref name (1- (length name))) #\_) "" #\_)) #.*package*)))
 
   (defun sym->op (op)
-    (let ((name (format nil "~A-~A" '#:py op)))
-      (or (find-symbol name :clpython)
-          (break "No such symbol in pkg clpython: ~A" name))))
+    (with-standard-io-syntax
+      (let ((name (format nil "~A-~A" '#:py op)))
+        (or (find-symbol name :clpython)
+            (break "No such symbol in pkg clpython: ~A" name)))))
 
   (defun sym->iop (op)
-    (let ((name (format nil "~A-~A=" '#:py op)))
-      (or (find-symbol name :clpython)
-          (break "No such symbol in pkg clpython: ~A" name))))
+    (with-standard-io-syntax
+      (let ((name (format nil "~A-~A=" '#:py op)))
+        (or (find-symbol name :clpython)
+            (break "No such symbol in pkg clpython: ~A" name)))))
   
   (defmacro def-magic-twins (name params &body body)
     `(progn (defun ,name ,params ,@body)
             (defun ,(magicify name) ,params (,name ,@params))
             (eval-when (:load-toplevel :execute)
-              (export ',name)
-              (export ',(magicify name)))))
+              (export ',name #.*package*)
+              (export ',(magicify name) #.*package*))))
   )
 
 ;; Binary, magic
@@ -156,21 +158,21 @@
 ;;   z = x; z += y."
 
 #.`(progn ,@(loop for (name op) in
-                  '((iadd +)
-                    (iand &)
-                    (iconcat +)
-                    (idiv /) ;; check __future__.division
-                    (ifloordiv //)
-                    (ilshift <<)
-                    (imod %)
-                    (imul *)
-                    (ior |\||)
-                    (ipow *)
-                    (irepeat *)
-                    (irshift >>)
-                    (isub -)
-                    (itruediv /t/)
-                    (ixor ^))
+                  '((|iadd| +)
+                    (|iand| &)
+                    (|iconcat| +)
+                    (|idiv| /) ;; check __future__.division
+                    (|ifloordiv| //)
+                    (|ilshift| <<)
+                    (|imod| %)
+                    (|imul| *)
+                    (|ior| |\||)
+                    (|ipow| *)
+                    (|irepeat| *)
+                    (|irshift| >>)
+                    (|isub| -)
+                    (|itruediv| /t/)
+                    (|ixor| ^))
                 collect `(def-magic-twins ,name (x y) (or (,(sym->iop op) x y)
                                                           (,(sym->op op) x y)))))
  
