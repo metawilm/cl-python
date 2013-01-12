@@ -69,7 +69,7 @@
 
 (asdf:defsystem :clpython.runtime
     :description "Python runtime environment"
-    :depends-on (:clpython.basic :closer-mop #+ecl :cl-custom-hash-table)
+    :depends-on (:clpython.basic :closer-mop #+ecl :cl-custom-hash-table :temporary-file)
     :components ((:module "runtime"
                           :serial t
                           :components ((:file "rsetup"       )

@@ -66,7 +66,7 @@ In particular, asdf-binary-locations is used if available.")
                ;; Fall back to using a temporary file.
                (setf result-path
                  (get-temporary-file :key (list kind modname filepath)
-                                     :filename-items (list "clpython" modname))))
+                                     :filename-items (list "clpython" modname "fasl"))))
              result-path))
   
   (:method (kind modname filepath)
@@ -77,27 +77,14 @@ In particular, asdf-binary-locations is used if available.")
 
 (defun get-temporary-file (&key key filename-items)
   "Returns the pathname of a new temporary file.
-FILENAME-ITEMS are converted to strings.
-Wen FILENAME-ITEMS is (:A :B :C) result could be #p\"/tmp/A/B/C.123343\""
-  (multiple-value-bind (file found-p)
-      (gethash key *temp-file-map*)
-    (when found-p
-      (return-from get-temporary-file file)))
-  (flet ((get-temp-file-name ()
-           (let ((random-n (random 1000000)))
-             (declare (ignorable random-n))
-             (let ((dir-string (or #+allegro (namestring (sys:temporary-directory))
-                                   #+unix "/tmp/" ;; e.g. Lispworks, ABCL
-                                   #-(or allegro unit) (error "GET-TEMPORARY-FILE not defined in this implementation.")))                     
-                   (filename (format nil "~{~A~^.~}.~D" filename-items random-n)))
-               (concatenate 'string dir-string filename)))))
-    (dotimes (i 1000)
-      (let ((fname (get-temp-file-name)))
-        (unless (careful-probe-file fname)
-          (when (file-writable-p fname)
-            (return-from get-temporary-file
-              (setf (gethash key *temp-file-map*) (pathname fname))))))))
-  (error "GET-TEMPORARY-FILE failed"))
+When FILENAME-ITEMS is (:A :B :C) result could look like #p'/tmp/clpython-A.B.C-XYZ123'
+Might signal TEMPORARY-FILE:CANNOT-CREATE-TEMPORARY-FILE"
+  (whereas ((file-name (gethash key *temp-file-map*)))
+           (return-from get-temporary-file file-name))
+  (let ((file-stream (temporary-file:open-temporary :template (format nil "TEMPORARY-FILES:~{~A~^-~}-%" filename-items)
+						    :direction :output)))
+    (prog1 (setf (gethash key *temp-file-map*) (pathname file-stream))
+      (close file-stream))))
 
 (defun file-writable-p (f)
   (handler-case
@@ -411,11 +398,13 @@ Otherwise raises ImportError."
                       bin-file))
               (when src-file
                 (setf bin-file (compiled-file-name kind just-mod-name find-path))
-                (unless (gethash bin-file *import-recompiled-files*)
-                  (when (or force-recompile
-                            (not (cached-probe-file bin-file)) ;; the T should not be necessary?
-                            (< (file-write-date bin-file)
-                               (file-write-date src-file)))
+                (let ((need-recompile (and (not (gethash bin-file *import-recompiled-files*))
+                                           (or force-recompile
+                                               (not (cached-probe-file bin-file))
+                                               (< (file-write-date bin-file) (file-write-date src-file))
+                                               (with-open-file (f bin-file :direction :input) ;; just created temp output file
+                                                 (zerop (file-length f)))))))
+                  (when need-recompile
                     ;; This would be a good place for a "try recompiling" restart,
                     ;; but implementations tend to provide that already.
                     (cond (*compile-for-import*
