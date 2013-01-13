@@ -62,7 +62,7 @@
                                                   (:read            :input)
                                                   (:write           :output)
                                                   ((:read+ :append) :io))
-                                     :element-type 'character
+                                     :element-type '(unsigned-byte 8)
                                      :if-exists (ecase fmode
                                                   ((:read :read+) nil)
                                                   (:write         :supersede)
@@ -153,7 +153,9 @@
 	 (chars (loop
 		    for i from 0
 		    for not-at-limit = (or (null check-size-p) (< i size))
-		    for ch = (and not-at-limit (read-char (py-file-stream f) nil nil))
+                                       ;; TODO check file encoding
+		    for ch = (and not-at-limit
+                                  (code-char (read-byte (py-file-stream f) nil nil)))
 		    while ch 
 		    collect ch)))
     (coerce chars 'string)))
