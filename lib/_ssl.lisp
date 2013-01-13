@@ -34,12 +34,12 @@
 (defconstant-once |SSL_ERROR_INVALID_ERROR_CODE| 9)
 
 (defun |RAND_status| ()
-  (error "TODO"))
+  (error "TODO: _ssl.RAND_status"))
 
 (defun |RAND_egd| (path)
   (declare (ignore path))
-  (error "TODO"))
+  (error "TODO: _ssl.RAND_egd"))
 
 (defun |RAND_add| (string entropy)
   (declare (ignore string entropy))
-  (error "TODO"))
+  (error "TODO: _ssl.RAND_add"))

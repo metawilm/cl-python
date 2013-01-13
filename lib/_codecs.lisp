@@ -15,4 +15,4 @@
 
 (defun |register| (search-func)
   (declare (ignore search-func))
-  (break "Todo: _codecs.register()"))
+  (error "TODO: _codecs.register()"))

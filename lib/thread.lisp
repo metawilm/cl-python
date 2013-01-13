@@ -95,7 +95,7 @@
 
 (def-py-method |lock.locked| (x)
   #+allegro (py-bool (not (mp:gate-open-p (lock-gate x))))
-  #-allegro (break "todo"))
+  #-allegro (error "TODO: thread.lock.locked"))
 
 (def-py-method |lock.__enter__| (x)
   (|lock.acquire| x 1)
@@ -121,7 +121,7 @@
            (declare (ignorable func args))
            #+allegro (mp:process-run-function (clpython::function-name func)
                        (lambda () (apply #'py-call func args)))
-           #-allegro (break "todo")))
+           #-allegro (error "TODO: thread.start_new_thread")))
     (let* ((pa (py-iterate->lisp-list args))
            (ka (when kwargs (loop for (k v) in (clpython:dict.items kwargs)
                                 collect (intern k :keyword)
@@ -135,7 +135,7 @@
   (flet ((kill (x)
            (declare (ignorable x))
            #+allegro (mp:process-kill (internal-thread x))
-           #-allegro (break "todo")))
+           #-allegro (error "TODO: thread.kill_new_threads")))
     (map nil #'kill *threads*)))
 
 (defparameter *threads* (make-hash-table #+allegro #+allegro :weak-keys t))
@@ -143,7 +143,7 @@
 
 (defun |get_ident| ()
   (let ((curr-thread #+allegro sys:*current-process*
-                     #-allegro (break "TODO")))
+                     #-allegro (error "TODO: thread.get_ident")))
     (or (gethash curr-thread *threads*)
         (prog1 (setf (gethash curr-thread *threads*) *next-thread-id*)
           (incf *next-thread-id*)))))

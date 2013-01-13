@@ -50,7 +50,7 @@
 
 (defun |unlink| (path)
   (declare (ignore path))
-  (break "TODO: posix.unlink(path)"))
+  (error "TODO: posix.unlink(path)"))
 
 (defconstant-once |error| (find-class '{OSError}))
 
@@ -64,7 +64,7 @@
 
 (defun |stat| (path)
   (declare (ignorable path))
-  #-allegro (error "TODO")
+  #-allegro (error "TODO: stat")
   #+allegro 
   (let ((stat (handler-case (excl.osi:stat path)
                 (excl.osi:syscall-error (c)
@@ -73,40 +73,40 @@
 
 (def-py-method stat-result.st_mode :attribute (x)
   #+allegro (excl.osi:stat-mode (sr-stat x))
-  #-allegro (break "TODO"))
+  #-allegro (error "TODO: stat-result.st_mode"))
 
 (def-py-method stat-result.st_ino :attribute (x)
   #+allegro (excl.osi:stat-ino (sr-stat x))
-  #-allegro (break "TODO"))
+  #-allegro (error "TODO: stat-result.st_ino"))
 
 (def-py-method stat-result.st_dev :attribute (x)
   #+allegro (excl.osi:stat-dev (sr-stat x))
-  #-allegro (break "TODO"))
+  #-allegro (error "TODO: stat-result.st_dev"))
 
 (def-py-method stat-result.st_nlink :attribute (x)
   #+allegro (excl.osi:stat-nlink (sr-stat x))
-  #-allegro (break "TODO"))
+  #-allegro (error "TODO: stat-result.st_nlink"))
 
 (def-py-method stat-result.st_uid :attribute (x)
   #+allegro (excl.osi:stat-uid (sr-stat x))
-  #-allegro (break "TODO"))
+  #-allegro (error "TODO: stat-result.st_uid"))
 
 (def-py-method stat-result.st_gid :attribute (x)
   #+allegro (excl.osi:stat-gid (sr-stat x))
-  #-allegro (break "TODO"))
+  #-allegro (error "TODO: stat-result.st_gid"))
 
 (def-py-method stat-result.st_size :attribute (x)
   #+allegro (excl.osi:stat-size (sr-stat x))
-  #-allegro (break "TODO"))
+  #-allegro (error "TODO: stat-result.st_size"))
 
 (def-py-method stat-result.st_atime :attribute (x)
   #+allegro (excl.osi:stat-atime (sr-stat x))
-  #-allegro (break "TODO"))
+  #-allegro (error "TODO: stat-result.st_atime"))
 
 (def-py-method stat-result.st_mtime :attribute (x)
   #+allegro (excl.osi:stat-mtime (sr-stat x))
-  #-allegro (break "TODO"))
+  #-allegro (error "TODO: stat-result.st_mtime"))
 
 (def-py-method stat-result.st_ctime :attribute (x)
   #+allegro (excl.osi:stat-ctime (sr-stat x))
-  #-allegro (break "TODO"))
+  #-allegro (error "TODO: stat-result.st_ctime"))
