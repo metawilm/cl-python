@@ -94,7 +94,8 @@
   (:use :clpython :common-lisp))
 
 (defpackage :clpython.module._md5
-  (:use :clpython :common-lisp))
+  (:use :clpython :common-lisp)
+  (:export #:|new|))
 
 (defpackage :clpython.module.marshal
   (:use :clpython :common-lisp)
@@ -255,5 +256,3 @@
 
 (defpackage :clpython.module.zlib
   (:use :clpython :common-lisp))
-
-
