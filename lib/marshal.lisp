@@ -8,3 +8,21 @@
 ;; known as the LLGPL.
 
 (in-package :clpython.module.marshal)
+
+(defun |dump| (value file &optional version)
+  (declare (ignore value file version))
+  (error "TODO: marshal.dump"))
+
+(defun |load| (file)
+  (declare (ignore file))
+  (error "TODO: marshal.load"))
+
+(defun |dumps| (value &optional version)
+  (declare (ignore value version))
+  (error "TODO: marshal.dumps"))
+
+(defun |loads| (string)
+  (declare (ignore string))
+  (error "TODO: marshal.loads"))
+
+(defvar |version| -1)
