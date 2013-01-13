@@ -49,7 +49,7 @@
   (:use :clpython :common-lisp))
 
 (defpackage :clpython.module._collections
-  (:use :common-lisp)
+  (:use :common-lisp :clpython)
   (:export #:|deque| #:|defaultdict|))
 
 (defpackage :clpython.module.cStringIO
