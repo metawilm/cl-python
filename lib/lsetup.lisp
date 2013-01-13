@@ -88,7 +88,7 @@
 
 (defpackage :clpython.module.itertools
   (:use :clpython :common-lisp)
-  (:export #:|islice|))
+  (:export #:|count| #:|ifilter| #:|imap| #:|izip| #:|islice| #:|repeat| #:|tee|))
 
 (defpackage :clpython.module._lsprof
   (:use :clpython :common-lisp))
