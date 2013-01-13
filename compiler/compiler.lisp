@@ -1371,7 +1371,8 @@ LOCALS shares share tail structure with input arg locals."
     (:string (check-type value string)
              value)
     (:bytes  (check-type value string)
-             `(error "TODO: the `bytes' data type"))
+             ;; In Python 2.x this is treated the same as strings. It's intended as mental preparation for 3.0.
+             value)
     (:number (check-type value number)
              value)
     (:lisp   value)))
