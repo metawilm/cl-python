@@ -10,9 +10,11 @@
 (in-package :clpython.module._codecs)
 (in-syntax clpython:*user-readtable*)
 
+(defparameter *search-functions* ())
+
 (defun |lookup_error| (&rest args)
   (py-raise '{LookupError} "_codecs.lookup_error() args: ~S" args))
 
 (defun |register| (search-func)
-  (declare (ignore search-func))
-  (error "TODO: _codecs.register()"))
+  ;; TODO check order
+  (push search-func *search-functions*))
