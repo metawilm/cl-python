@@ -144,6 +144,18 @@
            )
   (:import-from :clpython #:def-proxy-class))
 
+(defpackage :clpython.module._sha
+  (:use :clpython :common-lisp)
+  (:export #:|new|))
+
+(defpackage :clpython.module._sha256
+  (:use :clpython :common-lisp)
+  (:export #:|sha256| #:|sha224|))
+
+(defpackage :clpython.module._sha512
+  (:use :clpython :common-lisp)
+  (:export #:|sha512| #:|sha384|))
+
 (defpackage :clpython.module._socket
   (:use :clpython :common-lisp)
   (:shadow #:|error|)
