@@ -81,7 +81,7 @@ When FILENAME-ITEMS is (:A :B :C) result could look like #p'/tmp/clpython-A.B.C-
 Might signal TEMPORARY-FILE:CANNOT-CREATE-TEMPORARY-FILE"
   (whereas ((file-name (gethash key *temp-file-map*)))
            (return-from get-temporary-file file-name))
-  (let ((file-stream (temporary-file:open-temporary :template (format nil "TEMPORARY-FILES:~{~A~^-~}-%" filename-items)
+  (let ((file-stream (cl-fad:open-temporary :template (format nil "TEMPORARY-FILES:~{~A~^-~}-%" filename-items)
 						    :direction :output)))
     (prog1 (setf (gethash key *temp-file-map*) (pathname file-stream))
       (close file-stream))))
