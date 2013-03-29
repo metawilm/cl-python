@@ -192,50 +192,6 @@
       nil)))
 
 
-;;; Nice error messages for missing required libraries
-
-(defmacro with-missing-dep-help (lib-texts &body body)
-  `(handler-bind ((asdf:missing-dependency
-                   (lambda (c)
-		     ,@(loop for (library warning-text) in lib-texts
-			     collect `(when (eq (asdf::missing-requires c) ,library)
-					(warn ,warning-text))))))
-     ,@body))
-
-(let ((clpython (asdf:find-system :clpython)))
-  
-  (defmethod asdf::traverse :around ((op asdf:compile-op) (system (eql clpython)))
-    (with-missing-dep-help ((:closer-mop
-			     "CL-Python requires library \"Closer to MOP\". ~
-                              Please check it out from the darcs repo: ~
-                              \"darcs get http://common-lisp.net/project/closer/repos/closer-mop\" ~
-                              or download the latest release from: ~
-                              http://common-lisp.net/project/closer/ftp/closer-mop_latest.tar.gz")
-			    #-allegro
-			    (:yacc
-                             "CL-Python requires library \"CL-Yacc\". ~
-                              Please check it out from the darcs repo: ~
-                              \"darcs get http://www.pps.jussieu.fr/~~jch/software/repos/cl-yacc\" ~
-                              or download the latest release from: ~
-                              http://www.pps.jussieu.fr/~~jch/software/files/")
-                            #+ecl
-                            (:cl-custom-hash-table
-                             "CL-Python requires library \"CL-CUSTOM-HASH-TABLE\". ~
-                              Please check it out from the git repo: ~
-                              \"git clone git://github.com/metawilm/cl-custom-hash-table.git\" ~
-                              or download the latest release from: ~
-                              https://github.com/metawilm/cl-custom-hash-table/zipball/master"))
-			   (call-next-method)))
-  
-  #-allegro
-  (defmethod asdf::traverse :around ((op asdf:test-op) (system (eql clpython)))
-    (with-missing-dep-help ((:ptester
-			     "CL-Python requires library \"ptester\". ~
-                              Please download the latest release from: ~
-                              http://files.b9.com/ptester/ptester-latest.tar.gz"))
-      (call-next-method))))
-
-
 ;;; Suppress some warnings about package trickery 
 
 (defmacro suppress-package-warnings (&body body)
