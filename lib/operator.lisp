@@ -215,7 +215,7 @@ the call f(b) returns b.date.month."
   (export '|attrgetter|))
 
 (defun |itemgetter| (&rest items)
-  "Return a callable object that fetches item from its operand using the operand’s
+  "Return a callable object that fetches item from its operand using the operand's
 __getitem__() method. If multiple items are specified, returns a tuple of lookup
 values. Equivalent to:
 
@@ -229,7 +229,7 @@ values. Equivalent to:
                 return tuple(obj[item] for item in items)
         return g
 
-The items can be any type accepted by the operand’s __getitem__() method. Dictionaries
+The items can be any type accepted by the operand's __getitem__() method. Dictionaries
 accept any hashable value. Lists, tuples, and strings accept an index or a slice."
   (cond ((null items)
          (py-raise '{ValueError} "One or more items must be provided."))
