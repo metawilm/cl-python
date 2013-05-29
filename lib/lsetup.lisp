@@ -88,7 +88,8 @@
 
 (defpackage :clpython.module.itertools
   (:use :clpython :common-lisp)
-  (:export #:|count| #:|ifilter| #:|imap| #:|izip| #:|islice| #:|repeat| #:|tee|))
+  (:export #:|count| #:|ifilter| #:|imap| #:|izip| #:|islice| #:|repeat| #:|tee|)
+  (:shadow #:|count|))
 
 (defpackage :clpython.module._lsprof
   (:use :clpython :common-lisp))
@@ -99,7 +100,8 @@
 
 (defpackage :clpython.module.marshal
   (:use :clpython :common-lisp)
-  (:export #:|dump| #:|load| #:|dumps| #:|loads| #:|version|))
+  (:export #:|dump| #:|load| #:|dumps| #:|loads| #:|version|)
+  (:shadow #:|load|))
 
 (defpackage :clpython.module.math
   (:use :clpython :common-lisp)
