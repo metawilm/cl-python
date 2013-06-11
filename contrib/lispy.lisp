@@ -583,6 +583,9 @@ It must be delimited at the right by a space, closing bracket, or EOF."
                                                           (assert (eq (cell-error-name c) ',name)) 
                                                           (whereas ((sym (find-symbol ,dash-name *package*))
                                                                     (val (clpython::bound-in-some-way sym)))
+                                                            (use-value val))
+                                                          (whereas ((sym (find-symbol ,dash-name *lispy-package*))
+                                                                    (val (clpython::bound-in-some-way sym)))
                                                             (use-value val)))))
                                           ,ast))
                                      t))))))
@@ -592,7 +595,7 @@ It must be delimited at the right by a space, closing bracket, or EOF."
   (with-sane-debugging ("Error occured in Python/Lisp input mode, while handling a Python form.")
     (let ((clpython:*habitat* (or *lispy-habitat*
                                   (setf *lispy-habitat* (funcall 'clpython:make-habitat))))
-          (clpython::*module-namespace* (or *lispy-namespace*
+          (clpython::*module-namespace* (or 
                                             (setf *lispy-namespace* (clpython::make-package-ns
                                                                      :package *lispy-package*
                                                                      :scope :module
