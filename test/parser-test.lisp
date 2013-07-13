@@ -85,7 +85,20 @@
                                                     (invoke-restart (find-restart 'continue)))))
                       (ps s t))
                     `([literal-expr] :number ,(expt 10 n-expt)))))
-    
+
+    ;; import tests
+    (test-equal '(clpython.ast.node:|import-from-stmt|
+                  (clpython.user::|sys|)
+                  ((clpython.user::|path|
+                    NIL)))
+                (ps "from sys import path" t))
+
+    (test-equal '(clpython.ast.node:|import-from-stmt|
+                  (clpython.user::|sys|)
+                  ((clpython.user::|path|
+                    NIL)))
+                (ps "from sys import (path,)" t))
+
     ;; suffix operations
     (test-equal '([attributeref-expr]
 		  ([call-expr]
