@@ -11,6 +11,8 @@ CLPython is developed by Willem Broekema and is released as open source under th
 
 The project was started in 2006, and is currently (2013) not under active development anymore.
 
+The git address changed on Feb 4, 2014 from: github.com/franzinc/cl-python.git to: github.com/metawilm/cl-python.git
+
 Documentation
 -------------
 
