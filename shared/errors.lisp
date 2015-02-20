@@ -24,4 +24,4 @@ Same for EOF error."
   (if *exceptions-loaded*
       (apply 'py-raise '{SyntaxError} formatstring args)
     (apply #'error (concatenate 'string "SyntaxError: " formatstring) args))
-  (break "never"))
+  (error "never"))

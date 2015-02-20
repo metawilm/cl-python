@@ -15,11 +15,11 @@
 
 (defun |find_module| (name path)
   (declare (ignore name path))
-  (break "Todo: imp.find_module()"))
+  (error "Todo: imp.find_module()"))
 
 (defun |load_module| (&rest args)
   (declare (ignore args))
-  (break "Todo: imp.load_module()"))
+  (error "Todo: imp.load_module()"))
 
 ;; imp.PY_SOURCE
 ;; imp.PY_COMPILED

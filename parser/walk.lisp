@@ -76,7 +76,7 @@ CLASSDEF, FUNCDEF or LAMBDA."
              (when *walk-debug*
                (warn "w> ~A" ast))
              (unless ast
-               (break "Attempt to WALK-PY-AST into an AST that is NIL"))
+               (error "Attempt to WALK-PY-AST into an AST that is NIL"))
              
              ;; Call user function on whole form. The returned values
 	     ;; control how we proceed.
@@ -253,7 +253,7 @@ CLASSDEF, FUNCDEF or LAMBDA."
 
 (defun ast-recurse-fun (f ast &key value target)
   (when (null ast) 
-    (break "AST-RECURSE-FUN got NIL"))
+    (error "AST-RECURSE-FUN got NIL"))
   
   (unless (consp ast)
     (return-from ast-recurse-fun ast))

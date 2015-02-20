@@ -30,7 +30,7 @@
   (signal (make-condition 'raise-syntax-error-please
             :syntax-error-args syntax-error-args))
   ;; If no-one is listening (so not inside with-compiler-generated-syntax-errors)
-  (break "Uncaught SyntaxError: ~A" (apply #'format nil syntax-error-args)))
+  (error "Uncaught SyntaxError: ~A" (apply #'format nil syntax-error-args)))
 
 (defmacro with-compiler-generated-syntax-errors (() &body body)
   `(handler-bind ((raise-syntax-error-please

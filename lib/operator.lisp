@@ -24,13 +24,13 @@
     (with-standard-io-syntax
       (let ((name (format nil "~A-~A" '#:py op)))
         (or (find-symbol name :clpython)
-            (break "No such symbol in pkg clpython: ~A" name)))))
+            (error "No such symbol in pkg clpython: ~A" name)))))
 
   (defun sym->iop (op)
     (with-standard-io-syntax
       (let ((name (format nil "~A-~A=" '#:py op)))
         (or (find-symbol name :clpython)
-            (break "No such symbol in pkg clpython: ~A" name)))))
+            (error "No such symbol in pkg clpython: ~A" name)))))
   
   (defmacro def-magic-twins (name params &body body)
     `(progn (defun ,name ,params ,@body)

@@ -622,7 +622,7 @@ an assigment statement. This changes at least the returned 'store' form.")
   (with-matching (ast ([module-stmt] ?suite))
     (multiple-value-bind (globals-ns globals-param)
         (typecase globals
-          (symbol-hash-table (break "never"))
+          (symbol-hash-table (error "never"))
           (eq-hash-table     (values (make-hash-table-ns
                                       :dict-form '%exec-globals-ns
                                       :scope :exec-globals
@@ -639,7 +639,7 @@ an assigment statement. This changes at least the returned 'store' form.")
                                       globals)))
         (multiple-value-bind (locals-ns locals-param)
             (typecase locals
-              (symbol-hash-table (break "never"))
+              (symbol-hash-table (error "never"))
               (eq-hash-table     (values (make-hash-table-w/excl-ns
                                           :dict-form '%exec-locals-ns
                                           :excluded-names locals-excluded-names
@@ -1467,7 +1467,7 @@ LOCALS shares share tail structure with input arg locals."
 (defun in-module-1 (&rest args)
   "Ensures the module exists"
   (unless *load-truename*
-    (break "*LOAD-TRUENAME* is not set?!"))
+    (error "*LOAD-TRUENAME* is not set?!"))
   (setf (gethash (derive-pathname *load-truename*) *load-file->module*)
     (apply #'ensure-module args))
   (unless *habitat*
@@ -1691,7 +1691,7 @@ LOCALS shares share tail structure with input arg locals."
   ;; ERROR does not support _classes_ as first condition argument; it
   ;; must be an _instance_ or condition type _name_.
   (cond ((stringp (deproxy exc))
-         (break "String exceptions are not supported (got: ~S)" (deproxy exc))
+         (error "String exceptions are not supported (got: ~S)" (deproxy exc))
          (py-raise '{TypeError}
                    "String exceptions are not supported (got: ~S)" (deproxy exc)))
         

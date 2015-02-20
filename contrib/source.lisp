@@ -14,7 +14,7 @@
 
 #-clpython-source-level-debugging
 (eval-when (:compile-toplevel :load-toplevel :execute)
-  (break "This module is for Allegro 8.2+"))
+  (error "This module is for Allegro 8.2+"))
 
 
 ;;; The unit of source information is the SUBFORM, which links one Python AST node
@@ -170,7 +170,7 @@ Error when no table found."
                   (eq (first src) 'defun)
                   (eq (second src) module-func-name))
         do (or (find-it src)
-               (break "Found DEFUN record but not :PYTHON-SOURCE-LOCATION-TABLE in src ~S for func ~S"
+               (error "Found DEFUN record but not :PYTHON-SOURCE-LOCATION-TABLE in src ~S for func ~S"
                       src module-func-name))
         finally (error "No Python source information found for module-function ~S." module-func-name))))
 
@@ -277,7 +277,7 @@ The :PYTHON records are thus a subset of the :LISP records."
                     (when (and (listp src)
                                (eq (car src) 'defun))
                       (return-from find (second src))))
-                  (break "no func for ix ~A" ix)))
+                  (error "no func for ix ~A" ix)))
          (sum-asm-ranges (vec start end)
            (loop with result
                for ix from start to end

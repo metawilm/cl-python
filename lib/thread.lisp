@@ -49,7 +49,7 @@
           (:process-lock (values 'allegro-process-lock
                                  (list :process-lock (mp:make-process-lock :name (format nil "lock ~A" id))))))
       (apply #'make-instance type :id id :wait-msg wait-msg args))
-    #-allegro (break "todo")))
+    #-allegro (error "todo")))
 
 (def-py-method |lock.acquire| (x &optional (waitflag 1))
   (let ((wait (ecase waitflag

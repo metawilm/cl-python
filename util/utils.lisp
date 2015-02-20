@@ -23,7 +23,7 @@
                     (format t "~&; Recompiling ~A due to wrong fasl format.~%"
                             (or ,filename *load-pathname* *compile-file-truename* "fasl file"))
                     (invoke-restart r))
-                  (break "No expected restart named ~A" ',restart-name)))))
+                  (error "No expected restart named ~A" ',restart-name)))))
      
      (handler-bind (#+allegro
                     ((or excl::file-incompatible-fasl-error excl::fasl-casemode-mismatch)
@@ -110,7 +110,7 @@ If the stream length can not be determined (e.g. for standard input), all availa
   "Break unless the body contains exactly one form. Based on idea from Steve Haflich."
   (let ((num (length body)))
     (unless (= num 1)
-      (break "A CHECKING-READER-CONDITIONALS expression returned ~r forms: ~s" num whole))
+      (error "A CHECKING-READER-CONDITIONALS expression returned ~r forms: ~s" num whole))
     (car body)))
 
 (defmacro named-function (name lambda-form)

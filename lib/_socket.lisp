@@ -17,20 +17,20 @@
 
 (defun |gethostname| ()
   #+allegro (excl.osi:gethostname)
-  #-allegro (break "todo"))
+  #-allegro (cl:error "todo"))
 
 (defun |gethostbyaddr| (address)
   (check-type address string)
   (let* ((hostname #+allegro (if (socket:dotted-address-p address)
                                  (excl.osi:gethostbyaddr address)
                                (excl.osi:gethostbyname address))
-                   #-allegro (break "todo"))
+                   #-allegro (cl:error "todo"))
          (alias-list (clpython:make-py-list-from-list ())) ;; todo
          (ip-addr-list (clpython:make-py-list-from-list (list #+allegro (socket:ipaddr-to-dotted (socket:lookup-hostname hostname))
-                                                     #-allegro (break "todo")))))
+                                                     #-allegro (cl:error "todo")))))
     (make-tuple-from-list (list hostname alias-list ip-addr-list)))
         
-  #-allegro (break "todo"))
+  #-allegro (cl:error "todo"))
 
 
 ;; Socket class
@@ -45,43 +45,43 @@
   "Socket")
 
 (def-py-method |socket.close| (x)
-  (break "todo"))
+  (cl:error "todo"))
 
 (def-py-method |socket.accept| (x)
   #+allegro (let* ((stream (socket:accept-connection (socket.socket x) :wait t))
                    (remote-address (format nil "~A:~A" (socket:lookup-hostname (socket:remote-host stream)) (socket:remote-port stream))))
               (make-tuple-from-list (list (make-instance '|socket| :stream stream)
                                           remote-address)))
-  #-allegro (break "todo"))
+  #-allegro (cl:error "todo"))
 
 (def-py-method |socket.bind| (x address)
   (setf (socket.address x) address))
 
 (def-py-method |socket.connect| (x address)
-  (break "todo"))
+  (cl:error "todo"))
 
 (def-py-method |socket.connect_ex| (x address)
-  (break "todo"))
+  (cl:error "todo"))
 
 (def-py-method |socket.fileno| (x)
-  (break "todo"))
+  (cl:error "todo"))
 
 (def-py-method |socket.getpeername| (x)
-  (break "todo"))
+  (cl:error "todo"))
 
 (def-py-method |socket.getsockname| (x)
   (whereas ((socket (socket.socket x)))
     (let ((hostname #+allegro (socket:ipaddr-to-dotted (socket:local-host socket))
-                    #-allegro (break "todo"))
+                    #-allegro (error "todo"))
           (port #+allegro (socket:local-port socket)
-                #-allegro (break "todo")))
+                #-allegro (cl:error "todo")))
       (return-from |socket.getsockname|
         (make-tuple-from-list (list hostname port)))))
    ;; default same as CPython does
   (make-tuple-from-list (list "0.0.0.0" 0)))
 
 (def-py-method |socket.getsockopt| (x opt-name &optional buflen)
-  (break "todo"))
+  (cl:error "todo"))
 
 (defparameter *all-sockets* ())
 
@@ -92,51 +92,51 @@
                  (integerp (second address)))
         (address) "Cannot socket.listen() without an address: ~S." address)
     (let ((socket #+allegro (socket:make-socket :connect :passive :local-port (+ (second address) (random 100))) ;; XXX random
-                  #-allegro (break "todo")))
+                  #-allegro (cl:error "todo")))
       (push socket *all-sockets*)
       (setf (socket.socket x) socket))))
 
 (def-py-method |socket.makefile| (x &optional mode bufsize)
-  (break "todo"))
+  (cl:error "todo"))
 
 (def-py-method |socket.recv| (x bufsize &optional flags)
   (unless (socket.stream x)
-    (break "Can't socket.recv(): no socket stream."))
+    (cl:error "Can't socket.recv(): no socket stream."))
   ;; todo: multiple bytes
   (read-byte (socket.stream x)))
 
 (def-py-method |socket.recvfrom| (x bufsize &optional flags)
-  (break "todo"))
+  (cl:error "todo"))
 
 (def-py-method |socket.recvfrom_into| (x buffer &optional nbytes flags)
-  (break "todo"))
+  (cl:error "todo"))
 
 (def-py-method |socket.recv_into| (x buffer &optional nbytes flags)
-  (break "todo"))
+  (cl:error "todo"))
 
 (def-py-method |socket.send| (x string &optional flags)
-  (break "todo"))
+  (cl:error "todo"))
 
 (def-py-method |socket.sendall| (x string &optional flags)
-  (break "todo"))
+  (cl:error "todo"))
 
 (def-py-method |socket.sendto| (x string &optional flags address)
-  (break "todo"))
+  (cl:error "todo"))
 
 (def-py-method |socket.setblocking| (x flag)
-  (break "todo"))
+  (cl:error "todo"))
 
 (def-py-method |socket.settimeout| (x value)
-  (break "todo"))
+  (cl:error "todo"))
 
 (def-py-method |socket.gettimeout| (x)
-  (break "todo"))
+  (cl:error "todo"))
 
 (def-py-method |socket.setsockopt| (x level optname value)
   (warn "socket.setsockopt(..) ignored"))
 
 (def-py-method |socket.shutdown| (x how)
-  (break "todo"))
+  (cl:error "todo"))
 
 
 ;;; Constants

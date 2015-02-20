@@ -318,7 +318,7 @@
                                       (string name) 
                                       (make-tuple-from-list supers) ;; ensure not NIL
                                       namespace)
-                             (break "Class' bound __new__ returned NIL: ~A" bound-_new_))))))
+                             (error "Class' bound __new__ returned NIL: ~A" bound-_new_))))))
 
             ;; Call __init__ when the "thing" returned by
             ;; <metaclass>.__new__ is of type <metaclass>.
@@ -420,7 +420,7 @@
   (setf (slot-value x 'func) func))
 
 (def-py-method py-class-method.__call__ (x^ &rest args)
-  (break "todo")
+  (error "todo")
   #+(or)(apply #'py-call (py-method-func x) (slot-value x 'instance) args)
   #+(or)
   (let ((arg (if (classp obj) obj (py-class-of obj))))
@@ -447,7 +447,7 @@
 
 (def-py-method py-class-attribute-method.__get__ (x inst class)
   (unless (classp inst)
-    (break "py-class-attribute-method.__get__ wants class instance as first arg! ~A ~A ~A"
+    (error "py-class-attribute-method.__get__ wants class instance as first arg! ~A ~A ~A"
            x inst class))
   (py-call (slot-value x 'func) inst))
 
@@ -482,7 +482,7 @@
 (def-py-method py-bound-method.__call__ (x &rest args)
   (when (and (null (cdr args))
 	     (eq (car args) '{__dict__}))
-    #+(or)(break "pym.c args: ~A ~A" x args))
+    #+(or)(warn "pym.c args: ~A ~A" x args))
   (with-slots (func instance) x
     (if (functionp func)
 	(apply (the function func) instance args)
@@ -1055,7 +1055,7 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
 		      `(<= 0 ,stop ,real-stop ,start (1- ,length)))
                     (values :nonempty-stepped-slice
 			    start real-stop step (1+ num-increments))))
-                 (t (break "unexpected")))))))
+                 (t (error "unexpected")))))))
 
 ;; super( <B class>, <C instance> ) where C derives from B:
 ;;   :object = <C instance>
@@ -1156,7 +1156,7 @@ START and END are _inclusive_, absolute indices >= 0. STEP is != 0."
       (ecase (length args)
         (0 (py-raise '{TypeError} "xrange: >= 1 arg needed"))
         (1 (unless (>= (car args) 0)
-             (break "xrange: invalid 1-arg: ~A" (car args)))
+             (error "xrange: invalid 1-arg: ~A" (car args)))
            (values 0 (car args) 1))
         (2 (destructuring-bind (start end) args
              (if (< start end)
@@ -1452,7 +1452,7 @@ but the latter two classes are not in CPython.")
          ;; Object instantiation: x = C(..)
          (let ((__new__ (class.attr-no-magic cls '{__new__})))
            (unless __new__
-             (break "Class ~A lacks __new__ method." cls))
+             (error "Class ~A lacks __new__ method." cls))
            #+(or)(warn "__new__: ~A" __new__)
            (let* ((bound-new (if (eq (class-of __new__) (ltv-find-class 'py-static-method))
                                  __new__ ;; inline common case
@@ -1528,7 +1528,7 @@ but the latter two classes are not in CPython.")
              ;; REPL
              (setf packagep nil))
             (t
-             (break "Can't determine :packagep for ~S: no src-pathname" m))))
+             (error "Can't determine :packagep for ~S: no src-pathname" m))))
   (check-type (module-ht m) hash-table) ;; XXX or custom ht
   (setf (gethash m *all-modules*) t))
 
@@ -1878,7 +1878,7 @@ But if RELATIVE-TO package name is given, result may contains dots."
            (lisp-package.__getattribute__ pkg (symbol-name s)))
       finally
         (when (plusp num-skipped)
-          (break "Module (Lisp package) ~S has some attributes with :TODO or :N/A status, excluded from returned __dict__."
+          (warn "Module (Lisp package) ~S has some attributes with :TODO or :N/A status, excluded from returned __dict__."
                 pkg))
         (return dict)))
 
@@ -1999,7 +1999,7 @@ But if RELATIVE-TO package name is given, result may contains dots."
 			  (sxhash (realpart x))
 			(sxhash x)))
 	
-	(t (break "unexpected"))))
+	(t (error "unexpected"))))
 
 (def-py-method py-number.__eq__  (x^ y^) (py-bool (and (numberp x) (numberp y) (= x y))))
 (def-py-method py-number.__mul__ (x^ y^) 
@@ -3336,7 +3336,7 @@ invocation form.\"")
            (ltv-find-class 'dict))
                                
   (:method ((x list))    (cond ((null x)
-                                (break "PY-CLASS-OF of NIL"))
+                                (error "PY-CLASS-OF of NIL"))
                                ((and (listp (car x)) (symbolp (caar x)))
                                 (ltv-find-class 'py-alist))
                                (t
@@ -4124,7 +4124,7 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
 ;; Necessary for bootstrapping (dict + def-py-method)
 (defmethod py-== ((x symbol) (y symbol))
   (unless (eq (symbol-package x) (symbol-package y))
-    (break "py-== called for two symbols in different packages: ~S and ~S" x y))
+    (error "py-== called for two symbols in different packages: ~S and ~S" x y))
   (if (eq x y) 1 0))
 
 (defmethod py-== ((x symbol) (y string))
@@ -4197,7 +4197,7 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
 
 (defmethod py-hash ((x symbol))
   ;; Returning (py-hash (symbol-name x)) leads to infinite recursion.
-  (break "py-hash of SYMBOL")
+  (error "py-hash of SYMBOL")
   (or (get x 'py-hash)
       (let ((hash (py-string.__hash__ (symbol-name x))))
         (setf (get x 'py-hash) hash))))
@@ -4213,7 +4213,7 @@ Returns one of (-1, 0, 1): -1 iff x < y; 0 iff x == y; 1 iff x > y")
   (catch :getattr-block
     (multiple-value-bind (.a .b .c)
         (py-attr x '{__hash__} :bind-class-attr nil :via-getattr t) ;; but should also skip instance dict
-      ;;(break "ph: ~A ~A ~A" .a .b .c)
+      ;;(warn "ph: ~A ~A ~A" .a .b .c)
       (if (eq .a :class-attr)
           (funcall .b .c)
         (return-from py-hash (py-call .a)))))
@@ -4409,7 +4409,6 @@ next value gotten by iterating over X. Returns NIL, NIL upon exhaustion.")
    "Iterate over OBJECT, calling the Lisp function FUNC on each value. Returns nothing.")
   
   (:method ((func function) (object t))
-	   #+(or)(break "map over ~A" object)
 	   (loop with it-fun = (get-py-iterate-fun object)
 	       for val = (funcall it-fun)
 	       while val do (funcall func val))))

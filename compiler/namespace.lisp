@@ -241,7 +241,7 @@
       when (member (car subnames) (cdr subnames))
       collect (car subnames) into dups
       finally (when dups 
-                (break "Namespace ~A contains duplicate names: ~A" ns dups)))
+                (error "Namespace ~A contains duplicate names: ~A" ns dups)))
   `(let ,(ns.names ns)
      ;; Python has no way to declare variables unused, so suppress those warnings.
      (declare (ignorable ,@(ns.names ns)))
@@ -284,7 +284,7 @@
 (defmethod ns.expand-with ((ns let-w/locals-ns) body-form environment)
   (declare (ignore environment))
   (whereas ((non-local-lets (set-difference (ns.let-names ns) (ns.names ns))))
-    (break "Namespace ~A violates: ns.let-names <= ns.names: ~A." ns non-local-lets))
+    (error "Namespace ~A violates: ns.let-names <= ns.names: ~A." ns non-local-lets))
   `(let ,(ns.let-names ns)
      ;; Python has no way to declare variables unused, so suppress those warnings.
      (declare (ignorable ,@(ns.let-names ns)))
@@ -471,7 +471,7 @@
   (:method (environment)
            #+allegro (check-type environment sys::augmentable-environment)
            (get-module-namespace (or (get-pydecl :namespace environment)
-                                     (break "Cannot determine module namespace: ~
+                                     (error "Cannot determine module namespace: ~
                                              environment ~A has no namespace."
                                             environment))))
   (:method ((namespace namespace))
@@ -479,5 +479,5 @@
                while ns
                when (member (ns.scope ns) '(:module :exec-globals))
                return ns
-               finally (break "No global namespace found among parents, for: ~A."
+               finally (error "No global namespace found among parents, for: ~A."
                               namespace))))

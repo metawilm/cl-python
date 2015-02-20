@@ -31,7 +31,7 @@ import _random
   (check-type seed integer)
   ;; http://www.franz.com/support/documentation/8.1/doc/implementation.htm#cl-random-2
   #+allegro (make-random-state t seed)
-  #-allegro (break "Don't know how to create random-state with given seed ~
+  #-allegro (error "Don't know how to create random-state with given seed ~
                     in this Lisp implementation."))
 
 (def-py-method |Random.seed| (x &optional n)

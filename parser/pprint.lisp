@@ -240,7 +240,7 @@ output to a string does not start with a newline."
 			    (items-s (mapcar (lambda (x) (format nil "~A" x)) items)))
 			
 			(with-standard-io-syntax
-			  (break "body-s: ~S item-s: ~S" body-s items-s))
+			  (warn "body-s: ~S item-s: ~S" body-s items-s))
 			
 			;; standard syntax, otherwise strings are
 			;; printed with Python string escapes

@@ -157,7 +157,7 @@
 
 (defmacro %cps-convert (ast k &key nil-allowed)
   (cond ((and (null ast) (not nil-allowed))
-         (break "%CPS-CONVERT of NIL (k=~S)" k))
+         (error "%CPS-CONVERT of NIL (k=~S)" k))
         ((null ast)
          `(funcall ,k ,ast))
         ((listp ast)

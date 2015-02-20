@@ -39,7 +39,7 @@ to retrieve value for :key1."
            (dolist (key keys)
              (block check-key
                (unless (member key ,decl-keys-name)
-                 (restart-case (break "Declaration \"~A\" does not allow key ~S. ~
+                 (restart-case (error "Declaration \"~A\" does not allow key ~S. ~
                                        ~_The allowed keys are: ~{~S~^, ~}." 
                                       ',decl-name key ,decl-keys-name)
                    (declare-new-key ()
@@ -121,7 +121,7 @@ to retrieve value for :key1."
                      (not (symbol-value sym))
                    t)))
               ((:compiler :compilation) nil)
-              (t (break "New kind of environment found: ~A."
+              (t (error "New kind of environment found: ~A."
                         (sys::augmentable-environment-kind env))))))))
   
   (excl:def-fwrapper with-custom-decl-fwrapper (form env)

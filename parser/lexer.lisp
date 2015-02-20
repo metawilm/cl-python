@@ -943,4 +943,4 @@ Returns NEWLINE-P, NEW-INDENT, EOF-P."
     (if clpython:*exceptions-loaded*
 	(funcall 'clpython:py-raise '{UnexpectedEofError} msg)
       (raise-syntax-error msg)))
-  (break "unreachable"))
+  (error "unreachable"))

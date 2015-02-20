@@ -12,7 +12,7 @@
 (defun command-line-args ()
   ;; List of strings, first item = executable path
    #+sbcl cl-user::*POSIX-ARGV*
-   #-sbcl (break "COMMAND-LINE-ARGS undefined in this implementation"))
+   #-sbcl (error "COMMAND-LINE-ARGS undefined in this implementation"))
 
 #+cmu
 (defun build-executable (&rest args)

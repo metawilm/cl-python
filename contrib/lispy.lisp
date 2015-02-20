@@ -82,7 +82,7 @@ Ends by signalling one of: %PARSE.FINISHED, %PARSE.SWITCH-LANGUAGE, %PARSE.UNEXP
     (when (>= *debug-recursion-count* 10)
       (check-type *lisp-standard-readtable* readtable)
       (setf *readtable* *lisp-standard-readtable*)
-      (break "READ-LANGUAGE-FORMS: Too much recursion; *readtable* reset"))
+      (error "READ-LANGUAGE-FORMS: Too much recursion; *readtable* reset"))
     (call-next-method)))
 
 (defvar *lisp-readtable*)
@@ -165,7 +165,7 @@ Ends by signalling one of: %PARSE.FINISHED, %PARSE.SWITCH-LANGUAGE, %PARSE.UNEXP
       (when *lispy-debug*
         (format t "~&READ-LANGUAGE-FORMS :LISP says: reader-error: ~S" c))
       (error '%parse.switch-language :language :lisp :start-ix start-ix :reason c)))
-  (break "never"))
+  (error "never"))
 
 (defun read-mixed-source-string (string &key lisp-readtable interactive-p)
   "Returns a list of Python and Lisp source elements, like: ((:lang form) (:lang2 form2) ..)
@@ -247,7 +247,7 @@ If INTERACTIVE-P then the last item is possibly (:lang :incomplete)"
                                                   (declare (ignore c))
                                                   (finish-parsing))))
                   (read-language-forms language string start-ix :lisp-readtable lisp-readtable)
-                  (break "never"))))))))))
+                  (error "never"))))))))))
 
 (defgeneric read-toplevel-forms (thing &key lisp-readtable))
 
@@ -333,7 +333,7 @@ STREAM can be an interactive (REPL) stream"
                                        (format t "~& Input EOF reached~%")
                                        (setf eof-reached t))
                                      (when (and interactive-p (not (input-ends-with-newline input-string)))
-                                       (break "READ-CHAR on interactive steam failed unexpectedly: last char was ~S but expected ~S."
+                                       (error "READ-CHAR on interactive steam failed unexpectedly: last char was ~S but expected ~S."
                                               (when (plusp (length input-string))
                                                 (aref input-string (1- (length input-string))))
                                               #\Newline))))
@@ -349,7 +349,7 @@ STREAM can be an interactive (REPL) stream"
                          ;; Should hold only during debugging of interactive parsing rules, e.g. by passing
                          ;; STRING-INPUT-STREAM but forcing :INTERACTIVE-P to T
                          (unless *lispy-debug*
-                           (break "Unexpected: parsed-incomplete=~A interactive-p=~A eof-reached=~A"
+                           (error "Unexpected: parsed-incomplete=~A interactive-p=~A eof-reached=~A"
                                   parsed-incomplete interactive-p eof-reached)))
                        (cond (parsed-incomplete
                               (if (and interactive-p (not eof-reached))
