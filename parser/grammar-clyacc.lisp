@@ -15,10 +15,6 @@
 
 ;;; Grammar
 
-(eval-when (:compile-toplevel)
-  #+sbcl (terpri)
-  (format t ";;; Compiling Python grammar for CL-Yacc...~%"))
-
 #.(let ((parser-form
          `(yacc:define-parser *cl-yacc-python-parser*
               (:terminals ,*terminals*)
