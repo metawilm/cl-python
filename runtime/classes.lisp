@@ -792,6 +792,8 @@ otherwise work well.")
     (unless ok
       (py-raise '{AttributeError} "Function ~A has no attribute `~A' to delete." func attr))))
 
+(declaim (special *the-empty-tuple*))
+
 (defclass func-code (clpython:object)
   ((name      :type string                :initarg :name      :reader func-code.name      :initform "")
    (arg-count :type (integer 0)           :initarg :arg-count :reader func-code.arg-count :initform 0)
