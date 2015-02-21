@@ -36,8 +36,8 @@
     `(progn (defun ,name ,params ,@body)
             (defun ,(magicify name) ,params (,name ,@params))
             (eval-when (:load-toplevel :execute)
-              (export ',name #.*package*)
-              (export ',(magicify name) #.*package*))))
+              (export ',name #.(package-name *package*))
+              (export ',(magicify name) #.(package-name *package*)))))
   )
 
 ;; Binary, magic
