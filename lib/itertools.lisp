@@ -28,6 +28,12 @@
                  when (or (null x) ;; StopIteration
                           (funcall lisp-pred x))
                  return x)))))
+
+(defun |ifilterfalse| (predicate iterable)
+  (|ifilter| (if (eq predicate *the-none*)
+                 #'clpython::py-not
+               (lambda (x) (clpython::py-not (py-call predicate x))))
+             iterable))
     
 (defun |imap| (function &rest iterables)
   (clpython::make-iterator-from-function
