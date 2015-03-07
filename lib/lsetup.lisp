@@ -237,9 +237,9 @@
 (defpackage :clpython.module.sys
   (:use :clpython :common-lisp)
   (:export #:|argv| #:|byteorder| #:|exc_info| #:|exc_clear| #:|copyright|
-	   #:|builtin_module_names| #:|displayhook| #:|excepthook|
+	   #:|builtin_module_names| #:|displayhook| #:|excepthook| #:|executable|
 	   #:|__displayhook__| #:|exc_info| #:|__excepthook__| #:|exit| #:|exitfunc|
-           #:|flags| #:|_getframe|
+           #:|exec_prefix| #:|flags| #:|_getframe|
 	   #:|setcheckinterval| #:|getcheckinterval|
 	   #:|getdefaultencoding| #:|setdefaultencoding|
 	   #:|getfilesystemencoding|

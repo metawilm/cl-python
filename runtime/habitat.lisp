@@ -19,7 +19,8 @@
    (loaded-mods    :initform () :initarg :loaded-mods   :accessor habitat-loaded-mods)
    (cmd-line-args  :initform () :initarg :cmd-line-args :accessor %habitat-cmd-line-args)
    (search-paths   :initform (make-py-list-from-list (list ".")) :accessor habitat-search-paths)
-   (module-globals :initform (make-eq-hash-table) :reader habitat-module-globals))
+   (module-globals :initform (make-eq-hash-table) :reader habitat-module-globals)
+   (exitfunc       :initform nil :accessor habitat-exitfunc))
   (:documentation "Python execution context"))
 
 (defmethod print-object ((habitat habitat) stream)

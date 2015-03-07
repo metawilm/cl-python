@@ -30,7 +30,7 @@
 ;;  getrefcount, _getframe, settscdump, winver
 ;;
 ;; Not implemented, but perhaps later:
-;;  exc_info, exc_clear, exec_prefix, executable, getwindowsversion,
+;;  exc_info, exc_clear, getwindowsversion,
 ;;  last_{type,value,traceback}, {g,s}etdlopenflags, setprofile, settrace,
 ;;  tracebacklimit, warnoptions
 
@@ -68,6 +68,13 @@ The corresponding module must be defined as package, e.g. :clpython.module.posix
   "Function to be called on uncatched exception, e.g.to print stack trace")
 (set-impl-status '|excepthook| :todo "Currently never called.")
 
+(defvar |exec_prefix| *the-none*
+  ;; "Note that for some non-Unix systems, sys.prefix and sys.exec_prefix are empty" 
+  ;; https://docs.python.org/2/library/site.html
+  )
+
+(defvar |executable| *the-none*)
+
 (defvar |__displayhook__| *the-none*
   "Original value of displayhook")
 (set-impl-status '|__displayhook__| t)
@@ -80,9 +87,8 @@ The corresponding module must be defined as package, e.g. :clpython.module.posix
   (py-raise '{SystemExit} "sys.exit(~@[~A~]) called" arg))
 (set-impl-status '|exit| t)
 
-(defvar |exitfunc| *the-none*
+(def-habitat-attribute |exitfunc| clpython::habitat-exitfunc
   "Function to be called upon exit")
-(set-impl-status '|exitfunc| :todo "Currently never called.")
 
 ;;; Command-line args, read-only
 (defparameter |flags| 
@@ -146,8 +152,7 @@ The corresponding module must be defined as package, e.g. :clpython.module.posix
   (set-impl-status '(|getrecursionlimit| |setrecursionlimit|)
 		   :todo "Currently not taken into account."))
 
-(defvar |hexversion| :todo)
-(set-impl-status '|hexversion| :todo)
+(defvar |hexversion| #x20606f0) ;; Python 2.6.6. value
 
 (defvar |maxint| most-positive-fixnum
 	"Largest positive integer represented by regular integer type")
@@ -170,8 +175,9 @@ supported (not zip files etc).")
 (set-impl-status '|platform| t "Set to `Common Lisp'.")
 
 (defvar |prefix| *the-none*
+  ;; "Note that for some non-Unix systems, sys.prefix and sys.exec_prefix are empty" 
+  ;; https://docs.python.org/2/library/site.html
   "Site-specific directory prefix for installing platform independent Python files")
-(set-impl-status '|prefix| :todo "Automatically installing modules is not supported yet.")
 
 ;; REPL input prefixes
 ;; XXX do str() on non-string value! http://effbot.org/pyref/sys.ps1.htm
