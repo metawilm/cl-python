@@ -152,3 +152,8 @@
 
 (define-exception-subclass 'thread.error '{Exception})
 (defvar |error| (find-class 'thread.error))
+
+(defun |stack_size| (&optional size)
+  (declare (ignore size))
+  "Dummy value"
+  1)
