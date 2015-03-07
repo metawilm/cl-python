@@ -161,7 +161,7 @@
 (defpackage :clpython.module._socket
   (:use :clpython :common-lisp)
   (:shadow #:|error|)
-  (:export #:|error| #:|socket| #:|gethostname| #:|gethostbyaddr|
+  (:export #:|error| #:|socket| #:|gethostname| #:|gethostbyaddr| #:|getnameinfo|
            #:|AF_UNSPEC| #:|AF_UNIX| #:|AF_INET| #:|AF_DECnet| #:|AF_APPLETALK| #:|AF_SNA| #:|AF_ROUTE|
            #:|AF_IPX| #:|AF_INET6|
            #:|AI_PASSIVE| #:|AI_CANONNAME| #:|AI_NUMERICHOST| #:|AI_MASK| #:|AI_ALL| #:|AI_V4MAPPED_CFG|

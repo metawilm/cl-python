@@ -19,6 +19,10 @@
   #+allegro (excl.osi:gethostname)
   #-allegro (cl:error "todo"))
 
+(defun |getnameinfo| (addr flags)
+  (declare (ignore addr flags))
+  (cl:error "todo"))
+
 (defun |gethostbyaddr| (address)
   (check-type address string)
   (let* ((hostname #+allegro (if (socket:dotted-address-p address)
