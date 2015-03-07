@@ -273,7 +273,28 @@ assert x[0] == C")
     (run-no-error "
 class C:
   a = 3
-  assert locals()['a'] == 3"))
+  assert locals()['a'] == 3")
+    (run-no-error "
+class C:
+  def __init__(self):
+    self.__a = 3
+x = C()
+assert x._C__a == 3
+try:
+  x.__a
+  assert False
+except:
+  pass")
+    (run-no-error "
+class C:
+  __b = 4
+x = C()
+assert x._C__b == 4
+try:
+  x.__b
+  assert False
+except:
+  pass"))
 
 (defmethod test-lang ((kind (eql :comparison-expr)))
   (declare (ignorable kind))
