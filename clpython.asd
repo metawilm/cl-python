@@ -95,6 +95,7 @@
                                        (:file "array" :depends-on ("lsetup"))
                                        (:file "_ast" :depends-on ("lsetup"))
                                        (:file "binascii" :depends-on ("lsetup"))
+                                       (:file "_bsddb" :depends-on ("lsetup"))
                                        (:file "_collections" :depends-on ("lsetup"))
                                        (:file "_codecs" :depends-on ("lsetup"))
                                        (:file "cStringIO" :depends-on ("lsetup"))

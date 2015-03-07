@@ -36,7 +36,8 @@
   (:export #:|array|))
 
 (defpackage :clpython.module._bsddb
-  (:use :clpython :common-lisp))
+  (:use :clpython :common-lisp)
+  (:export #:|__version__| #:|DBError|))
 
 (defpackage :clpython.module.binascii
   (:use :clpython :common-lisp)
