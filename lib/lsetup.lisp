@@ -196,7 +196,7 @@
 
 (defpackage :clpython.module._sre
   (:use :clpython :common-lisp)
-  (:export #:|MAGIC|))
+  (:export #:|MAGIC| #:|CODESIZE|))
 
 (defpackage :clpython.module._ssl
   (:use :clpython :common-lisp)

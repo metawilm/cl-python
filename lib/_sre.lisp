@@ -10,3 +10,4 @@
 (in-package :clpython.module._sre)
 
 (defconstant |MAGIC| 20031017) ;; Python 2.6.6 value
+(defconstant |CODESIZE| 4) ;; Python 2.6.6 value
