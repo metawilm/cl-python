@@ -1345,6 +1345,7 @@ Basically the Python equivalent of ENSURE-CLASS."
   +the-true+)
 
 (def-py-method py-type.__dict__ :attribute-read (cls)
+  ;; or symbol-hash-table?
   (make-instance 'funky-dict-wrapper
     :getter (lambda () (dict cls))
     :setter (lambda (new) (setf (dict cls) new))))
@@ -2528,7 +2529,15 @@ invocation form.\"")
       using (hash-value value)
       collect (make-tuple-from-list (list (string key) value))))
 
- 
+
+(def-py-method symbol-hash-table.update (d y &rest kv-items)
+  (check-type y symbol-hash-table) ;; TODO: suport dict with string key
+  (when (or (keywordp y) (and kv-items (not (keywordp (car kv-items)))))
+    (py-raise '{ValueError}
+              "Invalid arguments to dict.update: expected (x, k=v, k2=v2, ..)."))
+  (maphash (lambda (k v) (setf (gethash k d) v)) (sht-ht y))
+  *the-none*)
+
 ;; TODO: add the other dict methods
 
 ;;; Proxies for funky dicts
