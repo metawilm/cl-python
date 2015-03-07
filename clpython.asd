@@ -114,6 +114,7 @@
                                        (:file "_sha256" :depends-on ("lsetup"))
                                        (:file "_sha512" :depends-on ("lsetup"))
                                        (:file "_socket" :depends-on ("lsetup"))
+                                       (:file "_sre" :depends-on ("lsetup"))
                                        (:file "_ssl" :depends-on ("lsetup"))
                                        (:file "_struct" :depends-on ("lsetup"))
                                        (:file "sys" :depends-on ("lsetup"))
