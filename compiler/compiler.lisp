@@ -263,7 +263,7 @@ and execution will be slower. It is very rare for Python code to do
 such indirect special calls.")
 ;; This is similar to the Javscript restriction on `eval' (ECMA 262, paragraph 15.1.2.1)
 
-(defvar *mangle-private-variables-in-class* nil
+(defvar *mangle-private-variables-in-class* t
   "In class definitions, replace __foo by _CLASSNAME__foo, like CPython does")
 
 (defmacro with-complete-python-semantics (&body body)
@@ -864,9 +864,40 @@ an assigment statement. This changes at least the returned 'store' form.")
            ([assign-stmt] cls (,name)))))))
 
 (defun mangle-suite-private-variables (cname suite)
-  "Rename all attributes `__foo' to `_CNAME__foo'."
-  (declare (ignore cname suite))
-  (error "todo"))
+  "Rename all attributes `__foo' to `_CNAME__foo'. Attributes names can be __foo, __foo_, but not __foo__ (2 suffix _)"
+  (check-type cname symbol)
+  (check-type suite list)
+  (flet ((mangle-candidate-p (identifier-name)
+           (check-type identifier-name symbol)
+           (let ((name (symbol-name identifier-name)))
+             (and (>= (length name) 3)
+                  (char= (aref name 0) #\_)
+                  (char= (aref name 1) #\_)
+                  (or (char/= (aref name (- (length name) 1)) #\_)
+                      (char/= (aref name (- (length name) 2)) #\_)))))
+         (replacement-symbol (identifier-name)
+           (check-type identifier-name symbol)
+           (intern (format nil "_~A~A" cname identifier-name) (symbol-package identifier-name))))
+    (let (candidates) ;; (old . new) symbols
+      (with-py-ast ((form &key value target) suite :into-nested-namespaces t)
+        (declare (ignore value target))
+        (case (car form)
+          ([identifier-expr] (let ((name-sym (second form)))
+                               (when (mangle-candidate-p name-sym)
+                                 (pushnew name-sym candidates)))
+                             (values nil t))
+          ([attributeref-expr] (destructuring-bind (item attr) (cdr form)
+                                 (declare (ignore item))
+                                 (assert (and (listp attr)
+                                              (eq (first attr) '[identifier-expr])
+                                              (symbolp (second attr))))
+                                 (when (mangle-candidate-p (second attr))
+                                   (pushnew (second attr) candidates)))
+                               form) ;; recurse into ITEM
+          (t form)))
+      (setf suite (copy-tree suite)) ;; gonna modify it - probably screws up source recording
+      (dolist (c candidates suite)
+        (setf suite (nsubst (replacement-symbol c) c suite))))))
 
 (defun apply-comparison-brackets (whole)
   (let (args cmps)
