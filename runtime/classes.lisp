@@ -2564,6 +2564,13 @@ invocation form.\"")
 (def-py-method funky-dict-wrapper.keys (w)
   (make-py-list-from-list (loop for (k . nil) in (funky-dict-wrapper.alist w) collect (string k))))
 
+(def-py-method funky-dict-wrapper.__setitem__ (w k v)
+  (check-type k string)
+  (setf k (ensure-user-symbol k))
+  (let ((old (funcall (fdw-getter w))))
+    (funcall (fdw-setter w) (funky-dict-set old k v)))
+  *the-none*)
+
 ;; List (Lisp object: adjustable array)
 
 (def-proxy-class py-list)

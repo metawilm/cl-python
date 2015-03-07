@@ -328,7 +328,10 @@ Returns NIL if not found."
       (return-from attr (bind-val v x x.cls)))
     ;; __dict__
     (when (eq attr '{__dict__})
-      (return-from attr (dict x)))
+      (return-from attr 
+        (make-instance 'funky-dict-wrapper
+          :getter (lambda () (dict x))
+          :setter (lambda (new) (setf (dict x) new)))))
     (when (eq attr '{__class__})
       (return-from attr (py-class-of x)))
     (when (and (eq attr '{__name__})

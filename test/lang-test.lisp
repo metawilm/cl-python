@@ -294,7 +294,13 @@ try:
   x.__b
   assert False
 except:
-  pass"))
+  pass")
+    (run-no-error "
+class C:
+  def __init__(self):
+    self.__dict__['a'] = 3
+x = C()
+assert x.a == 3"))
 
 (defmethod test-lang ((kind (eql :comparison-expr)))
   (declare (ignorable kind))
