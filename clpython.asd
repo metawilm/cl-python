@@ -123,7 +123,8 @@
                                        (:file "string" :depends-on ("lsetup"))
                                        (:file "symbol" :depends-on ("lsetup"))
                                        (:file "thread" :depends-on ("lsetup"))
-                                       (:file "time" :depends-on ("lsetup"))))))
+                                       (:file "time" :depends-on ("lsetup"))
+                                       (:file "_weakref" :depends-on ("lsetup"))))))
 
 (asdf:defsystem :clpython.contrib
     :description "CLPython contributions and experiments"

@@ -270,7 +270,9 @@
   (:use :clpython :common-lisp))
 
 (defpackage :clpython.module._weakref
-  (:use :clpython :common-lisp))
+  (:use :clpython :common-lisp)
+  (:export #:|getweakrefcount| #:|getweakrefs| #:|ref| #:|proxy| #:|ProxyType| #:|CallableProxyType| #:|ReferenceType|
+           #:|ReferenceError|))
 
 (defpackage :clpython.module.zlib
   (:use :clpython :common-lisp))
