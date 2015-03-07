@@ -2808,6 +2808,10 @@ invocation form.\"")
   "For internal use, e.g. list comprehensions."
   `(vector-push-extend ,item ,list))
 
+(def-py-method py-list.count (list item)
+  (loop for x across list
+      count (py-==->lisp-val x item)))
+            
 (def-py-method py-list.index (list item)
   (or (position item list :test #'py-==->lisp-val)
       (py-raise '{ValueError} "Item ~S not in list." item)))
