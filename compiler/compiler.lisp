@@ -1247,7 +1247,8 @@ LOCALS shares share tail structure with input arg locals."
                                                            :context-name ',context-fname
                                                            :lambda ,func-lambda
                                                            :func-globals ,(get-module-namespace e)
-                                                           :func-code ,func-code)))
+                                                           :func-code ,func-code
+                                                           :module-name ,*current-module-name*)))
           (let ((art-deco '.undecorated-func))
             (dolist (x (reverse decorators))
               (setf art-deco `(py-call ,x ,art-deco)))
@@ -1255,7 +1256,8 @@ LOCALS shares share tail structure with input arg locals."
                                                          :context-name ',context-fname
                                                          :lambda ,func-lambda
                                                          :func-globals ,(get-module-namespace e)
-                                                         :func-code ,func-code))
+                                                         :func-code ,func-code
+                                                         :module-name ,*current-module-name*))
                     (.decorated-func ,art-deco))
                ;; Ugly special case:
                ;;  class C:

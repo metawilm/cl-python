@@ -84,8 +84,8 @@
 
 (defmethod print-object ((x py-writable-attribute-method) stream)
   (print-unreadable-object (x stream)
-    (with-slots (func write-func) x
-      (format stream ":func ~S :write-func ~S" func write-func))))
+    (format stream ":func ~S " (if (slot-boundp x 'func) (slot-value x 'func) "(not set)"))
+    (format stream ":write-func ~S" (if (slot-boundp x 'write-func) (slot-value x 'write-func) "(not set)"))))
 
 (defclass py-static-method (py-method)
   ()
@@ -636,7 +636,8 @@ otherwise work well.")
    (context-name :initarg :context-name :initform nil :accessor py-function-context-name)
    (lambda       :initarg :lambda       :initform nil :accessor py-function-lambda)
    (func-globals :initarg :func-globals                         :accessor py-function-func-globals)
-   (func-code    :initarg :func-code                  :reader   py-function-code))
+   (func-code    :initarg :func-code                  :reader   py-function-code)
+   (module-name  :initarg :module-name                          :accessor py-function.module-name))
   (:metaclass funcallable-python-class))
 
 ;; XXX On LispWorks this is not guaranteed to work:
@@ -653,18 +654,20 @@ otherwise work well.")
                (string (sfd-name data)))))
   (:method ((f py-function)) (string (py-function-name f))))
 
-(defun make-py-function (&key name context-name lambda func-globals func-code)
+(defun make-py-function (&key name context-name lambda func-globals func-code module-name)
   (if *create-simple-lambdas-for-python-functions*
       (progn (register-simple-function lambda name func-globals func-code)
              lambda)
     (progn (when name (check-type name symbol))
            (when context-name (check-type context-name (or symbol string)))
+           (when module-name (check-type module-name string))
            (let ((x (make-instance 'py-function
                       :fname (string name)
                       :lambda lambda
                       :context-name context-name
                       :func-globals func-globals
-                      :func-code func-code)))
+                      :func-code func-code
+                      :module-name module-name)))
              (set-funcallable-instance-function x lambda)
              ;; fill dict?
              x))))
@@ -680,6 +683,13 @@ otherwise work well.")
     (if (typep func 'py-function)
         (print-object func s)
       (format s "~A" (or (function-name func) func)))))
+
+(def-py-method py-function.__module__ :attribute-read (x)
+  (py-function.module-name x))
+
+(def-py-method py-function.__module__ :attribute-write (x name)
+  (check-type name string)
+  (setf (py-function.module-name x) name))
 
 (defmethod print-object ((x py-function) stream)
   (print-unreadable-object (x stream :identity t)
