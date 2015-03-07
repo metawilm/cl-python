@@ -57,7 +57,8 @@
   (:export ))
 
 (defpackage :clpython.module.datetime
-  (:use :clpython :common-lisp))
+  (:use :clpython :common-lisp)
+  (:export #:|date|))
 
 (defpackage :clpython.module.errno
   (:use :common-lisp)

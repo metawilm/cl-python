@@ -97,6 +97,7 @@
                                        (:file "_collections" :depends-on ("lsetup"))
                                        (:file "_codecs" :depends-on ("lsetup"))
                                        (:file "cStringIO" :depends-on ("lsetup"))
+                                       (:file "datetime" :depends-on ("lsetup"))
                                        (:file "errno"  :depends-on ("lsetup"))
                                        (:file "exceptions" :depends-on ("lsetup"))
                                        (:file "_functools" :depends-on ("lsetup"))
