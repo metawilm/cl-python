@@ -1930,6 +1930,15 @@ But if RELATIVE-TO package name is given, result may contains dots."
 (def-py-method py-property.__doc__ :attribute (x)
   (slot-value x 'doc))
 
+(def-py-method py-property.setter (x set-func)
+  (setf (slot-value x 'fset) set-func))
+
+(def-py-method py-property.getter (x get-func)
+  (setf (slot-value x 'fget) get-func))
+
+(def-py-method py-property.deleter (x del-func)
+  (setf (slot-value x 'fdel) del-func))
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 ;;; Lisp objects (proxies around Lisp values: number, string, list, tuple, dict)
