@@ -10,7 +10,26 @@
 (in-package :clpython.module._struct)
 
 (defun |_clearcache| ()
-  ;; FIXME
-  )
+  (cl:error "TODO"))
 
 (defvar |__doc__| "FIXME: _struct doc")
+
+(defun |pack| (fmt &rest args)
+  (declare (ignore fmt args))
+  (cl:error "TODO"))
+
+(defun |pack_into| (fmt buffer offset &rest args)
+  (declare (ignore fmt buffer offset args))
+  (cl:error "TODO"))
+
+(defun |unpack| (fmt string)
+  (declare (ignore fmt string))
+  (cl:error "TODO"))
+
+(defun |unpack_from| (fmt buffer &optional (offset 0))
+  (declare (ignore fmt buffer offset))
+  (cl:error "TODO"))
+
+(defun |calcsize| (fmt)
+  (declare (ignore fmt))
+  (cl:error "TODO"))

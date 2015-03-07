@@ -207,7 +207,8 @@
 
 (defpackage :clpython.module._struct
   (:use :clpython :common-lisp)
-  (:export #:|_clearcache| #:|__doc__|))
+  (:export #:|_clearcache| #:|__doc__|
+           #:|pack| #:|pack_into| #:|unpack| #:|unpack_from| #:|calcsize|))
 
 (defpackage :clpython.module._symtable
   (:use :clpython :common-lisp))
