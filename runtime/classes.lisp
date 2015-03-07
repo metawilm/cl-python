@@ -657,15 +657,17 @@ otherwise work well.")
   (if *create-simple-lambdas-for-python-functions*
       (progn (register-simple-function lambda name func-globals func-code)
              lambda)
-    (let ((x (make-instance 'py-function
-               :fname (string name)
-               :lambda lambda
-               :context-name context-name
-               :func-globals func-globals
-               :func-code func-code)))
-      (set-funcallable-instance-function x lambda)
-      ;; fill dict?
-      x)))
+    (progn (when name (check-type name symbol))
+           (when context-name (check-type context-name (or symbol string)))
+           (let ((x (make-instance 'py-function
+                      :fname (string name)
+                      :lambda lambda
+                      :context-name context-name
+                      :func-globals func-globals
+                      :func-code func-code)))
+             (set-funcallable-instance-function x lambda)
+             ;; fill dict?
+             x))))
 
 (def-py-method py-function.__get__ (func inst cls)
   (py-lisp-function.__get__ func inst cls))

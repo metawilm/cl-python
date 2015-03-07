@@ -33,8 +33,17 @@
             (error "No such symbol in pkg clpython: ~A" name)))))
   
   (defmacro def-magic-twins (name params &body body)
-    `(progn (defun ,name ,params ,@body)
-            (defun ,(magicify name) ,params (,name ,@params))
+    (check-type name symbol)
+    `(progn (setf (symbol-value ',name)
+              (clpython::make-py-function :name ',name
+                                        :context-name ,(format nil "operator.~A" name)
+                                        :lambda (lambda ,params
+                                                  ,@body)))
+            (setf (symbol-value ',(magicify name))
+              (clpython::make-py-function :name ',(magicify name)
+                                          :context-name ,(format nil "operator.~A" (magicify name))
+                                          :lambda (lambda ,params
+                                                    ,@body)))
             (eval-when (:load-toplevel :execute)
               (export ',name #.(package-name *package*))
               (export ',(magicify name) #.(package-name *package*)))))
@@ -83,7 +92,10 @@
 #.`(progn ,@(loop for (meth op) in
                   '((truth bool))
                 for name = (intern (string-downcase meth))
-                collect `(defun ,name (x) (,(sym->op op) x))
+                collect `(setf (symbol-value ',name)
+                           (clpython::make-py-function :name ',name
+                                                       :context-name ,(format nil "operator.~A" name)
+                                                       :lambda (lambda (x) (,(sym->op op) x))))
                 collect `(eval-when (:load-toplevel :execute)
                            (export ',name))))
 
@@ -92,7 +104,10 @@
                   '((is_ is)
                     (is_not is-not))
                 for name = (intern (string-downcase meth))
-                collect `(defun ,name (x y) (,(sym->op op) x y))
+                collect `(setf (symbol-value ',name)
+                           (clpython::make-py-function :name ',name
+                                                       :context-name ,(format nil "operator.~A" name)
+                                                       :lambda (lambda (x y) (,(sym->op op) x y))))
                 collect `(eval-when (:load-toplevel :execute)
                            (export ',name))))
 
