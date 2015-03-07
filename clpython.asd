@@ -93,6 +93,7 @@
                                        (:file "builtins-buffer" :depends-on ("lsetup"))
                                        (:file "builtins" :depends-on ("builtins-file" "builtins-set" "builtins-buffer"))
                                        (:file "array" :depends-on ("lsetup"))
+                                       (:file "_ast" :depends-on ("lsetup"))
                                        (:file "binascii" :depends-on ("lsetup"))
                                        (:file "_collections" :depends-on ("lsetup"))
                                        (:file "_codecs" :depends-on ("lsetup"))

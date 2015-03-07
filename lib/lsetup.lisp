@@ -26,7 +26,8 @@
            ))
   
 (defpackage :clpython.module._ast
-  (:use :clpython :common-lisp))
+  (:use :clpython :common-lisp)
+  (:export #:|__version__|))
 
 (defpackage :clpython.module.array
   (:use :clpython :common-lisp)
