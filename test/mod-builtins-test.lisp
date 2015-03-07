@@ -13,7 +13,7 @@
 
 (defun run-builtin-test ()
   (with-subtest (:name "CLPython-Builtins")
-    (dolist (x '(:globals :hash :isinstance :int :range :type :map :list))
+    (dolist (x '(:globals :hash :isinstance :int :range :type :map :list :exception))
       (test-builtin x))))
 
 (defgeneric test-builtin (kind))
@@ -100,3 +100,9 @@ assert x == [10, 11, 12]"))
 def f(): pass
 g = lambda: 42
 assert type(f) == type(g)"))
+
+(defmethod test-builtin ((x (eql :exception)))
+  (declare (ignorable x))
+  (run-no-error "
+import exceptions
+print exceptions.ReferenceError"))

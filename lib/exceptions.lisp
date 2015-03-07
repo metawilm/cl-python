@@ -10,5 +10,10 @@
 (in-package :clpython.module.exceptions)
 (clpython:in-syntax clpython::*user-readtable*)
 
-(defparameter |ValueError| (find-class '{ValueError}))
-(defparameter |SyntaxError| (find-class '{SyntaxError}))
+(eval-when (:load-toplevel :execute)
+  (do-external-symbols (s 'clpython.user.builtin.type.exception)
+    (if (find-class s)
+        (let ((sym (intern (symbol-name s) #.*package*)))
+          (setf (symbol-value sym) (find-class s))
+          (export sym))
+      (warn "Skipped non-class symbol: ~S"s))))
