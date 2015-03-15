@@ -136,7 +136,9 @@
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (defconstant +fixnum-is-a-class+ (not (null (find-class 'fixnum nil))))
-  (register-feature :clpython-fixnum-is-a-class +fixnum-is-a-class+))
+  (register-feature :clpython-fixnum-is-a-class +fixnum-is-a-class+)
+  (defconstant +single-float-is-a-class+ (not (null (find-class 'single-float nil))))
+  (register-feature :clpython-single-float-is-a-class +single-float-is-a-class+))
 
 (defmethod py-subs ((x vector) (item #+clpython-fixnum-is-a-class fixnum #-clpython-fixnum-is-a-class integer))
   (declare (optimize (speed 3) (safety 0) (debug 0)))
@@ -278,7 +280,7 @@
 (defmethod py->  ((x float) (y float)) (declare #.+optimize-fastest+) (py-bool (>  x y)))
 (defmethod py->= ((x float) (y float)) (declare #.+optimize-fastest+) (py-bool (>= x y)))
 
-#+clpython-fixnum-is-a-class
+#+(and clpython-fixnum-is-a-class clpython-single-float-is-a-class)
 (progn (defmethod py-<= ((x single-float) (y fixnum)) (declare #.+optimize-fastest+) (py-bool (<= x y)))
        (defmethod py-<= ((x double-float) (y fixnum)) (declare #.+optimize-fastest+) (py-bool (<= x y)))
        (defmethod py-<= ((x fixnum) (y single-float)) (declare #.+optimize-fastest+) (py-bool (<= x y)))
@@ -417,7 +419,7 @@
 
 (defmethod py-/ ((x integer) (y integer)) (careful-floor-1ret x y))
 (defmethod py-/ ((x float) (y float)) (/ x y))
-                                           
+
 ;; Augmented assignment
 
 (defmethod py-+= ((x string) y) 

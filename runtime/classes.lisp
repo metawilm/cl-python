@@ -2484,9 +2484,13 @@ invocation form.\"")
   *the-none*)
    
 (def-py-method dict.values (x)
-  ;; XXX should err in ECL
   (with-py-dict
-      (make-py-list-from-list (loop for v being the hash-value in x collect v))))
+      (make-py-list-from-list (let (values)
+                                (maphash (lambda (k v) 
+                                           (declare (ignore k))
+                                           (push v values))
+                                         x)
+                                values))))
 
 ;; Dicts used for namespaces
 
