@@ -24,8 +24,9 @@
   (:import-from :clpython #:in-syntax)
   (:import-from :clpython.parser #:parse)
   (:import-from #+allegro :util.test #-allegro :ptester
-		#:*announce-test* #:with-tests #:test #:test-warning)
-  (:export #:run))
+		#:*announce-test* #:with-tests #:test #:test-warning
+                #:*test-successes* #:*test-errors* #:*test-unexpected-failures*)
+  (:export #:run-tests))
 
 (in-package :clpython.test)
 
@@ -135,16 +136,25 @@ seems to give implementations some freedom here. (In practice: Allegro=NIL, LisW
        ,@body)))
 
 (defun run-tests ()
-  (with-subtest (:name "CLPython")
-    (test-comp-testfunc)
-    (with-all-parser-versions 
-        (run-parser-test))
-    #+(or)(run-lispy-test)
-    (run-compiler-test)
-    (run-code-walker-test)
-    (run-pretty-printer-test)
-    (run-lang-test)
-    (run-builtin-test)
-    (run-mod-string-test)
-    (run-mod-math-test)
-    (run-mod-operator-test)))
+  "Return T if there are no unexpected failures."
+  (let (final-result successes errors unexpected-failures)
+    (with-subtest (:name "CLPython")
+      (test-comp-testfunc)
+      (with-all-parser-versions 
+          (run-parser-test))
+      #+(or)(run-lispy-test)
+      (run-compiler-test)
+      (run-code-walker-test)
+      (run-pretty-printer-test)
+      (run-lang-test)
+      (run-builtin-test)
+      (run-mod-string-test)
+      (run-mod-math-test)
+      (run-mod-operator-test)
+    
+      (setf final-result (not (plusp *test-unexpected-failures*))
+            successes *test-successes*
+            errors *test-errors*
+            unexpected-failures *test-unexpected-failures*))
+    (values final-result
+            successes errors unexpected-failures)))
