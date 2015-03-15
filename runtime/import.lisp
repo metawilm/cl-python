@@ -223,7 +223,7 @@ it being set before CLPython is loaded, e.g. in a Lisp configuration file.)")))
          (format t "~%;; Consider customizing variable ~S
 ;; to be a list of paths that are tried when locating a module in order to import it
 ;; (in addition to the current directory and `sys.path'). Typically it should at least
-;; contain the path to the Python (2.5) standard libraries, as those are not
+;; contain the path to the Python 2.x standard libraries, as those are not
 ;; distributed with CLPython.
 "
                'cl-user::*clpython-module-search-paths*))
