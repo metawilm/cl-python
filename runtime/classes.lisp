@@ -1646,7 +1646,9 @@ but the latter two classes are not in CPython.")
 (def-py-method module.__getattribute__ (x^ attr)
   (let ((attr.sym (py-string-val->symbol attr)))
     (if (eq attr.sym '{__dict__})
-        (make-instance 'funky-dict-wrapper :getter (lambda () (module-ht x)))
+        (make-instance 'funky-dict-wrapper
+          :getter (lambda () (module-ht x))
+          :setter (lambda (d) (setf (module-ht x) d)))
       (or (gethash attr.sym (module-ht x))
           ;; should be coupled to the namespace
           (builtin-value attr)
@@ -2545,8 +2547,8 @@ invocation form.\"")
 ;;; Proxies for funky dicts
 
 (defclass funky-dict-wrapper (object)
-  ((getter :initarg :getter :accessor fdw-getter)
-   (setter :initarg :setter :accessor fdw-setter))
+  ((getter :initarg :getter :accessor fdw-getter :initform (error "Need getter"))
+   (setter :initarg :setter :accessor fdw-setter :initform (error "Need setter")))
   (:metaclass py-type))
 
 (defun funky-dict-wrapper.alist (w)
