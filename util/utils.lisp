@@ -244,18 +244,15 @@ See function ALIST-VS-HT.")
 (defun quit (&optional code)
   ;; Adapted from Rob Warnock's post "How to programmatically exit?"
   ;;  http://groups.google.nl/group/comp.lang.lisp/msg/94c9a579608dcd9a
-  (declare (ignorable code))
+  (check-type code integer)
   (checking-reader-conditionals
    #+allegro (excl:exit code :quiet t)
    #+cmu (ext:quit code)
    #+lispworks (lw:quit :status code)
-   #+sbcl (sb-ext:quit :unix-status (typecase code (number code)
-                                              (null 0)
-                                              (t 1)))
+   #+sbcl (sb-ext:exit :code (or code 0))
    #+(or openmcl mcl) (ccl::quit)
    #+abcl (cl-user::quit)
-   #+ecl (si:quit)
-   ))
+   #+ecl (si:quit)))
 
 (defun abbreviate-to-one-line (string)
   (loop for i from 0
