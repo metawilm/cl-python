@@ -725,7 +725,11 @@ assert sys" :fail-info "Should work in both ANSI and Modern mode.")
     
     (clpython::%reset-import-state)
     ;; run compilation outside run-no-error, to prevent allegro style warning from failing the test
-    (clpython:run (concatenate 'string prefix "
+    #+ecl
+    (test-true nil :known-failure t :fail-info "ECL: reload() tests skipped due to segmentation fault")
+    #-ecl
+    (progn
+      (clpython:run (concatenate 'string prefix "
 print 'import'
 import bar
 assert bar.i
@@ -733,33 +737,34 @@ print 'reload'
 reload(bar)
 print 'del bar.i'
 del bar.i"))
-    
-    (clpython::%reset-import-state)
-    ;; When importing a module, the conditions of type clpython::module-import-pre
-    ;; make run-no-error fail. Therefore rely on statements returning nil (?!) by using test-false.
-    (test-true (prog1 t
-                 (run `,(concatenate 'string prefix "
+      
+      (clpython::%reset-import-state)
+      ;; When importing a module, the conditions of type clpython::module-import-pre
+      ;; make run-no-error fail. Therefore rely on statements returning nil (?!) by using test-false.
+      (test-true (prog1 t
+                   (run `,(concatenate 'string prefix "
 import bar
 for i in xrange(3):
   print 'bar.i=', bar.i, 'i=', i
   assert bar.i == i+1
   reload(bar)"))))
-    
-    (clpython::%reset-import-state)
-    ;; run outside run-no-error
-    (clpython:run (concatenate 'string prefix "
+      
+      (clpython::%reset-import-state)
+      
+      ;; run outside run-no-error
+      (clpython:run (concatenate 'string prefix "
 print '4a'
 import zut.bla
 print '4b'"))
-  
-    (clpython::%reset-import-state)
-    (test-true (prog1 t
-                 (run `,(concatenate 'string prefix "
+      
+      (clpython::%reset-import-state)
+      (test-true (prog1 t
+                   (run `,(concatenate 'string prefix "
 print '5a'
 for i in xrange(3):
   import zut.bla
   assert zut.bla.x
-  print '5b'"))))))
+  print '5b'")))))))
 
 (defmethod test-lang ((kind (eql :import-from-stmt)))
   (declare (ignorable kind))
