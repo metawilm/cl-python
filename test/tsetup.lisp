@@ -11,6 +11,12 @@
 
 #+allegro
 (eval-when (:compile-toplevel :load-toplevel :execute)
+  ;; Ensure the Allegro version of tester is loaded, so that package util.test is available.
+  ;; If e.g. ptester is loaded, (require :tester) won't load the Allegro version, leading to symbol problems.
+  (when (and (member :tester *modules* :test 'string=)
+             (null (find-package '#:util.test)))
+    (format t "~&Forcing loading of Allegro tester.")
+    (setf *modules* (remove :tester *modules* :test 'string=)))
   (require :tester))
 
 (defpackage :clpython.test
