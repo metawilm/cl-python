@@ -1629,7 +1629,7 @@ LOCALS shares share tail structure with input arg locals."
                         :current-module-name ,*current-module-name*
                         :defun-wrappers ',(mapcar #'second defun-wrappers)
                         :source ,(when *compile-file-truename*
-                                   (slurp-file (derive-pathname *compile-file-truename*)))
+                                       (slurp-file *compile-file-truename*))
                         :source-func ',module-function-name
                         :compiler-id ,*clpython-compiler-version-id*
                         :is-compiled ,(not (null *compile-file-truename*))))
