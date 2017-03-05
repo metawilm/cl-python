@@ -151,10 +151,12 @@ seems to give implementations some freedom here. (In practice: Allegro=NIL, LisW
       (run-mod-string-test)
       (run-mod-math-test)
       (run-mod-operator-test)
-    
+      
       (setf final-result (not (plusp *test-unexpected-failures*))
             successes *test-successes*
             errors *test-errors*
             unexpected-failures *test-unexpected-failures*))
-    (values final-result
-            successes errors unexpected-failures)))
+    
+    (let ((vals (list final-result successes errors unexpected-failures)))
+      (format t "~%Return values of RUN-TESTS: ~A" vals)
+      (values-list vals))))

@@ -83,7 +83,7 @@
 
 (defsystem "clpython/runtime"
     :description "Python runtime environment"
-    :depends-on ("clpython/basic" "closer-mop" #+ecl "cl-custom-hash-table" "cl-fad")
+    :depends-on ("clpython/basic" "closer-mop" #+(or abcl clisp ecl) "cl-custom-hash-table" "cl-fad")
     :components ((:module "runtime"
                           :serial t
                           :components ((:file "rsetup"       )

@@ -1,0 +1,70 @@
+language: common-lisp
+sudo: required
+
+env:
+  matrix:
+    - LISP=abcl CATCH=1
+    - LISP=abcl NOCATCH=1
+    
+    - LISP=allegro CATCH=1
+    - LISP=allegro NOCATCH=1
+
+    # Error outside our control:
+    # The command "curl https://raw.githubusercontent.com/luismbo/cl-travis/master/install.sh | bash" failed and exited with 1 during .
+    # - LISP=allegromodern
+
+    # Error outside our control: CCL 1.10 and cl-coveralls don't work together (see also cl-coveralls README):
+    # [package cl-coveralls] Not supported implementation: Clozure Common Lisp Version 1.10-r16196  (LinuxX8664)
+    # Therefore use CCL without coverage
+    #- LISP=ccl COVERALLS=true
+    - LISP=ccl
+    
+    - LISP=clisp
+
+    # Error outside our control:
+    # /home/travis/.cim/bin/cl: 9: .: Can't open /home/travis/.cim/config/current.7469
+    #- LISP=cmucl
+
+    - LISP=ecl CATCH=1
+    - LISP=ecl NOCATCH=1
+
+    - LISP=sbcl COVERALLS=true
+    
+install:
+  # Install cl-travis
+  - curl https://raw.githubusercontent.com/metawilm/cl-travis/dev/install.sh | bash
+  #- curl https://raw.githubusercontent.com/luismbo/cl-travis/master/install.sh | bash
+  # Newest Dexador needed for cl-coveralls -- https://github.com/fukamachi/cl-coveralls/issues/10
+  - git clone https://github.com/fukamachi/dexador.git ~/lisp/dexador
+  # Our project
+  - git clone https://github.com/metawilm/cl-python.git ~/lisp/cl-python
+
+script:
+  # Use SBCL for coverage
+  # Let CLISP print a backtrace, because it errs
+  
+  - cl -e '(in-package :cl-user)'
+       -e '(print *package*)'
+       -e '(ql:quickload :ptester)'
+       -e '#+sbcl (ql:quickload :cl-coveralls)'
+       -e '#+sbcl (defmacro outer (&body body) `(coveralls:with-coveralls () ,@body))'
+       -e '#-sbcl (defmacro outer (&body body) `(progn ,@body))'
+       -e '(defun do-test ()
+             (ql:quickload :clpython)
+             (ql:quickload :clpython/test)
+             (funcall (read-from-string "clpython.test:run-tests")))'
+       -e '(when (asdf/os:getenv "NOCATCH")
+             (do-test))'
+       -e '(unless (asdf/os:getenv "NOCATCH")
+             (let (ret normal-exit)
+                (unwind-protect
+                  (outer
+                    (setf ret (do-test))
+                    (setf normal-exit t))
+                  (cond ((and normal-exit (eq ret t)) (warn "Test suite SUCCESS") (uiop:quit 0))
+                        (normal-exit                  (warn "Test suite FAIL")    (uiop:quit -1))
+                        (t                            (warn "Unexpected abort during test suite") (uiop:quit -1))))))'
+
+notifications:
+  email:
+    - metawilm@gmail.com

@@ -66,8 +66,10 @@
 
 (defconstant-once +py-class-classname-slot-name+
     (checking-reader-conditionals
+     #+abcl 'mop::name
      #+allegro 'excl::name
      #+ccl 'ccl::name
+     #+clisp 'clos::$classname
      #+cmu 'pcl::name
      #+ecl 'clos::name
      #+lispworks 'clos::name
@@ -76,16 +78,16 @@
 (eval-when (:compile-toplevel :load-toplevel :execute)
 
   (defconstant +use-standard-instance-access+
-      (checking-reader-conditionals
-       #+ecl nil
-       #+(or allegro ccl cmu lispworks sbcl) t))
+    (checking-reader-conditionals
+     #+(or abcl ecl) nil ;; Need to look into ABCL, got NullPointerException in test case
+     #+(or allegro ccl clisp cmu lispworks sbcl) t))
 
   (register-feature :clpython-use-standard-instance-access +use-standard-instance-access+)
 
   (defconstant +use-standard-instance-access-setf+
       (checking-reader-conditionals
-       #+(or allegro ccl lispworks sbcl) t
-       #+(or cmu ecl) nil ;; these lack (SETF STANDARD-INSTANCE-ACCESS)
+       #+(or allegro ccl clisp lispworks sbcl) t
+       #+(or abcl cmu ecl) nil ;; these lack (SETF STANDARD-INSTANCE-ACCESS)
        ))
 
   (register-feature :clpython-use-standard-instance-access-setf +use-standard-instance-access-setf+))

@@ -179,7 +179,6 @@ ARGS are the command-line args, available as `sys.argv'; can be a string (which 
                                       (warn "Compilation failed: ~S" c)
                                       (return-from compilation nil))))
                       (compile nil get-module-f)))
-                (declare (ignore warnings-p))
                 (cond (func
                        (setf fc func))
                       (t

@@ -605,8 +605,8 @@
 (defparameter *create-simple-lambdas-for-python-functions*
     (checking-reader-conditionals
      #+(or allegro lispworks) nil
-     #+sbcl t
-     #-(or allegro lispworks sbcl) t)
+     #+(or abcl sbcl) t
+     #-(or abcl allegro lispworks sbcl) t)
      "Whether Python function are real CLOS funcallable instances, or just normal lambdas.
 Note that in the latter case, functions miss their name and attribute dict, but should
 otherwise work well.")
@@ -630,7 +630,8 @@ otherwise work well.")
   ;; which is not quite kosher.
   (:method ((x function)) x))
 
-(defclass py-function (standard-generic-function dicted-object)
+(defclass py-function (#-clisp standard-generic-function
+                       dicted-object)
   ;; mop:funcallable-standard-class defines :name initarg, but how to to access it portably...
   ((fname        :initarg :fname        :initform nil :accessor py-function-name)
    (context-name :initarg :context-name :initform nil :accessor py-function-context-name)
@@ -1341,7 +1342,6 @@ Basically the Python equivalent of ENSURE-CLASS."
 
 (def-py-method py-type.__nonzero__ (cls)
   ;; to make e.g. "if str: ..." work
-  (declare (ignore cls))
   +the-true+)
 
 (def-py-method py-type.__dict__ :attribute-read (cls)
@@ -4025,7 +4025,7 @@ finished; F will then not be called again."
 		       +the-false+)))
 	  (setf (gethash ',syntax *binary-comparison-funcs-ht*) ',func)))
 
-#+ecl
+#+(or abcl ecl)
 (defvar *py-id-entries* (make-weak-key-hash-table))
 
 (defun py-id (x)
@@ -4035,9 +4035,10 @@ fixed id during the object's lifetime."
   (checking-reader-conditionals
    #+allegro (excl:lispval-to-address x)
    #+ccl (ccl:%address-of x)
+   #+clisp (system::address-of x)
    #+cmu (kernel:get-lisp-obj-address x)
-   #+ecl (or #1=(gethash x *py-id-entries*)
-             (setf #1# (hash-table-count *py-id-entries*)))
+   #+(or abcl ecl) (or #1=(gethash x *py-id-entries*)
+                       (setf #1# (hash-table-count *py-id-entries*)))
    #+lispworks (system:object-address x)
    #+sbcl (sb-kernel:get-lisp-obj-address x)))
 

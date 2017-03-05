@@ -110,7 +110,7 @@
    (defun make-py-hash-table ()
      (make-hash-table :test 'py-hash-table-test)))
  
- #+ecl
+ #+(or abcl clisp ecl)
  (cl-custom-hash-table:define-custom-hash-table-constructor
      make-py-hash-table :test py-==->lisp-val :hash-function py-hash)
  

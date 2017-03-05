@@ -110,7 +110,7 @@ If the stream length can not be determined (e.g. for standard input), all availa
   "Break unless the body contains exactly one form. Based on idea from Steve Haflich."
   (let ((num (length body)))
     (unless (= num 1)
-      (error "A CHECKING-READER-CONDITIONALS expression returned ~r forms: ~s" num whole))
+      (error "A CHECKING-READER-CONDITIONALS expression returned ~r forms, in: ~A" num (or *compile-file-truename* *load-truename*)))
     (car body)))
 
 (defmacro named-function (name lambda-form)
@@ -247,7 +247,7 @@ See function ALIST-VS-HT.")
   (check-type code integer)
   (checking-reader-conditionals
    #+allegro (excl:exit code :quiet t)
-   #+cmu (ext:quit code)
+   #+(or clisp cmu) (ext:quit code)
    #+lispworks (lw:quit :status code)
    #+sbcl (sb-ext:exit :code (or code 0))
    #+(or openmcl mcl) (ccl::quit)
