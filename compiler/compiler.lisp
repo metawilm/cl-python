@@ -157,6 +157,10 @@ HABITAT is the execution environment; a fresh one will be used otherwie.
 If COMPILE is true, the AST is compiled into a function before running.
 MODULE-RUN-ARGS is a list with options passed on to the module-function; e.g. %module-globals, module-name, src-module-path.
 ARGS are the command-line args, available as `sys.argv'; can be a string (which will be splitted on spaces) or a list of strings."
+  
+  (unless (and (listp ast) (eq (car ast) '[module-stmt]))
+    (error "Not an AST: ~S" ast))
+  
   ;; At the moment there are only hashtable or package module namespaces:
   (with-compiler-generated-syntax-errors ()
     (handler-bind (#+sbcl

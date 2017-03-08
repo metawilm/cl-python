@@ -1543,7 +1543,8 @@ but the latter two classes are not in CPython.")
              ;; REPL
              (setf packagep nil))
             (t
-             (error "Can't determine :packagep for ~S: no src-pathname" m))))
+             ;; This can happen when loading a Lisp file that calls RUN-PYTHON-AST during load.
+             )))
   (check-type (module-ht m) hash-table) ;; XXX or custom ht
   (setf (gethash m *all-modules*) t))
 
