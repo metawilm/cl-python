@@ -163,7 +163,6 @@ b = AnotherDoubler(3)
 assert a * b == 12"
                 :fail-info "Wrong lookup logic for __r...__ methods"
                 )
-  (run-no-error "[1,2,3] * 2 == [1,2,3,1,2,3]")
   (run-no-error "(1,2,3) * 2 == (1,2,3,1,2,3)"))
 
 (defmethod test-lang ((kind (eql :binary-lazy-expr)))

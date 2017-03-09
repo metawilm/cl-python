@@ -2639,6 +2639,20 @@ invocation form.\"")
 		      (1  (return  1)))
 		 finally (return 0))))))
 
+(defmacro my-replace (&rest args)
+  #-ccl `(cl:replace ,@args)
+  #+ccl `(my-replace-1 ,@args)) ;; http://trac.clozure.com/ccl/ticket/1412
+
+#+ccl
+(defun my-replace-1 (sequence1 sequence2 &key (start1 0) (end1 (length sequence1)) (start2 0) (end2 (length sequence2)))
+  (let* ((copy-length (min (- end1 start1) (- end2 start2)))
+         (tmp (subseq sequence2 start2 (+ start2 copy-length))))
+    (loop for seq1-ix from start1
+        for tmp-ix from 0
+        repeat copy-length
+        do (setf (elt sequence1 seq1-ix) (elt tmp tmp-ix)))
+    sequence1))
+
 (def-py-method py-list.__delitem__ (x^ item)
   (typecase item
     (integer (when (minusp item)
@@ -2647,7 +2661,7 @@ invocation form.\"")
 	       (py-raise '{ValueError}
 			 "del <list>[i] : i outside range (got ~A, length list = ~A)"
 			 item (length x)))
-	     (replace x x :start1 item :start2 (1+ item))
+	     (my-replace x x :start1 item :start2 (1+ item))
 	     (decf (fill-pointer x)))
     (py-slice (with-slots (start stop step) item
 		(cond ((and (none-p start) (none-p stop) (none-p step)) ;; del x[:]
@@ -2660,7 +2674,7 @@ invocation form.\"")
                              ;; nothing to do
                              (:nonempty-slice
                               (destructuring-bind (start-incl stop-incl num) args
-                                (replace x x :start1 start-incl :start2 (1+ stop-incl))
+                                (my-replace x x :start1 start-incl :start2 (1+ stop-incl))
                                 (decf (fill-pointer x) num)))
                              (:nonempty-stepped-slice
                               (destructuring-bind (start-incl stop-incl step times) args
@@ -2670,7 +2684,7 @@ invocation form.\"")
                                   (rotatef start-incl stop-incl))
                                 (dotimes (i times)
                                  (let ((start-ix (- (+ start-incl (* step i)) i)))
-                                   (replace x x :start1 start-ix :start2 (1+ start-ix))))
+                                   (my-replace x x :start1 start-ix :start2 (1+ start-ix))))
                                 (decf (fill-pointer x) times)))))))))))
 
 (def-py-method py-list.__eq__ (x^ y^)
@@ -2742,7 +2756,7 @@ invocation form.\"")
 					      (aref x 0)))))
     (unless (= x.len 1)
       (dotimes (i n)
-	(replace res x :start1 (* i x.len))))
+	(my-replace res x :start1 (* i x.len))))
     res))
 
 (def-py-method py-list.__repr__ (x^)
@@ -2854,7 +2868,7 @@ invocation form.\"")
     (let ((ix (if (< index 0) (+ index x.len) index)))
       (if (<= 0 ix (1- x.len))
 	  (prog1 (aref x ix)
-	    (replace x x :start1 ix :start2 (1+ ix))
+	    (my-replace x x :start1 ix :start2 (1+ ix))
 	    (decf (fill-pointer x)))
 	(py-raise '{IndexError}
 		  "list.pop(x, i): ix wrong (got: ~A; x.len: ~A)"
@@ -2871,7 +2885,7 @@ invocation form.\"")
 
     ;; It's not guaranteed by ANSI that (eq res x).
     (unless (eq res x)
-      (replace x res))
+      (my-replace x res))
     
     (load-time-value *the-none*)))
 
@@ -2887,7 +2901,7 @@ invocation form.\"")
 (defun make-py-list-from-list (list)
   (let* ((len (length list))
 	 (vec (make-array len :adjustable t :fill-pointer t)))
-    (replace vec list)
+    (my-replace vec list)
     vec))
 
 (defun make-py-list-from-vec (vec)
@@ -3073,7 +3087,7 @@ invocation form.\"")
       ""
     (let ((res (make-array (* n x.len) :element-type 'character)))
       (dotimes (i n)
-	(replace res x :start1 (* i x.len)))
+	(my-replace res x :start1 (* i x.len)))
       res))))
 
 (def-py-method py-string.__nonzero__ (x^) (py-bool (> (length x) 0)))
@@ -3129,12 +3143,12 @@ invocation form.\"")
 							       :key #'length
 							       :initial-value (* (length x) (1- num-strings))))
 					(res (make-array tot-num-chars :element-type 'character)))
-				   (replace res (car strings))
+				   (my-replace res (car strings))
 				   (loop with ix = (length (car strings))
 				       for s in (cdr strings)
-				       do (replace res x :start1 ix)
+				       do (my-replace res x :start1 ix)
 					  (incf ix (length x))
-					  (replace res s :start1 ix)
+					  (my-replace res s :start1 ix)
 					  (incf ix (length s)))
 				   res)))))
 

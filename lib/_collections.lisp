@@ -28,7 +28,7 @@
 (def-py-method deque.append (deque x)
   (with-slots (max-length vector) deque
     (if (and max-length (= (length vector) max-length))
-        (progn (replace vector vector :start1 0 :end1 (1- (length vector)) :start2 1) ;; shift 1 left
+        (progn (clpython::my-replace vector vector :start1 0 :end1 (1- (length vector)) :start2 1) ;; shift 1 left
                (setf (aref vector (1- max-length)) x))
       (vector-push-extend x vector)))
   (load-time-value *the-none*))
@@ -37,7 +37,7 @@
   (with-slots (max-length vector) deque
     (unless (and max-length (= (length vector) max-length))
       (vector-push-extend nil vector))
-    (replace vector vector :start1 1 :end1 (length vector) :start2 0) ;; shift 1 right
+    (clpython::my-replace vector vector :start1 1 :end1 (length vector) :start2 0) ;; shift 1 right
     (setf (aref vector 0) x))
   (load-time-value *the-none*))
 
@@ -72,14 +72,14 @@
     (when (zerop (length vector))
       (py-raise '{IndexError} "Can't popleft from empty deque."))
     (prog1 (aref vector 0)
-      (replace vector vector :start1 0 :end1 (1- (length vector)) :start2 1)
+      (clpython::my-replace vector vector :start1 0 :end1 (1- (length vector)) :start2 1)
       (decf (fill-pointer vector)))))
 
 (def-py-method deque.remove (deque val)
   (with-slots (vector) deque
     (dotimes (i (length vector))
       (when (py-==->lisp-val (aref vector i) val)
-        (replace vector vector :start1 i :end1 (1- (length vector)) :start2 (1+ i))
+        (clpython::my-replace vector vector :start1 i :end1 (1- (length vector)) :start2 (1+ i))
         (decf (fill-pointer vector))
         (return-from deque.remove (load-time-value *the-none*)))))
   (py-raise '{ValueError} "Value ~A not found in deque." val))
