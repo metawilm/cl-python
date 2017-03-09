@@ -13,7 +13,7 @@
 
 ;; Different implementations have different requirements, so let's
 ;; make everything available all the time.
-(eval-when (:compile-toplevel :load-toplevel :execute)
+
 
 (defclass dict-mixin ()
   ((dict :initarg :dict
@@ -135,4 +135,4 @@
 (defclass py-notimplemented (object) () (:metaclass py-type))
 (defvar *the-notimplemented* (make-instance 'py-notimplemented))
 
-) ;; eval-when
+
