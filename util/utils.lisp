@@ -106,7 +106,7 @@ If the stream length can not be determined (e.g. for standard input), all availa
                    ((equal array-element-type '(unsigned-byte 8))
                     (map 'string #'code-char vec))))))
 
-(defmacro checking-reader-conditionals (&whole whole &body body)
+(defmacro checking-reader-conditionals (&body body)
   "Break unless the body contains exactly one form. Based on idea from Steve Haflich."
   (let ((num (length body)))
     (unless (= num 1)
