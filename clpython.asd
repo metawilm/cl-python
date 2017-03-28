@@ -171,6 +171,8 @@
 
 (defsystem "clpython"
     :description "CLPython - an implementation of Python in Common Lisp"
+    :author "Willem Broekema <metawilm@gmail.com>"
+    :license "LLGPL (Lisp Lesser GNU Public License)"
     :depends-on ("clpython/basic" "clpython/parser" "clpython/runtime" "clpython/compiler" "clpython/lib" "clpython/contrib")
     :in-order-to ((test-op (test-op "clpython/test")))
     :perform (load-op :after (o c) (show-clpython-quick-start)))
