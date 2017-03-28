@@ -352,7 +352,11 @@ Value should be a (weak) EQ hash table: (make-weak-key-hash-table :test 'eq).")
 (p import-from-2 :or
    (([*]) $1)
    ((import-as-name comma--import-as-name*) (cons $1 $2))
-   (([(] import-as-name comma--import-as-name* [)]) (cons $2 $3)))
+   (([(] import-as-name--comma+ [)]) $2))
+
+(gp import-as-name--comma+)
+(p import-as-name--comma (import-as-name) $1)
+(p import-as-name--comma (import-as-name [,]) $1)
 
 (gp comma--import-as-name+)
 (p comma--import-as-name ([,] import-as-name) $2)
