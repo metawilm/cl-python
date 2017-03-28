@@ -25,17 +25,30 @@
 ;; Pathname handling is as suggested by Kent Pitman on comp.lang.lisp
 ;; <sfwzo21um0k.fsf@shell01.TheWorld.com>
 
-(defun %get-py-file-name (kind modname filepath type)
+(defun %get-py-file-name (kind modname filepath type &key (case :common))
+  #+sbcl
+  (when (member type *py-source-file-types*)
+    ;; For SBCL don't use :COMMON as that gives case problems; use :LOCAL instead.
+    ;; https://github.com/metawilm/cl-python/issues/1
+    ;; https://github.com/metawilm/cl-python/pull/20
+    ;; https://bugs.launchpad.net/sbcl/+bug/695486
+    (setf case :local
+          type (string-downcase type)))
+  
   (ecase kind
     (:module (derive-pathname filepath
-                              :name (pathname-name modname :case :common)
-                              :type type))
+                              :name (pathname-name modname :case case)
+                              :type type
+                              :case case))
     (:package (merge-pathnames
-               (make-pathname :directory `(:relative ,(pathname-name modname :case :common))
-                              :case :common)
+               (make-pathname :directory `(:relative ,(pathname-name modname :case case))
+                              :case case)
                (derive-pathname filepath
                                 :type type
-                                :name *package-indicator-filename*)))))
+                                :name
+                                #+sbcl (string-downcase *package-indicator-filename*)
+                                #-sbcl *package-indicator-filename*
+                                :case case)))))
   
 (defun source-file-names (kind modname filepath)
   (check-type modname string)

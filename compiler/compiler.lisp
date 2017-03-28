@@ -1348,7 +1348,7 @@ LOCALS shares share tail structure with input arg locals."
   `(let ((*module-namespace* nil)) ;; hack
      (values ,@(loop for (mod-name-as-list bind-name) in items
                    for top-name = (car mod-name-as-list)
-                   collect `(let* ((args (list :within-mod-path ',(careful-derive-pathname *compile-file-truename* nil)
+                   collect `(let* ((args (list :within-mod-path ,*compile-file-truename*
                                                :within-mod-name ',*current-module-name*))
                                    (top-module (apply #'py-import '(,top-name) args))
                                    (deep-module ,(if (cdr mod-name-as-list)
@@ -1363,7 +1363,7 @@ LOCALS shares share tail structure with input arg locals."
 
 (defmacro [import-from-stmt] (mod-name-as-list items)
   `(let* ((*module-namespace* nil) ;; hack
-          (args (list :within-mod-path ',(careful-derive-pathname *compile-file-truename* nil)
+          (args (list :within-mod-path ,*compile-file-truename*
                       :within-mod-name ',*current-module-name*))
           (m (apply #'py-import '(,(car mod-name-as-list)) args)))
      (declare (ignorable m)) ;; Ensure topleve module is imported relative to current mod
@@ -1508,9 +1508,9 @@ LOCALS shares share tail structure with input arg locals."
     (setf *habitat* (make-habitat))))
 ||#
 
-(defun careful-derive-pathname (pathname default)
+(defun careful-derive-pathname (pathname default &rest options)
   (if pathname
-      (derive-pathname pathname)
+      (apply #'derive-pathname pathname options)
     default))
   
 (defmacro with-module-toplevel-context (() &body body)
@@ -1624,8 +1624,8 @@ LOCALS shares share tail structure with input arg locals."
            #+clpython-source-level-debugging
            ,(create-python-source-location-table-pydecl suite)
            
-           (module-init :src-pathname ,(careful-derive-pathname *compile-file-truename* nil)
-                        :bin-pathname (load-time-value (careful-derive-pathname *load-truename* #P"__main__"))
+           (module-init :src-pathname ,*compile-file-truename*
+                        :bin-pathname (load-time-value (careful-derive-pathname *load-truename* #P"__main__" :case #+sbcl :local #-sbcl :common))
                         :current-module-name ,*current-module-name*
                         :defun-wrappers ',(mapcar #'second defun-wrappers)
                         :source ,(when *compile-file-truename*
