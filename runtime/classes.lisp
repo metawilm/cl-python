@@ -3099,7 +3099,8 @@ invocation form.\"")
 
 (def-py-method py-string.endswith (x^ suffix &optional start end)
   (when (or start end) (error "todo"))
-  (py-bool (string= (subseq x (- (length x) (length suffix))) suffix)))
+  (py-bool (and (>= (length x) (length suffix))
+                (string= (subseq x (- (length x) (length suffix))) suffix))))
   
 (def-py-method py-string.find (x^ item &rest args)
   (warn "todo :string.find")
