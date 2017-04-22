@@ -85,6 +85,23 @@
                                                     (invoke-restart (find-restart 'continue)))))
                       (ps s t))
                     `([literal-expr] :number ,(expt 10 n-expt)))))
+
+    ;; import
+    (test-equal '([import-from-stmt] ({sys}) (({path} nil))) (ps "from sys import path" t))
+    (test-equal '([import-from-stmt] ({sys}) (({path} nil))) (ps "from sys import (path)" t))
+    (test-equal '([import-from-stmt] ({sys}) (({path} nil))) (ps "from sys import (path,)" t))
+    
+    (test-equal '([import-from-stmt] ({sys}) (({path} nil) ({exit} nil))) (ps "from sys import path, exit" t))
+    (test-error (ps "from sys import path exit" t) :condition-type '{SyntaxError})
+    
+    (test-equal '([import-from-stmt] ({sys}) (({path} {p}) ({exit} nil))) (ps "from sys import path as p, exit" t))
+    (test-equal '([import-from-stmt] ({sys}) (({path} nil) ({exit} {e}))) (ps "from sys import path, exit as e" t))
+    
+    (test-equal '([import-from-stmt] ({sys}) (({path} {p}) ({exit} {e}))) (ps "from sys import path as p, exit as e" t))
+    (test-equal '([import-from-stmt] ({sys}) (({path} {p}) ({exit} {e}))) (ps "from sys import (path as p, exit as e)" t))
+    (test-equal '([import-from-stmt] ({sys}) (({path} {p}) ({exit} {e}))) (ps "from sys import (path as p, exit as e,)" t))
+    (test-equal '([import-from-stmt] ({sys}) (({path} nil) ({exit} {e}))) (ps "from sys import (path, exit as e,)" t))
+    (test-error (ps "from sys import (path exit)" t) :condition-type '{SyntaxError})
     
     ;; suffix operations
     (test-equal '([attributeref-expr]
