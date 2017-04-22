@@ -49,21 +49,21 @@
                                        (:file "aupprint")))))
 
 ;;; In Allegro, which provides its own Yacc, CL-Yacc can optionally be used.
-;;; In other implementations, Allegro Yacc is unavailable
+;;; In other implementations CL-Yacc must be used.
 (when (asdf:find-system "yacc" nil)
-  (pushnew :use-cl-yacc *features*))
+  (pushnew :have-cl-yacc *features*))
 
 (defsystem "clpython/parser"
     :description "Python parser, code walker, and pretty printer"
     :depends-on ("clpython/basic"
                  "closer-mop"
-                 (:feature (:or :allegro :use-cl-yacc) "yacc"))
+                 (:feature (:or (:not :allegro) :have-cl-yacc) "yacc"))
     :components ((:module "parser"
                           :components ((:file "grammar" )
                                        (:file "lexer"    :depends-on ("grammar"))
                                        (:file "parser"   :depends-on ("grammar" "lexer"))
                                        (:file "grammar-aclyacc" :depends-on ("grammar" "lexer" "parser") :if-feature :allegro)
-                                       (:file "grammar-clyacc"  :depends-on ("grammar" "lexer" "parser") :if-feature :use-cl-yacc)
+                                       (:file "grammar-clyacc"  :depends-on ("grammar" "lexer" "parser") :if-feature (:or (:not :allegro) :have-cl-yacc))
                                        (:file "ast-util" :depends-on ("grammar"))
                                        (:file "walk"   )
                                        (:file "pprint" )))))
