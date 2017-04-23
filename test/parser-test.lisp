@@ -87,6 +87,8 @@
                     `([literal-expr] :number ,(expt 10 n-expt)))))
 
     ;; import
+    (test-equal '([import-from-stmt] ({a} {b}) (({c} nil))) (ps "from a.b import c" t))
+    
     (test-equal '([import-from-stmt] ({sys}) (({path} nil))) (ps "from sys import path" t))
     (test-equal '([import-from-stmt] ({sys}) (({path} nil))) (ps "from sys import (path)" t))
     (test-equal '([import-from-stmt] ({sys}) (({path} nil))) (ps "from sys import (path,)" t))
@@ -102,6 +104,12 @@
     (test-equal '([import-from-stmt] ({sys}) (({path} {p}) ({exit} {e}))) (ps "from sys import (path as p, exit as e,)" t))
     (test-equal '([import-from-stmt] ({sys}) (({path} nil) ({exit} {e}))) (ps "from sys import (path, exit as e,)" t))
     (test-error (ps "from sys import (path exit)" t) :condition-type '{SyntaxError})
+    
+    (test-equal '([import-from-stmt] ([.]                ) (({b} nil))) (ps "from . import b" t))
+    (test-equal '([import-from-stmt] ([.] {a}            ) (({b} nil))) (ps "from .a import b" t))
+    (test-equal '([import-from-stmt] ([.] [.] {a}        ) (({b} nil))) (ps "from ..a import b" t))
+    (test-equal '([import-from-stmt] ([.] [.] [.] {a}    ) (({b} nil))) (ps "from ...a import b" t))
+    (test-equal '([import-from-stmt] ([.] [.] [.] {a} {b}) (({c} nil))) (ps "from ...a.b import c" t))
     
     ;; suffix operations
     (test-equal '([attributeref-expr]

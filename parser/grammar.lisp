@@ -348,11 +348,16 @@ Value should be a (weak) EQ hash table: (make-weak-key-hash-table :test 'eq).")
 (gp comma--dotted-as-name+)
 (p comma--dotted-as-name ([,] dotted-as-name) $2)
 
-(p import-from ([from] dotted-name [import] import-from-2) `([import-from-stmt] ,$2 ,$4))
+(p import-from ([from]      dotted-name  [import] import-from-2) `([import-from-stmt] ,$2 ,$4))
+(p import-from ([from] dots dotted-name? [import] import-from-2) `([import-from-stmt] ,(nconc $2 $3) ,$5))
+
 (p import-from-2 :or
    (([*]) $1)
    ((import-as-name comma--import-as-name*) (cons $1 $2))
    (([(] import-as-name comma--import-as-name* comma? [)]) (cons $2 $3)))
+
+(p dots ([.])       (list $1))
+(p dots (dots [.])  (nconc $1 (list $2)))
 
 (gp comma--import-as-name+)
 (p comma--import-as-name ([,] import-as-name) $2)

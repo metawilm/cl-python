@@ -100,7 +100,8 @@ where TOKEN-KIND is a symbol like '[identifier]"
    (bracket-level :accessor ls-bracket-level :initform 0  :type fixnum)
    (open-deco                                :initform nil)
    (return-count                             :initform 0)
-   (last-newline-in-source :reader ls-last-newline-in-source :initform :unknown))
+   (last-newline-in-source :reader ls-last-newline-in-source :initform :unknown)
+   (last-returned-value :accessor ls-last-returned-value :initform nil))
   (:metaclass closer-mop:funcallable-standard-class))
 
 (defmethod print-object ((lexer lexer) stream)
@@ -124,6 +125,7 @@ where TOKEN-KIND is a symbol like '[identifier]"
 (define-symbol-macro %lex-curr-line-no%        (ls-curr-line-no *lex-state*))
 (define-symbol-macro %lex-string%              (ls-string *lex-state*))
 (define-symbol-macro %lex-tab-width%           (ls-tab-width *lex-state*))
+(define-symbol-macro %lex-last-returned-value% (ls-last-returned-value *lex-state*))
 
 (defgeneric call-lexer (yacc-version lexer op)
   (:documentation "Returns either the eof-token, or two values: TOKEN-KIND, TOKEN-VALUE"))
@@ -162,6 +164,7 @@ On EOF returns: eof-token, eof-token."
     (flet ((lex-return (token value source-loc &optional msg)
              (when *lex-debug* (format t "Lexer returns: ~S ~S ~S~@[ ~A~]~%" token value source-loc msg))
              (incf return-count)
+             (setf %lex-last-returned-value% value)
              (return-from call-lexer (values token value source-loc)))
            (lex-todo (token value)
              (when *lex-debug* (format t "Lexer todo: ~S ~S~%" token value))
@@ -234,6 +237,12 @@ On EOF returns: eof-token, eof-token."
                      (read-kind :string c)
                    (lex-return '[literal-expr] (list '[literal-expr] :string val) source-loc)))
 
+                ((and (char= c #\.)
+                      (member %lex-last-returned-value% '([from] [.])))
+                 (multiple-value-bind (val source-loc)
+                     (read-kind :dot c)
+                   (lex-return val val source-loc)))
+                      
                 ((or (punct-char1-p c)
                      (punct-char-not-punct-char1-p c))
                  (multiple-value-bind (token source-loc)
@@ -422,6 +431,11 @@ Used by compiler to generate 'forbidden' identfiers.")
     (or (find-symbol str (load-time-value (find-package :clpython.ast.reserved)))
         (intern str (load-time-value (find-package :clpython.user))))))
 
+(defmethod read-kind ((kind (eql :dot)) c1 &rest args)
+  (declare (ignorable kind))
+  (assert (char= c1 #\.))
+  '[.])
+  
 ;; String
 
 (defmethod read-kind ((kind (eql :string)) ch1 &key raw unicode)

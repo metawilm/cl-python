@@ -1365,6 +1365,10 @@ LOCALS shares share tail structure with input arg locals."
 (defvar *inside-import-from-stmt* nil) ;; hack
 
 (defmacro [import-from-stmt] (mod-name-as-list items)
+  (when (eq (car mod-name-as-list) '[.])
+    (error "Relative imports are not yet supported by the compiler: ~A" 
+           (with-output-to-string (s)
+             (py-pprint `([import-from-stmt] ,mod-name-as-list ,items) s))))
   `(let* ((*module-namespace* nil) ;; hack
           (args (list :within-mod-path ,*compile-file-truename*
                       :within-mod-name ',*current-module-name*))
