@@ -9,7 +9,7 @@ Also Python and Lisp code can be mixed.
 For rough documentation, please see the [Introduction](http://common-lisp.net/project/clpython/index.html) and
 [Manual](http://common-lisp.net/project/clpython/manual.html) on *common-lisp.net*.
 
-To install using QuickLisp: `(ql:quickload "clpython")`
+To install using QuickLisp: `(ql:quickload "clpython")` (require ASDF 3.3 or higher).
 
 CLPython is developed by Willem Broekema and is released as open source under the [LLGPL](http://opensource.franz.com/preamble.html).
 The project was started in 2006, and is since 2013 not under active development anymore.
