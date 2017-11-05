@@ -46,6 +46,7 @@ script:
   - cl -e '(in-package :cl-user)'
        -e '(print *package*)'
        -e '(ql:quickload :ptester)'
+       -e '(when (member :sbcl *features*) (dolist (s (quote (:trivial-features :babel))) (ql:quickload s)))'
        -e '#+sbcl (ql:quickload :cl-coveralls)'
        -e '#+sbcl (defmacro outer (&body body) `(coveralls:with-coveralls () ,@body))'
        -e '#-sbcl (defmacro outer (&body body) `(progn ,@body))'
