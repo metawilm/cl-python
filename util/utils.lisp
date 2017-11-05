@@ -14,8 +14,9 @@
            filename)
      &body body)
   "Automatically recompile when FASL is apparently intended for another implementation"
-  (declare (ignorable restart-name))
-  `(flet ((.invoke-recompile-restart (&optional c)
+  (declare (ignorable restart-name filename))
+  `(flet (#+(or allegro ccl sbcl lispworks)
+	  (.invoke-recompile-restart (&optional c)
             (declare (ignore c))
             ,(when restart-name
                `(progn 

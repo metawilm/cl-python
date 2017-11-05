@@ -432,8 +432,9 @@ Used by compiler to generate 'forbidden' identfiers.")
         (intern str (load-time-value (find-package :clpython.user))))))
 
 (defmethod read-kind ((kind (eql :dot)) c1 &rest args)
-  (declare (ignorable kind))
+  (declare (ignorable kind) (dynamic-extent args))
   (assert (char= c1 #\.))
+  (assert (null args))
   '[.])
   
 ;; String
