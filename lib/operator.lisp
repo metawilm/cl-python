@@ -248,7 +248,7 @@ The items can be any type accepted by the operand's __getitem__() method. Dictio
 accept any hashable value. Lists, tuples, and strings accept an index or a slice."
   (cond ((null items)
          (py-raise '{ValueError} "One or more items must be provided."))
-        ((not (cdr items))
+        ((cl:not (cdr items))
          (named-function :itemgetter
              (lambda (obj &aux (item (car items)))
                (py-subs obj item))))

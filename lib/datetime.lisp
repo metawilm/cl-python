@@ -10,28 +10,28 @@
 (in-package :clpython.module.datetime)
 
 (defclass |date| (object)
-  ((year  :accessor date.year)
-   (month :accessor date.month)
-   (day   :accessor date.day))
+  ((year  :accessor date-year)
+   (month :accessor date-month)
+   (day   :accessor date-day))
   (:metaclass py-type))
 
 (def-py-method |date.year| :attribute-read (x)
-  (date.year x))
+  (date-year x))
 
 (def-py-method |date.year| :attribute-write (x val)
-  (setf (date.year x) val))
+  (setf (date-year x) val))
 
 (def-py-method |date.month| :attribute-read (x)
-  (date.month x))
+  (date-month x))
 
 (def-py-method |date.month| :attribute-write (x val)
-  (setf (date.month x) val))
+  (setf (date-month x) val))
 
 (def-py-method |date.day| :attribute-read (x)
-  (date.day x))
+  (date-day x))
 
 (def-py-method |date.day| :attribute-write (x val)
-  (setf (date.day x) val))
+  (setf (date-day x) val))
 
 (def-py-method |date.strftime| (x format)
   (error "TODO"))

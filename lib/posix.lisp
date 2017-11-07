@@ -50,7 +50,7 @@
 
 (defun |unlink| (path)
   (declare (ignore path))
-  (error "TODO: posix.unlink(path)"))
+  (cl:error "TODO: posix.unlink(path)"))
 
 (defconstant-once |error| (find-class '{OSError}))
 
