@@ -200,7 +200,7 @@ ARGS are the command-line args, available as `sys.argv'; can be a string (which 
         (let ((*habitat* (or habitat (make-habitat))))
           (unless module-globals
             (setf module-globals (habitat-module-globals *habitat*)))
-          (check-type module-globals (or hash-table package #+ecl cl-custom-hash-table::custom-hash-table))
+	  (assert (with-py-dict (hash-table-p module-globals)))
           (when args-p
             (setf (habitat-cmd-line-args *habitat*) args))
           (flet ((run ()
@@ -1545,7 +1545,7 @@ LOCALS shares share tail structure with input arg locals."
   (multiple-value-bind (module module-new-p)
       (ensure-module :src-pathname src-pathname :bin-pathname bin-pathname :name current-module-name)
     (let ((%module-globals (module-ht module)))
-      (check-type %module-globals (or hash-table #+ecl cl-custom-hash-table::custom-hash-table))
+      (assert (with-py-dict (hash-table-p %module-globals)))
       (flet ((init-module (&optional (module-globals %module-globals))
                (init-module-namespace module-globals current-module-name))
              (run-top-level-forms (&optional (module-globals %module-globals))
@@ -1581,7 +1581,7 @@ LOCALS shares share tail structure with input arg locals."
                                    :run-tlv t
                                    :globals %module-globals))
           (continue-loading (&key (init t) (run-tlv t) (globals %module-globals))
-            (check-type globals (or hash-table #+ecl cl-custom-hash-table::custom-hash-table))
+            (assert (with-py-dict (hash-table-p globals)))
             (setf %module-globals globals)
             (when init
               (init-module))
