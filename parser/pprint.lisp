@@ -323,14 +323,27 @@ output to a string does not start with a newline."
   (declare (ignorable kind))
   (format stream "~D" x))
 
+(defun print-float-like-python (f trim-dot-zero-p)
+  (let* ((str (format nil "~G" f))
+         (space (position #\Space str))
+         (dot (position #\. str)))
+    (cond ((and trim-dot-zero-p space dot (= (1+ dot) space)) ;; "3.j   " -> "3"
+           (subseq str 0 dot))
+          ((and space dot (= (1+ dot) space)) ;; "3.   " -> "3.0"
+           (concatenate 'string (subseq str 0 space) "0"))
+          (space
+           (subseq str 0 space))
+          (t
+           str))))
+    
 (defmethod py-pprint-literal (stream (kind (eql :number)) (x complex))
   (declare (ignorable kind))
   (assert (= 0 (realpart x)))
-  (format stream "~Gj" (imagpart x)))
+  (format stream "~Aj" (print-float-like-python (imagpart x) t)))
 
 (defmethod py-pprint-literal (stream (kind (eql :number)) (x float))
   (declare (ignorable kind))
-  (format stream "~G" x))
+  (format stream "~A" (print-float-like-python x nil)))
 
 (defmethod py-pprint-literal (stream (kind (eql :bytes)) (x vector))
   (declare (ignorable kind))
