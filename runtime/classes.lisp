@@ -2383,11 +2383,12 @@ But if RELATIVE-TO package name is given, result may contains dots."
 
 (defparameter *hash-table-iterator-indefinite-extent*
     (checking-reader-conditionals
+     #+abcl t
      #+allegro t
      #+ecl t
      #+lispworks nil
      #+sbcl t
-     #-(or allegro ecl lispworks sbcl) nil)
+     #-(or abcl allegro ecl lispworks sbcl) nil)
      "Whether the iterator created by WITH-HASH-TABLE-ITERATOR has indefinite extent.
 ANSI states for WITH-HASH-TABLE-ITERATOR:  \"It is unspecified what happens if any
 of the implicit interior state of an iteration is returned outside the dynamic extent
@@ -2402,7 +2403,7 @@ invocation form.\"")
              :func (lambda () (multiple-value-bind (ok key val) (next-fn)
                                 (when ok (funcall func key val)))))))
     (progn
-      #+custom-hash-table-fallback ;; from library CL-CUSTOM-HASH-TABLE
+      #+custom-hash-table-fallback
       (error "This LOOP is not supported by CUSTOM-HASH-TABLE-FALLBACK") 
       (let ((vec 
              (loop with vec = (make-array (* 2 (hash-table-count hash-table)))
@@ -3397,7 +3398,7 @@ invocation form.\"")
   (:method ((x string))  (declare (ignorable x)) (ltv-find-class 'py-string ))
   (:method ((x vector))  (declare (ignorable x)) (ltv-find-class 'py-list   ))
   
-  #+ecl
+  #+custom-hash-table-fallback
   (:method ((x cl-custom-hash-table:custom-hash-table))
            (declare (ignorable x))
            (ltv-find-class 'dict))
