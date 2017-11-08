@@ -405,6 +405,8 @@ assert x == [0, 1, 2, 3, 4, 6, 8]"))
   (run-no-error "{1+2: 3+4}")
   (run-no-error "assert {1: 3}[1] == 3")
   (run-no-error "assert {1: 3, 2: 4}[1] == 3")
+  (run-no-error "{} == {}")
+  (run-no-error "{'a': 1, 'b': 2} == {'b': 2, 'a': 1}")
   (run-no-error "
 d = {}
 d[3] = 1

@@ -127,12 +127,16 @@
 
 (defun class.raw-classname (class)
   "Given a class, return its classname. Only intended for classes corresponding to Python (meta)types."
+  #+custom-hash-table-fallback
+  (when (typep class 'structure-class)
+    (assert (eq class (ltv-find-class 'cl-custom-hash-table:custom-hash-table)))
+    (return-from class.raw-classname 'dict))
   #+clpython-use-standard-instance-access
   (#.+standard-instance-access-func+ class +py-class-classname-slot-index+)
   #-clpython-use-standard-instance-access
   (slot-value class +py-class-classname-slot-name+))
 
-#+clpython-use-standard-instance-access
+#+(and (not custom-hash-table-fallback) clpython-use-standard-instance-access)
 (define-compiler-macro class.raw-classname (class)
   `(#.+standard-instance-access-func+ ,class +py-class-classname-slot-index+))
 
