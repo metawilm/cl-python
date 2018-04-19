@@ -149,15 +149,15 @@
   ;; parameter was given.
   (ensure-open-file f)
   (let* ((size (if size (py-val->integer size) 100))
-	 (check-size-p (>= size 0))
-	 (chars (loop
-		    for i from 0
-		    for not-at-limit = (or (null check-size-p) (< i size))
+         (check-size-p (>= size 0))
+         (chars (loop
+                    for i from 0
+                    for not-at-limit = (or (null check-size-p) (< i size))
                                        ;; TODO check file encoding
-		    for ch = (and not-at-limit
-                                  (code-char (read-byte (py-file-stream f) nil nil)))
-		    while ch 
-		    collect ch)))
+                    for b = (and not-at-limit (read-byte (py-file-stream f) nil nil))
+                    for ch = (and b (code-char b))
+                    while ch
+                    collect ch)))
     (coerce chars 'string)))
 
 (def-py-method py-file.readline (f^ &optional size^)
