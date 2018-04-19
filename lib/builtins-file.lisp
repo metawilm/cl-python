@@ -62,7 +62,9 @@
                                                   (:read            :input)
                                                   (:write           :output)
                                                   ((:read+ :append) :io))
-                                     :element-type '(unsigned-byte 8)
+                                     :element-type (if binary-mode-p
+                                                       '(unsigned-byte 8)
+                                                       'character)
                                      :if-exists (ecase fmode
                                                   ((:read :read+) nil)
                                                   (:write         :supersede)
