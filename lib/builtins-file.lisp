@@ -265,7 +265,11 @@
   ;; buffering, the string may not actually show up in the file until
   ;; the flush() or close() method is called.
   (ensure-open-file f)
-  (write-string str (py-file-stream f))
+  (unless (stringp str)
+    (py-raise '{TypeError} "Not supported: file.write() of non-string ~S" str))
+  (loop with fs = (py-file-stream f)
+      for ch across str
+      do (write-byte (char-code ch) fs))
   *the-none*)
 
 (def-py-method py-file.writelines (f sequence)
