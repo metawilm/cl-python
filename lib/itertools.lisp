@@ -111,4 +111,4 @@
                                    (unless (eq d deque)
                                      (clpython.module._collections::deque.append d new-val)))
                                  new-val))))))
-             (make-tuple-from-list (mapcar 'generator deques)))))))
+             (make-tuple-from-list (mapcar #'generator deques)))))))
