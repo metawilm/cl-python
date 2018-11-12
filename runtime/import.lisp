@@ -68,7 +68,7 @@ In particular, asdf-binary-locations is used if available.")
                   (asdf-path (when *use-asdf-fasl-locations*
                                (ignore-errors
                                 (let ((path (car (asdf:output-files
-                                                  (make-instance 'asdf:compile-op)
+                                                  (asdf:make-operation 'asdf:compile-op)
                                                   (make-instance 'asdf:cl-source-file
                                                     :parent (asdf:find-system :clpython)
                                                     :pathname bin-path)))))
