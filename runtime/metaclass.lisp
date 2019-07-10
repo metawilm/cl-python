@@ -11,9 +11,12 @@
 
 ;;; Class hierarchy
 
-;; Different implementations have different requirements, so let's
-;; make everything available all the time.
-
+(defmacro maybe-eval-always (&body body)
+  ;; ECL needs to see the VALIDATE-SUPERCLASS methods
+  #+ecl
+  `(eval-when (compile load eval) ,@body)
+  #-ecl
+  `(progn ,@body))
 
 (defclass dict-mixin ()
   ((dict :initarg :dict
@@ -35,16 +38,19 @@
 
 (closer-mop:finalize-inheritance (find-class 'py-meta-type))
 
+(maybe-eval-always
 (defmethod closer-mop:validate-superclass ((class py-meta-type) superclass)
   (declare (ignorable class superclass))
   t)
-  
+)
+
 (defclass py-type (dict-mixin standard-class)
   ()      
   (:metaclass py-meta-type))
 
 (closer-mop:finalize-inheritance (find-class 'py-type))
 
+(maybe-eval-always
 (defmethod closer-mop:validate-superclass ((class py-type) superclass)
   (declare (ignorable class superclass))
   t)
@@ -52,6 +58,7 @@
 (defmethod closer-mop:validate-superclass ((class standard-class) (superclass py-type))
   (declare (ignorable class superclass))
   t)
+)
 
 (defclass object (standard-object)
   ()
@@ -65,13 +72,15 @@
 
 (closer-mop:finalize-inheritance (find-class 'dicted-object))
 
-  (defmethod closer-mop:validate-superclass (class (superclass py-meta-type))
-    (declare (ignorable class superclass))
-    t)
+(maybe-eval-always
+(defmethod closer-mop:validate-superclass (class (superclass py-meta-type))
+  (declare (ignorable class superclass))
+  t)
   
-  (defmethod closer-mop:validate-superclass ((class standard-class) (superclass py-meta-type))
-    (declare (ignorable class superclass))
-    t)
+(defmethod closer-mop:validate-superclass ((class standard-class) (superclass py-meta-type))
+  (declare (ignorable class superclass))
+  t)
+)
 
 ;;; Instance dicts
 
