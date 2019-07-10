@@ -13,9 +13,9 @@
 
 (defmacro maybe-eval-always (&body body)
   ;; ECL needs to see the VALIDATE-SUPERCLASS methods
-  #+ecl
+  #+(or ecl lispworks)
   `(eval-when (compile load eval) ,@body)
-  #-ecl
+  #-(or ecl lispworks)
   `(progn ,@body))
 
 (defclass dict-mixin ()

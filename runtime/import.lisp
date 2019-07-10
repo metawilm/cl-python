@@ -94,7 +94,10 @@ When FILENAME-ITEMS is (:A :B :C) result could look like #p'/tmp/clpython-A.B.C-
 Might signal TEMPORARY-FILE:CANNOT-CREATE-TEMPORARY-FILE"
   (whereas ((file-name (gethash key *temp-file-map*)))
            (return-from get-temporary-file file-name))
-  (let ((file-stream (cl-fad:open-temporary :template (format nil "TEMPORARY-FILES:~{~A~^-~}-%" filename-items)
+  (let ((file-stream (cl-fad:open-temporary :template
+					    ;; Lispworks apparently does not resolve "TEMPORARY-FILES:.." properly
+					    #+lispworks (format nil "/tmp/~{~A~^-~}-%" filename-items)
+					    #-lispworks (format nil "TEMPORARY-FILES:~{~A~^-~}-%" filename-items)
 					    :direction :output)))
     (prog1 (setf (gethash key *temp-file-map*) (pathname file-stream))
       (close file-stream))))
@@ -135,7 +138,8 @@ with: KIND one of :module, :package
            (cached-probe-file fname))
          (probe-bin (fname)
            (whereas ((path (cached-probe-file fname)))
-             (and #+allegro (excl::check-fasl-magic path nil)
+             (and (typep (file-length path) '(integer 1)) ;; skip empty files, or when length can't be determined
+                  #+allegro (excl::check-fasl-magic path nil)
                   path))))
     ;; Ignore non-existent directories
     (setf search-paths (remove-if-not #'cached-probe-file search-paths))
@@ -416,7 +420,8 @@ Otherwise raises ImportError."
                                                (not (cached-probe-file bin-file))
                                                (< (file-write-date bin-file) (file-write-date src-file))
                                                (with-open-file (f bin-file :direction :input) ;; just created temp output file
-                                                 (zerop (file-length f)))))))
+							       (zerop (file-length f)))))))
+		  (format t "need-recompile: ~s" need-recompile)
                   (when need-recompile
                     ;; This would be a good place for a "try recompiling" restart,
                     ;; but implementations tend to provide that already.
