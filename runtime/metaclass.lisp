@@ -12,8 +12,12 @@
 ;;; Class hierarchy
 
 (defmacro maybe-eval-always (&body body)
-  ;; ECL needs to see the VALIDATE-SUPERCLASS methods
-  #+(or ecl lispworks)
+  #+ecl
+  ;; ECL may need to see the VALIDATE-SUPERCLASS methods.
+  (if (<= ext:+ecl-version-number+ 160103)
+      `(eval-when (compile load eval) ,@body)
+      `(progn ,@body))
+  #+lispworks
   `(eval-when (compile load eval) ,@body)
   #-(or ecl lispworks)
   `(progn ,@body))
