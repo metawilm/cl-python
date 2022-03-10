@@ -57,7 +57,12 @@
     (test-equal '([module-stmt] ([suite-stmt] (([literal-expr] :number 42)))) (ps "42"))
     (test-equal '([module-stmt] ([suite-stmt] (([literal-expr] :string "x")))) (ps "'x'"))
     (test-equal '([module-stmt] ([suite-stmt] (([literal-expr] :bytes "x")))) (ps "b'x'"))
-      
+    (test-equal '([module-stmt] ([suite-stmt] (([literal-expr] :string "")))) (ps "\"\"\"\"\"\""))
+    (test-equal '([module-stmt] ([suite-stmt] (([literal-expr] :string "")))) (ps "''''''"))
+    (test-equal '([module-stmt] ([suite-stmt] (([literal-expr] :string "x")))) (ps "'''x'''"))
+    (test-equal '([module-stmt] ([suite-stmt] (([literal-expr] :string " ")))) (ps "''' '''"))
+    (test-equal '([module-stmt] ([suite-stmt] (([literal-expr] :string "'")))) (ps "'''\\''''"))
+
     ;; variables
     (test-equal '([assign-stmt] ([literal-expr] :number 3) (([identifier-expr] {y} ))) (ps "y = 3" t))
     (test-equal '([assign-stmt] ([literal-expr] :number 3) (([identifier-expr] {len}))) (ps "len = 3" t))

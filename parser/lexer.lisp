@@ -585,7 +585,9 @@ Used by compiler to generate 'forbidden' identfiers.")
                                                                       (not prev-bs))
                                           until (and (char= z x y ch1) (not prev-bs))
                                           finally (return (- %lex-last-read-char-ix% 3)))))
-                            (lex-substring start end)))
+                            (if (> start end)
+                                (return-from read-kind "")
+                              (lex-substring start end))))
                          
                          ((char= ch1 ch2) ;; "" or '' but not """ or '''
                           (when ch3 (lex-unread-char ch3))
