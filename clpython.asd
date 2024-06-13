@@ -12,6 +12,9 @@
 (eval-when (:compile-toplevel)
   (error "This ASDF file should be run interpreted."))
 
+(eval-when (compile load eval)
+  (import '(asdf:defsystem asdf:load-op asdf:test-op))
+  (import '(uiop/package:find-symbol* uiop/package:symbol-call)))
 
 ;;; CL-Python is split into several ASDF systems, to make it possible to load
 ;;; specific components -- in particular, to load the compiler or parser without
@@ -31,7 +34,7 @@
                                        (muffle-warning c))))))
     (funcall thunk)))
 
-(defsystem "clpython/basic"
+(asdf:defsystem "clpython/basic"
     :description "CLPython package and utils"
     :depends-on ("closer-mop")
     :serial t
@@ -53,7 +56,7 @@
 (when (asdf:find-system "yacc" nil)
   (pushnew :have-cl-yacc *features*))
 
-(defsystem "clpython/parser"
+(asdf:defsystem "clpython/parser"
     :description "Python parser, code walker, and pretty printer"
     :depends-on ("clpython/basic"
                  "closer-mop"
@@ -68,7 +71,7 @@
                                        (:file "walk"   )
                                        (:file "pprint" )))))
 
-(defsystem "clpython/compiler"
+(asdf:defsystem "clpython/compiler"
     :description "Python compiler"
     :depends-on ("clpython/basic" "clpython/parser" "clpython/runtime" "closer-mop")
     :serial t
@@ -81,7 +84,7 @@
                                        (:file "generator"    )
                                        (:file "optimize"     )))))
 
-(defsystem "clpython/runtime"
+(asdf:defsystem "clpython/runtime"
     :description "Python runtime environment"
     :depends-on ("clpython/basic" "closer-mop" #+(or abcl clisp ecl) "cl-custom-hash-table" "cl-fad")
     :components ((:module "runtime"
@@ -96,7 +99,7 @@
                                        (:file "run"          )
                                        (:file "import"       )))))
 
-(defsystem "clpython/lib"
+(asdf:defsystem "clpython/lib"
     :description "Python module library"
     :depends-on ("clpython/basic" "clpython/runtime" "clpython/compiler" #| TODO: remove compiler dep |#)
     :components ((:module "lib"
@@ -141,7 +144,7 @@
                                        (:file "time" :depends-on ("lsetup"))
                                        (:file "_weakref" :depends-on ("lsetup"))))))
 
-(defsystem "clpython/contrib"
+(asdf:defsystem "clpython/contrib"
     :description "CLPython contributions and experiments"
     :depends-on ("clpython/basic" "clpython/runtime" "clpython/compiler")
     :components ((:module "contrib"
@@ -193,4 +196,7 @@
                                        (:file "mod-string-test")
                                        (:file "mod-math-test")
                                        (:file "mod-operator-test"))))
-    :perform (test-op (o c) (symbol-call :clpython.test :run-tests)))
+    :perform (test-op (o c)
+		(if (symbol-call :clpython.test :run-tests)
+                    (format t "clpython/test test-op: No test failures.~%")
+		  (error "clpython/test test-op: Some test failures."))))

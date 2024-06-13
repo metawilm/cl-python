@@ -18,11 +18,11 @@ See the [build status](https://travis-ci.org/metawilm/cl-python) on Travis-CI, a
 
 | Common Lisp Implementation | Build + Test Status | |
 |:-:|:-:|:-:|
-| [ABCL](https://common-lisp.net/project/armedbear/) 1.5.0 | [![Build Status](https://travis-build-job-badge.herokuapp.com/badge?user=metawilm&repo=cl-python&branch=master&envContains=abcl+CATCH&label=ABCL)](https://travis-ci.org/metawilm/cl-python) | Fails due to `ClassCastException: StandardObject cannot be cast to LispClass` |
-| [Allegro CL](http://franz.com/products/allegrocl/) 10.1 | [![Build Status](https://travis-build-job-badge.herokuapp.com/badge?user=metawilm&repo=cl-python&branch=master&envContains=allegro+CATCH&label=Allegro+CL)](https://travis-ci.org/metawilm/cl-python) | |
-| [Clozure CL](http://clozure.com/clozurecl.html) 1.11 | [![Build Status](https://travis-build-job-badge.herokuapp.com/badge?user=metawilm&repo=cl-python&branch=master&envContains=ccl&label=Clozure+CL)](https://travis-ci.org/metawilm/cl-python) | |
-| [CLISP](http://clisp.sourceforge.net) 2.49         | [![Build Status](https://travis-build-job-badge.herokuapp.com/badge?user=metawilm&repo=cl-python&branch=master&envContains=clisp&label=CLISP)](https://travis-ci.org/metawilm/cl-python) | Fails due to stack overflow |
+| [ABCL](https://common-lisp.net/project/armedbear/) | ? | |
+| [Allegro CL](http://franz.com/products/allegrocl/) | ? | |
+| [Clozure CL](http://clozure.com/clozurecl.html)    | ? | |
+| [CLISP 2.49.93](https://clisp.sourceforge.io)      | &#10060; | Dependency `cl-fad` &rarr; `bordeaux-threads` not supported |
 | [CMUCL](http://www.cons.org/cmucl/)                | ? | |
-| [ECL](http://ecls.sourceforge.net/) 16.1.3         | [![Build Status](https://travis-build-job-badge.herokuapp.com/badge?user=metawilm&repo=cl-python&branch=master&envContains=ecl+CATCH&label=ECL)](https://travis-ci.org/metawilm/cl-python) | |
-| [LispWorks](http://www.lispworks.com/) 6.1.1       | ✅ | Manually verified |
-| [SBCL](http://sbcl.sourceforge.net/) 1.5.4         | [![Build Status](https://travis-build-job-badge.herokuapp.com/badge?user=metawilm&repo=cl-python&branch=master&envContains=sbcl&label=SBCL)](https://travis-ci.org/metawilm/cl-python) [![Coverage Status](https://coveralls.io/repos/metawilm/cl-python/badge.svg?branch=master)](https://coveralls.io/r/metawilm/cl-python?branch=master) | |
+| [ECL 23.9.9](https://ecl.common-lisp.dev)          | ? | |
+| [LispWorks](http://www.lispworks.com/)             | ? | |
+| [SBCL 2.1.11](https://www.sbcl.org)                | &#9989; | |

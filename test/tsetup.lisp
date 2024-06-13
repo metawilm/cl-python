@@ -158,5 +158,5 @@ seems to give implementations some freedom here. (In practice: Allegro=NIL, LisW
             unexpected-failures *test-unexpected-failures*))
     
     (let ((vals (list final-result successes errors unexpected-failures)))
-      (format t "~%Return values of RUN-TESTS: ~A" vals)
+      (format t "~%Return values of RUN-TESTS: ~A~%" vals)
       (values-list vals))))

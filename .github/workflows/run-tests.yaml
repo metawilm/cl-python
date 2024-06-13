@@ -1,0 +1,75 @@
+name: build & test
+on:
+  push:
+    branches:
+     - master
+     - dev
+jobs:
+
+  install_ecl:
+    name: Download ECL
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          cd /tmp
+          mkdir ecl-dir
+          cd ecl-dir
+          wget https://common-lisp.s3.eu-central-1.amazonaws.com/ecl-23.9.9.tgz
+      - name: Upload ECL artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ecl-artifact
+          path: /tmp/ecl-dir/ecl-23.9.9.tgz
+
+  install_quicklisp:
+    name: Install QuickLisp
+    runs-on: ubuntu-latest
+    steps:
+     - run: |
+          cd /tmp
+          mkdir ql-dir
+          cd ql-dir
+          wget -q https://beta.quicklisp.org/quicklisp.lisp
+          chmod -R a+rwx /tmp/ql-dir
+     - name: Upload Quicklisp artifact
+       uses: actions/upload-artifact@v4
+       with:
+          name: ql-artifact
+          path: /tmp/ql-dir
+
+  run_test_suites:
+    name: Test on ${{ matrix.scenario }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        scenario: [ecl, sbcl]
+    needs: [install_quicklisp]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: ql-artifact
+          path: /tmp/ql-dir
+
+      - if: matrix.scenario == 'ecl'
+        uses: actions/download-artifact@v4
+        with:
+          name: ecl-artifact
+          path: /tmp/ecl-dir/
+      - if: matrix.scenario == 'ecl'
+        run: |
+          cd /tmp/ecl-dir/
+          tar -xzf ecl-23.9.9.tgz
+          cd ecl-23.9.9
+          ./configure
+          make -j 8
+          sudo make install
+      - if: matrix.scenario == 'ecl'
+        run: |
+          ecl --shell /home/runner/work/cl-python/cl-python/.github/workflows/github-workflow-tests.lisp
+
+      - if: matrix.scenario == 'sbcl'
+        run: |
+         sudo apt-get install sbcl
+         sbcl --script /home/runner/work/cl-python/cl-python/.github/workflows/github-workflow-tests.lisp
